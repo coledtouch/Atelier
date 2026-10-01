@@ -190,6 +190,21 @@ test('link previews carry the A7a launch copy; the privacy page names both sign-
   assert.doesNotMatch(privacy, /the only cookie is/);
 });
 
+test('privacy page and tester welcome name every provider Auto or a fallback can send a tester prompt to', async () => {
+  const privacy = await readFile(new URL('../public/privacy.html', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const row = privacy.match(/<tr><td>Z\.ai, DeepSeek and Meta<\/td><td>([^<]*)<\/td><\/tr>/);
+  assert.ok(row, 'the Z.ai/DeepSeek/Meta processor row');
+  assert.doesNotMatch(row[1], /models you can choose\./, 'not only when picked: Auto and fallbacks use them too');
+  assert.match(row[1], /Auto/);
+  assert.match(row[1], /fall back/);
+  // Testers: Auto puts GLM 5.3 first for Code/Build (Opus is demoted), so the copy must say so.
+  assert.match(app, /code: \[\s*\['anthropic:claude-opus-5-5', 'Claude Opus 5\.5'\], \['zai:glm-5\.3'/);
+  assert.match(row[1], /GLM 5\.3/);
+  assert.match(app, /Claude, GPT, Gemini and others \(Z\.ai, DeepSeek, Meta\) for answers, code, ideas and apps/);
+  assert.doesNotMatch(app, /— Claude, GPT and Gemini for answers, code, ideas and apps/);
+});
+
 test('tester client guards: a per-call refusal moves down the chain, Auto demotes the tightest models, a name ends with its session', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /const callCap = err\.code === 'tester_budget' && err\.scope === 'call';\s*if \(isTesterCode\(err\.code\) && !callCap\) throw err;/);

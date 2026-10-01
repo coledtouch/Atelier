@@ -3721,7 +3721,7 @@ function welcomeTester() {
   const dlg = document.createElement('dialog');
   dlg.className = 'tok-dialog tester-welcome';
   dlg.setAttribute('aria-labelledby', 'twTitle');
-  dlg.innerHTML = `<form method="dialog"><p class="eyebrow">LinkedIn tester</p><h3 id="twTitle">Welcome${first ? `, <em>${esc(first)}</em>` : ''}.</h3><p class="hint">You have <b>${money(t.allowance.day.limit)}</b> a day and <b>${money(t.allowance.month.limit)}</b> a month on paid models — Claude, GPT and Gemini for answers, code, ideas and apps, plus images and Veo video. The line above the prompt shows what’s left.</p><p class="hint">Your threads stay on this device. Your You profile is saved to your tester account.</p><div class="row"><button class="btn-primary" value="ok">Start making</button></div></form>`;
+  dlg.innerHTML = `<form method="dialog"><p class="eyebrow">LinkedIn tester</p><h3 id="twTitle">Welcome${first ? `, <em>${esc(first)}</em>` : ''}.</h3><p class="hint">You have <b>${money(t.allowance.day.limit)}</b> a day and <b>${money(t.allowance.month.limit)}</b> a month on paid models — Claude, GPT, Gemini and others (Z.ai, DeepSeek, Meta) for answers, code, ideas and apps, plus images and Veo video. The line above the prompt shows what’s left.</p><p class="hint">Your threads stay on this device. Your You profile is saved to your tester account.</p><div class="row"><button class="btn-primary" value="ok">Start making</button></div></form>`;
   document.body.append(dlg);
   dlg.addEventListener('close', () => { dlg.remove(); if (!COARSE.matches) input.focus({ preventScroll: true }); });
   dlg.showModal();
