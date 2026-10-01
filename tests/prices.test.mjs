@@ -5,6 +5,7 @@ import {
   TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, TESTER_EXCLUDED, WEB_CALL_RESERVE_CAP, VEO_CALL_RESERVE_CAP,
   chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, gptImageOutputTokens,
   priceOf, isFree, PriceError,
+  TESTER_TTS_MODELS, ttsWorstCase, ttsActual, OPENAI_TTS_AUDIO_TOKENS_PER_SECOND, TTS_MIN_CHARS_PER_SECOND, TTS_INSTRUCTION_TOKENS,
 } from '../src/tester/prices.js';
 
 const throwsCode = (fn, code) => assert.throws(fn, (e) => e instanceof PriceError && e.code === code, `expected PriceError ${code}`);
@@ -29,7 +30,7 @@ test('the table is deeply frozen', () => {
 
 test('every TESTER_* model has a price of the right kind and a source', () => {
   const nonNeg = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
-  for (const [list, kind] of [[TESTER_MODELS, 'chat'], [TESTER_IMAGE_MODELS, 'image'], [TESTER_VIDEO_MODELS, 'video']]) {
+  for (const [list, kind] of [[TESTER_MODELS, 'chat'], [TESTER_IMAGE_MODELS, 'image'], [TESTER_VIDEO_MODELS, 'video'], [TESTER_TTS_MODELS, 'tts']]) {
     assert.ok(list.length > 0, `${kind} list is empty`);
     for (const id of list) {
       const e = priceOf(id);
@@ -45,6 +46,10 @@ test('every TESTER_* model has a price of the right kind and a source', () => {
       // Every listed model can actually be priced by its cost function.
       if (kind === 'chat') assert.ok(Number.isInteger(chatWorstCase({ model: id, inputTokens: 100, maxTokens: 100 })));
       if (kind === 'video') assert.ok(Number.isInteger(veoCost({ model: id, seconds: 4 })));
+      if (kind === 'tts') {
+        assert.ok(e.textInput > 0 && e.audioOutput > 0 && e.audioTokensPerSecond > 0, `${id} speech price`);
+        assert.ok(Number.isInteger(ttsWorstCase({ model: id, chars: 100 })) && ttsWorstCase({ model: id, chars: 100 }) > 0);
+      }
       if (kind === 'image' && !e.free) {
         const size = e.provider === 'gemini' ? '2K' : e.sizes[0];
         assert.ok(imageCost({ model: id, size, quality: e.qualities ? 'medium' : undefined }) > 0);
@@ -385,4 +390,104 @@ test('maxTokensWithin finds the per-model max_tokens cap for a $0.25 reserve', (
   // Nothing fits: Opus 5.5 with a web search (two attempts, each with 25K result tokens and the 1024-token floor).
   assert.equal(maxTokensWithin({ model: 'anthropic:claude-opus-5-5', inputTokens: 3_000, webSearches: 1 }), 0);
   assert.equal(maxTokensWithin({ model: 'gemini:gemini-3.8-flash', inputTokens: 0, budget: 1_000_000, ceiling: 64 }), 64);
+});
+
+// ── speech (read aloud) ──
+const OPENAI_TTS = 'openai:gpt-4o-mini-tts-2025-12-15', GEMINI_TTS = 'gemini:gemini-3.8-flash-lite-tts';
+
+test('speech: both read-aloud models are listed for testers with named assumptions', () => {
+  assert.deepEqual([...TESTER_TTS_MODELS], [OPENAI_TTS, GEMINI_TTS]);
+  assert.ok(Object.isFrozen(TESTER_TTS_MODELS) && Object.isFrozen(PRICES[GEMINI_TTS].promo));
+  assert.equal(OPENAI_TTS_AUDIO_TOKENS_PER_SECOND, 50);
+  assert.equal(TTS_MIN_CHARS_PER_SECOND, 8);
+  assert.equal(TTS_INSTRUCTION_TOKENS, 200);
+  assert.equal(PRICES[OPENAI_TTS].audioTokensPerSecond, OPENAI_TTS_AUDIO_TOKENS_PER_SECOND);
+  assert.equal(PRICES[GEMINI_TTS].audioTokensPerSecond, 25);
+  assert.deepEqual({ ...PRICES[GEMINI_TTS].promo }, { until: '2026-12-31', textInput: 0.5, audioOutput: 6 });
+  for (const id of TESTER_TTS_MODELS) assert.ok(!(id in TESTER_EXCLUDED) && !isFree(id), id);
+});
+
+test('ttsWorstCase: integer µ$ rising with chars; 1,000 characters fit the per-call cap for both models', () => {
+  // OpenAI, 1,000 chars: 125 s x 50 tok/s x $12 = 75,000 + (334 + 200) x $0.60 = 320.4 → 75,320.4 x 1.25 → 94,151.
+  assert.equal(ttsWorstCase({ model: OPENAI_TTS, chars: 1_000 }), 94_151);
+  assert.equal(ttsWorstCase({ model: OPENAI_TTS, chars: 1_000, margin: false }), 75_321);
+  // Gemini at the standing price: 125 s x 25 x $12 = 37,500 + 534 x $1 → 38,034 x 1.25 → 47,543.
+  assert.equal(ttsWorstCase({ model: GEMINI_TTS, chars: 1_000 }), 47_543);
+  for (const model of TESTER_TTS_MODELS) {
+    assert.ok(ttsWorstCase({ model, chars: 1_000 }) <= PER_CALL_RESERVE_CAP, model);
+    let prev = -1;
+    for (const chars of [0, 1, 8, 9, 100, 500, 1_000, 4_000]) {
+      const v = ttsWorstCase({ model, chars });
+      assert.ok(Number.isInteger(v) && v >= prev, `${model} ${chars}`);
+      prev = v;
+    }
+    assert.ok(ttsWorstCase({ model, chars: 9 }) > ttsWorstCase({ model, chars: 8 }), 'a started second is a whole second');
+  }
+});
+
+test('ttsWorstCase: priced on spoken units (numbers, CJK) when given; a Gemini output bound is a true ceiling', () => {
+  // 250 digits are 1,000 spoken units: the same reservation as 1,000 letters, four times that of 250 letters' worth.
+  assert.equal(ttsWorstCase({ model: OPENAI_TTS, chars: 250, units: 1_000 }), 94_151);
+  assert.ok(ttsWorstCase({ model: OPENAI_TTS, chars: 250, units: 1_000 }) > 3 * ttsWorstCase({ model: OPENAI_TTS, chars: 250 }));
+  assert.equal(ttsWorstCase({ model: OPENAI_TTS, chars: 1_000, units: 10 }), 94_151, 'units never count below chars');
+  // Gemini, 12,000 units: 1,500 s x 25 = 37,500 tokens, bounded at 4,369 x $12 = 52,428 + (4,000 + 200) x $1 → 56,628 x 1.25.
+  assert.equal(ttsWorstCase({ model: GEMINI_TTS, chars: 4_000, units: 12_000, maxAudioTokens: 4_369 }), 70_785);
+  assert.equal(ttsWorstCase({ model: GEMINI_TTS, chars: 1_000, maxAudioTokens: 4_369 }), 47_543, 'a bound above the estimate changes nothing');
+  const atBound = ttsActual({ model: GEMINI_TTS, usage: { promptTokenCount: 4_200 }, seconds: 4_369 / 25, date: AFTER_PROMO });
+  assert.ok(ttsWorstCase({ model: GEMINI_TTS, chars: 4_000, units: 12_000, maxAudioTokens: 4_369, margin: false }) >= atBound);
+  throwsCode(() => ttsWorstCase({ model: GEMINI_TTS, chars: 10, maxAudioTokens: -1 }), 'bad_input');
+  throwsCode(() => ttsWorstCase({ model: OPENAI_TTS, chars: 10, units: 'lots' }), 'bad_input');
+});
+
+test('ttsActual: OpenAI from speech.audio.done usage; missing or zero audio tokens throw no_usage', () => {
+  // 300 x $0.60 + 1,800 x $12 = 180 + 21,600.
+  assert.equal(ttsActual({ model: OPENAI_TTS, usage: { input_tokens: 300, output_tokens: 1_800, total_tokens: 2_100 } }), 21_780);
+  assert.equal(ttsActual({ model: OPENAI_TTS, usage: { input_tokens: 300, output_tokens: 1_800 }, margin: true }), 27_225);
+  // output is never less than total - input
+  assert.equal(ttsActual({ model: OPENAI_TTS, usage: { input_tokens: 100, output_tokens: 500, total_tokens: 900 } }), 60 + 800 * 12);
+  throwsCode(() => ttsActual({ model: OPENAI_TTS }), 'no_usage');
+  throwsCode(() => ttsActual({ model: OPENAI_TTS, usage: null }), 'no_usage');
+  throwsCode(() => ttsActual({ model: OPENAI_TTS, usage: { input_tokens: 40, output_tokens: 0, total_tokens: 40 } }), 'no_usage');
+  throwsCode(() => ttsActual({ model: OPENAI_TTS, seconds: 30 }), 'no_usage');
+});
+
+test('ttsActual: Gemini from the seconds of audio (25 tokens/s), promo through 2026-12-31, standing price after', () => {
+  const usage = { promptTokenCount: 300 };
+  // promo: 300 x $0.50 + 85 x 25 = 2,125 x $6 → 150 + 12,750
+  assert.equal(ttsActual({ model: GEMINI_TTS, usage, seconds: 85, date: '2026-12-31T23:59:59Z' }), 12_900);
+  // standing: 300 x $1 + 2,125 x $12
+  assert.equal(ttsActual({ model: GEMINI_TTS, usage, seconds: 85, date: '2027-01-01T00:00:00Z' }), 25_800);
+  // a reported count above seconds x 25 is billed; fractional seconds round up per token, not per second
+  assert.equal(ttsActual({ model: GEMINI_TTS, usage: { promptTokenCount: 0, candidatesTokenCount: 3_000 }, seconds: 85, date: AFTER_PROMO }), 36_000);
+  assert.equal(ttsActual({ model: GEMINI_TTS, usage: { promptTokenCount: 0 }, seconds: 1.2, date: AFTER_PROMO }), 30 * 12);
+  // no usageMetadata: input is estimated from the characters sent (ceil(300 / 3) + 200)
+  assert.equal(ttsActual({ model: GEMINI_TTS, seconds: 10, chars: 300, date: AFTER_PROMO }), 300 + 250 * 12);
+  assert.equal(ttsActual({ model: GEMINI_TTS, usage: { usageMetadata: usage }, seconds: 85, date: AFTER_PROMO }), 25_800, 'a response holding usageMetadata');
+  throwsCode(() => ttsActual({ model: GEMINI_TTS }), 'no_usage');
+  throwsCode(() => ttsActual({ model: GEMINI_TTS, usage, seconds: -1 }), 'bad_input');
+  throwsCode(() => ttsActual({ model: GEMINI_TTS, usage, seconds: true }), 'bad_input');
+});
+
+test('speech: worst case >= actual at the assumed slowest pace and token rate, for any date', () => {
+  for (const chars of [1, 50, 220, 999, 1_000]) {
+    const seconds = Math.ceil(chars / TTS_MIN_CHARS_PER_SECOND);
+    const openai = { input_tokens: Math.ceil(chars / 3) + TTS_INSTRUCTION_TOKENS, output_tokens: seconds * OPENAI_TTS_AUDIO_TOKENS_PER_SECOND };
+    assert.ok(ttsWorstCase({ model: OPENAI_TTS, chars, margin: false }) >= ttsActual({ model: OPENAI_TTS, usage: openai }), `openai ${chars}`);
+    for (const date of ['2026-10-01', AFTER_PROMO]) {
+      const g = ttsActual({ model: GEMINI_TTS, usage: { promptTokenCount: Math.ceil(chars / 3) + TTS_INSTRUCTION_TOKENS }, seconds, date });
+      assert.ok(ttsWorstCase({ model: GEMINI_TTS, chars, margin: false }) >= g, `gemini ${chars} ${date}`);
+    }
+  }
+});
+
+test('speech: unknown models, wrong kinds and bad inputs are rejected', () => {
+  for (const model of ['openai:gpt-4o-mini-tts', 'openai:tts-1', 'gpt-4o-mini-tts-2025-12-15', '', undefined, '__proto__']) {
+    throwsCode(() => ttsWorstCase({ model, chars: 10 }), 'unknown_model');
+    throwsCode(() => ttsActual({ model, usage: { input_tokens: 1, output_tokens: 1 } }), 'unknown_model');
+  }
+  throwsCode(() => ttsWorstCase({ model: 'openai:gpt-6-luna', chars: 10 }), 'wrong_kind');
+  throwsCode(() => chatWorstCase({ model: OPENAI_TTS, inputTokens: 1, maxTokens: 1 }), 'wrong_kind');
+  throwsCode(() => ttsWorstCase({ model: OPENAI_TTS }), 'bad_input');
+  throwsCode(() => ttsWorstCase({ model: OPENAI_TTS, chars: -1 }), 'bad_input');
+  throwsCode(() => ttsWorstCase({ model: OPENAI_TTS, chars: 'many' }), 'bad_input');
 });

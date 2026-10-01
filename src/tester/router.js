@@ -6,9 +6,10 @@ import { waitUntil } from 'cloudflare:workers';
 import { claudeChat } from '../anthropic.js';
 import { geminiNativeChat, handleVideoApi, isGeminiFileUri, fileNameOf, normalizeVideoMime, GEMINI_BASE, GEMINI_VIDEO_MIMES, VIDEO_NEEDS_GEMINI } from '../gemini.js';
 import {
-  PRICES, TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, PER_CALL_RESERVE_CAP, WEB_CALL_RESERVE_CAP, VEO_CALL_RESERVE_CAP,
-  PriceError, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin,
+  PRICES, TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, TESTER_TTS_MODELS, PER_CALL_RESERVE_CAP, WEB_CALL_RESERVE_CAP, VEO_CALL_RESERVE_CAP,
+  PriceError, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, ttsWorstCase, ttsActual,
 } from './prices.js';
+import { handleTts, TTS_VOICES, TTS_VOICE_IDS, ttsPriceId } from '../tts.js';
 import { ALLOWED_ORIGINS, fail, ledger, sha256, signedOut, resetTesterCaches } from './auth.js';
 import { SUB, DAILY_UPLOADS } from './ledger.js';
 import { meter, openaiUsage, geminiUsage } from './usage.js';
@@ -131,6 +132,7 @@ export const TESTER_ROUTES = Object.freeze([
   { method: 'GET', match: 'tester/profile', run: profileGet },
   { method: 'PUT', match: 'tester/profile', run: profilePut },
   { method: 'POST', match: 'chat', run: chat },
+  { method: 'POST', match: 'tts', run: tts },
   { method: 'POST', match: /^x\/openai\/images\/(generations|edits)$/, sample: 'x/openai/images/edits', run: openaiImages },
   { method: 'POST', match: /^x\/meta\/images\/generations$/, sample: 'x/meta/images/generations', run: metaImages },
   { method: 'POST', match: /^x\/gemini\/(v1beta|v1)\/models\/([\w.-]+):generateContent$/, sample: 'x/gemini/v1beta/models/gemini-3-pro-image:generateContent', run: geminiImage },
@@ -168,10 +170,11 @@ async function me(c) {
   const a = await c.stub.allowance(c.who.sub);
   if (!a) return signedOut();
   const ready = (id) => Boolean(c.env[c.up.PROVIDERS[providerOf(id)]?.secret]);
+  const voices = testerVoices(ready);
   return json({
     sub: c.who.sub, name: c.who.name, picture: c.who.picture, email: c.who.email,
-    models: { chat: TESTER_MODELS.filter(ready), image: TESTER_IMAGE_MODELS.filter(ready), video: TESTER_VIDEO_MODELS.filter(ready) },
-    features: { web: ready('anthropic:'), video: ready('gemini:'), veo: ready('gemini:'), helpers: true, profile: true },
+    models: { chat: TESTER_MODELS.filter(ready), image: TESTER_IMAGE_MODELS.filter(ready), video: TESTER_VIDEO_MODELS.filter(ready), tts: voices },
+    features: { web: ready('anthropic:'), video: ready('gemini:'), veo: ready('gemini:'), helpers: true, profile: true, tts: voices.length > 0 },
     allowance: { day: a.day, month: a.month },
     pool: { paused: a.paused, spotsLeft: a.spotsLeft, ...(a.preview ? { preview: true } : {}) },
   }, 200, allowanceHeader(a));
@@ -333,6 +336,50 @@ async function chat(c) {
   }
   if (!res.ok) await mtr.settle(0); // refused before generating anything: nothing was billed
   return withHeaders(res, headers);
+}
+
+// ── POST /api/tts (read aloud): src/tts.js validates the body and calls the provider; this reserves and settles ──
+// Voice ids a tester may use: priced for testers and with the provider's key on the server.
+const testerVoices = (ready) => TTS_VOICE_IDS.filter((id) => TESTER_TTS_MODELS.includes(ttsPriceId(TTS_VOICES[id])) && ready(`${TTS_VOICES[id].provider}:`));
+let warnedTtsUsage = false;
+// A per-tester rate limit on paid speech (the LI_LIMIT binding, keyed by sub, apart from its per-IP sign-in keys): the
+// app asks for at most three segments at a time, so a burst past it is a script opening reservations in parallel.
+const TTS_RATE_RETRY_AFTER = '30';
+async function ttsThrottled(c) {
+  if (!c.env.LI_LIMIT) return false;
+  try { return !(await c.env.LI_LIMIT.limit({ key: `tts:${c.who.sub}` })).success; } catch { return false; }
+}
+async function tts(c) {
+  return handleTts(c.req, c.env, {
+    tester: true,
+    // 503, not noProvider's 401: the read-aloud client reads any 401 as "sign in again"; this falls back to the device voice.
+    unavailable: (provider) => fail(503, 'tts_unavailable', `${c.up.PROVIDERS[provider].name} isn’t available to testers right now.`),
+    async reserve({ voice, chars, units }) {
+      const model = ttsPriceId(voice);
+      if (!TESTER_TTS_MODELS.includes(model)) return { res: notTesterModel('That voice isn’t part of the tester set.') };
+      if (await ttsThrottled(c)) return { res: fail(429, 'tts_busy', 'Read aloud is busy right now. Try again in a moment.', {}, { 'retry-after': TTS_RATE_RETRY_AFTER }) };
+      // Priced on the spoken length, and for Gemini at most its maxOutputTokens bound: a true ceiling for the reservation.
+      const worst = ttsWorstCase({ model, chars, units, ...(voice.maxOutputTokens ? { maxAudioTokens: voice.maxOutputTokens } : {}) });
+      if (worst > PER_CALL_RESERVE_CAP) return { res: refused({ scope: 'call' }) };
+      const mtr = await reserve(c, worst);
+      if (mtr.res) return mtr;
+      return {
+        headers: mtr.headers,
+        // null: keep the full reservation; {billed: false}: $0; {usage, seconds}: the provider's report.
+        async settle(r) {
+          let actual = mtr.amount;
+          if (r?.billed === false) actual = 0;
+          else if (r) {
+            try { actual = ttsActual({ model, usage: r.usage, seconds: r.seconds, chars }); } catch {
+              if (!warnedTtsUsage) { warnedTtsUsage = true; console.warn('tts: no usable usage reported, the full reservation stands', model); }
+            }
+          }
+          const s = await mtr.settle(actual);
+          return s?.allowance ? allowanceHeader(s.allowance) : null;
+        },
+      };
+    },
+  });
 }
 
 // ── images: POST /api/x/openai/images/(generations|edits), /api/x/meta/images/generations, Gemini generateContent ──

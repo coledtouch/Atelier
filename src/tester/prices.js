@@ -30,7 +30,8 @@
 //
 // ASSUMPTIONS (estimates, not published numbers; each one is a named export so it can be tuned)
 //   WEB_SEARCH_RESULT_TOKENS, GEMINI_VIDEO_TOKENS_PER_SECOND, OPENAI_EDIT_IMAGE_TOKENS,
-//   GEMINI_PRO_IMAGE_THINKING_TOKENS, GEMINI_FLASH_IMAGE_THINKING_TOKENS, DEFAULT_IMAGE_PROMPT_TOKENS.
+//   GEMINI_PRO_IMAGE_THINKING_TOKENS, GEMINI_FLASH_IMAGE_THINKING_TOKENS, DEFAULT_IMAGE_PROMPT_TOKENS,
+//   OPENAI_TTS_AUDIO_TOKENS_PER_SECOND, TTS_MIN_CHARS_PER_SECOND, TTS_INSTRUCTION_TOKENS (read aloud, src/tts.js).
 //   The provider floors in MIN_OUTPUT mirror the max_tokens clamps in src/anthropic.js and src/gemini.js (2026-09-30).
 //
 // SOURCES (all read 2026-09-30)
@@ -93,6 +94,20 @@ export const GEMINI_FLASH_IMAGE_THINKING_TOKENS = 4_096; // 3.1 Flash Image defa
 export const DEFAULT_IMAGE_PROMPT_TOKENS = 4_096;
 /** Output floors the server code applies: anthropic.js clamps max_tokens to >= 1024; gemini.js native video chat to >= 256. */
 export const MIN_OUTPUT = Object.freeze({ anthropic: 1024, geminiNative: 256 });
+/**
+ * ASSUMPTION. Audio output tokens per second of gpt-4o-mini-tts speech. OpenAI publishes only "about $0.015 a minute"
+ * (≈ 21 tokens/s at $12/MTok); users report runs above that. 50 covers them. Settle reads the exact count from the
+ * speech.audio.done usage. (Gemini TTS is published: 25 audio tokens per second.)
+ */
+export const OPENAI_TTS_AUDIO_TOKENS_PER_SECOND = 50;
+/**
+ * ASSUMPTION. The slowest read-aloud delivery, in spoken units (src/tts.js spokenUnits) per second: the brief's slow,
+ * pause-rich pace runs ~11-13 characters of prose a second. Digits (4 units), symbols (3) and CJK characters (3) weigh
+ * more, so number-heavy or Chinese/Japanese/Korean text is reserved for its longer reading time.
+ */
+export const TTS_MIN_CHARS_PER_SECOND = 8;
+/** ASSUMPTION. Input tokens the server-side voice brief (src/tts.js TTS_BRIEF, ~120 tokens) or Gemini style adds. */
+export const TTS_INSTRUCTION_TOKENS = 200;
 
 export class PriceError extends Error {
   constructor(code, message) {
@@ -261,6 +276,18 @@ const TABLE = {
   },
   'nvidia/cosmos3-nano': { kind: 'video', provider: 'nvidia', free: true, source: `${SRC.nvidia} ; src/worker.js FUNCTIONS`, note: 'NVCF function; counted per request.' },
   'atelier/motion-still': { kind: 'video', provider: 'local', free: true, source: 'public/app.js VIDEO_MODELS (a free FLUX keyframe plus an in-browser camera move)' },
+
+  // ── Speech (read aloud, src/tts.js). USD per 1M tokens: textInput (the text plus the voice brief), audioOutput.
+  'openai:gpt-4o-mini-tts-2025-12-15': {
+    kind: 'tts', provider: 'openai', textInput: 0.6, audioOutput: 12, audioTokensPerSecond: OPENAI_TTS_AUDIO_TOKENS_PER_SECOND,
+    source: `${SRC.openai} ; https://developers.openai.com/api/docs/models/gpt-4o-mini-tts`,
+    note: 'Pinned snapshot. Audio tokens per second are unpublished (≈ $0.015/min ≈ 21/s); settle uses speech.audio.done usage.',
+  },
+  'gemini:gemini-3.8-flash-lite-tts': {
+    kind: 'tts', provider: 'gemini', textInput: 1, audioOutput: 12, audioTokensPerSecond: 25,
+    promo: { until: '2026-12-31', textInput: 0.5, audioOutput: 6 }, source: SRC.gemini,
+    note: '$0.50 / $6.00 through 2026-12-31, then $1.00 / $12.00 (the standing price, used for the worst case). 25 audio tokens per second.',
+  },
 };
 
 const deepFreeze = (o) => {
@@ -282,6 +309,8 @@ export const TESTER_MODELS = keysOf('chat');
 export const TESTER_IMAGE_MODELS = keysOf('image');
 /** Video models a tester may use. */
 export const TESTER_VIDEO_MODELS = keysOf('video');
+/** Speech (read aloud) models a tester may use. */
+export const TESTER_TTS_MODELS = keysOf('tts');
 /** Priced models that testers still cannot use, with the reason. */
 export const TESTER_EXCLUDED = deepFreeze(Object.fromEntries(Object.entries(PRICES).filter(([, e]) => !testerOk(e)).map(([k, e]) => [k, e.why || FREE_WHY])));
 
@@ -315,6 +344,11 @@ const RATES = Object.fromEntries(Object.entries(PRICES).filter(([, e]) => e.kind
   promo: e.promo ? { ...rateSet(e.promo), until: e.promo.until } : null,
   cacheWrite1h: perToken(e.cacheWrite1h ?? e.cacheWrite),
   webSearch: e.webSearchUsd ? usdPico(e.webSearchUsd) : 0n,
+}]));
+// Speech rates: top (standing) and promo.
+const TTS_RATES = Object.fromEntries(Object.entries(PRICES).filter(([, e]) => e.kind === 'tts').map(([k, e]) => [k, {
+  top: { input: perToken(e.textInput), audio: perToken(e.audioOutput) },
+  promo: e.promo ? { input: perToken(e.promo.textInput), audio: perToken(e.promo.audioOutput), until: e.promo.until } : null,
 }]));
 
 // A count argument: a finite number >= 0, rounded up to an integer token/second/image count.
@@ -616,4 +650,69 @@ export function veoCost(o = {}) {
   else if (Object.hasOwn(e.perSecond, o.resolution)) usd = e.perSecond[o.resolution];
   else throw new PriceError('bad_resolution', `${o.model} resolution must be one of ${Object.keys(e.perSecond).join(', ')}`);
   return toMicros(big(seconds) * usdPico(usd), o.margin !== false);
+}
+
+// ───────────────────────────── speech (read aloud) ─────────────────────────────
+/**
+ * Worst-case cost of one read-aloud request, in integer micro-dollars, rounded up, x MARGIN:
+ * ceil(units / TTS_MIN_CHARS_PER_SECOND) seconds x audio tokens per second at the audio rate (at most maxAudioTokens
+ * when the request bounds its output), plus (ceil(units / 3) + TTS_INSTRUCTION_TOKENS) input tokens at the text rate.
+ * units is the spoken length (src/tts.js spokenUnits: digits, symbols and CJK characters weigh more than a letter);
+ * without it, chars. Gemini is priced at its standing price.
+ * @param {object} o
+ * @param {string} o.model  'openai:gpt-4o-mini-tts-2025-12-15' | 'gemini:gemini-3.8-flash-lite-tts'
+ * @param {number} o.chars  characters of text to speak
+ * @param {number} [o.units] spoken units of that text (at least chars)
+ * @param {number} [o.maxAudioTokens] the request's own output bound (Gemini maxOutputTokens): a true ceiling
+ * @param {boolean} [o.margin=true]
+ */
+export function ttsWorstCase(o = {}) {
+  const e = entryOf(o.model, 'tts');
+  const chars = count(o.chars, 'chars', { required: true });
+  const units = Math.max(chars, count(o.units, 'units'));
+  const r = TTS_RATES[o.model].top;
+  let audio = Math.ceil(units / TTS_MIN_CHARS_PER_SECOND) * e.audioTokensPerSecond;
+  if (o.maxAudioTokens !== undefined && o.maxAudioTokens !== null) audio = Math.min(audio, count(o.maxAudioTokens, 'maxAudioTokens'));
+  const input = Math.ceil(units / 3) + TTS_INSTRUCTION_TOKENS;
+  return toMicros(big(input) * r.input + big(audio) * r.audio, o.margin !== false);
+}
+
+/**
+ * Actual cost of a finished read-aloud request (settle; no margin unless `margin: true`).
+ * OpenAI: from the speech.audio.done `usage` {input_tokens, output_tokens, total_tokens}. Throws PriceError('no_usage')
+ *   when usage is missing or reports no audio tokens: keep the full reservation.
+ * Gemini: audio = max(seconds x 25 tokens/s, the reported candidates tokens); input = usageMetadata.promptTokenCount,
+ *   else estimated from `chars`. Promo prices for requests dated through 2026-12-31 (UTC), then the standing price.
+ * @param {object} o
+ * @param {string} o.model
+ * @param {object} [o.usage]   OpenAI usage, or Gemini usageMetadata (or a response holding it)
+ * @param {number} [o.seconds] Gemini: seconds of audio returned
+ * @param {number} [o.chars]   Gemini: characters sent, when usageMetadata is missing
+ * @param {Date|string|number} [o.date]  when the request ran; default now
+ */
+export function ttsActual(o = {}) {
+  const e = entryOf(o.model, 'tts');
+  const R = TTS_RATES[o.model];
+  const u = o.usage && typeof o.usage === 'object' ? (o.usage.usageMetadata || o.usage) : null;
+  if (e.provider === 'openai') {
+    if (!u) throw new PriceError('no_usage', 'No usage reported');
+    const input = field(u.input_tokens ?? u.prompt_tokens);
+    const total = field(u.total_tokens);
+    const out = Math.max(field(u.output_tokens ?? u.completion_tokens), total ? total - input : 0);
+    if (!out) throw new PriceError('no_usage', 'No audio tokens reported');
+    return toMicros(big(input) * R.top.input + big(out) * R.top.audio, o.margin === true);
+  }
+  const hasSeconds = o.seconds !== undefined && o.seconds !== null;
+  if (!u && !hasSeconds) throw new PriceError('no_usage', 'No usage or audio length reported');
+  const r = R.promo && dayKey(o.date) <= R.promo.until ? R.promo : R.top;
+  let fromSeconds = 0;
+  if (hasSeconds) {
+    const s = Number(o.seconds);
+    if (typeof o.seconds === 'boolean' || !Number.isFinite(s) || s < 0) throw new PriceError('bad_input', 'seconds must be a number >= 0');
+    fromSeconds = Math.ceil(s * e.audioTokensPerSecond - 1e-9);
+  }
+  const prompt = u ? field(u.promptTokenCount) : 0;
+  const reported = u ? Math.max(field(u.candidatesTokenCount) + field(u.thoughtsTokenCount), field(u.totalTokenCount) ? field(u.totalTokenCount) - prompt : 0) : 0;
+  const input = prompt || (o.chars != null ? Math.ceil(count(o.chars, 'chars') / 3) + TTS_INSTRUCTION_TOKENS : 0);
+  return toMicros(big(input) * r.input + big(Math.max(fromSeconds, reported)) * r.audio, o.margin === true);
 }

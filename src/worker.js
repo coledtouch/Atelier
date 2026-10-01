@@ -9,6 +9,7 @@ import { toolList, runTool, GOOGLE_SCOPES, saveGoogleAccount, removeGoogleAccoun
   canvaListDesigns, canvaDesignFormats, canvaImport, canvaFetchFile } from './tools.js';
 import { identify, handleLinkedIn, signedOut, fail } from './tester/auth.js';
 import { testerRouter, testerAdmin } from './tester/router.js';
+import { handleTts } from './tts.js';
 export { Relay } from './relay.js';
 export { Ledger } from './tester/ledger.js';
 
@@ -561,6 +562,8 @@ async function handleApi(req, env, url) {
 
   // POST /api/chat → routed by model prefix (anthropic: / openai: / gemini: / NVIDIA default)
   if (path === 'chat' && req.method === 'POST') return handleChat(req, env);
+  // POST /api/tts {voice, text} | {voice, preview: true} → read aloud in the Atelier voice (src/tts.js; testers never get here)
+  if (path === 'tts' && req.method === 'POST') return passOk(req, env) ? handleTts(req, env) : missingKey(req, env, 'openai');
 
   // /api/x/<provider>/<path> → allow-listed image / video endpoints for OpenAI and Gemini
   const x = path.match(/^x\/(openai|gemini|meta)\/(.+)$/);

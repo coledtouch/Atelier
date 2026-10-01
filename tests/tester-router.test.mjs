@@ -2,7 +2,8 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { makeEnv, mockFetch, restoreFetch, upstream, reply, sseOf, api, signIn, PROFILE, resetTesterCaches, allowanceOf } from './tester-env.mjs';
-import { PRICES, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS } from '../src/tester/prices.js';
+import { PRICES, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, ttsWorstCase, ttsActual, TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS } from '../src/tester/prices.js';
+import { TTS_BRIEF, TTS_VOICES, spokenUnits } from '../src/tts.js';
 
 const { TESTER_ROUTES, PUBLIC_PATHS, matchTesterRoute, LIMITS } = await import('../src/tester/router.js');
 const { GEMINI_BASE } = await import('../src/gemini.js');
@@ -636,9 +637,9 @@ test('tester/me: identity, the metered model lists (no NVIDIA, no free models), 
   const j = await r.json();
   assert.equal(j.sub, sub);
   assert.deepEqual(Object.keys(j).sort(), ['allowance', 'email', 'features', 'models', 'name', 'picture', 'pool', 'sub']);
-  assert.deepEqual(j.models, { chat: [...TESTER_MODELS], image: [...TESTER_IMAGE_MODELS], video: [...TESTER_VIDEO_MODELS] });
+  assert.deepEqual(j.models, { chat: [...TESTER_MODELS], image: [...TESTER_IMAGE_MODELS], video: [...TESTER_VIDEO_MODELS], tts: ['atelier', 'cedar', 'sage', 'sulafat'] });
   for (const id of [...j.models.chat, ...j.models.image, ...j.models.video]) assert.match(id, /^(anthropic|openai|gemini|zai|deepseek|meta):/);
-  assert.deepEqual(j.features, { web: true, video: true, veo: true, helpers: true, profile: true });
+  assert.deepEqual(j.features, { web: true, video: true, veo: true, helpers: true, profile: true, tts: true });
   assert.deepEqual(j.allowance, { day: { spent: 0, reserved: 0, limit: 1_000_000 }, month: { spent: 0, reserved: 0, limit: 10_000_000 } });
   assert.deepEqual(j.pool, { paused: false, spotsLeft: 24 });
 });
@@ -649,6 +650,243 @@ test('tester/me hides models whose provider key is missing', async () => {
   const j = await (await api(env, 'tester/me', {}, { cookie: t.token })).json();
   assert.ok(!j.models.chat.some((id) => /^(meta|zai):/.test(id)));
   assert.ok(!j.models.image.includes('meta:muse-image-1.0'));
+});
+
+test('tester/me: read-aloud voices (models.tts, features.tts) follow the provider keys', async () => {
+  for (const [missing, voices] of [[{ OPENAI_API_KEY: undefined }, ['sulafat']], [{ GEMINI_API_KEY: undefined }, ['atelier', 'cedar', 'sage']], [{ OPENAI_API_KEY: undefined, GEMINI_API_KEY: undefined }, []]]) {
+    const { env, L } = makeEnv(missing);
+    const t = await signIn(L, PROFILE());
+    const j = await (await api(env, 'tester/me', {}, { cookie: t.token })).json();
+    assert.deepEqual(j.models.tts, voices, JSON.stringify(missing));
+    assert.equal(j.features.tts, voices.length > 0);
+  }
+});
+
+// ── read aloud: POST /api/tts ──
+const TTS_UP = /^POST https:\/\/api\.openai\.com\/v1\/audio\/speech$/;
+const TTS_MODEL = 'openai:gpt-4o-mini-tts-2025-12-15';
+const CLIP = Uint8Array.from({ length: 3_000 }, (_, i) => (i * 13) % 256);
+const speechEvents = (bytes = CLIP, usage = { input_tokens: 180, output_tokens: 1_700, total_tokens: 1_880 }) => [
+  `data: ${JSON.stringify({ type: 'speech.audio.delta', audio: Buffer.from(bytes.subarray(0, 1_000)).toString('base64') })}\n\n`,
+  `data: ${JSON.stringify({ type: 'speech.audio.delta', audio: Buffer.from(bytes.subarray(1_000)).toString('base64') })}\n\n`,
+  `data: ${JSON.stringify({ type: 'speech.audio.done', ...(usage ? { usage } : {}) })}\n\n`,
+];
+const bytesOf = async (r) => new Uint8Array(await r.arrayBuffer());
+
+test('tts: an empty or invalid body reserves nothing and calls no provider', async () => {
+  const { L, sub, call } = await tester();
+  mockFetch([]);
+  for (const [body, status] of [['', 400], ['{', 400], [{ voice: 'atelier' }, 400], [{ voice: 'device', text: 'hi' }, 400], [{ voice: '__proto__', text: 'hi' }, 400],
+    [{ voice: 'atelier', text: '   ' }, 400], [{ voice: 'atelier', text: 'x'.repeat(1_001) }, 413], [{ voice: 'atelier', text: 'x'.repeat(20_000) }, 413]]) {
+    L.calls.length = 0;
+    const r = await call('tts', post(body));
+    assert.equal(r.status, status, JSON.stringify(body).slice(0, 40));
+    assert.ok(['bad_request', 'too_large'].includes(await codeOf(r)));
+    assert.ok(!L.calls.includes('reserve'), `${JSON.stringify(body).slice(0, 40)} reserved`);
+  }
+  assert.equal(upstream.calls.length, 0);
+  assert.deepEqual(spent(L, sub), { spent: 0, reserved: 0, limit: 1_000_000 });
+});
+
+test('tts: a request from another Origin is refused before it is read', async () => {
+  const { L, call } = await tester();
+  mockFetch([]);
+  for (const origin of [null, 'https://evil.example']) {
+    L.calls.length = 0;
+    const r = await call('tts', post({ voice: 'atelier', text: 'Hello.' }), { origin });
+    assert.equal(r.status, 403);
+    assert.equal(await codeOf(r), 'tester_origin');
+    assert.ok(!L.calls.includes('reserve'));
+  }
+  assert.equal(upstream.calls.length, 0);
+});
+
+test('tts: reserves the worst case, streams audio/mpeg and settles from the speech.audio.done usage', async () => {
+  const { L, sub, call } = await tester();
+  const usage = { input_tokens: 180, output_tokens: 1_700, total_tokens: 1_880 };
+  mockFetch([[TTS_UP, () => sseOf(speechEvents(CLIP, usage))]]);
+  const text = 'A calm paragraph to read aloud. '.repeat(25).trim();
+  const r = await call('tts', post({ voice: 'atelier', text, instructions: 'Shout every word.', model: 'tts-1', speed: 3, response_format: 'wav' }));
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('content-type'), 'audio/mpeg');
+  assert.equal(r.headers.get('x-tts-voice'), 'atelier');
+  const worst = ttsWorstCase({ model: TTS_MODEL, chars: text.length });
+  assert.ok(worst > 0 && worst <= 250_000);
+  assert.equal(allowanceOf(r).dayLeft, 1_000_000 - worst, 'the header shows the reservation');
+  assert.deepEqual(await bytesOf(r), CLIP);
+  assert.deepEqual(upstream.calls[0].json, { model: 'gpt-4o-mini-tts-2025-12-15', voice: 'marin', input: text, instructions: TTS_BRIEF, response_format: 'mp3', stream_format: 'sse' });
+  assert.equal(upstream.calls[0].headers.get('authorization'), 'Bearer sk-openai-test');
+  const actual = ttsActual({ model: TTS_MODEL, usage });
+  assert.ok(actual < worst);
+  assert.deepEqual(spent(L, sub), { spent: actual, reserved: 0, limit: 1_000_000 });
+});
+
+test('tts: a client that hangs up mid-read keeps the full reservation', async () => {
+  const { L, sub, call } = await tester();
+  const enc = new TextEncoder();
+  mockFetch([[TTS_UP, () => new Response(new ReadableStream({
+    start(c) { c.enqueue(enc.encode(speechEvents()[0])); },
+    pull() { return new Promise(() => {}); }, // the provider is still talking
+  }), { headers: { 'content-type': 'text/event-stream' } })]]);
+  const r = await call('tts', post({ voice: 'atelier', text: 'Hello there.' }));
+  assert.equal(r.status, 200);
+  const reader = r.body.getReader();
+  assert.equal((await reader.read()).value.length, 1_000);
+  await reader.cancel();
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.deepEqual(spent(L, sub), { spent: ttsWorstCase({ model: TTS_MODEL, chars: 12 }), reserved: 0, limit: 1_000_000 });
+});
+
+test('tts: usage missing, or no audio tokens, keeps the full reservation', async () => {
+  for (const usage of [null, { input_tokens: 12, output_tokens: 0, total_tokens: 12 }]) {
+    const { L, sub, call } = await tester();
+    mockFetch([[TTS_UP, () => sseOf(speechEvents(CLIP, usage))]]);
+    const r = await call('tts', post({ voice: 'sage', text: 'Hello there.' }));
+    assert.deepEqual(await bytesOf(r), CLIP, 'the audio still plays');
+    assert.deepEqual(spent(L, sub), { spent: ttsWorstCase({ model: TTS_MODEL, chars: 12 }), reserved: 0, limit: 1_000_000 }, JSON.stringify(usage));
+  }
+});
+
+test('tts: a provider refusal settles at $0 and never passes the provider’s error through', async () => {
+  const { L, sub, call } = await tester();
+  let status = 401;
+  mockFetch([[TTS_UP, () => reply(status, { error: { message: 'Incorrect API key provided: sk-proj-XYZ********1234.' } }, { 'retry-after': '3', 'x-request-id': 'req_1' })]]);
+  let r = await call('tts', post({ voice: 'atelier', text: 'Hi.' }));
+  assert.equal(r.status, 502);
+  const text = await r.text();
+  assert.equal(JSON.parse(text).code, 'tts_unavailable');
+  assert.ok(!/sk-|1234|XYZ/.test(text));
+  assert.equal(r.headers.get('x-request-id'), null);
+  status = 429;
+  r = await call('tts', post({ voice: 'atelier', text: 'Hi.' }));
+  assert.equal(r.status, 429);
+  assert.equal(await codeOf(r), 'tts_busy');
+  assert.equal(r.headers.get('retry-after'), '3');
+  assert.deepEqual(spent(L, sub), { spent: 0, reserved: 0, limit: 1_000_000 });
+});
+
+test('tts: a refused reservation is 402 tester_budget; a missing key is 503 tts_unavailable; neither calls a provider', async () => {
+  const { call } = await tester({ config: { day_limit: 1_000 } });
+  mockFetch([]);
+  const r = await call('tts', post({ voice: 'atelier', text: 'Hello there, this is a longer sentence to read.' }));
+  assert.equal(r.status, 402);
+  const j = await r.json();
+  assert.equal(j.code, 'tester_budget');
+  assert.equal(j.scope, 'day');
+  assert.ok(allowanceOf(r));
+  const { env, L } = makeEnv({ OPENAI_API_KEY: undefined });
+  const t = await signIn(L, PROFILE());
+  L.calls.length = 0;
+  const r2 = await api(env, 'tts', post({ voice: 'cedar', text: 'Hi.' }), { cookie: t.token });
+  assert.equal(r2.status, 503);
+  assert.deepEqual(await r2.json(), { error: 'OpenAI isn’t available to testers right now.', code: 'tts_unavailable' });
+  assert.ok(!L.calls.includes('reserve'));
+  assert.equal(upstream.calls.length, 0);
+});
+
+test('tts (Sulafat): settled from the seconds of audio returned; the header shows the settled cost', async () => {
+  const { L, sub, call } = await tester();
+  const pcm = new Uint8Array(96_000); // 2 s at 24 kHz
+  const usageMetadata = { promptTokenCount: 30, candidatesTokenCount: 50, totalTokenCount: 80 };
+  mockFetch([[/gemini-3\.8-flash-lite-tts:generateContent$/, () => reply(200, { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: Buffer.from(pcm).toString('base64') } }] } }], usageMetadata })]]);
+  const r = await call('tts', post({ voice: 'sulafat', text: 'Two seconds <laugh> of calm.' }));
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('content-type'), 'audio/wav');
+  assert.equal(upstream.calls[0].url, `${GEMINI_BASE}/v1beta/models/gemini-3.8-flash-lite-tts:generateContent`);
+  assert.equal(upstream.calls[0].json.contents[0].parts[0].text, 'Two seconds laugh of calm.');
+  const actual = ttsActual({ model: 'gemini:gemini-3.8-flash-lite-tts', usage: usageMetadata, seconds: 2 });
+  assert.equal(allowanceOf(r).dayLeft, 1_000_000 - actual);
+  assert.equal((await bytesOf(r)).length, 96_044);
+  assert.deepEqual(spent(L, sub), { spent: actual, reserved: 0, limit: 1_000_000 });
+});
+
+test('tts: the reservation is priced on spoken units (numbers weigh more), and Gemini’s on its output bound too', async () => {
+  const { L, sub, call } = await tester();
+  mockFetch([[TTS_UP, () => sseOf(speechEvents(CLIP, null))]]); // no usage: the full reservation stands, so it is visible
+  const text = '987654321987654 '.repeat(15).trim(); // 239 characters, 15 numbers of 15 digits
+  let r = await call('tts', post({ voice: 'atelier', text }));
+  await bytesOf(r);
+  const units = spokenUnits(text);
+  assert.equal(units, 239 + 225 * 3);
+  const worst = ttsWorstCase({ model: TTS_MODEL, chars: text.length, units });
+  assert.ok(worst > 3 * ttsWorstCase({ model: TTS_MODEL, chars: text.length }));
+  assert.deepEqual(spent(L, sub), { spent: worst, reserved: 0, limit: 1_000_000 });
+  // 1,000 characters of digits is 4,000 units: over a tester's cap, refused before anything is reserved.
+  L.calls.length = 0;
+  r = await call('tts', post({ voice: 'atelier', text: '7'.repeat(1_000) }));
+  assert.equal(r.status, 413);
+  assert.ok(!L.calls.includes('reserve'));
+  // Sulafat: the reservation is the smaller of the spoken-length estimate and the maxOutputTokens bound.
+  const pcm = new Uint8Array(48_000);
+  mockFetch([[/gemini-3\.8-flash-lite-tts:generateContent$/, () => reply(200, { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: Buffer.from(pcm).toString('base64') } }] } }] })]]);
+  const g = await tester({ config: { day_limit: 1_000_000 } });
+  const zh = '这是一个测试句子。'.repeat(30); // 270 characters, 810 units
+  r = await g.call('tts', post({ voice: 'sulafat', text: zh }));
+  assert.equal(r.status, 200);
+  assert.equal(upstream.calls[0].json.generationConfig.maxOutputTokens, TTS_VOICES.sulafat.maxOutputTokens);
+  const gWorst = ttsWorstCase({ model: 'gemini:gemini-3.8-flash-lite-tts', chars: zh.length, units: spokenUnits(zh), maxAudioTokens: TTS_VOICES.sulafat.maxOutputTokens });
+  assert.ok(gWorst > ttsWorstCase({ model: 'gemini:gemini-3.8-flash-lite-tts', chars: zh.length }));
+  assert.ok(g.L.calls.includes('reserve'));
+});
+
+test('tts: a Sulafat answer longer than one request allows is settled at its real length, not dropped at the reservation', async () => {
+  const { L, sub, call } = await tester();
+  const usageMetadata = { promptTokenCount: 320, candidatesTokenCount: 4_427, totalTokenCount: 4_747 };
+  const body = JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: Buffer.alloc(8_500_000).toString('base64') } }] } }], usageMetadata });
+  mockFetch([[/gemini-3\.8-flash-lite-tts:generateContent$/, () => new Response(body, { headers: { 'content-type': 'application/json' } })]]);
+  const text = 'A calm paragraph to read aloud. '.repeat(28).trim(); // 895 units
+  const r = await call('tts', post({ voice: 'sulafat', text }));
+  assert.equal(r.status, 502);
+  assert.equal(await codeOf(r), 'tts_unavailable');
+  const model = 'gemini:gemini-3.8-flash-lite-tts';
+  const reserved = ttsWorstCase({ model, chars: text.length, units: spokenUnits(text), maxAudioTokens: TTS_VOICES.sulafat.maxOutputTokens });
+  const actual = ttsActual({ model, usage: usageMetadata, seconds: 8_500_000 / 48_000, chars: text.length });
+  assert.notEqual(actual, reserved);
+  assert.deepEqual(spent(L, sub), { spent: Math.min(actual, 4 * reserved), reserved: 0, limit: 1_000_000 });
+});
+
+test('tts: a per-tester rate limit (LI_LIMIT, keyed by sub) answers 429 tts_busy before anything is reserved', async () => {
+  const { env, L, sub, call } = await tester();
+  const keys = [];
+  env.LI_LIMIT = { async limit({ key }) { keys.push(key); return { success: keys.length <= 2 }; } };
+  mockFetch([[TTS_UP, () => sseOf(speechEvents())]]);
+  for (let i = 0; i < 2; i++) assert.equal((await call('tts', post({ voice: 'atelier', text: 'Hello there.' }))).status, 200);
+  L.calls.length = 0;
+  const r = await call('tts', post({ voice: 'atelier', text: 'Hello there.' }));
+  assert.equal(r.status, 429);
+  assert.equal(await codeOf(r), 'tts_busy');
+  assert.equal(r.headers.get('retry-after'), '30');
+  assert.ok(!L.calls.includes('reserve'));
+  assert.equal(upstream.calls.length, 2);
+  assert.deepEqual(keys, [`tts:${sub}`, `tts:${sub}`, `tts:${sub}`]);
+  // A limiter that fails never blocks read aloud.
+  env.LI_LIMIT = { async limit() { throw new Error('down'); } };
+  assert.equal((await call('tts', post({ voice: 'atelier', text: 'Hello there.' }))).status, 200);
+});
+
+test('tts preview: a cached clip costs nothing; a miss is reserved and settled like a segment', async () => {
+  const store = new Map();
+  globalThis.caches = { default: {
+    match: async (k) => (store.has(String(k)) ? new Response(store.get(String(k)), { headers: { 'content-type': 'audio/mpeg' } }) : undefined),
+    put: async (k, res) => { store.set(String(k), new Uint8Array(await res.arrayBuffer())); },
+  } };
+  try {
+    const { L, sub, call } = await tester();
+    const usage = { input_tokens: 60, output_tokens: 200, total_tokens: 260 };
+    mockFetch([[TTS_UP, () => sseOf(speechEvents(CLIP, usage))]]);
+    let r = await call('tts', post({ voice: 'cedar', preview: true }));
+    assert.equal(r.status, 200);
+    assert.deepEqual(await bytesOf(r), CLIP);
+    const actual = ttsActual({ model: TTS_MODEL, usage });
+    assert.deepEqual(spent(L, sub), { spent: actual, reserved: 0, limit: 1_000_000 });
+    assert.equal(allowanceOf(r).dayLeft, 1_000_000 - actual);
+    L.calls.length = 0;
+    r = await call('tts', post({ voice: 'cedar', preview: true }));
+    assert.deepEqual(await bytesOf(r), CLIP);
+    assert.equal(upstream.calls.length, 1, 'served from the cache');
+    assert.ok(!L.calls.includes('reserve'));
+    assert.equal(spent(L, sub).spent, actual);
+  } finally { delete globalThis.caches; }
 });
 
 test('tester/profile: per tester, sanitized, 300 KB cap, never the owner’s me key', async () => {

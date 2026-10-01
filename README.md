@@ -71,6 +71,27 @@ Design: `docs/superpowers/specs/2026-09-30-atelier-tester-access-design.md` plus
   app's authorized redirect URLs, and set `npx wrangler secret put LINKEDIN_CLIENT_ID` / `LINKEDIN_CLIENT_SECRET`.
   The first deploy adds the `Ledger` class (migration `v2`).
 
+### Read aloud (the Atelier voice)
+`POST /api/tts` (`src/tts.js`) speaks one segment of an answer in a soft, human voice. The client sends only
+`{voice, text}` or `{voice, preview: true}`; the model, the voice brief (`TTS_BRIEF`, versioned by `TTS_BRIEF_V`) and the
+format are server constants. Voices: `atelier` (default: OpenAI `gpt-4o-mini-tts-2025-12-15`, voice marin), `cedar`,
+`sage` (same model) and `sulafat` (Gemini `gemini-3.8-flash-lite-tts`); `device` (the browser's own voice) never reaches
+the server. OpenAI voices stream `audio/mpeg`; Sulafat answers a whole `audio/wav`. Text is capped at 4,000 characters per
+request for the owner and 1,000 *spoken units* for testers (`spokenUnits`: a character each, plus 3 per digit, 2 per
+symbol read as a word and 2 per Chinese/Japanese/Korean character, since those take longer to say; `public/readaloud.js`
+sizes its segments with the same count). Gemini's output is bounded at the source (`maxOutputTokens` 4,369, about 175 s,
+what fits in one request's 8 MB of audio); an answer longer than that anyway is settled at its real length and answered
+with 502. Errors are our own (`400 bad_request`, `413 too_large`, `429 tts_busy` with `retry-after`, `502/503
+tts_unavailable`): provider error bodies and headers are never passed on. Settings previews are cached per voice, brief
+version and preview line (`PREVIEW_ID`, a hash of `PREVIEW_TEXT`) in the data center's cache for 30 days. Testers are
+metered like chat: the worst case (`ttsWorstCase` on the spoken units, about $0.094 per 1,000 on OpenAI; for Gemini at
+most its `maxOutputTokens`) is reserved, then settled from the `speech.audio.done` usage (OpenAI) or the seconds of audio
+returned (Gemini, 25 tokens/s); a tester may start about 20 paid read-aloud requests a minute (the `LI_LIMIT` binding,
+keyed `tts:<sub>`; past it `429 tts_busy`, `retry-after: 30`). `GET /api/tester/me` lists the tester's voices in
+`models.tts` and `features.tts`. Change the default voice by editing the `atelier` row of `TTS_VOICES` and bumping
+`TTS_BRIEF_V`; a new `PREVIEW_TEXT` needs only the matching `PREVIEW_ID` in `public/readaloud.js` (a test checks it). The
+answer text is sent to OpenAI (or Google for Sulafat) to make the audio, and the voice is AI-generated.
+
 ### Canva
 Canva uses OAuth 2.0 with PKCE. Each connected Canva account's refresh token is kept in KV (`canva_accounts`), and access
 tokens are cached separately (`canva_access:<id>`). Canva refresh tokens are single-use: each refresh stores the
