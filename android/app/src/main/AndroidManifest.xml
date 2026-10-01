@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Atelier Assist: one translucent bottom-sheet activity that hosts https://atelier.ciprari.ai in a WebView.
+
+  - ACTION_ASSIST + DEFAULT makes the app eligible for Settings > Apps > Choose default apps > Digital assistant app
+    (AOSP AssistantRoleBehavior: an exported activity resolving ACTION_ASSIST with MATCH_DEFAULT_ONLY is enough). The
+    system then launches it for the side-key / power-key long press, the corner swipe and the nav-handle gesture.
+  - MAIN + LAUNCHER is the same sheet, so Samsung's Side button > Double press > Open app gives the same pop-up.
+  - Never shown over the lock screen (no showWhenLocked): AssistActivity asks to unlock first.
+  - No backup / device transfer: the WebView holds the owner's signed-in Atelier session.
+  - configChanges: rotation, size, keyboard and dark mode (uiMode) are handled in place, so the page survives them;
+    AssistActivity.onConfigurationChanged re-reads the theme's colours. Display size (density) and font size (fontScale)
+    are left out on purpose: they recreate the activity, which starts a fresh page in "ask" mode.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Dictation in the WebView: RECORD_AUDIO is asked at first use; Chromium also needs MODIFY_AUDIO_SETTINGS. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- "Open in Atelier": find the installed Atelier PWA (a Chrome WebAPK) that handles the site's links. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" android:host="atelier.ciprari.ai" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="false"
+        android:theme="@style/Theme.AtelierAssist.Panel"
+        tools:targetApi="36">
+
+        <!-- No WebView usage/crash metrics leave the device for this app. -->
+        <meta-data
+            android:name="android.webkit.WebView.MetricsOptOut"
+            android:value="true" />
+
+        <activity
+            android:name=".AssistActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:windowSoftInputMode="adjustResize|stateHidden"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode"
+            android:theme="@style/Theme.AtelierAssist.Panel">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

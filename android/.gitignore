@@ -1,0 +1,29 @@
+# Atelier Assist (Android companion). Build output and key material never enter git.
+
+# Gradle / Kotlin / IDE state
+.gradle/
+.kotlin/
+build/
+app/build/
+captures/
+.idea/
+*.iml
+.externalNativeBuild/
+.cxx/
+local.properties
+
+# Packages (built output is written to %LOCALAPPDATA%\atelier-assist-build anyway)
+*.apk
+*.aab
+*.apks
+*.idsig
+output-metadata.json
+
+# Signing material: the release key lives in %USERPROFILE%\.atelier-assist, outside the repo.
+*.jks
+*.keystore
+*.p12
+*.pk8
+*.pem
+keystore.properties
+signing.properties

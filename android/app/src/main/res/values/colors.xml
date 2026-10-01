@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Atelier's palette (public/app.css). Light theme here; values-night holds the warm-black theme. -->
+<resources>
+    <color name="sheet_bg">#F3EEE3</color>
+    <color name="sheet_surface">#E2DBCB</color>
+    <color name="ink">#1B1A16</color>
+    <color name="ink_2">#5B564C</color>
+    <color name="handle">#471B1A16</color>
+    <color name="accent">#4D7A00</color>
+
+    <color name="scrim">#73000000</color>
+    <color name="ic_launcher_background">#0E0D0B</color>
+</resources>

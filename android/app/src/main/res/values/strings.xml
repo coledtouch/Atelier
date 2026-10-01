@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Atelier Assist</string>
+
+    <string name="open_in_atelier">Open in Atelier</string>
+    <string name="sheet_handle">Atelier Assist panel. Double-tap to expand or shrink, swipe down to close.</string>
+    <string name="action_close">Close</string>
+    <string name="action_expand">Expand</string>
+    <string name="action_collapse">Shrink</string>
+    <string name="dismiss">Dismiss</string>
+
+    <string name="setup_text">Open Atelier from the side button: make Atelier Assist your digital assistant.</string>
+    <string name="setup_action">Set up</string>
+    <string name="setup_hint">Choose Digital assistant app, then Atelier Assist.</string>
+
+    <string name="mic_blocked">The microphone is off for Atelier Assist.</string>
+    <string name="mic_settings">Settings</string>
+
+    <string name="offline_title">Can’t reach Atelier</string>
+    <string name="offline_body">Check your connection, then try again.</string>
+    <string name="retry">Try again</string>
+
+    <string name="saved">Saved to Downloads/Atelier</string>
+    <string name="save_failed">Couldn’t save that here. Open it in Atelier to download it.</string>
+    <string name="save_busy">Still saving the last file. Try again in a moment.</string>
+    <string name="no_app">No app on this phone can open that link.</string>
+    <string name="no_atelier">Atelier isn’t installed. Opening it in the browser.</string>
+    <string name="crashed">Atelier stopped. Press the side button to open it again.</string>
+    <string name="no_webview">Android System WebView isn’t available right now. Try again in a moment.</string>
+</resources>

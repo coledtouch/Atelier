@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- values-night swaps the parent for the dark Material theme. isLightTheme also drives the WebView's
+         prefers-color-scheme (targetSdk 33+), so Atelier renders in the same theme as the sheet. -->
+    <style name="Base.AtelierAssist" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:isLightTheme">true</item>
+    </style>
+
+    <!-- A see-through window: the app underneath stays visible, AssistActivity draws its own scrim and sheet and
+         animates them itself (no window animation, no system dim, no preview window). -->
+    <style name="Theme.AtelierAssist.Panel" parent="Base.AtelierAssist">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorControlActivated">@color/accent</item>
+    </style>
+</resources>
