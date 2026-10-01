@@ -852,8 +852,8 @@ test('confirm.html: no inline script (MV3 extension pages forbid it), and the pa
 });
 
 // ── packing ──
-test('manifest: version 1.3.0, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
-  assert.equal(SOURCE_MANIFEST.version, '1.3.0');
+test('manifest: version 1.3.1, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
+  assert.equal(SOURCE_MANIFEST.version, '1.3.1');
   assert.ok(SOURCE_MANIFEST.description.length <= 132);
   assert.ok(Number(SOURCE_MANIFEST.minimum_chrome_version) >= 116);
 });
@@ -867,7 +867,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
   const prod = packExtension();
   const files = unzipSync(prod.zip);
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  assert.equal(manifest.version, '1.3.0');
+  assert.equal(manifest.version, '1.3.1');
   assert.deepEqual(manifest.content_scripts.map((c) => c.matches), [['https://atelier.ciprari.ai/*']]);
   assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
   assert.ok(!/localhost|127\.0\.0\.1/.test(strFromU8(files['manifest.json'])));
@@ -876,7 +876,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
 
   const dev = packExtension({ dev: true });
   assert.deepEqual(dev.manifest.content_scripts[0].matches, ['https://atelier.ciprari.ai/*', 'http://localhost:8787/*']);
-  assert.equal(dev.manifest.version, '1.3.0');
+  assert.equal(dev.manifest.version, '1.3.1');
   assert.deepEqual(SOURCE_MANIFEST.content_scripts[0].matches, dev.manifest.content_scripts[0].matches, 'the source keeps localhost for Load unpacked');
 });
 
