@@ -1,0 +1,16 @@
+I built myself an AI studio. Now I'm opening 25 spots.
+
+It's called Atelier.
+
+Most of us bounce between five AI apps a day, and none of them know who we are. Atelier puts it all in one place, and it learns you: your profile, your writing voice, the things you want it to remember. Flip on "As me" and it writes the way you do.
+
+What's inside:
+• Six modes: Ask, Code, Image, Video, Ideas, Build
+• Frontier models side by side: Claude Opus 5.5 and Sonnet 5.5, GPT-6, Gemini 3.1 Pro, DeepSeek, GLM, Kimi and more
+• Images and video with GPT Image, Nano Banana, FLUX and Veo
+• Describe an app and watch it run, right in the thread
+• Installs like an app on your phone or desktop, and your threads stay on your device
+
+I'm looking for 25 people to try it on the paid models, free. Sign in with LinkedIn at atelier.ciprari.ai and tell me what breaks, what you love, and what you'd build with it.
+
+#AI #BuildInPublic #ProductDesign #GenerativeAI #Productivity

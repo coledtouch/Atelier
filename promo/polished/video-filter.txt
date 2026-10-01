@@ -1,0 +1,9 @@
+color=c=0x0e0d0b:s=1080x1350:r=30:d=5[bg];
+[1:v]scale=350:350:flags=lanczos,format=rgba,trim=duration=5,setpts=PTS-STARTPTS,fade=t=in:st=0.1:d=0.75:alpha=1[logo];
+[bg][logo]overlay=x=(W-w)/2:y='340-8*min(t/2,1)':shortest=1,
+drawtext=fontfile='promo/polished/InstrumentSerif-Regular.ttf':text='Atelier':fontsize=156:fontcolor=0xece6d9:x=(w-text_w)/2:y=715:alpha='clip((t-0.5)/0.65,0,1)',
+drawtext=fontfile='C\:/Windows/Fonts/segoeui.ttf':text='A personal AI studio. Shaped around you.':fontsize=32:fontcolor=0xbdb7aa:x=(w-text_w)/2:y=905:alpha='clip((t-1.0)/0.65,0,1)',
+fade=t=out:st=4.45:d=0.55:color=0x0e0d0b,setsar=1,format=yuv420p[intro];
+[0:v]trim=start=5:end=40,setpts=PTS-STARTPTS,setsar=1,format=yuv420p[middle];
+[2:v]scale=2160:2700:flags=lanczos,zoompan=z='1+0.012*on/239':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=1080x1350:fps=30,trim=duration=8,setpts=PTS-STARTPTS,fade=t=in:st=0:d=0.4:color=0x0e0d0b,setsar=1,format=yuv420p[outro];
+[intro][middle][outro]concat=n=3:v=1:a=0,format=yuv420p[v]

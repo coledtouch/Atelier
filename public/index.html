@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <title>Atelier</title>
+  <meta name="description" content="Atelier — a personal studio for answers, code, images, video, ideas and apps." />
+  <meta name="theme-color" content="#0e0d0b" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#f3eee3" media="(prefers-color-scheme: light)" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Atelier" />
+  <!-- link previews (LinkedIn, Slack, iMessage, X) -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Atelier" />
+  <meta property="og:title" content="Atelier — Come make something yours." />
+  <meta property="og:description" content="A personal AI studio for answers, code, images, video, ideas and apps. 25 LinkedIn tester spots — paid models included. Built by Cole Ciprari." />
+  <meta property="og:url" content="https://atelier.ciprari.ai/" />
+  <meta property="og:image" content="https://atelier.ciprari.ai/og/atelier-share.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="628" />
+  <meta property="og:image:alt" content="Atelier — Come make something yours." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/atelier-v2-32.png" type="image/png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="/icons/atelier-v2-180.png" sizes="180x180" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app.css?v=49" />
+  <link rel="stylesheet" href="/studio.css?v=49" />
+</head>
+<body data-mode="ask">
+  <a class="skip-link" href="#input">Skip to prompt</a>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="halo" aria-hidden="true"></div>
+
+  <header class="top">
+    <button class="icon-btn" id="threadsBtn" aria-label="Threads" title="Threads (Ctrl+.)">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h13"/></svg>
+    </button>
+    <button class="brand" id="brandBtn" aria-label="New session">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-caption">PERSONAL STUDIO</span>
+    </button>
+    <div class="top-right">
+      <button class="key-state" id="keyState" title="Connection status" aria-label="Connection status: checking"><span id="keyLabel">Checking</span></button>
+      <button class="icon-btn" id="youBtn" aria-label="You" title="You — profile, voice & memory">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+      </button>
+      <button class="icon-btn" id="libraryBtn" aria-label="Library" title="Library">
+        <svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+      </button>
+      <button class="icon-btn" id="newBtn" aria-label="New thread" title="New thread (Ctrl+Shift+O)">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button class="icon-btn" id="settingsBtn" aria-label="Settings" title="Settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <nav class="studio-nav" aria-label="Studio navigation">
+    <p class="nav-caption">YOUR WORKSPACE</p>
+    <button class="nav-new" data-trigger="newBtn"><span aria-hidden="true">＋</span> New thread</button>
+    <button class="nav-item" data-trigger="threadsBtn"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h12M4 17h9"/></svg>Threads</button>
+    <button class="nav-item" data-trigger="libraryBtn"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>Library</button>
+    <div class="nav-note"><span class="nav-note-mark" aria-hidden="true">✳</span><p>A little space<br />for your next <em>big idea.</em></p><span>Think. Make. Make it yours.</span></div>
+    <div class="nav-bottom">
+      <button class="nav-item" data-trigger="youBtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Your profile</button>
+      <button class="nav-item" data-trigger="settingsBtn"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg>Settings</button>
+      <span class="nav-local">Threads saved on this device</span>
+    </div>
+  </nav>
+
+  <main id="stage">
+    <div class="connection-banner" id="connectionBanner" role="status" hidden>You’re offline. You can browse saved threads; reconnect to create.</div>
+    <section id="welcome" class="welcome">
+      <p class="eyebrow" id="dateLine"></p>
+      <h1 class="greeting"><span id="greetWord">Good evening</span><span class="greet-name" id="greetName"></span>.<br /><em>What are we making?</em></h1>
+      <p class="welcome-copy">A thought, a first draft, something entirely new.<br class="mobile-break" /> Start anywhere. Make it yours.</p>
+      <div class="section-label"><h2>Explore your studio</h2><span>Six ways to get started</span></div>
+      <div class="bento" id="bento"></div>
+      <p class="legal-links">Your ideas, all in one place. <a href="/privacy">Privacy</a> · <a href="/tos">Terms</a></p>
+    </section>
+    <ol class="stream" id="stream" aria-label="Conversation"></ol>
+    <div class="sr-only" id="activityStatus" role="status" aria-live="polite"></div>
+  </main>
+
+  <footer class="dock" id="dock">
+    <div class="dock-inner">
+      <div class="composer" id="composer">
+        <nav class="modes" id="modes" role="tablist" aria-label="Mode">
+          <span class="mode-ink" id="modeInk" aria-hidden="true"></span>
+        </nav>
+        <div class="attachments" id="attachments"></div>
+        <div class="composer-row" id="promptPanel" role="tabpanel" aria-label="Ask prompt">
+          <button class="icon-btn subtle" id="attachBtn" type="button" aria-label="Attach image or video" title="Attach image or video">
+            <svg viewBox="0 0 24 24"><path d="M21 12.5 12.6 21a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>
+          </button>
+          <input type="file" id="fileInput" accept="image/*,video/*" multiple hidden />
+          <textarea id="input" rows="1" placeholder="Ask anything…" autocomplete="off" enterkeyhint="send" aria-label="Prompt"></textarea>
+          <button class="icon-btn subtle" id="micBtn" type="button" aria-pressed="false" aria-label="Dictate" title="Dictate">
+            <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          </button>
+          <button class="send" id="sendBtn" type="button" data-state="idle" aria-label="Send">
+            <svg class="i-send" viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+            <svg class="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+          </button>
+        </div>
+        <div class="options" id="options"></div>
+      </div>
+      <p class="composer-hint"><span>Enter to send <span aria-hidden="true">·</span> Shift + Enter for a new line</span><span>AI can make mistakes. Check important details.</span></p>
+    </div>
+  </footer>
+
+  <!-- Threads drawer -->
+  <aside class="drawer left" id="threadsDrawer" role="dialog" aria-modal="true" aria-label="Threads" tabindex="-1" hidden>
+    <div class="drawer-head">
+      <h3><em>Threads</em></h3>
+      <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <p class="drawer-description">Pick up where you left off.</p>
+    <input class="search" id="threadSearch" type="search" placeholder="Search threads…" aria-label="Search threads" />
+    <ul class="thread-list" id="threadList"></ul>
+  </aside>
+
+  <!-- Library drawer -->
+  <aside class="drawer right" id="libraryDrawer" role="dialog" aria-modal="true" aria-label="Library" tabindex="-1" hidden>
+    <div class="drawer-head">
+      <h3><em>Library</em></h3>
+      <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <p class="drawer-description">Everything you’ve made, in one place.</p>
+    <div class="lib-filter" id="libFilter" role="group" aria-label="Filter library">
+      <button type="button" class="chip on" data-f="all" aria-pressed="true">All<span class="n"></span></button>
+      <button type="button" class="chip" data-f="image" data-kind="image" aria-pressed="false">Image<span class="n"></span></button>
+      <button type="button" class="chip" data-f="video" data-kind="video" aria-pressed="false">Video<span class="n"></span></button>
+      <button type="button" class="chip" data-f="app" data-kind="build" aria-pressed="false">App<span class="n"></span></button>
+    </div>
+    <div class="lib-grid" id="libGrid"></div>
+  </aside>
+  <!-- You drawer: profile, voice, memory, imports -->
+  <aside class="drawer right you" id="youDrawer" role="dialog" aria-modal="true" aria-label="Your profile" tabindex="-1" hidden>
+    <div class="drawer-head">
+      <h3><em>You</em></h3>
+      <span class="sync-state" id="meSync"></span>
+      <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="you-scroll">
+      <section class="you-card">
+        <label class="field"><span>Name</span><input id="meName" placeholder="What should Atelier call you?" autocomplete="given-name" /></label>
+        <label class="field"><span>Who you are <small>role, work, companies, projects, people, what matters — Atelier reads this every time</small></span>
+          <textarea id="meBio" rows="5" placeholder="e.g. Founder of … I run … I'm building … I care about …"></textarea></label>
+      </section>
+
+      <section class="you-card">
+        <h4>Your voice</h4>
+        <label class="field"><span>Writing samples <small>paste a few emails, posts or messages you wrote</small></span>
+          <textarea id="meSamples" rows="4"></textarea></label>
+        <button type="button" class="chip" id="learnStyle">✦ Learn my style</button>
+        <label class="field" style="margin-top:12px"><span>Style guide <small>learned — edit freely. Used when Ask is set to “As me”.</small></span>
+          <textarea id="meStyle" rows="5"></textarea></label>
+      </section>
+
+      <section class="you-card">
+        <h4>What Atelier knows</h4>
+        <textarea id="meLearned" rows="6" aria-label="What Atelier knows" placeholder="Filled in from imports — edit freely."></textarea>
+      </section>
+
+      <section class="you-card">
+        <h4>Memory <span class="hint" id="memCount"></span></h4>
+        <div class="mem-add"><input id="memInput" aria-label="New memory" placeholder="Add something to remember…" /><button type="button" class="chip" id="memAdd">Add</button></div>
+        <ul class="mem-list" id="memList"></ul>
+      </section>
+
+      <section class="you-card">
+        <h4>Import your history</h4>
+        <p class="hint">Atelier reads what <i>you</i> wrote and distills who you are and how you write. Files are read in this browser; only your own messages are sent (to Gemini) for analysis.</p>
+        <div class="row-actions" style="margin-top:10px">
+          <label class="chip file-chip">ChatGPT export<input type="file" id="impChatgpt" accept=".zip,.json" aria-label="Import ChatGPT history" /></label>
+          <label class="chip file-chip">Claude export<input type="file" id="impClaude" accept=".zip,.json" aria-label="Import Claude history" /></label>
+          <button type="button" class="chip" id="impCode">Claude Code sessions…</button>
+          <button type="button" class="chip" id="impCodeSync" hidden>↻ Re-sync Claude Code</button>
+        </div>
+        <p class="hint" id="impStatus"></p>
+        <ul class="src-list" id="srcList"></ul>
+      </section>
+    </div>
+  </aside>
+
+  <div class="scrim" id="scrim" hidden></div>
+
+  <!-- Settings -->
+  <dialog class="sheet" id="settings" aria-labelledby="settingsTitle">
+    <form method="dialog" class="sheet-body" id="settingsForm">
+      <header class="sheet-head">
+        <h2 id="settingsTitle"><em>Settings</em></h2>
+        <button type="button" class="icon-btn" id="settingsClose" aria-label="Close settings"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </header>
+      <nav class="settings-nav" aria-label="Settings sections">
+        <button type="button" class="chip on" data-settings="general" aria-pressed="true">General</button>
+        <button type="button" class="chip" data-settings="connections" aria-pressed="false">Connections</button>
+        <button type="button" class="chip" data-settings="models" aria-pressed="false">Models</button>
+        <button type="button" class="chip" data-settings="data" aria-pressed="false">Your data</button>
+      </nav>
+
+      <div class="sheet-scroll" id="settingsScroll">
+        <section class="field-group">
+          <h4>Access</h4>
+          <label class="field">
+            <span>Studio passcode <small>Saved on this device so you can come back to your work.</small></span>
+            <div class="key-row">
+              <input type="password" name="passcode" id="passcodeField" autocomplete="current-password" spellcheck="false" enterkeyhint="done" />
+              <button type="button" class="chip" id="testPassBtn">Test</button>
+            </div>
+          </label>
+          <p class="hint" id="passResult" role="status"></p>
+        </section>
+
+        <section class="field-group">
+          <h4>Available providers</h4>
+          <p class="prov-status" id="provStatus"></p>
+          <button type="button" class="chip" id="diagBtn" style="margin-top:10px">Check provider keys</button>
+          <div class="prov-status" id="diagOut" aria-live="polite" style="margin-top:10px"></div>
+        </section>
+
+        <section class="field-group">
+          <h4>Connections</h4>
+          <ul class="conn-list" id="connList"></ul>
+          <p class="hint">Connect your tools to work across your accounts. Atelier asks for approval before sending or changing anything.</p>
+        </section>
+
+        <section class="field-group">
+          <h4>About you</h4>
+          <p class="hint" style="margin-bottom:10px">Your profile, writing voice, memory and history imports live in the <b>You</b> panel.</p>
+          <button type="button" class="chip" id="openYouFromSettings">Open You panel →</button>
+        </section>
+
+        <section class="field-group">
+          <h4>Models</h4>
+          <div class="model-grid" id="modelFields"></div>
+          <label class="field">
+            <span>Creativity <small id="tempVal"></small></span>
+            <input type="range" name="temperature" min="0" max="1.2" step="0.05" />
+          </label>
+          <datalist id="modelList"></datalist>
+          <button type="button" class="chip" id="refreshModels">Load my model catalog</button>
+        </section>
+
+        <section class="field-group">
+          <h4>Appearance</h4>
+          <div class="seg" id="themeSeg">
+            <label><input type="radio" name="theme" value="auto" /> <span>Auto</span></label>
+            <label><input type="radio" name="theme" value="dark" /> <span>Dark</span></label>
+            <label><input type="radio" name="theme" value="light" /> <span>Paper</span></label>
+          </div>
+        </section>
+        <section class="field-group">
+          <h4>Your data</h4>
+          <p class="hint" style="margin-bottom:14px">Export your threads and creations for safekeeping. Imports add copies without replacing existing work. Profile, account connections and preferences are not included.</p>
+          <div class="row-actions">
+            <button type="button" class="chip" id="exportBtn">Export threads</button>
+            <label class="chip file-chip">Import backup<input type="file" id="importInput" accept="application/json" aria-label="Import backup" /></label>
+          </div>
+          <div class="danger-zone"><p class="hint"><b>Irreversible</b>Clears threads, media, profile and saved sign-in on this device. Export your threads first.</p><button type="button" class="chip danger" id="wipeBtn">Clear this device</button></div>
+        </section>
+      </div>
+
+      <footer class="sheet-foot">
+        <span class="hint">Your studio, your preferences.</span>
+        <button class="btn-primary" value="save" id="saveSettings">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Onboarding -->
+  <dialog class="sheet onboard" id="onboard" aria-labelledby="onboardTitle" aria-describedby="onboardMsg">
+    <form method="dialog" class="sheet-body" id="onboardForm">
+      <div class="onboard-art" aria-hidden="true"><img src="/icons/atelier-v2-192.png" alt="" width="64" height="64" /></div>
+      <p class="eyebrow">Welcome to your studio</p>
+      <h2 class="onboard-title" id="onboardTitle">A space for<br /><em>what comes next.</em></h2>
+      <p class="onboard-copy">Your personal studio for thinking, writing and creating. Enter your passcode to make yourself at home.</p>
+      <label class="field"><span>Studio passcode</span><input type="password" name="passcode" id="onboardPass" placeholder="Enter your passcode" enterkeyhint="go" autocomplete="current-password" spellcheck="false" required /></label>
+      <label class="field"><span>First name <small>Optional — make the studio feel like you.</small></span><input name="name" placeholder="Your first name" autocomplete="given-name" maxlength="60" /></label>
+      <p class="hint" id="onboardMsg" role="status"></p>
+      <div class="onboard-actions">
+        <span></span>
+        <button class="btn-primary" id="onboardGo">Open the studio</button>
+      </div>
+      <p class="legal-links"><a href="/privacy" target="_blank">Privacy Policy</a> · <a href="/tos" target="_blank">Terms of Service</a></p>
+    </form>
+  </dialog>
+
+  <!-- Viewer -->
+  <div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-labelledby="viewerTitle" tabindex="-1" hidden>
+    <div class="viewer-bar">
+      <span class="viewer-title" id="viewerTitle"></span>
+      <div class="viewer-actions" id="viewerActions"></div>
+      <button type="button" class="icon-btn" id="viewerClose" aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="viewer-body" id="viewerBody"></div>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="/vendor/marked.js"></script>
+  <script src="/vendor/purify.js"></script>
+  <script src="/vendor/highlight.js"></script>
+  <script src="/app.js?v=49" type="module"></script>
+</body>
+</html>

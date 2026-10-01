@@ -1,0 +1,116 @@
+# Atelier — personal studio (PWA)
+
+Answers · Code · Images · Video · Ideas · App builder — all on **NVIDIA build** free endpoints,
+served from one **Cloudflare Worker**.
+
+```
+public/            the installable PWA (vanilla JS, no build step)
+  index.html       shell
+  app.css          design system (darkroom-editorial, per-mode accents)
+  studio.css       responsive studio shell, navigation and component refinements
+  data-safety.js   backup validation and interrupted-response recovery
+  app.js           app logic, model catalog, IndexedDB threads
+  sw.js            offline shell (API traffic is never cached)
+  vendor/          marked, DOMPurify, highlight.js (vendored)
+src/worker.js      serves /public + proxies an allow-list of NVIDIA endpoints
+wrangler.jsonc     Worker config
+```
+
+## Why a proxy?
+NVIDIA's APIs don't allow browser CORS. The Worker forwards only these routes:
+
+| App route | NVIDIA upstream |
+|---|---|
+| `POST /api/chat` | `integrate.api.nvidia.com/v1/chat/completions` (streamed) |
+| `GET /api/models` | `integrate.api.nvidia.com/v1/models` |
+| `POST /api/genai/<org>/<model>` | `ai.api.nvidia.com/v1/genai/<org>/<model>` |
+| `POST /api/fn/cosmos3-nano` | `api.nvcf.nvidia.com/v2/nvcf/pexec/functions/<id>` (allow-listed) |
+| `GET /api/status/<id>` | `api.nvcf.nvidia.com/v2/nvcf/pexec/status/<id>` (202 polling) |
+
+## Access & keys
+Atelier is **passcode-only**. All provider keys live in Worker secrets; a device only needs the passcode.
+```bash
+npx wrangler secret put APP_PASSCODE
+npx wrangler secret put NVIDIA_API_KEY      # any of these four
+npx wrangler secret put ANTHROPIC_API_KEY   # (+ ANTHROPIC_WORKSPACE_ID for org-level keys)
+npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put GEMINI_API_KEY
+```
+Connected accounts use more secrets (GITHUB_TOKEN, STRIPE_API_KEY, CLOUDFLARE_API_TOKEN, RAILWAY_API_TOKEN,
+SLACK_USER_TOKEN, GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET, CANVA_CLIENT_ID + CANVA_CLIENT_SECRET) — see Settings → Connections.
+
+### Canva
+Canva uses OAuth 2.0 with PKCE. Each connected Canva account's refresh token is kept in KV (`canva_accounts`), and access
+tokens are cached separately (`canva_access:<id>`). Canva refresh tokens are single-use: each refresh stores the
+replacement token immediately, and parallel refreshes are shared, so the old token is never used twice.
+1. Turn on multi-factor authentication for your Canva account (Canva account settings → Login & security; if you sign in
+   with Google/Apple, set a Canva password first). The Developer Portal has required MFA to create an app.
+2. https://www.canva.com/developers/apps → **Create an app** (name ≤ 18 characters, e.g. "Atelier"). Choose **Public** unless
+   your team is on Canva Enterprise. The choice is permanent, and you don't need to submit a public app for review to connect your own account.
+3. **Outside Canva → Start integrating**; under Configuration make sure **Canva REST APIs** is on. Copy the Client ID and
+   **Generate secret** (starts with `cnvca`, shown once).
+4. Scopes: tick exactly **design:meta Read**, **design:content Read + Write**, **asset Read + Write**, **profile Read**.
+5. Redirect URLs (exactly, no trailing slash): URL 1 `https://atelier.ciprari.ai/api/oauth/canva/callback`,
+   URL 2 `http://127.0.0.1:8787/api/oauth/canva/callback`. Canva rejects `localhost` redirect URLs.
+6. `npx wrangler secret put CANVA_CLIENT_ID` and `npx wrangler secret put CANVA_CLIENT_SECRET`. For local testing, also
+   add both to `.dev.vars`. Run `npx wrangler dev --local-upstream 127.0.0.1:8787`: without that flag, wrangler presents
+   requests as coming from the custom domain, so the Worker would send Canva `http://atelier.ciprari.ai/...` as the redirect.
+7. Settings → Connections → **Connect Canva**. Image results then offer **Send to Canva** (`POST /api/canva/send-image`),
+   and the agent gets `canva_designs`, `canva_design`, `canva_export` (read), plus `canva_create_design` and `canva_upload_image`
+   (these need your approval).
+   The Library's **From Canva** view uses `GET /api/canva/designs`, `GET /api/canva/designs/<id>/formats` and `POST /api/canva/import` (PNG pages, max 10, or one MP4), then downloads each export through `GET /api/canva/file`, which only fetches `https://export-download.canva.com` links (PNG/JPEG/MP4, max 100 MB, no redirects to other hosts).
+
+## Develop / deploy
+```bash
+npm install
+npx wrangler dev          # http://localhost:8787
+npx wrangler deploy      # → https://atelier.ciprari.ai
+```
+
+## Verification and UI review
+
+```bash
+npm run check            # syntax checks
+npm test                 # backup safety, recovery and offline-cache regression tests
+npm run review:ui        # isolated fixture at http://127.0.0.1:8791
+npx wrangler deploy --dry-run --outdir .review-build
+```
+
+The isolated UI fixture uses the passcode `review-only`. It serves canned responses and a small interactive test app, never loads `.dev.vars`, and never calls providers or connected accounts. It is a development script, not part of the deployed app. Real development continues to use `npm run dev` on port 8787.
+
+The September 2026 UI pass adds desktop workspace navigation, balanced mode cards, phone-sized controls, clearer onboarding, grouped settings, keyboard navigation and modal focus handling. Thread imports are validated before a single atomic write, use new IDs to preserve existing work, and discard stale tool approvals. Backups explicitly contain threads and creations; they exclude passcodes, profiles and account connections. Clearing a device now removes Atelier's saved sign-in backup and legacy thread database as well as current threads, without clearing other applications' local storage.
+
+Validation: 14 regression tests; syntax checks; production bundle dry run; production-dependency audit with zero reported vulnerabilities; browser checks at 320px, 390px and 1440px, in dark and paper themes. Browser checks cover draft preservation, keyboard mode selection, streamed fixture responses, thread search, settings, app preview interaction, code view, full-screen view and library persistence. Local Worker smoke checks confirm the shell loads, unauthenticated profile requests return 401, and API responses are not cached.
+
+Release verification still requires the deployed environment: real provider generation and streaming, image/video output and editing, OAuth connections, browser-extension pairing and action approval, and a service-worker upgrade on an installed PWA. The automated tests cover offline cache behavior but do not replace an installed-device check. Atelier remains a personal, shared-passcode app; this pass does not add multi-user identity or tenant isolation. No production deployment is performed by the review commands.
+
+## Using it
+- **Modes**: Alt+1…6, or slash commands: `/img`, `/vid`, `/code`, `/idea`, `/build`, `/ask`.
+- **Ask** with an image attached → vision model. **Deep think** → reasoning model.
+- **Image**: FLUX.1 dev / FLUX.2 klein / FLUX.1 schnell. Attach a photo in Image mode to *edit* it (FLUX.2 klein).
+- **Video**: NVIDIA Cosmos 3 Nano when the key has access; otherwise a **Motion still** — FLUX paints the frame and the browser films a slow push-in/pan (MP4/WebM).
+- **Ideas** → each card can *Expand*, *Build it* or *Visualize*.
+- **Build**: single-file apps previewed in a sandbox; keep chatting to refine; download as `.html`.
+- **Library** collects every image, video and app. Threads live in IndexedDB; export/import in Settings.
+- Models are editable per role in Settings ("Load my model catalog" lists every model your key can use). Retired models fall back automatically.
+
+## Atelier Browser (Chrome / Edge extension)
+`extension/` is a Manifest V3 companion that lets the agent use your real, logged-in browser.
+- Talks **only** to the Atelier page (content script on atelier.ciprari.ai / localhost:8787 ↔ `window.postMessage`).
+- Free: list tabs, read a page, open a page, list page controls, bring a tab to the front.
+- Needs your approval in Atelier: click, type. The approval card shows the real target element and page.
+- Since v1.3.0 the extension also asks on the computer itself before every click or type (a small Atelier Browser window:
+  Deny is the default, Allow unlocks after ~1 s). After a Deny or timeout, further click/type from that source is refused
+  for 30 s (doubling, up to 10 min). Password and payment fields are refused outright.
+- Hard block: never types into password, payment or ID fields.
+
+Install: download `/atelier-browser.zip` (Settings → Connections → Get extension), unzip, then
+`chrome://extensions` → Developer mode → **Load unpacked** → pick the `atelier-browser` folder.
+`npm run deploy` re-packs the zip before deploying. The production zip only runs on atelier.ciprari.ai; for `wrangler dev`
+use Load unpacked on `extension/` or `node scripts/pack-extension.mjs --dev` (writes `atelier-browser-dev.zip`, never served).
+
+### Remote browser (use your computer's browser from your phone)
+The extension keeps a WebSocket open to the `Relay` Durable Object (`src/relay.js`) while Chrome is running.
+Opening Atelier on the computer pairs the extension automatically (`/api/relay/pair` issues a device token; re-pairing
+revokes the old one). Other devices send browser commands through `/api/relay/cmd` (passcode + approval for click/type).
+Works whenever the computer is awake and Chrome is open (minimized is fine).

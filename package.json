@@ -1,0 +1,30 @@
+{
+  "name": "atelier",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check public/app.js && node --check public/data-safety.js && node --check public/sw.js && node --check src/worker.js && node --check public/video.js && node --check src/gemini.js",
+    "review:ui": "node scripts/review-server.mjs",
+    "dev": "wrangler dev",
+    "deploy": "node scripts/pack-extension.mjs && wrangler deploy",
+    "pack:extension": "node scripts/pack-extension.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "sharp": "^0.35.5",
+    "wrangler": "^4.144.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.129.0",
+    "@highlightjs/cdn-assets": "^11.12.0",
+    "dompurify": "^3.4.16",
+    "fflate": "^0.8.3",
+    "highlight.js": "^11.12.0",
+    "marked": "^18.0.14"
+  }
+}

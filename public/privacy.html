@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy Policy · Atelier</title>
+  <meta name="description" content="How Atelier collects, uses, stores, shares and deletes data, including data from Google APIs (Gmail)." />
+  <link rel="icon" href="/icons/atelier-v2-32.png" type="image/png" sizes="32x32" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/legal.css" />
+</head>
+<body>
+<main>
+  <a class="brand" href="/"><i></i>Atelier</a>
+  <p class="eyebrow">Effective September 30, 2026</p>
+  <h1>Privacy <em>Policy</em></h1>
+  <p class="lede">Atelier (“Atelier”, “we”, “us”) is a personal AI assistant available at <a href="https://atelier.ciprari.ai">atelier.ciprari.ai</a>. This policy explains what data Atelier accesses, how it is used, where it is stored, who it is shared with, and how you can delete it.</p>
+
+  <div class="box">
+    <b>In short:</b> Atelier accesses your data only to do what you ask it to do. It never sells your data, never uses it for advertising, and never uses it to train AI models. Data from Google APIs is handled under Google’s Limited Use requirements (see <a href="#google">Google user data</a>).
+  </div>
+
+  <h2>1. Who can use Atelier</h2>
+  <p>Atelier is a private application. Access is protected by an owner-set passcode; there is no public sign-up. It is not directed at children under 13, and we do not knowingly collect data from them.</p>
+
+  <h2>2. Data we access and collect</h2>
+  <h3>Information you provide</h3>
+  <ul>
+    <li><b>Prompts and conversations</b> — the questions, instructions, text and images you enter.</li>
+    <li><b>Profile and memory</b> — optional information you add in the “You” panel (name, a description of yourself, writing samples, a style guide, and remembered facts), plus facts Atelier notes from your conversations, which you can view and delete.</li>
+    <li><b>Imported history</b> — if you choose to import a ChatGPT/Claude data export or Claude Code session files, Atelier reads the messages <i>you</i> wrote in them to build your profile. The files are read in your browser and are not uploaded or stored.</li>
+  </ul>
+  <h3>Connected accounts (only if you connect them)</h3>
+  <ul>
+    <li><b>Gmail</b> (via Google OAuth) — see <a href="#google">Google user data</a> below.</li>
+    <li><b>Slack, GitHub, Stripe, Cloudflare, Railway</b> — when connected, Atelier reads the data needed to answer a request (for example, messages matching a search, open pull requests, recent payments, DNS records or deployments).</li>
+    <li><b>Browser extension</b> — if you install the optional Atelier Browser extension, Atelier can list your open tabs and read the page you ask about. Clicks and typing happen only after you approve each one, and the extension never enters passwords or payment details.</li>
+  </ul>
+  <h3>Technical data</h3>
+  <ul>
+    <li>Our host, Cloudflare, processes standard request data (such as IP address and request logs) to operate and secure the service. We use IP addresses to block repeated wrong-passcode attempts. We do not use analytics, advertising or tracking cookies.</li>
+  </ul>
+
+  <h2 id="google">3. Google user data (Gmail)</h2>
+  <p>If you connect Gmail, Atelier requests these permissions:</p>
+  <table>
+    <thead><tr><th>Scope</th><th>What Atelier does with it</th></tr></thead>
+    <tbody>
+      <tr><td><code>gmail.readonly</code></td><td>Searches and reads your email when you ask (for example, “what’s unread from today?” or “summarize the thread with Alex”).</td></tr>
+      <tr><td><code>gmail.compose</code></td><td>Saves draft emails you ask Atelier to write.</td></tr>
+      <tr><td><code>gmail.send</code></td><td>Sends an email <b>only after you review and approve it</b> on an approval card in the app. Atelier never sends email on its own.</td></tr>
+    </tbody>
+  </table>
+  <h3>How Google user data is used</h3>
+  <ul>
+    <li>Only to provide the user-facing features you request: searching, reading, summarizing, drafting and — with your approval — sending email.</li>
+    <li>Email content needed for a request is sent to the AI model provider selected for that request (see <a href="#sharing">Sharing</a>) solely to generate the response you asked for.</li>
+    <li>It is <b>not</b> used for advertising, <b>not</b> sold, <b>not</b> used to develop, improve or train generalized AI or machine-learning models, and <b>not</b> read by humans unless you explicitly ask for help with a specific message, it is necessary for security or legal compliance, or the data is aggregated and anonymized for internal operations.</li>
+  </ul>
+  <h3>How Google user data is stored</h3>
+  <ul>
+    <li>Atelier stores only the OAuth <b>refresh token</b> (and a short-lived access token) in encrypted Cloudflare storage so it can call Gmail on your behalf. Email content is not stored on our servers.</li>
+    <li>Answers that quote or summarize your email are saved in your conversation history in your own browser, where you can delete them.</li>
+  </ul>
+  <div class="box">
+    <b>Limited Use disclosure.</b> Atelier’s use and transfer to any other app of information received from Google APIs will adhere to the
+    <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including the Limited Use requirements.
+  </div>
+
+  <h2>4. How we use data</h2>
+  <ul>
+    <li>To answer your requests and perform the actions you ask for (chat, code, images, video, ideas, apps, and account tasks).</li>
+    <li>To personalize answers using your profile, memory and writing style.</li>
+    <li>To keep the service secure and working (for example, rate-limiting passcode attempts and diagnosing errors).</li>
+  </ul>
+  <p>We do not use your data for advertising, profiling for third parties, or selling.</p>
+
+  <h2 id="sharing">5. Sharing and third-party processors</h2>
+  <p>Atelier does not sell or rent personal data. To provide the service, data needed for a specific request is shared with these processors:</p>
+  <table>
+    <thead><tr><th>Processor</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>Cloudflare</td><td>Hosting, network security, and storage of your profile, memory and connection tokens.</td></tr>
+      <tr><td>Anthropic (Claude), OpenAI, Google (Gemini, Veo) and NVIDIA</td><td>AI models that generate responses, images and video. Only the content needed for the request is sent, via their business APIs, which do not use API data to train their models by default.</td></tr>
+      <tr><td>Gmail, Slack, GitHub, Stripe, Cloudflare, Railway</td><td>Only when you connect them, to read or act on your own account at your request.</td></tr>
+    </tbody>
+  </table>
+  <p>We may disclose information if required by law or to protect the rights, safety or security of users or the service.</p>
+
+  <h2>6. Where data is stored and for how long</h2>
+  <ul>
+    <li><b>In your browser:</b> conversations, generated media and settings — kept until you delete them (Settings → Erase everything, or delete individual threads).</li>
+    <li><b>Cloudflare (server):</b> your profile/memory (so it syncs between your devices) and connection tokens — kept until you delete or disconnect them.</li>
+    <li><b>AI providers:</b> may retain request data briefly under their own API policies for abuse monitoring; they do not use it for advertising.</li>
+    <li><b>Operational logs:</b> short-lived request logs kept by Cloudflare for reliability and security.</li>
+  </ul>
+
+  <h2>7. Security</h2>
+  <p>Traffic is encrypted with HTTPS. API keys and account tokens are stored as encrypted server-side secrets and never sent to your browser. Access requires the owner’s passcode, with automatic lockout after repeated wrong attempts. Actions that send, post, pay or change something require your explicit approval.</p>
+
+  <h2>8. Your choices and deletion</h2>
+  <ul>
+    <li><b>Delete conversations and media:</b> delete threads in the app, or use Settings → Erase everything.</li>
+    <li><b>Delete profile and memory:</b> edit or remove entries in the “You” panel.</li>
+    <li><b>Disconnect Gmail:</b> Settings → Connections → Disconnect (this deletes the stored token), and/or revoke access at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</li>
+    <li><b>Disconnect other services:</b> revoke the token in that service’s settings; Atelier then loses access immediately.</li>
+    <li><b>Request deletion of everything:</b> email <a href="mailto:cole@ciprari.ai">cole@ciprari.ai</a> and we will delete server-side data within 30 days.</li>
+  </ul>
+
+  <h2>9. Changes</h2>
+  <p>We may update this policy. The effective date at the top shows the latest version. Material changes to how Google user data is used will be reflected here before they take effect.</p>
+
+  <h2>10. Contact</h2>
+  <p>Questions or requests: <a href="mailto:cole@ciprari.ai">cole@ciprari.ai</a></p>
+
+  <footer><a href="/">Atelier</a><a href="/privacy">Privacy Policy</a><a href="/tos">Terms of Service</a></footer>
+</main>
+</body>
+</html>

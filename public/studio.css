@@ -1,0 +1,329 @@
+/* Studio shell and component refinements. Core media/prose styles live in app.css. */
+:root { --sidebar-w: 224px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.skip-link { position: fixed; left: 16px; top: -80px; z-index: 100; padding: 12px 18px; border-radius: 10px; color: var(--on-accent); background: var(--accent); }
+.skip-link:focus { top: 12px; }
+.grain { opacity: .035; }
+.halo { opacity: .055; }
+button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
+.top { height: calc(76px + env(safe-area-inset-top)); padding-inline: max(28px, env(safe-area-inset-left)) max(28px, env(safe-area-inset-right)); gap: 16px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.brand { margin-right: auto; flex: none; gap: 11px; font-size: 30px; }
+.brand-caption { font: 500 9px/1.5 var(--mono); letter-spacing: .17em; color: var(--ink-3); border-left: 1px solid var(--line-2); padding-left: 18px; margin-left: 10px; }
+.top-right { gap: 7px; }
+.icon-btn { width: 42px; height: 42px; flex: none; }
+.key-state { width: auto; height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; margin: 0 10px 0 0; border-radius: 99px; background: var(--surface); color: var(--ink-2); border: 1px solid var(--line); font: 500 11px/1 var(--sans); box-shadow: none; }
+.key-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); }
+.key-state.ok, .key-state.bad { background: var(--surface); box-shadow: none; }
+.key-state.ok::before { background: var(--c-ask); }
+.key-state.bad::before { background: var(--c-video); }
+.studio-nav { display: none; }
+#stage { padding: calc(108px + env(safe-area-inset-top)) max(32px, env(safe-area-inset-right)) calc(var(--dock-h) + 32px) max(32px, env(safe-area-inset-left)); scroll-padding-bottom: var(--dock-h); }
+.welcome { max-width: 980px; padding-top: 12px; }
+.eyebrow { font-size: 10px; line-height: 1.5; letter-spacing: .13em; margin-bottom: 20px; }
+.greeting { font-size: clamp(43px, 5.6vw, 76px); line-height: 1.04; margin-bottom: 20px; animation: none; }
+.welcome-copy { color: var(--ink-2); margin: 0 0 34px; font-size: 15px; line-height: 1.7; }
+.mobile-break { display: none; }
+.section-label { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 13px; }
+.section-label h2 { margin: 0; font: 500 11px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .11em; color: var(--ink-2); }
+.section-label > span { font-size: 12px; color: var(--ink-3); }
+.bento { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tile, .tile:nth-child(n) { grid-column: auto; grid-row: auto; min-height: 172px; padding: 20px; border-radius: 16px; justify-content: flex-start; gap: 12px; animation: none; }
+.tile:hover { transform: translateY(-2px); }
+.tile-top { gap: 10px; }
+.tile-icon { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--accent); }
+.tile-icon svg { width: 18px; height: 18px; }
+.tile-name, .tile:nth-child(1) .tile-name { font: 400 27px/1 var(--serif); margin-right: auto; }
+.tile-key { border: 0; padding: 0; font-size: 10px; }
+.tile-desc { margin: 0; font-size: 13px; line-height: 1.55; max-width: 30ch; }
+.tile-try, .tile:nth-child(1) .tile-try { display: block; font: 400 12px/1.5 var(--sans); margin-top: auto; padding-top: 2px; opacity: 1; }
+.tile-glyph { display: none; }
+.legal-links { margin-top: 22px; font-size: 11px; color: var(--ink-3); }
+.legal-links a { color: var(--ink-2); text-underline-offset: 3px; }
+.dock { padding-inline: max(24px, env(safe-area-inset-left)) max(24px, env(safe-area-inset-right)); padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+.dock-inner { max-width: 860px; }
+.dock::before { inset-block-start: -32px; }
+.composer { border-radius: 20px; background: var(--bg-2); }
+.modes { padding: 7px 8px 0; }
+.mode { height: 40px; font-size: 13px; color: var(--ink-2); border-radius: 10px; }
+.mode-ink { top: 7px; height: 40px; border-radius: 10px; }
+.composer-row { padding: 12px 12px 8px; gap: 5px; }
+.composer-row .icon-btn { width: 42px; height: 44px; }
+#input { padding: 10px 6px; min-height: 44px; }
+.send { width: 44px; height: 44px; border-radius: 14px; }
+.options { padding: 6px 12px 12px; gap: 7px; --opt-h: 34px; }
+.composer-hint { display: flex; justify-content: space-between; gap: 12px; margin: 8px 5px 0; color: var(--ink-3); font-size: 10px; line-height: 1.5; }
+.connection-banner { margin: 0 auto 18px; padding: 12px 16px; max-width: 980px; border: 1px solid var(--line-2); border-radius: 12px; font-size: 13px; color: var(--ink-2); background: var(--bg-2); }
+.drawer { padding-inline: 22px; }
+.drawer-description { margin: -3px 0 20px; color: var(--ink-2); font-size: 13px; }
+.drawer-head h3 { font-size: 36px; }
+.empty-note { text-align: center; padding: 42px 22px; font: 14px/1.65 var(--sans); color: var(--ink-2); }
+.empty-note strong { display: block; margin-bottom: 8px; font: 400 28px/1.2 var(--serif); color: var(--ink); }
+.empty-note .chip { display: inline-flex; align-items: center; min-height: 40px; margin-top: 18px; }
+.thread { padding: 6px 8px; }
+.thread-open { display: flex; align-items: center; gap: 10px; text-align: left; flex: 1; min-width: 0; padding: 8px 0; }
+.thread-body { min-width: 0; }
+.thread-title, .thread-sub { display: block; }
+.thread .del { opacity: .7; }
+.settings-nav { display: flex; gap: 6px; flex-wrap: wrap; } /* padding: #settings .settings-nav in app.css */
+.settings-nav .chip { min-height: 38px; font-family: var(--sans); font-size: 13px; padding-inline: 14px; }
+.sheet-body { min-height: 360px; }
+.field-group h4 { font-size: 11px; }
+.field small { line-height: 1.6; }
+.onboard .sheet-body { padding: 32px; gap: 12px; }
+.onboard .onboard-art { height: 64px; margin: 0; }
+.onboard-art img { display: block; width: 64px; height: 64px; border-radius: 16px; }
+.onboard-title { font-size: 52px; }
+.onboard-copy { font-size: 14px; color: var(--ink-2); line-height: 1.7; margin: 0 0 8px; max-width: 44ch; }
+.onboard .field { margin-bottom: 2px; }
+.onboard .field > span { font-size: 12px; }
+.onboard .field small { display: inline; margin-left: 6px; }
+.onboard .onboard-actions { justify-content: stretch; }
+.onboard .btn-primary { width: 100%; min-height: 46px; }
+.onboard .legal-links { margin: 4px 0 0; text-align: center; }
+.onboard input { font-size: 16px; }
+.file-chip { position: relative; }
+.file-chip input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.file-chip:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -2px; }
+.actions { opacity: .85; }
+.mini { min-height: 34px; }
+.prose { line-height: 1.8; }
+
+/* ═══ RESPONSIVE TAIL — studio.css loads after app.css, so rules here beat app.css and studio base at equal specificity. Order: 1100 → 760 → 640 → 480 → pointer:coarse → hover:none → max-height:500 → keyboard (html.kb-*) → reduced-motion. Append to the matching block; never add @media blocks elsewhere. ═══ */
+@media (min-width: 1100px) {
+  .top > #threadsBtn { display: none; }
+  .top-right > #youBtn, .top-right > #libraryBtn, .top-right > #settingsBtn { display: none; }
+  .top-right #newBtn { border: 1px solid var(--line); }
+  .studio-nav { position: fixed; display: flex; flex-direction: column; left: 0; top: calc(76px + env(safe-area-inset-top)); bottom: 0; width: var(--sidebar-w); padding: 28px 18px 24px; border-right: 1px solid var(--line); background: var(--bg); z-index: 20; overflow-y: auto; overscroll-behavior: contain; } /* scrolls when short windows push Your profile/Settings past the bottom */
+  .nav-caption { font: 500 9px/1.5 var(--mono); letter-spacing: .14em; margin: 0 12px 16px; color: var(--ink-3); }
+  .nav-new { display: flex; align-items: center; gap: 9px; padding: 12px; margin-bottom: 15px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 11px; font-size: 13px; }
+  .nav-new > span { color: var(--accent); font-size: 19px; line-height: 1; }
+  .nav-new kbd { display: none; }
+  .nav-item { display: flex; gap: 12px; align-items: center; min-height: 44px; padding: 10px 12px; width: 100%; text-align: left; font-size: 13px; border-radius: 10px; color: var(--ink-2); }
+  .nav-item svg { width: 17px; height: 17px; }
+  .nav-item:hover, .nav-new:hover { background: var(--surface-2); color: var(--ink); }
+  .nav-note { padding: 38px 12px; color: var(--ink-3); }
+  .nav-note-mark { font-size: 28px; color: var(--accent); }
+  .nav-note p { font: 400 25px/1.2 var(--serif); margin: 16px 0 12px; color: var(--ink-2); }
+  .nav-note > span:last-child { font-size: 10px; }
+  .nav-bottom { margin-top: auto; }
+  .nav-local { display: block; margin: 20px 12px 0; color: var(--ink-3); font-size: 10px; }
+  #stage { margin-left: var(--sidebar-w); padding-inline: clamp(32px, 5vw, 80px); }
+  .dock { left: var(--sidebar-w); padding-inline: 40px; }
+  .toast { left: calc(50% + var(--sidebar-w) / 2); }
+}
+@media (max-width: 760px) {
+  .top { padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right)); gap: 10px; }
+  .brand { font-size: 27px; }
+  .brand-caption { display: none; }
+  #stage { padding: calc(98px + env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) calc(var(--dock-h) + 24px) max(20px, env(safe-area-inset-left)); }
+  .welcome { padding-top: 0; }
+  .greeting { font-size: clamp(42px, 8vw, 60px); margin-bottom: 16px; }
+  .welcome-copy { margin-bottom: 28px; font-size: 14px; }
+  .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .tile, .tile:nth-child(n) { padding: 16px; min-height: 165px; }
+  .tile-key { display: none; }
+  .tile-name, .tile:nth-child(1) .tile-name { font-size: 25px; }
+  .tile-desc { font-size: 12px; }
+  .tile-try, .tile:nth-child(1) .tile-try { font-size: 11px; }
+  .section-label > span { display: none; }
+  .dock { padding-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right)); padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  .composer-hint > span:first-child { display: none; }
+  .composer-hint { justify-content: center; }
+  .drawer.you { width: min(560px, 100vw); }
+  .entry { grid-template-columns: minmax(0, 1fr); padding: 20px 0 24px; }
+  .rail { position: static; flex-direction: row; align-items: center; gap: 10px; padding: 0 0 8px; }
+  .rail-num { font-size: 24px; }
+  .prompt { font-size: 25px; }
+  .prose { font-size: 16px; }
+  .model-grid { grid-template-columns: 1fr; }
+  dialog.sheet { border-radius: 22px; }
+  .ideas { grid-template-columns: 1fr; }
+  .idea { rotate: 0deg; }
+  .lib-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 8px; }
+  .lib-filter { gap: 14px 4px; }
+  .lib-filter .chip { padding: 0 10px; }
+  .drawer-head .lib-from-canva { padding: 0 10px; margin-right: 4px; }
+}
+/* phones: stacked tabs (icon over label, equal widths); drop hint text */
+@media (max-width: 640px) {
+  .mode, .mode[aria-selected='true'] { flex: 1 0 0; flex-direction: column; height: 48px; gap: 5px; padding: 0 3px; min-width: 0; font-size: 10px; }
+  .mode svg { width: 15px; height: 15px; }
+  .mode-ink { height: 48px; }
+  .opt-note { display: none; }
+  #threadsDrawer, #libraryDrawer { width: min(420px, calc(100vw - 48px)); } /* leave a strip of scrim to tap closed */
+  .attach-menu { left: 4px; min-width: min(260px, calc(100% - 8px)); }
+  /* Settings: full-height bottom sheet, 2×2 tabs, full-width Save */
+  #settings { width: 100%; max-width: none; height: calc(var(--vvh, 100dvh) - env(safe-area-inset-top) - 8px); max-height: none; margin: auto 0 var(--kb, 0px); border-width: 1px 0 0; border-radius: 22px 22px 0 0; }
+  #settings[open] { animation-name: sheetUp; }
+  #settings .sheet-head { padding: 12px max(10px, env(safe-area-inset-right)) 4px max(20px, env(safe-area-inset-left)); }
+  #settings .sheet-head h2 { font-size: 34px; }
+  #settings .settings-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left)); }
+  #settings .settings-nav .chip { justify-content: center; }
+  .sheet-scroll { padding: 0 max(16px, env(safe-area-inset-right)) 16px max(16px, env(safe-area-inset-left)); }
+  #settings .sheet-foot { padding: 10px max(16px, env(safe-area-inset-right)) max(10px, calc(env(safe-area-inset-bottom) + 10px - var(--kb, 0px))) max(16px, env(safe-area-inset-left)); }
+  #settings .sheet-foot .hint { display: none; }
+  #saveSettings { flex: 1; min-height: 48px; }
+  #connList .conn { grid-template-columns: 8px minmax(0, 1fr) auto; row-gap: 4px; padding: 12px 0; }
+  #connList .conn-info { grid-area: 2 / 2 / auto / -1; }
+  #connList .conn > .chip { grid-area: 1 / 3; }
+  #connList .accts { grid-area: 3 / 2 / auto / -1; margin-top: 6px; }
+  #settings .seg { display: flex; width: 100%; }
+  #settings .seg label { flex: 1; }
+  #settings .seg span { text-align: center; }
+  #settings .row-actions > * { flex: 1 1 auto; }
+  .danger-zone > .chip { flex: 1 1 100%; }
+  dialog.tok-dialog { width: calc(100vw - 24px); max-width: none; } /* the UA's dialog:modal max-width would cap it at 100% - 2em - 6px */
+  dialog.tok-dialog .row > * { flex: 1; min-height: 48px; }
+  /* stream shots: one row of round icon buttons; multi-image entries open the viewer instead */
+  .shots .shot-acts { left: 8px; right: 8px; bottom: 8px; gap: 6px; flex-wrap: nowrap; }
+  .shots .shot-acts .mini { flex: none; width: 44px; height: 44px; min-height: 0; padding: 0; gap: 0; font-size: 0; justify-content: center; border-radius: 50%; }
+  .shots .shot-acts .mini svg { width: 18px; height: 18px; }
+  .shots .shot-acts .mini.is-busy { gap: 0; } /* the label is font-size 0 here: keep the spinner centred */
+  .shots .shot-acts:has(> :nth-child(6)) { flex-wrap: wrap; } /* with Canva, six 44px buttons fit one row down to ~352px; narrower phones wrap instead of clipping */
+  .shots.multi .shot-acts { display: none; } /* tap → viewer carries Save/Animate/Edit/Variation */
+  .shot.vid .shot-acts { left: auto; right: 8px; top: 8px; bottom: auto; }
+  /* viewer: solid backdrop, actions in a bottom toolbar above the home indicator */
+  .viewer { backdrop-filter: none; background: var(--bg); }
+  .viewer-bar { gap: 4px; padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(6px, env(safe-area-inset-right)); }
+  .viewer-title { font-size: 18px; line-height: 1.15; }
+  .viewer-actions { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1; justify-content: center; flex-wrap: nowrap; gap: 4px; padding: 8px max(12px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: color-mix(in srgb, var(--bg) 92%, transparent); border-top: 1px solid var(--line); }
+  .viewer-actions:empty { display: none; }
+  .viewer-actions .mini { flex: 1 1 0; min-width: 0; max-width: 120px; flex-direction: column; justify-content: center; gap: 4px; padding: 4px 6px; } /* icon over label: four actions fit one row at 320px */
+  .viewer-actions .mini svg { width: 16px; height: 16px; }
+  .viewer-actions .mini > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .viewer-actions:has(> :nth-child(5)) .mini { padding-inline: 2px; font-size: 10px; } /* five actions (with Canva) still fit one row at 360px */
+  .viewer-body { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .viewer-body.full { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+  .viewer:has(.viewer-actions:empty) .viewer-body { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  body:has(.viewer:not([hidden]) .viewer-actions:not(:empty)) .toast { bottom: calc(72px + env(safe-area-inset-bottom)); } /* sit above the viewer's bottom toolbar (Send to Canva toasts last a while) */
+  .developing .status { font-size: 11px; gap: 7px; padding: 7px 10px; } /* fits a 2-up tile at 360 */
+}
+@media (max-width: 480px) {
+  .top { gap: 6px; padding-inline: max(10px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-right)); }
+  .top-right { gap: 0; }
+  .top-right #newBtn { display: none; }
+  .key-state { padding: 0; border: 0; margin-right: 6px; width: 16px; justify-content: center; }
+  .key-state span { display: none; }
+  .brand { font-size: 25px; gap: 7px; }
+  .brand-mark { width: 36px; height: 36px; border-radius: 10px; }
+  .icon-btn { width: 38px; }
+  .mobile-break { display: block; }
+  .greeting { font-size: 43px; }
+  .eyebrow { font-size: 9px; }
+  .tile, .tile:nth-child(n) { padding: 13px; min-height: 172px; gap: 10px; }
+  .tile-top { gap: 8px; }
+  .tile-icon { width: 27px; height: 27px; border-radius: 8px; }
+  .tile-name, .tile:nth-child(1) .tile-name { font-size: 24px; }
+  .composer-row { padding: 8px 8px 4px; gap: 0; }
+  .composer-row .icon-btn { width: 36px; }
+  .options { --opt-h: 36px; }
+  .opt-val { max-width: 174px; }
+  .onboard .sheet-body { padding: 24px; }
+  .onboard-title { font-size: 44px; }
+  .onboard .field small { display: block; margin-left: 0; }
+}
+@media (pointer: coarse) {
+  .tile-key { display: none; }
+  /* HIT-44: grow the tap area to ≥44×44 without changing the look. Only for controls whose clip/scroll container
+     leaves room (checked: .options pad 6/12, .codeblock-bar 46px tall, .appbar pad 8+3, .lib-filter/.acct unclipped,
+     .att once batch 3 drops overflow:hidden, .lib-canva 7px inside its tile and .lib-grid pads 4/6, .lib-from-canva in the
+     unclipped drawer head, .cvc-meta a in the unclipped .cv-confirm). Add selectors to THIS list; never write a second hit-area rule. */
+  :is(.options .chip, .codeblock-bar .mini, .appbar .tabs button, .lib-filter .chip, .acct button, .lib-from-canva, .cvc-meta a) { position: relative; } /* .att button and .lib-canva are already absolute */
+  :is(.options .chip, .codeblock-bar .mini, .appbar .tabs button, .lib-filter .chip, .acct button, .att button, .lib-from-canva, .lib-canva, .cvc-meta a)::after {
+    content: ''; position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: max(100%, 44px); height: max(100%, 44px);
+  }
+  /* iOS zooms the page when a focused text control is under 16px */
+  :is(.field input:not([type='range'], [type='checkbox'], [type='radio'], [type='file']), .field textarea, .onboard input, .you-card input, .you-card textarea, .ac-fields input, .ac-fields textarea, .tok-dialog input, .search, #meLearned, #meStyle) { font-size: 16px; }
+  .error-acts .mini { min-height: 44px; }
+  .icon-btn { width: 44px; height: 44px; } /* header, drawer [data-close], #viewerClose, thread .del, settings close */
+  .top-right { gap: 0; } /* the 44px boxes already space the icons; keeps the 481–640 header (with #newBtn) inside its padding */
+  .brand { min-height: 44px; }
+  .key-state { position: relative; }
+  .key-state::after { content: ''; position: absolute; left: auto; right: -6px; top: 50%; translate: 0 -50%; width: clamp(28px, 100vw - 281px, 44px); height: 44px; } /* grows left toward the brand and ends at #youBtn's edge (margin-right 6px); the clamp keeps it clear of the brand at 320-324px */
+  .actions .mini, .idea-acts .mini, .appfoot .mini { min-height: 44px; }
+  .codeblock-bar .acts { gap: 6px; }
+  .legal-links a { display: inline-block; padding: 13.5px 8px; margin: -13.5px -8px; } /* 17.6px line + 27 = 44.6 tall; 8px sides keep Privacy 44 wide past the " · " */
+  .you-card .chip, .mem-add .chip { min-height: 44px; }
+  .mem-list li button { width: 44px; height: 44px; margin: -7px -4px -7px 0; opacity: 0.7; } /* real 44px box; the negative margins cancel the li padding (7px/4px) so it stays inside the li and the .mem-list scroller never clips it */
+  .mode, .mode-ink { min-height: 44px; } /* tablets above 640px: 40 → 44 */
+  .composer-row .icon-btn { width: 44px; } /* height is already 44; beats the 480 block's 36px */
+  .attach-menu button { min-height: 44px; }
+  #connList .acct { height: 36px; padding: 0 12px 0 14px; font-size: 13px; } /* never overflow:hidden — the HIT-44 ::after must stick out */
+  #connList .acct button { width: 32px; height: 32px; margin-right: -9px; }
+  #settings .chip { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding-inline: 14px; }
+  #settings .seg span { padding: 13px 16px; font-size: 14px; }
+  #settings .field input[type='range'] { height: 44px; margin: 0; }
+  .tok-dialog .row :where(button) { min-height: 44px; } /* low specificity: the ≤640 block's 48px still wins on phones */
+  .shot-acts .mini, .viewer-actions .mini { min-height: 44px; }
+  .empty-note .chip { min-height: 44px; }
+  .ac-acts .btn-primary, .ac-acts .mini { min-height: 44px; }
+  .toast a { display: inline-block; padding: 12.5px 6px; margin: -12.5px -6px; } /* 44px tall tap area, same line box */
+  .cv-back { min-height: 44px; margin-top: -8px; }
+  .cv-bar .search, .cv-acct { min-height: 44px; font-size: 16px; }
+  .cv-more-row .chip, .cvc-acts .chip { min-height: 44px; }
+  .cvc-fmt span { padding: 13px 10px; font-size: 14px; }
+}
+@media (hover: none) {
+  /* body sets -webkit-tap-highlight-color: transparent, so give taps their own feedback */
+  .thread:active, .mini:active, .icon-btn:active { background: var(--surface-2); }
+  .chip:not(.on, .danger):active { border-color: var(--line-2); color: var(--ink); } /* rest bg is already --surface-2; selected/danger chips keep their own tint while pressed */
+  .shot-acts .mini:not(.accent):active { background: #0e0d0b; } /* keep the dark backdrop behind the light icon over images (matches app.css .shot-acts .mini:hover) */
+  .actions { opacity: 1; } /* beats studio base .85 on touch: there is no hover to reveal it */
+  .tile:hover { transform: none; border-color: var(--line); background: var(--surface); }
+  .tile:active { transform: scale(0.985); background: var(--surface-2); }
+  .idea:hover { transform: none; }
+  .composer-row .icon-btn:hover { background: none; color: var(--ink-2); }
+  .options .chip:not(.on):hover:not(:active), .opt:hover:not(:focus-within) .opt-val { border-color: var(--line); color: var(--ink-2); } /* keep the focused pill's accent border */
+  #connList a.chip[download] { display: none; } /* phones and tablets can't install the extension zip */
+  .lib-canva { opacity: 1; } /* no hover to reveal Send to Canva on image tiles */
+  .lib-canva:not(.is-busy):active { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+}
+@media (max-height: 500px) {
+  /* landscape phones and short windows (also Android portrait with the keyboard up — keep .options visible) */
+  .top { height: calc(56px + env(safe-area-inset-top)); padding-top: calc(env(safe-area-inset-top) + 6px); padding-bottom: 6px; }
+  .studio-nav { top: calc(56px + env(safe-area-inset-top)); }
+  .nav-note { display: none; } /* decorative (~265px): lets Your profile/Settings fit without scrolling */
+  #stage { padding-top: calc(env(safe-area-inset-top) + 68px); padding-bottom: calc(var(--dock-h) + 16px); }
+  .rail { top: 64px; }
+  .greeting { font-size: clamp(34px, 10vh, 56px); margin-bottom: 12px; }
+  .welcome-copy { margin-bottom: 18px; }
+  .composer-hint { display: none; }
+  .drawer { padding-top: calc(env(safe-area-inset-top) + 8px); }
+  .drawer-head { margin-bottom: 6px; }
+  .drawer-head h3 { font-size: 26px; }
+  .drawer-description { display: none; }
+  .onboard .onboard-art { display: none; }
+  .sheet-body { min-height: 0; } /* studio's 360px floor would push the onboarding form past its dialog */
+  #settings { height: calc(100dvh - 16px); max-height: none; }
+  #settings .sheet-head { padding-block: 4px 0; } /* head/foot trimmed so ≥180px of the middle stays visible at 360px tall, even with 44px touch chips */
+  #settings .sheet-head h2 { font-size: 28px; }
+  #settings .settings-nav { padding-block: 2px 8px; }
+  #settings .sheet-foot { padding-block: 6px; }
+  #settings .sheet-foot .hint { display: none; }
+  .viewer-bar { padding-top: calc(env(safe-area-inset-top) + 4px); padding-bottom: 4px; }
+  .cv-bar { margin-bottom: 8px; }
+  .cv-confirm { padding: 10px 12px 12px; }
+  .cvc-thumb { width: 44px; height: 44px; }
+  .cvc-title { font-size: 18px; -webkit-line-clamp: 1; }
+  .cvc-fmt { margin-top: 10px; }
+  .cvc-acts { margin-top: 10px; }
+}
+/* keyboard state — classes/vars from syncViewport() in app.js */
+html.kb-open .dock { padding-bottom: 8px; } /* the keyboard covers the home indicator */
+html.kb-open .composer-hint { display: none; }
+html.kb-open .thread-list { padding-bottom: var(--kb, 0px); }
+html.kb-open .cv-grid { padding-bottom: calc(12px + var(--kb, 0px)); }
+html.kb-open .you-scroll { padding-bottom: calc(20px + var(--kb, 0px)); }
+html.kb-tight .top { opacity: 0; visibility: hidden; } /* <460px visible: rows go to the conversation */
+html.kb-open :is(#onboard, dialog.tok-dialog) { top: var(--vv-top, 0px); bottom: var(--kb, 0px); max-height: calc(var(--vvh, 100dvh) - 16px); }
+html.kb-open #onboardForm { max-height: calc(var(--vvh, 100dvh) - 16px); }
+html.kb-tight .onboard .onboard-art { display: none; } /* iOS twin of the max-height:500 rule (its layout viewport doesn't shrink) */
+html.kb-tight #settings .settings-nav { display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-block: 2px 6px; } /* one row of tabs while typing: at 360x400 the middle grows 169 → 221px */
+html.kb-tight #settings .settings-nav .chip { flex: 1 0 auto; padding-inline: 10px; } /* all four tabs fit at 360px */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; }
+  .shimmer { background: none; color: var(--ink-2); }
+  .spin, .status::before, .skel, .buildmeter .bar i, .send[data-state='stop']::after { animation: breathe 2.4s ease-in-out infinite !important; }
+  .buildmeter .bar i { width: 100%; transform: none; }
+}

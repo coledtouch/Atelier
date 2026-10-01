@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "atelier", "runtimeExecutable": "npx", "runtimeArgs": ["wrangler", "dev", "--port", "8787"], "port": 8787 },
+    { "name": "atelier-review", "runtimeExecutable": "node", "runtimeArgs": ["scripts/review-server.mjs"], "port": 8791, "url": "http://127.0.0.1:8791" }
+  ]
+}

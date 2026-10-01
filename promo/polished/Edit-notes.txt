@@ -1,0 +1,32 @@
+ATELIER PROMO — POLISHED EXPORT
+
+Artwork edited with the built-in image-generation tool. Video edited locally with FFmpeg.
+Original attachments preserved; no app source files changed.
+
+Deliverables:
+- Atelier-promo-4x5-polished.mp4: 1080 x 1350, 30 fps, 48 seconds, original audio. New opening (0–5s) and closing (40–48s); original demonstrations retained between them.
+- Atelier-promo-thumbnail-polished.png: 1080 x 1350, under 1 MB.
+- Atelier-A-transparent.png: 512 x 512, genuine alpha transparency, under 1 MB. The letter remains visible; the black background is removed.
+
+POSTER EDIT PROMPT
+Use case: precise-object-edit / ads-marketing.
+Edit target: attached Atelier promotional thumbnail, vertical 4:5.
+Polish this existing promotional poster into a premium editorial software launch invitation. Keep all copy verbatim and the established near-black, warm ivory, electric-lime palette. Maintain exact 4:5 aspect ratio, ideally 1080x1350.
+Main required edit: remove the BLACK ROUNDED SQUARE behind the sculpted A logo. Keep the same folded ivory A with lime inner edge, standing freely directly on the seamless poster background, no tile, no square, no badge or visible rectangular patch. The A stays opaque and visible.
+Design refinement: precise optical centering and spacing, generous but balanced whitespace, a smaller elegant logo-and-Atelier lockup, excellent typographic hierarchy, crisply typeset tall editorial serif headline, beautiful italic lime emphasis on the second line. Use the same style of serif as reference; make it sophisticated and legible. Reduce the heavy green haze to a very restrained soft olive glow behind the headline only; clean near-black surroundings. Make the LinkedIn CTA a refined blue rounded rectangle rather than oversized pill, with a small white in mark on left and consistent padding. Align and separate supporting copy from URL elegantly. Light delicate divider may be used before footer. Small restrained tracked footer. Keep all content comfortably inside margins and no extra copy.
+Text (verbatim, each line):
+Atelier
+Come make
+something yours.
+Sign in with LinkedIn
+25 tester spots. Paid models included.
+atelier.ciprari.ai
+BUILT BY COLE CIPRARI
+The two lines Come make / something yours. are the primary focal point; the URL must be crisp and easy to read. No additional slogans, no interface mockups, no invented claims, no missing letters, no watermarks. The background of the POSTER remains opaque near-black; only eliminate the logo's boxed background so it blends seamlessly.
+
+LOGO EXTRACTION PROMPT
+Use case: background-extraction. Edit target: attached Atelier sculpted letter A logo. Create a clean reusable PNG logo on a genuinely TRANSPARENT alpha background. Remove all black backdrop and any ground shadow; the holes within and below the A must also be transparent. Preserve exactly the A silhouette, folded ivory satin ribbon material, dimensional shading and subtle electric lime inner-edge accent. The LETTER stays opaque, only background transparent. Single centered A, generous even small transparent margin, square 1024x1024 canvas. Crisp clean antialiased edges without dark fringe. No checkerboard painted into image, no text, no tile, no rounded square, no added elements.
+
+FINAL LOGO CLEANUP PROMPT
+Edit target: transparent Atelier A logo. Precision edge cleanup ONLY. Retain the exact logo silhouette, ivory folded ribbon surfaces, shading and lime green inner fold. Keep a genuine transparent alpha background including the holes. Remove the ragged bright white fringe and scattered pixels around the outside contour, top arch, inner triangle and lower crossbar. Make all contours smooth, clean, antialiased and professionally cut out, no white halo or black matte. Do not redesign, reposition, retexture or add anything. No checkerboard, no square, no shadows outside the silhouette. Square transparent PNG.
+
