@@ -99,6 +99,30 @@ Requirements:
 - **Link previews:** `og:title` "Atelier — Come make something yours.", `og:description` "25 LinkedIn tester spots. Paid models included. Built by Cole Ciprari.", `og:image` https://atelier.ciprari.ai/og/atelier-share.png (1200×628), `og:url`, and `twitter:card=summary_large_image`.
 - **Header mark:** use the transparent "A" (`/icons/atelier-mark-96.png`) without the dark tile in the dark theme. Keep a subtle tile in the light Paper theme, for contrast.
 
+## A7b. Pricing-driven rules (src/tester/prices.js, checked 2026-09-30) and owner decisions
+
+- **No NVIDIA for testers (owner decision).** NVIDIA's free API tier is meant for development and testing.
+  - Testers can't use `/api/genai/*`, `/api/status/*` or `/api/fn/*` (FLUX, Cosmos, the motion still), or any NVIDIA chat model.
+  - Free NVIDIA entries stay out of `TESTER_MODELS`, `TESTER_IMAGE_MODELS` and `TESTER_VIDEO_MODELS`.
+  - Tester images come from GPT Image / Nano Banana, and tester video from Veo, all metered.
+  - In tester mode the client hides the motion-still and NVIDIA options. Fallback chains skip NVIDIA, so they never end on a model the tester can't use.
+- **Per-call chat cap stays $0.25, with exceptions:**
+  - Web-search calls get a $0.50 cap.
+  - Tester web calls run with Anthropic fallbacks off, and `max_uses` is the largest of 3, 2 or 1 that fits.
+  - If not even 1 fits on the chosen model, that call uses Sonnet 5.5, and the meta line notes it.
+- **Veo for testers:** a call is admitted only if its worst case fits the tester's remaining day, month and pool, and never above $1.00.
+  - The client offers only durations and resolutions that fit, and explains when one doesn't.
+  - Veo standard (`veo-3.1-generate-preview`) is excluded for testers; prices.js already marks it so.
+- **Video chats on Gemini 3.1 Pro** may not fit $0.25 at the long-context price tier. The router then uses Gemini 3.8 Flash for that call, or refuses with a clear `tester_budget` message.
+- **Router hygiene from the pricing pass:**
+  - Force an explicit `size` and `quality` on GPT Image requests; app.js sends none on some edits.
+  - Strip Gemini `extra_body` / `cached_content`.
+  - Exclude base64 bytes from the text-token estimate, and price images by the per-image rule.
+  - Map `PriceError` `unpriced_images` / `no_vision` to a non-`tester_` code, so the client's fallback moves on to a vision model.
+  - Keep prices.js `MIN_OUTPUT` in step with the anthropic.js and gemini.js clamps.
+- **The Ledger starts paused.** A fresh Ledger initialises with `paused=1`, so the first deploy is safe without a manual step. The owner unpauses in the Testers panel after preview testing.
+- **Public spots count:** `GET /api/li/spots` returns `{spotsLeft, paused}`, cached for 60 s, with no personal data. The sign-in screen uses it for "N of 25 tester spots left".
+
 ## A7. Order
 
 1. Ship the in-flight video-upload release and the hardening pass.
