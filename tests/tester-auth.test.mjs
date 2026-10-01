@@ -99,6 +99,22 @@ test('callback: admitted → session cookie (HttpOnly, Secure, SameSite=Strict, 
   assert.equal((await me.json()).name, 'Ada Lovelace');
 });
 
+test('callback: LinkedIn’s real ID token has no nonce claim, and that still signs in (state guards the flow)', async () => {
+  const { env, L } = makeEnv();
+  L.ledger.setConfig({ paused: false });
+  const s = await start(env);
+  linkedIn({ nonce: undefined });
+  const res = await callback(env, s.state, s.stateCookie);
+  assert.equal(res.headers.get('location'), '/?tester=welcome');
+  assert.ok(cookieNamed(res, '__Host-atelier_tester'));
+  // paused (as live today): no nonce → paused, and the owner sees this sub as last refused
+  const p = makeEnv();
+  const s2 = await start(p.env);
+  linkedIn({ nonce: undefined });
+  assert.equal((await callback(p.env, s2.state, s2.stateCookie)).headers.get('location'), '/?tester=paused');
+  assert.equal(p.L.ledger.roster().lastRefused.sub, PERSON.sub);
+});
+
 test('callback: state is single-use, must match the browser that started, and a wrong state never reaches LinkedIn', async () => {
   const { env, L } = makeEnv();
   L.ledger.setConfig({ paused: false });
@@ -145,6 +161,7 @@ test('callback outcomes: full, paused, revoked, denied and error', async () => {
   assert.equal(await run(env, {}, 'nocode=1'), '/?tester=error');
   assert.equal(await run(env, { tokenStatus: 400 }), '/?tester=error');
   assert.equal(await run(env, { nonce: 'someone-elses-nonce' }), '/?tester=error', 'nonce mismatch');
+  assert.ok(logs.some((l) => /id token rejected: nonce/.test(l)), 'the log names the failed claim');
   assert.equal(await run(env, { aud: 'another-app' }), '/?tester=error', 'audience mismatch');
   assert.equal(await run(env, { exp: Math.floor(Date.now() / 1000) - 10 }), '/?tester=error', 'expired id token');
   assert.equal(await run(env, { userinfo: { ...PERSON, sub: 'other' } }), '/?tester=error', 'userinfo is someone else');

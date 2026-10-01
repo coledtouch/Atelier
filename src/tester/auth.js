@@ -104,7 +104,11 @@ export async function linkedInProfile(env, code, redirect_uri, nonce) {
   if (!r.ok || typeof j.access_token !== 'string') throw new Error(`token exchange ${r.status} ${clean(j.error, 60)}`);
   const id = claimsOf(j.id_token);
   const aud = Array.isArray(id?.aud) ? id.aud : [id?.aud];
-  if (!id || id.nonce !== nonce || !aud.includes(client_id) || !(Number(id.exp) * 1000 > Date.now())) throw new Error('id token rejected');
+  // LinkedIn leaves nonce out of its ID tokens (it isn't in its claims_supported), so a nonce is checked only when one is
+  // present; the single-use state cookie already ties the code to the browser that started. The log names the claim.
+  const why = !id ? 'unreadable' : id.nonce !== undefined && id.nonce !== nonce ? 'nonce' : !aud.includes(client_id) ? 'aud'
+    : !(Number(id.exp) * 1000 > Date.now()) ? 'exp' : '';
+  if (why) throw new Error(`id token rejected: ${why}`);
   const u = await fetch(LI_USERINFO, { headers: { authorization: `Bearer ${j.access_token}`, accept: 'application/json' }, redirect: 'manual' });
   const p = await u.json().catch(() => null);
   if (!u.ok || !p || typeof p.sub !== 'string' || p.sub !== id.sub || !/^[A-Za-z0-9_-]{1,128}$/.test(p.sub)) throw new Error(`userinfo ${u.status}`);
