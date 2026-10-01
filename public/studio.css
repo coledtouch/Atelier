@@ -165,7 +165,9 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   #saveSettings { flex: 1; min-height: 48px; }
   #connList .conn { grid-template-columns: 8px minmax(0, 1fr) auto; row-gap: 4px; padding: 12px 0; }
   #connList .conn-info { grid-area: 2 / 2 / auto / -1; }
-  #connList .conn > .chip { grid-area: 1 / 3; }
+  /* The action (+ Add account / Connect …) follows the account chips as one more pill, so the name row stays one quiet line. */
+  #connList .conn > .chip { grid-area: 4 / 2 / auto / -1; justify-self: start; margin-top: 6px; border-radius: 99px; }
+  #connList .conn > .chip:not(.on) { border-style: dashed; border-color: var(--line-2); color: var(--ink-2); background: transparent; }
   #connList .accts { grid-area: 3 / 2 / auto / -1; margin-top: 6px; }
   #settings .seg { display: flex; width: 100%; }
   #settings .seg label { flex: 1; }
@@ -239,8 +241,8 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
      leaves room (checked: .options pad 6/12, .codeblock-bar 46px tall, .appbar pad 8+3, .lib-filter/.acct unclipped,
      .att once batch 3 drops overflow:hidden, .lib-canva 7px inside its tile and .lib-grid pads 4/6, .lib-from-canva in the
      unclipped drawer head, .cvc-meta a in the unclipped .cv-confirm). Add selectors to THIS list; never write a second hit-area rule. */
-  :is(.options .chip, .codeblock-bar .mini, .appbar .tabs button, .lib-filter .chip, .acct button, .lib-from-canva, .cvc-meta a) { position: relative; } /* .att button and .lib-canva are already absolute */
-  :is(.options .chip, .codeblock-bar .mini, .appbar .tabs button, .lib-filter .chip, .acct button, .att button, .lib-from-canva, .lib-canva, .cvc-meta a)::after {
+  :is(.options .chip, .codeblock-bar .mini, .appbar .tabs button, .lib-filter .chip, .acct button, .lib-from-canva, .cvc-meta a, #connList .conn > .chip) { position: relative; } /* .att button and .lib-canva are already absolute */
+  :is(.options .chip, .codeblock-bar .mini, .appbar .tabs button, .lib-filter .chip, .acct button, .att button, .lib-from-canva, .lib-canva, .cvc-meta a, #connList .conn > .chip)::after {
     content: ''; position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: max(100%, 44px); height: max(100%, 44px);
   }
   /* iOS zooms the page when a focused text control is under 16px */
@@ -261,6 +263,7 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   .attach-menu button { min-height: 44px; }
   #connList .acct { height: 36px; padding: 0 12px 0 14px; font-size: 13px; } /* never overflow:hidden — the HIT-44 ::after must stick out */
   #connList .acct button { width: 32px; height: 32px; margin-right: -9px; }
+  #connList .conn > .chip { min-height: 36px; height: 36px; padding-inline: 14px; font-size: 13px; } /* matches the account pills; HIT-44 below keeps the tap area */
   #settings .chip { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding-inline: 14px; }
   #settings .seg span { padding: 13px 16px; font-size: 14px; }
   #settings .field input[type='range'] { height: 44px; margin: 0; }

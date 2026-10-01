@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { validateBackup, prepareImport, safeMediaUrl, recoverThread, ERROR_KINDS } from '../public/data-safety.js';
+import { validateBackup, prepareImport, safeMediaUrl, recoverThread, openOldDb, ERROR_KINDS } from '../public/data-safety.js';
 const fixture = () => ({ app: 'atelier', v: 1, threads: [{ id: 'thread-1', title: 'Example', createdAt: 1, updatedAt: 2,
   entries: [{ id: 'entry-1', kind: 'ask', prompt: 'Hello', createdAt: 1, text: 'World' }] }] });
 test('accepts existing v1 thread backups', () => assert.equal(validateBackup(fixture()).length, 1));
@@ -98,4 +98,29 @@ test('import keeps a follow-up linked to its video under the new IDs', () => {
   assert.deepEqual(t.entries[0].video.frames.length, 2); assert.equal(t.entries[0].video.file.name, 'files/abc-123');
   const orphan = videoFixture(); orphan.threads[0].entries[1].videoOf = 'missing-entry';
   const [o] = prepareImport(orphan, () => `copy-${++n}`); assert.equal('videoOf' in o.entries[1], false);
+});
+// The old "atelier" database open (migrateOldThreads): a fake IDBOpenDBRequest the test fires by hand.
+const fakeOpen = () => { const r = { result: null, transaction: { aborted: false, abort() { this.aborted = true; } } }; return r; };
+const conn = () => ({ closed: false, close() { this.closed = true; } });
+const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+test('openOldDb returns the connection when it opens in time, and none / null for a missing or failed database', async () => {
+  let r = fakeOpen(); const c = conn();
+  const p = openOldDb(() => r, 200); r.result = c; r.onsuccess(); assert.equal(await p, c); assert.equal(c.closed, false);
+  r = fakeOpen(); const none = openOldDb(() => r, 200); r.onupgradeneeded(); assert.equal(await none, 'none'); assert.equal(r.transaction.aborted, true, 'never created');
+  r = fakeOpen(); const failed = openOldDb(() => r, 200); r.onerror(); assert.equal(await failed, null);
+  assert.equal(await openOldDb(() => { throw new Error('blocked by policy'); }, 200), null);
+});
+test('openOldDb: an open slower than the wait reports busy, then hands the late connection over instead of closing it', async () => {
+  let r = fakeOpen(), late = null;
+  const p = openOldDb(() => r, 20, (db) => { late = db; });
+  assert.equal(await p, 'busy');
+  const c = conn(); r.result = c; await wait(5); r.onsuccess();
+  assert.equal(late, c, 'a phone slower than the timeout still migrates'); assert.equal(c.closed, false);
+  // with no late handler the connection is closed, as before
+  r = fakeOpen(); assert.equal(await openOldDb(() => r, 10), 'busy'); const d = conn(); r.result = d; r.onsuccess(); assert.equal(d.closed, true);
+});
+test('app.js keeps a late old-database open and copies once', async () => {
+  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(src, /openOldDb\(\(\) => indexedDB\.open\('atelier'\), MIGRATE_OPEN_MS, lateCopy\)/);
+  assert.match(src, /function copyOld\(old\) \{\r?\n  if \(copying \|\| !migrationPending\(\)\) \{ old\.close\(\); return copying \|\| Promise\.resolve\(movedNow\); \}/);
 });

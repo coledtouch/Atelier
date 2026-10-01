@@ -28,8 +28,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=50" />
-  <link rel="stylesheet" href="/studio.css?v=50" />
+  <link rel="stylesheet" href="/app.css?v=51" />
+  <link rel="stylesheet" href="/studio.css?v=51" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -273,6 +273,7 @@
           <div class="row-actions">
             <button type="button" class="chip" id="exportBtn">Export threads</button>
             <label class="chip file-chip">Import backup<input type="file" id="importInput" accept="application/json" aria-label="Import backup" /></label>
+            <button type="button" class="chip" id="migrateBtn" hidden>Bring over older conversations</button>
           </div>
           <div class="danger-zone"><p class="hint"><b>Irreversible</b>Clears threads, media, profile and saved sign-in on this device. Export your threads first.</p><button type="button" class="chip danger" id="wipeBtn">Clear this device</button></div>
         </section>
@@ -323,6 +324,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=50" type="module"></script>
+  <script src="/app.js?v=51" type="module"></script>
 </body>
 </html>

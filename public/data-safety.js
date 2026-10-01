@@ -76,3 +76,21 @@ export function recoverThread(thread) {
   }
   return thread;
 }
+// Opens the old "atelier" database for the one-time thread copy (app.js migrateOldThreads), waiting at most ms.
+// → the connection, 'none' (it never existed: the upgrade is aborted so it isn't created), 'busy' (still opening after
+// ms) or null (the open failed). An open that finishes after we stopped waiting isn't thrown away: onLate(connection)
+// gets it, so a phone that is always slower than ms still brings its threads over. open: () => indexedDB.open('atelier').
+export function openOldDb(open, ms, onLate) {
+  return new Promise((res) => {
+    let done = false, timer = null;
+    const finish = (v) => { if (!done) { done = true; clearTimeout(timer); res(v); } };
+    timer = setTimeout(() => finish('busy'), ms);
+    try {
+      const r = open();
+      r.onupgradeneeded = () => { finish('none'); r.transaction?.abort(); };
+      r.onsuccess = () => { if (!done) finish(r.result); else if (onLate) onLate(r.result); else r.result.close(); };
+      r.onerror = () => finish(null);
+      r.onblocked = () => {};
+    } catch { finish(null); }
+  });
+}
