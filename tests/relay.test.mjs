@@ -176,15 +176,16 @@ test('_headers: a report-only CSP for every page, alongside the existing securit
   assert.equal(all['x-frame-options'], 'DENY');
   assert.equal(all['referrer-policy'], 'strict-origin-when-cross-origin');
   assert.equal(all['content-security-policy'], undefined, 'report-only first: nothing is enforced yet');
+  assert.equal(all['strict-transport-security'], 'max-age=31536000; includeSubDomains', 'HTTPS only (worker.js sends the same on /api)');
   assert.equal(rules['/sw.js']['cache-control'], 'no-cache');
   assert.equal(rules['/index.html']['cache-control'], 'no-cache');
 
   const csp = cspOf(all['content-security-policy-report-only']);
-  // The app itself: own files and /api, Google Fonts, data:/blob: media, Canva thumbnails.
+  // The app itself: own files and /api, Google Fonts, data:/blob: media, Canva thumbnails, LinkedIn photos (testers).
   assert.deepEqual(csp['default-src'], ["'self'"]);
   for (const src of ["'self'", 'https://fonts.googleapis.com']) assert.ok(csp['style-src'].includes(src), src);
   for (const src of ["'self'", 'https://fonts.gstatic.com']) assert.ok(csp['font-src'].includes(src), src);
-  for (const src of ["'self'", 'data:', 'blob:', 'https://*.canva.com']) assert.ok(csp['img-src'].includes(src), src);
+  for (const src of ["'self'", 'data:', 'blob:', 'https://*.canva.com', 'https://media.licdn.com']) assert.ok(csp['img-src'].includes(src), src);
   for (const src of ["'self'", 'data:', 'blob:']) assert.ok(csp['media-src'].includes(src), src);
   // sw.js fetches the Google Fonts files itself, which is governed by connect-src.
   for (const src of ["'self'", 'https://fonts.googleapis.com', 'https://fonts.gstatic.com']) assert.ok(csp['connect-src'].includes(src), src);
@@ -202,7 +203,11 @@ test('_headers: a report-only CSP for every page, alongside the existing securit
   assert.deepEqual(csp['base-uri'], ["'none'"]);
   assert.deepEqual(csp['frame-ancestors'], ["'none'"]);
   assert.deepEqual(csp['form-action'], ["'self'"]);
-  assert.equal(csp['report-uri'], undefined, 'no report endpoint exists yet; reports go to the console');
+  // Violations go to POST /api/csp-report: report-uri (older browsers) and report-to → the Reporting-Endpoints "csp".
+  // Relative, so a local or preview copy never reports to production.
+  assert.deepEqual(csp['report-uri'], ['/api/csp-report']);
+  assert.deepEqual(csp['report-to'], ['csp']);
+  assert.equal(all['reporting-endpoints'], 'csp="/api/csp-report"');
 });
 
 test('_headers: every external stylesheet the pages link to is allowed by the report-only CSP', () => {

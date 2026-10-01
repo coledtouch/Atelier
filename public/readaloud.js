@@ -59,9 +59,16 @@ export const SAY = Object.freeze({
   nothing: 'There’s nothing to read aloud here.',
   unsupported: 'Read aloud isn’t supported in this browser.',
   resume: 'Tap Resume to keep listening.',
+  // A preview has no answer to fall back on, so these never promise the device voice.
   previewOffline: 'You’re offline — connect to hear this voice.',
   previewFailed: 'Couldn’t play that preview — try again in a moment.',
+  previewPlan: 'This voice isn’t available on this account.',
+  previewPasscode: 'Add your passcode in Settings to hear the AI voices.',
+  previewSignin: 'Sign in again to hear this voice.',
+  previewBudget: 'Your tester allowance is used up for now, and previews use it too.',
 });
+// why() gives a SAY key; a preview says the matching preview line instead.
+const PREVIEW_SAY = { offline: 'previewOffline', plan: 'previewPlan', passcode: 'previewPasscode', signin: 'previewSignin', budget: 'previewBudget' };
 const DEVICE_PREVIEW = 'This is your device’s own voice. It works offline, and it’s free.';
 const ARTWORK = [{ src: '/icons/atelier-v2-512.png', sizes: '512x512', type: 'image/png' }, { src: '/icons/atelier-v2-192.png', sizes: '192x192', type: 'image/png' }];
 const MOSTLY_CODE_PROSE = 400; // this much prose is always read, however much code sits around it
@@ -75,6 +82,16 @@ export function normalizeReadAloud(v) {
 }
 /** The Settings list: AI voices the account may use (allowed: ids, or null for all) plus the device voice. */
 export const voiceChoices = (allowed) => VOICES.filter((v) => v.provider === 'device' || !Array.isArray(allowed) || allowed.includes(v.id));
+/**
+ * The voice that reads for this account when `want` is chosen (allowed: ids, or null for all): `want` itself, else the
+ * first AI voice the account may use, else the device voice. The reader picks this way, and Settings and the Read aloud
+ * button show the same answer.
+ */
+export function voiceFor(want, allowed) {
+  const v = VOICE.has(want) ? want : DEFAULT_READ_ALOUD.voice;
+  if (v === 'device' || !Array.isArray(allowed) || allowed.includes(v)) return v;
+  return allowed.find((id) => VOICE.get(id) && VOICE.get(id).provider !== 'device') || 'device';
+}
 
 // ── text: Markdown → what a listener should hear ──
 const ENTITY = { amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'', '#39': '\'', nbsp: ' ' };
@@ -439,8 +456,12 @@ const mseFault = (cause) => Object.assign(failure('media', 0), { mse: true, caus
  * reported through onState(id, state) (previews use the id 'preview:<voiceId>').
  * opts: apiHeaders() (app.js's, adds x-app-pass), getSettings() → settings.readAloud, isTester(), toast(msg, {error}),
  *   onState, fetch; optional: allowedVoices() → AI voice ids this account may use (null = all, [] = device only),
- *   onResponse(r) for every /api/tts response (x-tester-allowance), onRefusal(err) for tester refusals ({status, code,
- *   scope, resetsAt, error}; the reader then reads with the device voice without its own toast), lang() → BCP 47.
+ *   signedIn() → false when no AI voice can be asked for at all (no passcode and no tester session: the device voice
+ *   reads and SAY.passcode says why, with no request), onResponse(r) for every /api/tts response (x-tester-allowance),
+ *   onRefusal(err, {preview}) for tester refusals ({status, code, scope, resetsAt, error}; the reader then reads with the
+ *   device voice without its own toast, or for a preview just stops), onSignedOut(err) when a tester's /api/tts answers
+ *   401 (the session has ended: the app may sign them out, and if that stops the read the reader says nothing more),
+ *   lang() → BCP 47.
  * Test seams (default to the browser's): Audio, MediaSource, URL, speech, Utterance, caches, storage, mediaSession,
  *   MediaMetadata, online(), stallMs.
  * → {toggle(id, markdown, button?, {title, album, lang}?), stop(), pause(), resume(), stateFor(id), preview(voiceId),
@@ -448,7 +469,7 @@ const mseFault = (cause) => Object.assign(failure('media', 0), { mse: true, caus
  */
 export function createReader(opts = {}) {
   const g = globalThis, has = (k) => k in opts;
-  const { apiHeaders, getSettings, isTester, onState, onResponse, onRefusal, allowedVoices } = opts;
+  const { apiHeaders, getSettings, isTester, onState, onResponse, onRefusal, onSignedOut, allowedVoices, signedIn } = opts;
   const toast = opts.toast || (() => {});
   const doFetch = opts.fetch || ((...a) => g.fetch(...a));
   const AudioCtor = opts.Audio || g.Audio, MS = has('MediaSource') ? opts.MediaSource : g.MediaSource, URLs = opts.URL || g.URL;
@@ -462,7 +483,7 @@ export function createReader(opts = {}) {
   const lsGet = (k) => { try { return ls?.getItem(k) ?? null; } catch { return null; } };
   const lsSet = (k, v) => { try { v == null ? ls?.removeItem(k) : ls?.setItem(k, v); } catch {} };
 
-  let el = null, job = null, generation = 0, opened = null, spoke = false, toldPlan = false, memoBytes = 0;
+  let el = null, job = null, generation = 0, opened = null, spoke = false, toldPlan = false, toldPass = false, memoBytes = 0;
   const memo = new Map(), ctrls = new Set();
   speech?.getVoices?.(); // Chrome loads its voice list on first ask
 
@@ -586,9 +607,13 @@ export function createReader(opts = {}) {
     if (j.recs[i]) return j.recs[i];
     const rec = j.recs[i] = { chunks: [], done: false, error: null, wake: [] };
     j.pending++;
-    rec.whole = (async () => {
+    // Keys (SHA-256) and Cache Storage lookups finish in any order: chained per read, so requests go out in reading order.
+    const look = j.look = (j.look || Promise.resolve()).catch(() => {}).then(async () => {
       const key = j.preview ? previewKey(j.voice) : await cacheKey(j.voice, j.segs[i]);
-      const hit = recall(key) || await cached(key);
+      return { key, hit: recall(key) || await cached(key) };
+    });
+    rec.whole = (async () => {
+      const { key, hit } = await look;
       if (hit) { if (j.mode === 'mse') rec.chunks.push(new Uint8Array(await hit.arrayBuffer())); notify(rec); return hit; } // only streaming reads chunks
       const r = await request(j, j.preview ? { voice: j.voice, preview: true } : { voice: j.voice, text: j.segs[i] });
       try {
@@ -772,23 +797,31 @@ export function createReader(opts = {}) {
   }
 
   // ── failures: say why gently, then let the device voice read the rest ──
-  function why(err) {
+  // → a SAY key, or '' when the app has said it (onRefusal). A tester's 401 also tells the app (onSignedOut).
+  function why(err, preview) {
     const s = err?.status, code = err?.code || '';
-    if (code === 'offline' || !online()) return SAY.offline;
-    if (code === 'owner_only' || code === 'tester_model') return SAY.plan;
-    if (s === 401 || code === 'tester_signin') return isTester?.() ? SAY.signin : SAY.passcode;
+    if (code === 'offline' || !online()) return 'offline';
+    if (code === 'owner_only' || code === 'tester_model') return 'plan';
+    if (s === 401 || code === 'tester_signin') {
+      if (!isTester?.()) return 'passcode';
+      try { onSignedOut?.(err); } catch (e) { console.error(e); }
+      return 'signin';
+    }
     if (s === 402 || code.startsWith('tester_')) {
-      if (!onRefusal) return SAY.budget;
-      try { onRefusal(err); } catch (e) { console.error(e); }
+      if (!onRefusal) return 'budget';
+      try { onRefusal(err, { preview: Boolean(preview) }); } catch (e) { console.error(e); }
       return '';
     }
-    return s === 429 ? SAY.busy : SAY.down;
+    return s === 429 ? 'busy' : 'down';
   }
   function fail(j, err, i) {
     if (j !== job || j.dead || j.mode === 'device' || err?.name === 'AbortError') return; // the device voice already reads it
     if (!err?.tts || err.status >= 500 || err.status === 400 || err.status === 413) console.warn('[atelier] read aloud:', err?.status ?? '', err?.code || err);
-    const msg = why(err);
-    if (j.preview) { if (msg) toast(err.code === 'offline' ? SAY.previewOffline : SAY.previewFailed); return end(j); }
+    const k = why(err, j.preview);
+    if (j.dead) return; // the app ended the read (a tester whose session ended is signed out): nothing more to say
+    // A preview has nothing to fall back on: say why it didn't play (never "reading with the device voice") and stop.
+    if (j.preview) { if (k) toast(SAY[PREVIEW_SAY[k] || 'previewFailed']); return end(j); }
+    const msg = k && SAY[k];
     if (msg) toast(msg);
     // Streaming: let what is already buffered finish, then hand over at the failed segment (a decode error can't finish).
     if (j.mode === 'mse' && err.code !== 'media' && i > 0 && bufferedEnd(j.sb) > el.currentTime + 0.25) { j.failAt = i; try { j.ms.endOfStream(); } catch {} return; }
@@ -844,15 +877,17 @@ export function createReader(opts = {}) {
   function choose(want) {
     if (want === 'device') return { voice: 'device', note: '' };
     if (!online()) return { voice: 'device', note: SAY.offline };
-    const allowed = allowedVoices?.();
-    if (Array.isArray(allowed) && !allowed.includes(want)) {
-      const alt = allowed.find((id) => VOICE.get(id) && VOICE.get(id).provider !== 'device');
-      if (alt) return { voice: alt, note: '' };
-      const note = toldPlan ? '' : SAY.plan;
-      toldPlan = true;
+    if (signedIn && !signedIn()) { // no passcode, no tester session: a request would only come back 401
+      const note = toldPass ? '' : SAY.passcode;
+      toldPass = true;
       return { voice: 'device', note };
     }
-    return { voice: want, note: '' };
+    toldPass = false; // said again should the passcode go once more
+    const voice = voiceFor(want, allowedVoices?.());
+    if (voice !== 'device') return { voice, note: '' };
+    const note = toldPlan ? '' : SAY.plan;
+    toldPlan = true;
+    return { voice: 'device', note };
   }
   // Runs inside the tap: the element is attached and play() is called before anything is awaited.
   function startAi(j) {
@@ -905,6 +940,9 @@ export function createReader(opts = {}) {
     const speed = normalizeReadAloud(getSettings?.()).speed;
     if (voiceId === 'device') return device(newJob(id, 'device', [DEVICE_PREVIEW], { speed, preview: true, lang: textLang(DEVICE_PREVIEW, langOf()) }), 0);
     if (!online()) return toast(SAY.previewOffline);
+    // The same checks as a read (choose()), said for a preview: no request that can only be refused.
+    if (signedIn && !signedIn()) return toast(SAY.previewPasscode);
+    if (voiceFor(voiceId, allowedVoices?.()) !== voiceId) return toast(SAY.previewPlan);
     startAi(newJob(id, voiceId, ['(preview)'], { speed, preview: true }));
   }
   function setSpeed(x) {

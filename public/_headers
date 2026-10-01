@@ -1,14 +1,22 @@
-# Content-Security-Policy-Report-Only: nothing is blocked yet. Violations show in the browser console; collect them
-# before the policy is enforced. It allows what the app loads today: its own files and /api, Google Fonts (also
-# fetched by sw.js, hence connect-src), data:/blob: images and media, Canva thumbnails, the Cloudflare Web Analytics beacon the edge injects, and Build previews. Those run
-# in srcdoc iframes, which inherit this policy, so inline <script>/<style> and the jsdelivr/unpkg CDNs they are told
-# to use are allowed until previews move to their own origin. Inline event-handler attributes stay disallowed: the
-# app has none, so any report there is worth a look.
+# Content-Security-Policy-Report-Only: nothing is blocked yet. Violations are reported to POST /api/csp-report (one
+# compact line each in the Worker log: directive, blocked origin, page path, no IP, user agent or query string) and show
+# in the browser console; collect them before the policy is enforced. It allows what the app loads today: its own files
+# and /api, Google Fonts (also fetched by sw.js, hence connect-src), data:/blob: images and media, Canva thumbnails,
+# LinkedIn profile photos (tester avatars, media.licdn.com), the Cloudflare Web Analytics beacon the edge injects, and
+# Build previews. Those run in srcdoc iframes, which inherit this policy, so inline <script>/<style> and the
+# jsdelivr/unpkg CDNs they are told to use are allowed until previews move to their own origin. Inline event-handler
+# attributes stay disallowed: the app has none, so any report there is worth a look.
+# report-uri is for browsers without the Reporting API; report-to names the "csp" endpoint in Reporting-Endpoints.
+# Both are relative, so a local or preview copy reports to itself, never to production.
+# Strict-Transport-Security: HTTPS only for a year. includeSubDomains covers *.atelier.ciprari.ai (there are none),
+# not the rest of ciprari.ai; no preload. src/worker.js sends the same header on /api responses.
 /*
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
-  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://unpkg.com; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net https://unpkg.com; img-src 'self' data: blob: https://*.canva.com; media-src 'self' data: blob:; connect-src 'self' https://cloudflareinsights.com https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net https://unpkg.com; worker-src 'self'; manifest-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  Reporting-Endpoints: csp="/api/csp-report"
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://unpkg.com; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net https://unpkg.com; img-src 'self' data: blob: https://*.canva.com https://media.licdn.com; media-src 'self' data: blob:; connect-src 'self' https://cloudflareinsights.com https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net https://unpkg.com; worker-src 'self'; manifest-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; report-uri /api/csp-report; report-to csp
 
 /sw.js
   Cache-Control: no-cache

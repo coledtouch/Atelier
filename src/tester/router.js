@@ -7,7 +7,7 @@ import { claudeChat } from '../anthropic.js';
 import { geminiNativeChat, handleVideoApi, isGeminiFileUri, fileNameOf, normalizeVideoMime, fileGone, GEMINI_BASE, GEMINI_VIDEO_MIMES, VIDEO_NEEDS_GEMINI, FILE_GONE_ERROR } from '../gemini.js';
 import {
   PRICES, TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, TESTER_TTS_MODELS, PER_CALL_RESERVE_CAP, WEB_CALL_RESERVE_CAP, VEO_CALL_RESERVE_CAP,
-  PriceError, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, ttsWorstCase, ttsActual,
+  PriceError, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, ttsWorstCase, ttsReserved, ttsActual,
 } from './prices.js';
 import { handleTts, TTS_VOICES, TTS_VOICE_IDS, ttsPriceId } from '../tts.js';
 import { ALLOWED_ORIGINS, fail, ledger, sha256, signedOut, resetTesterCaches } from './auth.js';
@@ -142,8 +142,9 @@ export const TESTER_ROUTES = Object.freeze([
   VIDEO('POST', 'upload/start'), VIDEO('PUT', 'upload/chunk'), VIDEO('POST', 'upload/query'), VIDEO('POST', 'upload/cancel'),
   VIDEO('GET', 'file'), VIDEO('DELETE', 'file'),
 ]);
-// Reached by everyone before identity is checked (worker.js): health and the LinkedIn sign-in routes.
-export const PUBLIC_PATHS = Object.freeze(['health', 'li/']);
+// Reached by everyone before identity is checked (worker.js): health, CSP reports, the LinkedIn sign-in routes and the
+// extension relay socket (authenticated by its device token only, so a tester cookie in the owner's browser never breaks it).
+export const PUBLIC_PATHS = Object.freeze(['health', 'csp-report', 'li/', 'relay/ws']);
 
 export function matchTesterRoute(method, path) {
   for (const route of TESTER_ROUTES) {
@@ -370,23 +371,32 @@ async function tts(c) {
     tester: true,
     // 503, not noProvider's 401: the read-aloud client reads any 401 as "sign in again"; this falls back to the device voice.
     unavailable: (provider) => fail(503, 'tts_unavailable', `${c.up.PROVIDERS[provider].name} isn’t available to testers right now.`),
-    async reserve({ voice, chars, units }) {
+    async reserve({ voice, chars, units, ceiling }) {
       const model = ttsPriceId(voice);
       if (!TESTER_TTS_MODELS.includes(model)) return { res: notTesterModel('That voice isn’t part of the tester set.') };
       if (await ttsThrottled(c)) return { res: fail(429, 'tts_busy', 'Read aloud is busy right now. Try again in a moment.', {}, { 'retry-after': TTS_RATE_RETRY_AFTER }) };
-      // Priced on the spoken length, and for Gemini at most its maxOutputTokens bound: a true ceiling for the reservation.
-      const worst = ttsWorstCase({ model, chars, units, ...(voice.maxOutputTokens ? { maxAudioTokens: voice.maxOutputTokens } : {}) });
+      // Priced on a ceiling of the reading time (ttsCeilingUnits: symbols and emoji are read as words) and held to it,
+      // so the reservation is a true ceiling for both providers: Gemini's maxOutputTokens is the reserved audio, and
+      // OpenAI speech, which has no output bound, is cut off once it plays past cutoffSeconds.
+      const o = { model, chars, units: ceiling ?? units, ...(voice.maxOutputTokens ? { maxAudioTokens: voice.maxOutputTokens } : {}) };
+      const worst = ttsWorstCase(o);
       if (worst > PER_CALL_RESERVE_CAP) return { res: refused({ scope: 'call' }) };
+      const held = ttsReserved(o);
       const mtr = await reserve(c, worst);
       if (mtr.res) return mtr;
       return {
         headers: mtr.headers,
-        // null: keep the full reservation; {billed: false}: $0; {usage, seconds}: the provider's report.
+        limits: voice.provider === 'gemini' ? { outputTokens: held.audioTokens } : { seconds: held.cutoffSeconds },
+        // null: keep the full reservation; {billed: false}: $0; {usage, seconds}: the provider's report; {usage,
+        // stopped}: a stream that broke after the provider reported, settled at no less than the reservation.
         async settle(r) {
           let actual = mtr.amount;
           if (r?.billed === false) actual = 0;
           else if (r) {
-            try { actual = ttsActual({ model, usage: r.usage, seconds: r.seconds, chars }); } catch {
+            try {
+              const reported = ttsActual({ model, usage: r.usage, seconds: r.seconds, chars });
+              actual = r.stopped ? Math.max(mtr.amount, reported) : reported;
+            } catch {
               if (!warnedTtsUsage) { warnedTtsUsage = true; console.warn('tts: no usable usage reported, the full reservation stands', model); }
             }
           }

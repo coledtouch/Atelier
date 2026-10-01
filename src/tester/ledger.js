@@ -14,6 +14,9 @@ export const DAILY_UPLOADS = 10; // video clips a tester may start per UTC day (
 export const OVERRUN = 4;
 const MINUTE = 60_000, DAY = 86_400_000;
 const STATE_TTL = 10 * MINUTE, STALE = 15 * MINUTE, TICK = 10 * MINUTE, SESSION_TTL = 30 * DAY, RETAIN = 90 * DAY, JOB_TTL = 7 * DAY;
+// The last refused sign-in (A4) names someone who is not a tester (LinkedIn ID, name, photo link): it is kept this long
+// for the owner's Testers panel, then dropped when read and deleted by the alarm (privacy page §6).
+export const REFUSED_TTL = 7 * DAY;
 const SESSIONS_PER_TESTER = 10;
 const MAX_STATES = 2000; // sign-ins in flight (10 minutes each); a flood of /api/li/start can't grow the table past it
 
@@ -95,6 +98,17 @@ export class Ledger extends DurableObject {
   #refused(profile, now) {
     const v = JSON.stringify({ sub: profile.sub, name: str(profile.name, 120), picture: str(profile.picture, 1024), at: now });
     this.#run('INSERT INTO config (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', 'last_refused', v);
+  }
+  // → the last refused sign-in while it is under REFUSED_TTL old, else null; a stale, undated or unreadable record is
+  // deleted on the way (a single statement, so this is safe outside a transaction).
+  #lastRefused(now) {
+    const row = this.#row("SELECT v FROM config WHERE k = 'last_refused'");
+    if (!row) return null;
+    let v = null;
+    try { v = JSON.parse(row.v); } catch {}
+    if (v && typeof v === 'object' && Number.isFinite(v.at) && v.at > now - REFUSED_TTL) return v;
+    this.#run("DELETE FROM config WHERE k = 'last_refused'");
+    return null;
   }
   #settle(id, actual) {
     const r = this.#row('SELECT * FROM reservations WHERE id = ?', String(id));
@@ -222,6 +236,8 @@ export class Ledger extends DurableObject {
       this.#run('DELETE FROM jobs WHERE created_at <= ?', now - JOB_TTL);
       // Retention (privacy page): a tester's record, spend, sessions and profile go 90 days after last use.
       for (const { sub } of this.#rows('SELECT sub FROM testers WHERE last_seen <= ?', now - RETAIN)) this.#forget(sub);
+      // ...and a refused sign-in goes 7 days after the attempt, whether or not the owner ever looked at it.
+      this.#lastRefused(now);
     });
     await this.storage.setAlarm(Date.now() + TICK);
   }
@@ -279,8 +295,7 @@ export class Ledger extends DurableObject {
   }
   roster() {
     const c = this.#config(), now = this.clock(), day = dayKey(now), month = monthKey(now), p = this.#pool(month);
-    let lastRefused = null;
-    try { lastRefused = JSON.parse(this.#row("SELECT v FROM config WHERE k = 'last_refused'")?.v || 'null'); } catch {}
+    const lastRefused = this.#lastRefused(now);
     const testers = this.#rows(`SELECT t.sub, t.name, t.email, t.picture, t.joined_at, t.revoked_at, t.last_seen,
         COALESCE(d.spent, 0) AS day_spent, COALESCE(m.spent, 0) AS month_spent FROM testers t
       LEFT JOIN spend d ON d.sub = t.sub AND d.period = ? LEFT JOIN spend m ON m.sub = t.sub AND m.period = ?

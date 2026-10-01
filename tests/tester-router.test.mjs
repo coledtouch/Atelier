@@ -2,8 +2,8 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { makeEnv, mockFetch, restoreFetch, upstream, reply, sseOf, api, signIn, PROFILE, resetTesterCaches, allowanceOf } from './tester-env.mjs';
-import { PRICES, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, ttsWorstCase, ttsActual, TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS } from '../src/tester/prices.js';
-import { TTS_BRIEF, TTS_VOICES, spokenUnits } from '../src/tts.js';
+import { PRICES, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, ttsWorstCase, ttsReserved, ttsActual, TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, PER_CALL_RESERVE_CAP } from '../src/tester/prices.js';
+import { TTS_BRIEF, TTS_VOICES, spokenUnits, ttsCeilingUnits } from '../src/tts.js';
 
 const { TESTER_ROUTES, PUBLIC_PATHS, matchTesterRoute, LIMITS } = await import('../src/tester/router.js');
 const { GEMINI_BASE } = await import('../src/gemini.js');
@@ -135,6 +135,29 @@ test('with a passcode and a tester cookie, every route takes the owner path exac
       assert.notEqual(await codeOf(withCookie), 'owner_only');
     }
   }
+});
+
+test('relay/ws is dispatched before identity: the extension socket reaches the Relay with no, a live or an ended tester cookie', async () => {
+  // The owner may also be signed in as a tester in the browser profile that runs the Atelier extension; its socket
+  // carries that cookie. The Relay authenticates the socket by the device token in the subprotocol only.
+  const { env, L, token } = await tester();
+  const seen = [];
+  env.RELAY = { idFromName: (n) => `id:${n}`, get: () => ({ fetch: async (req) => { seen.push({ url: req.url, protocol: req.headers.get('sec-websocket-protocol') }); return new Response('Expected WebSocket', { status: 426 }); } }) };
+  const protocol = `atelier, ${'a'.repeat(64)}`;
+  for (const who of [{}, { cookie: token }, { cookie: 'x'.repeat(43) }]) {
+    L.calls.length = 0;
+    const r = await api(env, 'relay/ws?token=abc', { headers: { upgrade: 'websocket', 'sec-websocket-protocol': protocol } }, who);
+    assert.equal(r.status, 426, `${JSON.stringify(who)}: the Relay answered, not owner_only or tester_signin`);
+    assert.equal(r.headers.get('set-cookie'), null, 'no tester session is looked up or cleared here');
+    assert.deepEqual(L.calls, []);
+  }
+  assert.deepEqual(seen, Array.from({ length: 3 }, () => ({ url: 'https://relay/ws', protocol })), 'no query string is passed on');
+  // The rest of /api/relay/* stays owner-only for a tester.
+  for (const path of ['relay/pair', 'relay/status', 'relay/probe']) {
+    const r = await api(env, path, {}, { cookie: token });
+    assert.deepEqual([r.status, await codeOf(r)], [403, 'owner_only'], path);
+  }
+  assert.equal(seen.length, 3);
 });
 
 test('non-GET tester requests need the app Origin (CSRF)', async () => {
@@ -764,6 +787,31 @@ test('tts: a client that hangs up mid-read keeps the full reservation', async ()
   assert.deepEqual(spent(L, sub), { spent: ttsWorstCase({ model: TTS_MODEL, chars: 12 }), reserved: 0, limit: 1_000_000 });
 });
 
+test('tts: a stream cut after the usage event settles at the reservation, or at the reported bill when that is bigger', async () => {
+  const enc = new TextEncoder();
+  // speech.audio.done with usage arrives, then the connection resets before the stream ends.
+  const cutAfterDone = (usage) => {
+    const events = speechEvents(CLIP, usage);
+    let n = 0;
+    return new Response(new ReadableStream({ pull(c) { if (n < events.length) c.enqueue(enc.encode(events[n++])); else c.error(new Error('connection reset')); } }),
+      { headers: { 'content-type': 'text/event-stream' } });
+  };
+  const reserved = ttsWorstCase({ model: TTS_MODEL, chars: 12 });
+  const small = { input_tokens: 10, output_tokens: 20, total_tokens: 30 }, big = { input_tokens: 180, output_tokens: 1_700, total_tokens: 1_880 };
+  assert.ok(ttsActual({ model: TTS_MODEL, usage: small }) < reserved && ttsActual({ model: TTS_MODEL, usage: big }) > reserved);
+  // A broken stream never settles below its reservation, even with usage in hand (f7f750f); one whose provider already
+  // reported more is charged that, capped at OVERRUN x by the Ledger (the rule 58781a9 set for stopped answers).
+  for (const [usage, want] of [[small, reserved], [big, Math.min(ttsActual({ model: TTS_MODEL, usage: big }), OVERRUN * reserved)]]) {
+    const { L, sub, call } = await tester();
+    mockFetch([[TTS_UP, () => cutAfterDone(usage)]]);
+    const r = await call('tts', post({ voice: 'atelier', text: 'Hello there.' }));
+    assert.equal(r.status, 200);
+    await assert.rejects(r.arrayBuffer());
+    await new Promise((ok) => setTimeout(ok, 20));
+    assert.deepEqual(spent(L, sub), { spent: want, reserved: 0, limit: 1_000_000 }, JSON.stringify(usage));
+  }
+});
+
 test('tts: usage missing, or no audio tokens, keeps the full reservation', async () => {
   for (const usage of [null, { input_tokens: 12, output_tokens: 0, total_tokens: 12 }]) {
     const { L, sub, call } = await tester();
@@ -843,17 +891,107 @@ test('tts: the reservation is priced on spoken units (numbers weigh more), and G
   r = await call('tts', post({ voice: 'atelier', text: '7'.repeat(1_000) }));
   assert.equal(r.status, 413);
   assert.ok(!L.calls.includes('reserve'));
-  // Sulafat: the reservation is the smaller of the spoken-length estimate and the maxOutputTokens bound.
+  // Sulafat: the reservation is the smaller of the spoken-length estimate and the maxOutputTokens bound, and Gemini is
+  // asked for no more audio than it reserved (750 units → 94 s → 2,350 tokens), so it can't bill past the reservation.
   const pcm = new Uint8Array(48_000);
   mockFetch([[/gemini-3\.8-flash-lite-tts:generateContent$/, () => reply(200, { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: Buffer.from(pcm).toString('base64') } }] } }] })]]);
   const g = await tester({ config: { day_limit: 1_000_000 } });
-  const zh = '这是一个测试句子。'.repeat(30); // 270 characters, 810 units
+  const zh = '这是一个测试句子。'.repeat(30); // 270 characters, 750 units
   r = await g.call('tts', post({ voice: 'sulafat', text: zh }));
   assert.equal(r.status, 200);
-  assert.equal(upstream.calls[0].json.generationConfig.maxOutputTokens, TTS_VOICES.sulafat.maxOutputTokens);
-  const gWorst = ttsWorstCase({ model: 'gemini:gemini-3.8-flash-lite-tts', chars: zh.length, units: spokenUnits(zh), maxAudioTokens: TTS_VOICES.sulafat.maxOutputTokens });
-  assert.ok(gWorst > ttsWorstCase({ model: 'gemini:gemini-3.8-flash-lite-tts', chars: zh.length }));
+  const gModel = 'gemini:gemini-3.8-flash-lite-tts';
+  const held = ttsReserved({ model: gModel, chars: zh.length, units: spokenUnits(zh), maxAudioTokens: TTS_VOICES.sulafat.maxOutputTokens });
+  assert.equal(held.audioTokens, 2_350);
+  assert.equal(upstream.calls[0].json.generationConfig.maxOutputTokens, held.audioTokens);
+  assert.ok(held.audioTokens < TTS_VOICES.sulafat.maxOutputTokens);
+  const gWorst = ttsWorstCase({ model: gModel, chars: zh.length, units: spokenUnits(zh), maxAudioTokens: TTS_VOICES.sulafat.maxOutputTokens });
+  assert.ok(gWorst > ttsWorstCase({ model: gModel, chars: zh.length }));
   assert.ok(g.L.calls.includes('reserve'));
+  // The owner keeps the voice's own bound.
+  const { env } = makeEnv();
+  await (await api(env, 'tts', post({ voice: 'sulafat', text: zh }), { pass: 'pw' })).arrayBuffer();
+  assert.equal(upstream.calls.at(-1).json.generationConfig.maxOutputTokens, TTS_VOICES.sulafat.maxOutputTokens);
+});
+
+test('tts: symbols and emoji are reserved for their spoken names; text too long to read in one call is refused before anything is reserved', async () => {
+  const { L, sub, call } = await tester();
+  mockFetch([[TTS_UP, () => sseOf(speechEvents(CLIP, null))]]); // no usage: the full reservation stands, so it is visible
+  const text = 'a ≤ b → c 🦒 '.repeat(20).trim();
+  const r = await call('tts', post({ voice: 'atelier', text }));
+  assert.equal(r.status, 200);
+  await bytesOf(r);
+  const units = ttsCeilingUnits(text);
+  assert.ok(units > 4 * spokenUnits(text), `${units} vs ${spokenUnits(text)}`);
+  assert.deepEqual(spent(L, sub), { spent: ttsWorstCase({ model: TTS_MODEL, chars: text.length, units }), reserved: 0, limit: 1_000_000 });
+  // 1,000 "≤" pass the 1,000-unit cap but take about half an hour to say: over the per-call cap, so refused with no
+  // reservation and no provider call (the app then reads with the device voice).
+  assert.ok(ttsWorstCase({ model: TTS_MODEL, chars: 1_000, units: ttsCeilingUnits('≤'.repeat(1_000)) }) > PER_CALL_RESERVE_CAP);
+  L.calls.length = 0;
+  const before = upstream.calls.length;
+  const r2 = await call('tts', post({ voice: 'atelier', text: '≤'.repeat(1_000) }));
+  assert.equal(r2.status, 402);
+  const j = await r2.json();
+  assert.deepEqual([j.code, j.scope], ['tester_budget', 'call']);
+  assert.ok(!L.calls.includes('reserve'));
+  assert.equal(upstream.calls.length, before);
+});
+
+test('tts: OpenAI audio running past twice the reserved reading time (+1 s) is cut off, the upstream cancelled and the reservation kept', async () => {
+  const enc = new TextEncoder();
+  // MPEG-2 Layer III frames, 24 kHz, 160 kbit/s (480 bytes, 24 ms each), as gpt-4o-mini-tts streams them.
+  const frames = (n) => Buffer.concat(Array.from({ length: n }, () => { const f = Buffer.alloc(480, 0x55); f.set([0xff, 0xf3, 0xe4, 0xc4]); return f; }));
+  const deltaOf = (n) => `data: ${JSON.stringify({ type: 'speech.audio.delta', audio: frames(n).toString('base64') })}\n\n`;
+  const usage = { input_tokens: 20, output_tokens: 3_000, total_tokens: 3_020 };
+  // `deltas` deltas of 25 frames (0.6 s each), then speech.audio.done with usage.
+  const speaking = (deltas) => {
+    const s = { cancelled: false };
+    let n = 0;
+    s.res = new Response(new ReadableStream({
+      pull(c) {
+        if (n++ < deltas) return c.enqueue(enc.encode(deltaOf(25)));
+        c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'speech.audio.done', usage })}\n\n`));
+        c.close();
+      },
+      cancel() { s.cancelled = true; },
+    }), { headers: { 'content-type': 'text/event-stream' } });
+    return s;
+  };
+  const readAll = async (r) => {
+    const got = [], reader = r.body.getReader();
+    let error = null;
+    try { for (let x = await reader.read(); !x.done; x = await reader.read()) got.push(x.value); } catch (e) { error = e; }
+    return { seconds: got.reduce((n, c) => n + c.length, 0) / 480 * 0.024, error };
+  };
+  const text = 'Hello there.'; // 12 units: 2 s reserved, cut off past 2 x 2 + 1 = 5 s
+  const held = ttsReserved({ model: TTS_MODEL, chars: 12, units: ttsCeilingUnits(text) });
+  assert.deepEqual([held.seconds, held.cutoffSeconds], [2, 5]);
+  const reserved = ttsWorstCase({ model: TTS_MODEL, chars: 12 });
+
+  // A runaway: 60 s of audio for a 12-character text. The tester gets at most 5 s and is charged the reservation.
+  let t = await tester(), up;
+  mockFetch([[TTS_UP, () => (up = speaking(100)).res]]);
+  let got = await readAll(await t.call('tts', post({ voice: 'atelier', text })));
+  assert.ok(got.error, 'the response breaks off (the app reads the rest with the device voice)');
+  assert.ok(got.seconds <= 5 && got.seconds > 4, `${got.seconds} s reached the tester`);
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.equal(up.cancelled, true, 'OpenAI is told to stop');
+  assert.deepEqual(spent(t.L, t.sub), { spent: reserved, reserved: 0, limit: 1_000_000 });
+
+  // Within the time (4.8 s), it all plays and settles from the usage.
+  t = await tester();
+  mockFetch([[TTS_UP, () => (up = speaking(8)).res]]);
+  got = await readAll(await t.call('tts', post({ voice: 'atelier', text })));
+  assert.equal(got.error, null);
+  assert.ok(Math.abs(got.seconds - 4.8) < 1e-6);
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.deepEqual(spent(t.L, t.sub), { spent: Math.min(ttsActual({ model: TTS_MODEL, usage }), OVERRUN * reserved), reserved: 0, limit: 1_000_000 });
+
+  // The owner is held only to the 8 MB cap.
+  const { env } = makeEnv();
+  mockFetch([[TTS_UP, () => (up = speaking(100)).res]]);
+  got = await readAll(await api(env, 'tts', post({ voice: 'atelier', text }), { pass: 'pw' }));
+  assert.equal(got.error, null);
+  assert.ok(Math.abs(got.seconds - 60) < 1e-6);
 });
 
 test('tts: a Sulafat answer longer than one request allows is settled at its real length, not dropped at the reservation', async () => {

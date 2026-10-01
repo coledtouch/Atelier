@@ -28,8 +28,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=52" />
-  <link rel="stylesheet" href="/studio.css?v=52" />
+  <link rel="stylesheet" href="/app.css?v=53" />
+  <link rel="stylesheet" href="/studio.css?v=53" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -232,6 +232,7 @@
           <h4>Available providers</h4>
           <p class="prov-status" id="provStatus"></p>
           <button type="button" class="chip" id="diagBtn" style="margin-top:10px">Check provider keys</button>
+          <button type="button" class="chip" id="kbDebugBtn" aria-pressed="false" title="Live keyboard numbers in a corner, for this session only (same as ?kbdebug=1)" style="margin-top:10px">Keyboard readout</button>
           <div class="prov-status" id="diagOut" aria-live="polite" style="margin-top:10px"></div>
         </section>
 
@@ -266,6 +267,19 @@
             <label><input type="radio" name="theme" value="dark" /> <span>Dark</span></label>
             <label><input type="radio" name="theme" value="light" /> <span>Paper</span></label>
           </div>
+        </section>
+        <section class="field-group read-aloud">
+          <h4>Read aloud</h4>
+          <div role="radiogroup" aria-label="Voice" id="readVoices" class="ra-voices"></div>
+          <div class="ra-speed"><span class="ra-sub" aria-hidden="true">Speed</span>
+            <div role="group" aria-label="Reading speed" id="readSpeed" class="ra-chips">
+              <button type="button" class="chip" data-speed="0.9" aria-pressed="false">0.9×</button>
+              <button type="button" class="chip on" data-speed="1" aria-pressed="true">1×</button>
+              <button type="button" class="chip" data-speed="1.1" aria-pressed="false">1.1×</button>
+              <button type="button" class="chip" data-speed="1.25" aria-pressed="false">1.25×</button>
+            </div>
+          </div>
+          <p class="hint" id="readCaption">AI-generated voice. To make the audio, answer text is sent to OpenAI (Google for Sulafat). Clips stay on this device until you clear it.</p>
         </section>
         <section class="field-group">
           <h4>Your data</h4>
@@ -324,6 +338,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=52" type="module"></script>
+  <script src="/app.js?v=53" type="module"></script>
 </body>
 </html>

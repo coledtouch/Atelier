@@ -31,7 +31,8 @@
 // ASSUMPTIONS (estimates, not published numbers; each one is a named export so it can be tuned)
 //   WEB_SEARCH_RESULT_TOKENS, GEMINI_VIDEO_TOKENS_PER_SECOND, OPENAI_EDIT_IMAGE_TOKENS,
 //   GEMINI_PRO_IMAGE_THINKING_TOKENS, GEMINI_FLASH_IMAGE_THINKING_TOKENS, DEFAULT_IMAGE_PROMPT_TOKENS,
-//   OPENAI_TTS_AUDIO_TOKENS_PER_SECOND, TTS_MIN_CHARS_PER_SECOND, TTS_INSTRUCTION_TOKENS (read aloud, src/tts.js).
+//   OPENAI_TTS_AUDIO_TOKENS_PER_SECOND, TTS_MIN_CHARS_PER_SECOND, TTS_CUTOFF_FACTOR, TTS_INSTRUCTION_TOKENS (read aloud,
+//   src/tts.js).
 //   The provider floors in MIN_OUTPUT mirror the max_tokens clamps in src/anthropic.js and src/gemini.js (2026-09-30).
 //
 // SOURCES (all read 2026-09-30)
@@ -101,11 +102,25 @@ export const MIN_OUTPUT = Object.freeze({ anthropic: 1024, geminiNative: 256 });
  */
 export const OPENAI_TTS_AUDIO_TOKENS_PER_SECOND = 50;
 /**
- * ASSUMPTION. The slowest read-aloud delivery, in spoken units (src/tts.js spokenUnits) per second: the brief's slow,
- * pause-rich pace runs ~11-13 characters of prose a second. Digits (4 units), symbols (3) and CJK characters (3) weigh
- * more, so number-heavy or Chinese/Japanese/Korean text is reserved for its longer reading time.
+ * ASSUMPTION. The slowest read-aloud delivery, in spoken units per second: the brief's slow, pause-rich pace runs ~11-13
+ * characters of prose a second. A tester's reservation counts the units of src/tts.js ttsCeilingUnits, a ceiling on the
+ * reading time: digits (4 units) and CJK characters (3) as in spokenUnits, a symbol said as a word ($ % & @ # + = * / \
+ * and the like) 10, any other symbol, fraction or Roman numeral (≤ → ≈ < > | ~ ^ ½) 21 and an emoji cluster (™ and ©
+ * included) 37 or more, so number-, symbol- or emoji-heavy and Chinese/Japanese/Korean text is reserved for its longer
+ * reading time. At 10 characters a second those weights cover names of about 12, 26 and 46 characters; the cut-off
+ * (TTS_CUTOFF_FACTOR) covers any text read slower still.
  */
 export const TTS_MIN_CHARS_PER_SECOND = 8;
+/**
+ * ASSUMPTION. OpenAI speech has no output bound, so a tester's is cut off (the response errors, the upstream is
+ * cancelled and the reservation stands) once its audio plays longer than this many times the reserved reading time
+ * (ttsReserved seconds), plus one second for the silence at either end of a very short clip (ttsReserved cutoffSeconds;
+ * src/tts.js times the mp3 from its frame headers). The reservation pays for OPENAI_TTS_AUDIO_TOKENS_PER_SECOND (50)
+ * tokens in each reserved second; at OpenAI's published ≈21 tokens a second, twice the time plus one still costs less
+ * than that. Prose runs about 0.65x its reserved time, so only a runaway or mis-read text reaches the cut. (Gemini is
+ * bounded at the source instead: a tester's maxOutputTokens is the reserved audio tokens.)
+ */
+export const TTS_CUTOFF_FACTOR = 2;
 /** ASSUMPTION. Input tokens the server-side voice brief (src/tts.js TTS_BRIEF, ~120 tokens) or Gemini style adds. */
 export const TTS_INSTRUCTION_TOKENS = 200;
 
@@ -654,27 +669,40 @@ export function veoCost(o = {}) {
 
 // ───────────────────────────── speech (read aloud) ─────────────────────────────
 /**
+ * The audio one read-aloud reservation pays for → {units, seconds, audioTokens, cutoffSeconds}: seconds = ceil(units /
+ * TTS_MIN_CHARS_PER_SECOND), audioTokens = seconds x the model's audio tokens per second, at most maxAudioTokens,
+ * cutoffSeconds = TTS_CUTOFF_FACTOR x seconds + 1. The tester router holds the provider to it: Gemini's maxOutputTokens
+ * is audioTokens, and OpenAI speech is cut off past cutoffSeconds. Takes the same input as ttsWorstCase (margin is
+ * ignored).
+ */
+export function ttsReserved(o = {}) {
+  const e = entryOf(o.model, 'tts');
+  const chars = count(o.chars, 'chars', { required: true });
+  const units = Math.max(chars, count(o.units, 'units'));
+  const seconds = Math.ceil(units / TTS_MIN_CHARS_PER_SECOND);
+  let audioTokens = seconds * e.audioTokensPerSecond;
+  if (o.maxAudioTokens !== undefined && o.maxAudioTokens !== null) audioTokens = Math.min(audioTokens, count(o.maxAudioTokens, 'maxAudioTokens'));
+  return { units, seconds, audioTokens, cutoffSeconds: TTS_CUTOFF_FACTOR * seconds + 1 };
+}
+
+/**
  * Worst-case cost of one read-aloud request, in integer micro-dollars, rounded up, x MARGIN:
  * ceil(units / TTS_MIN_CHARS_PER_SECOND) seconds x audio tokens per second at the audio rate (at most maxAudioTokens
  * when the request bounds its output), plus (ceil(units / 3) + TTS_INSTRUCTION_TOKENS) input tokens at the text rate.
- * units is the spoken length (src/tts.js spokenUnits: digits, symbols and CJK characters weigh more than a letter);
- * without it, chars. Gemini is priced at its standing price.
+ * units is a ceiling on the reading time (src/tts.js ttsCeilingUnits: digits, symbols, emoji and CJK characters weigh
+ * more than a letter); without it, chars. Gemini is priced at its standing price.
  * @param {object} o
  * @param {string} o.model  'openai:gpt-4o-mini-tts-2025-12-15' | 'gemini:gemini-3.8-flash-lite-tts'
  * @param {number} o.chars  characters of text to speak
- * @param {number} [o.units] spoken units of that text (at least chars)
+ * @param {number} [o.units] reading-time units of that text (at least chars)
  * @param {number} [o.maxAudioTokens] the request's own output bound (Gemini maxOutputTokens): a true ceiling
  * @param {boolean} [o.margin=true]
  */
 export function ttsWorstCase(o = {}) {
-  const e = entryOf(o.model, 'tts');
-  const chars = count(o.chars, 'chars', { required: true });
-  const units = Math.max(chars, count(o.units, 'units'));
+  const { units, audioTokens } = ttsReserved(o);
   const r = TTS_RATES[o.model].top;
-  let audio = Math.ceil(units / TTS_MIN_CHARS_PER_SECOND) * e.audioTokensPerSecond;
-  if (o.maxAudioTokens !== undefined && o.maxAudioTokens !== null) audio = Math.min(audio, count(o.maxAudioTokens, 'maxAudioTokens'));
   const input = Math.ceil(units / 3) + TTS_INSTRUCTION_TOKENS;
-  return toMicros(big(input) * r.input + big(audio) * r.audio, o.margin !== false);
+  return toMicros(big(input) * r.input + big(audioTokens) * r.audio, o.margin !== false);
 }
 
 /**

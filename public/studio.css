@@ -329,6 +329,9 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
 }
 /* keyboard state — classes/vars from syncViewport() in app.js */
 html.kb-open .dock { padding-bottom: 8px; } /* the keyboard covers the home indicator */
+/* glued to the bottom of what is on screen: % is the dock's own fixed box, so this needs no layout height from JS (equals --kb) */
+html.kb-open .dock { bottom: max(0px, calc(100% - var(--vv-top, 0px) - var(--vvh, 100%))); }
+html.kb-frame .dock { visibility: hidden; } /* typing in a Build preview: the composer would cover the field iOS just revealed */
 html.kb-open .composer-hint { display: none; }
 html.kb-open .thread-list { padding-bottom: var(--kb, 0px); }
 html.kb-open .cv-grid { padding-bottom: calc(12px + var(--kb, 0px)); }

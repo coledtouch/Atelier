@@ -69,6 +69,8 @@ const CHAT_UPSTREAM = {
 };
 
 const PASS_HEADERS = ['content-type', 'content-length', 'nvcf-reqid', 'nvcf-status', 'nvcf-percent-complete', 'retry-after'];
+// Same value as public/_headers. includeSubDomains covers only *.atelier.ciprari.ai (none exist); no preload.
+const HSTS = 'max-age=31536000; includeSubDomains';
 const SEG = /^[A-Za-z0-9._-]+$/;
 
 const json = (data, status = 200) =>
@@ -233,8 +235,89 @@ async function passcodeGuard(req, env) {
   return null;
 }
 
+// Reads at most `cap` bytes of a request body → text, or null when it is larger.
+async function readCapped(req, cap) {
+  if (Number(req.headers.get('content-length') || 0) > cap) return null;
+  const reader = req.body?.getReader();
+  if (!reader) return '';
+  const chunks = [];
+  let n = 0;
+  for (;;) {
+    const r = await reader.read();
+    if (r.done) break;
+    n += r.value.byteLength;
+    if (n > cap) { reader.cancel().catch(() => {}); return null; }
+    chunks.push(r.value);
+  }
+  const all = new Uint8Array(n);
+  let at = 0;
+  for (const ch of chunks) { all.set(ch, at); at += ch.byteLength; }
+  return new TextDecoder().decode(all);
+}
+
+// ── POST /api/csp-report: Content-Security-Policy violations (public/_headers: report-uri, and report-to → the csp
+// endpoint in Reporting-Endpoints). Public, answered before identity is checked, never reads a cookie or the passcode.
+// Each violation becomes one compact log line with nothing personal in it: the directive, the blocked origin (or
+// inline / eval / data / blob), the page and source as origin + path (no query string or fragment), line and column.
+// IP addresses, user agents, query strings and script samples are never logged. Per IP (LI_LIMIT, key csp:<ip>) and
+// per isolate (CSP_PER_MINUTE lines), so a flood can't fill the logs. Accepted reports always get 204.
+const CSP_MAX_BYTES = 16 * 1024, CSP_PER_REQUEST = 5, CSP_PER_MINUTE = 60;
+let cspMinute = 0, cspLines = 0;
+const cspWord = (v) => String(v ?? '').trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40);
+const cspInt = (v) => (v === '' || v == null ? undefined : Number.isSafeInteger(Number(v)) && Number(v) >= 0 ? Math.min(Number(v), 9_999_999) : undefined);
+// A URL → origin (+ path) for http(s), about:srcdoc as is, the bare scheme for anything else; CSP keywords pass through.
+function cspPlace(v, { path = true } = {}) {
+  const s = typeof v === 'string' ? v.trim() : '';
+  if (!s) return undefined;
+  if (!s.includes(':')) return cspWord(s) || undefined; // inline, eval, wasm-eval, data, blob, self…
+  let u;
+  try { u = new URL(s); } catch { return 'unparsed'; }
+  if (u.href === 'about:srcdoc') return 'about:srcdoc';
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return u.protocol.slice(0, -1).replace(/[^a-z0-9.+-]/g, '').slice(0, 20);
+  return (path ? u.origin + u.pathname.replace(/[^\w./~-]/g, '_') : u.origin).slice(0, 160);
+}
+// report-uri sends {"csp-report": {...}} (hyphenated keys); report-to sends [{type: "csp-violation", body: {...}}].
+function cspReports(data) {
+  const raw = Array.isArray(data) ? data.filter((r) => r?.type === 'csp-violation').map((r) => r.body)
+    : data && typeof data === 'object' ? [data['csp-report']] : [];
+  return raw.filter((b) => b && typeof b === 'object' && !Array.isArray(b)).map((b) => Object.fromEntries(Object.entries({
+    dir: cspWord(b.effectiveDirective ?? b['effective-directive'] ?? b['violated-directive']) || undefined,
+    blocked: cspPlace(b.blockedURL ?? b['blocked-uri'], { path: false }),
+    page: cspPlace(b.documentURL ?? b['document-uri']),
+    src: cspPlace(b.sourceFile ?? b['source-file']),
+    line: cspInt(b.lineNumber ?? b['line-number']),
+    col: cspInt(b.columnNumber ?? b['column-number']),
+    mode: cspWord(b.disposition) || undefined,
+  }).filter(([, v]) => v !== undefined)));
+}
+async function cspThrottled(req, env) {
+  const now = Date.now();
+  if (now - cspMinute >= 60_000) { cspMinute = now; cspLines = 0; }
+  if (cspLines >= CSP_PER_MINUTE) return true;
+  if (!env.LI_LIMIT) return false;
+  try { return !(await env.LI_LIMIT.limit({ key: `csp:${req.headers.get('cf-connecting-ip') || 'unknown'}` })).success; } catch { return false; }
+}
+async function handleCspReport(req, env) {
+  if (req.method !== 'POST') return json({ error: 'Send CSP reports with POST.' }, 405);
+  const text = await readCapped(req, CSP_MAX_BYTES);
+  if (text == null) return json({ error: 'Report too large.' }, 413);
+  let data = null;
+  try { data = JSON.parse(text); } catch {}
+  const reports = cspReports(data);
+  if (!reports.length) return json({ error: 'Not a CSP report.' }, 400);
+  if (!(await cspThrottled(req, env))) {
+    for (const r of reports.slice(0, CSP_PER_REQUEST)) {
+      if (cspLines >= CSP_PER_MINUTE) break;
+      cspLines++;
+      console.log('csp', JSON.stringify(r));
+    }
+  }
+  return new Response(null, { status: 204 });
+}
+
 async function handleApi(req, env, url) {
   const path = url.pathname.replace(/^\/api\/?/, '');
+  const relay = () => env.RELAY.get(env.RELAY.idFromName('main'));
 
   const locked = await passcodeGuard(req, env);
   if (locked) return locked;
@@ -243,11 +326,19 @@ async function handleApi(req, env, url) {
     const server = Object.fromEntries(Object.entries(PROVIDERS).map(([n, p]) => [n, Boolean(env[p.secret] && env.APP_PASSCODE)]));
     return json({ ok: true, serverKey: server.nvidia, server });
   }
+  // POST /api/csp-report → CSP violation reports from browsers (public; see handleCspReport).
+  if (path === 'csp-report') return handleCspReport(req, env);
 
   // ── LinkedIn testers (docs/superpowers/specs/2026-09-30-atelier-tester-access-*.md) ──
-  // Sign-in routes are public. Then: passcode → owner (wins over a tester cookie); a live tester cookie → the tester
-  // router, which allows only its own list (deny by default); otherwise everything below behaves as it always has.
+  // Public before identity: health, csp-report, the sign-in routes and relay/ws. Then: passcode → owner (wins over a
+  // tester cookie); a live tester cookie → the tester router, which allows only its own list (deny by default);
+  // otherwise everything below behaves as it always has.
   if (path.startsWith('li/')) return handleLinkedIn(req, env, url, path);
+  // GET /api/relay/ws → the extension's persistent connection. The Relay authenticates it only by the device token,
+  // which travels as a WebSocket subprotocol (no query string is passed on), never by the passcode or a cookie. So it
+  // is dispatched before identify(): a tester cookie in the owner's browser can't turn the extension away, and a tester
+  // or anonymous caller gets the Relay's own 426 / 401, never a socket.
+  if (path === 'relay/ws') return relay().fetch(new Request('https://relay/ws', req));
   const who = await identify(req, env, passOk);
   if (who.kind === 'tester') return testerRouter(req, env, url, path, who, UPSTREAM);
   if (who.stale && !req.headers.get('x-app-pass')) return signedOut(); // an ended tester session, not a passcode problem
@@ -311,12 +402,7 @@ async function handleApi(req, env, url) {
   }
 
   // ── Remote browser relay (extension on the user's computer ↔ Atelier on any device) ──
-  const relay = () => env.RELAY.get(env.RELAY.idFromName('main'));
-
-  // GET /api/relay/ws → the extension's persistent connection. The relay itself checks the device token, which only
-  // travels as a WebSocket subprotocol: no query string is passed on.
-  if (path === 'relay/ws') return relay().fetch(new Request('https://relay/ws', req));
-
+  // (GET /api/relay/ws, the extension's own connection, is dispatched above, before identity is checked.)
   if (path.startsWith('relay/')) {
     if (!passOk(req, env)) return json({ error: 'Enter your passcode.' }, 401);
 
@@ -623,6 +709,8 @@ export default {
         if (!/\bno-store\b/i.test(secured.headers.get('Cache-Control') || '')) secured.headers.set('Cache-Control', 'no-store');
         secured.headers.set('X-Content-Type-Options', 'nosniff');
         secured.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+        // public/_headers covers static assets only; Worker responses set HSTS themselves (ignored over plain http).
+        if (url.protocol === 'https:') secured.headers.set('Strict-Transport-Security', HSTS);
         return secured;
       } catch (err) {
         return json({ error: err.message || 'Proxy error' }, 500);

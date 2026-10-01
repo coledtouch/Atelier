@@ -22,9 +22,12 @@ export const isTesterCode = (code) => typeof code === 'string' && (code.startsWi
 export function normalizeMe(j) {
   if (!j || typeof j !== 'object' || typeof j.sub !== 'string' || !j.sub) return null;
   const m = j.models || {}, f = j.features || {}, a = j.allowance || {}, p = j.pool || {};
-  const features = Object.fromEntries(['web', 'video', 'veo', 'helpers', 'profile'].map((k) => [k, f[k] !== false]));
+  const features = Object.fromEntries(['web', 'video', 'veo', 'helpers', 'profile', 'tts'].map((k) => [k, f[k] !== false]));
   const period = (x = {}) => ({ spent: int(x.spent), reserved: int(x.reserved), limit: int(x.limit) });
-  const models = { chat: ids(m.chat), image: ids(m.image), video: features.veo ? ids(m.video) : [] };
+  // tts: Read aloud voice ids ('atelier', 'sulafat', …) the tester may use; allowedIds() stays chat/image/video only.
+  // null = not listed (a record cached before v53, before its first /me): unknown, not none, so the reader asks and the
+  // server's own allow-list decides. [] = Read aloud's AI voices are off for this tester.
+  const models = { chat: ids(m.chat), image: ids(m.image), video: features.veo ? ids(m.video) : [], tts: features.tts ? (Array.isArray(m.tts) ? ids(m.tts) : null) : [] };
   const pool = a.pool && typeof a.pool === 'object' && a.pool.limit != null ? period(a.pool) : null; // when /me reports the pool
   return {
     sub: str(j.sub, 128), name: str(j.name, 120), email: str(j.email, 200), picture: httpsUrl(j.picture), models, features,

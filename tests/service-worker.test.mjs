@@ -51,6 +51,28 @@ test('every module the app imports is precached', async () => {
   s.handlers.install({ waitUntil: (p) => done = p }); await done;
   for (const f of ['app.js', 'data-safety.js']) {
     const src = await readFile(new URL(`../public/${f}`, import.meta.url), 'utf8');
-    for (const [, path] of src.matchAll(/^import\s[^;]*?\sfrom\s+'\.\/([\w.-]+\.js)'/gm)) assert.ok(s.cached.includes(`/${path}`), `/${path} (imported by ${f}) is precached`);
+    for (const [, path, q = ''] of src.matchAll(/^import\s[^;]*?\sfrom\s+'\.\/([\w.-]+\.js)(\?v=\d+)?'/gm)) assert.ok(s.cached.includes(`/${path}${q}`), `/${path}${q} (imported by ${f}) is precached`);
   }
+});
+// sw.js answers static files from its cache first, so an unversioned import lets a new app.js run against an older cached
+// module (a bare screen after v52). app.js and every module it reaches import at ?v=<VERSION number>, the worker
+// precaches exactly those URLs, and scripts/bump-version.mjs moves all of them together.
+test('every module the app loads is imported and precached at ?v=<VERSION number>', async () => {
+  const s = setup(); let done;
+  s.handlers.install({ waitUntil: (p) => done = p }); await done;
+  const v = `?v=${VERSION.slice('atelier-v'.length)}`, seen = new Set(), todo = ['app.js'];
+  while (todo.length) {
+    const f = todo.shift();
+    if (seen.has(f)) continue;
+    seen.add(f);
+    const src = await readFile(new URL(`../public/${f}`, import.meta.url), 'utf8');
+    // from './x.js', import './x.js' and import('./x.js'), wherever they sit (a multi-line import can't slip past)
+    for (const [, path, q = ''] of src.matchAll(/\b(?:from|import)\s*\(?\s*['"]\.\/([\w./-]+\.m?js)(\?[^'"]*)?['"]/g)) {
+      assert.equal(q, v, `${f} imports ./${path}${q}: it must be ./${path}${v}`);
+      assert.ok(s.cached.includes(`/${path}${v}`), `/${path}${v} (imported by ${f}) is precached`);
+      todo.push(path);
+    }
+  }
+  assert.ok(seen.size > 1, 'app.js imports its modules');
+  for (const f of seen) assert.ok(!s.cached.includes(`/${f}`), `/${f} is precached only at its ?v= URL (never a second, stale copy)`);
 });

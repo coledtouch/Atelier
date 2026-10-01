@@ -5,7 +5,7 @@ import {
   TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, TESTER_EXCLUDED, WEB_CALL_RESERVE_CAP, VEO_CALL_RESERVE_CAP,
   chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, gptImageOutputTokens,
   priceOf, isFree, PriceError,
-  TESTER_TTS_MODELS, ttsWorstCase, ttsActual, OPENAI_TTS_AUDIO_TOKENS_PER_SECOND, TTS_MIN_CHARS_PER_SECOND, TTS_INSTRUCTION_TOKENS,
+  TESTER_TTS_MODELS, ttsWorstCase, ttsReserved, ttsActual, OPENAI_TTS_AUDIO_TOKENS_PER_SECOND, TTS_MIN_CHARS_PER_SECOND, TTS_INSTRUCTION_TOKENS, TTS_CUTOFF_FACTOR,
 } from '../src/tester/prices.js';
 
 const throwsCode = (fn, code) => assert.throws(fn, (e) => e instanceof PriceError && e.code === code, `expected PriceError ${code}`);
@@ -437,6 +437,19 @@ test('ttsWorstCase: priced on spoken units (numbers, CJK) when given; a Gemini o
   assert.ok(ttsWorstCase({ model: GEMINI_TTS, chars: 4_000, units: 12_000, maxAudioTokens: 4_369, margin: false }) >= atBound);
   throwsCode(() => ttsWorstCase({ model: GEMINI_TTS, chars: 10, maxAudioTokens: -1 }), 'bad_input');
   throwsCode(() => ttsWorstCase({ model: OPENAI_TTS, chars: 10, units: 'lots' }), 'bad_input');
+});
+
+test('ttsReserved: the audio a reservation pays for, and the cut-off that holds OpenAI to it', () => {
+  assert.equal(TTS_CUTOFF_FACTOR, 2);
+  assert.deepEqual(ttsReserved({ model: OPENAI_TTS, chars: 12 }), { units: 12, seconds: 2, audioTokens: 100, cutoffSeconds: 5 });
+  assert.deepEqual(ttsReserved({ model: OPENAI_TTS, chars: 250, units: 1_000 }), { units: 1_000, seconds: 125, audioTokens: 6_250, cutoffSeconds: 251 });
+  assert.deepEqual(ttsReserved({ model: GEMINI_TTS, chars: 4_000, units: 12_000, maxAudioTokens: 4_369 }), { units: 12_000, seconds: 1_500, audioTokens: 4_369, cutoffSeconds: 3_001 });
+  // Cut off at cutoffSeconds, OpenAI's published rate (≈21 audio tokens a second) stays inside the reservation.
+  for (const chars of [1, 8, 12, 100, 1_000]) {
+    const held = ttsReserved({ model: OPENAI_TTS, chars });
+    const atCut = ttsActual({ model: OPENAI_TTS, usage: { input_tokens: Math.ceil(chars / 3) + 200, output_tokens: Math.ceil(held.cutoffSeconds * 21) } });
+    assert.ok(atCut <= ttsWorstCase({ model: OPENAI_TTS, chars }), `${chars} chars: ${atCut}`);
+  }
 });
 
 test('ttsActual: OpenAI from speech.audio.done usage; missing or zero audio tokens throw no_usage', () => {

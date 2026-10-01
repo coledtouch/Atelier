@@ -5,6 +5,7 @@ import { makeEnv, mockFetch, restoreFetch, upstream, reply, api } from './tester
 const {
   handleTts, validateTts, sseToAudio, toWav, wavHeader, previewCacheKey, openaiSpeechBody, geminiSpeechBody, spokenUnits, previewId,
   TTS_BRIEF, TTS_BRIEF_V, PREVIEW_TEXT, PREVIEW_ID, TTS_VOICES, TTS_VOICE_IDS, TTS_LIMITS, OWNER_HOOKS, ttsPriceId, GEMINI_MAX_OUTPUT_TOKENS,
+  ttsCeilingUnits, TTS_CEILING, mp3Clock,
 } = await import('../src/tts.js');
 const { GEMINI_BASE } = await import('../src/gemini.js');
 
@@ -86,13 +87,60 @@ test('spokenUnits: a character each, more for digits, symbols read as words and 
   assert.equal(spokenUnits(null), 0);
 });
 
+// What a voice may say for a symbol or an emoji (Unicode / CLDR names) — what ttsCeilingUnits must leave time for.
+const SAID = [
+  ['≤', 'less-than or equal to'], ['≥', 'greater-than or equal to'], ['≠', 'not equal to'], ['≈', 'almost equal to'],
+  ['→', 'rightwards arrow'], ['←', 'leftwards arrow'], ['⇔', 'left right double arrow'], ['∑', 'n-ary summation'], ['√', 'square root'],
+  ['∞', 'infinity'], ['±', 'plus-minus sign'], ['<', 'less-than sign'], ['>', 'greater-than sign'], ['|', 'vertical line'], ['~', 'tilde'],
+  ['^', 'circumflex accent'], ['`', 'grave accent'], ['½', 'one half'], ['²', 'superscript two'], ['Ⅷ', 'roman numeral eight'], ['•', 'bullet'],
+  ['%', 'percent'], ['&', 'and'], ['@', 'at'], ['#', 'number sign'], ['$', 'dollars'], ['€', 'euros'], ['£', 'pounds'], ['¥', 'yen'], ['₹', 'rupees'],
+  ['+', 'plus'], ['=', 'equals'], ['*', 'asterisk'], ['/', 'slash'], ['\\', 'backslash'], ['_', 'underscore'], ['°', 'degrees'], ['×', 'times'],
+  ['÷', 'divided by'], ['§', 'section sign'], ['‰', 'per mille'], ['٣', 'three'], ['５', 'five'],
+  ['™', 'trade mark sign'], ['©', 'copyright sign'], ['®', 'registered sign'], ['🦒', 'giraffe'], ['😍', 'smiling face with heart-eyes'],
+  ['👍🏽', 'thumbs up: medium skin tone'], ['🇺🇸', 'flag: United States'], ['🏴󠁧󠁢󠁥󠁮󠁧󠁿', 'flag: England'], ['#️⃣', 'keycap: number sign'],
+  ['👨‍👩‍👧‍👦', 'family: man, woman, girl, boy'], ['🧑🏽‍🤝‍🧑🏻', 'people holding hands: medium skin tone, light skin tone'],
+  ['👩🏼‍❤️‍👨🏾', 'couple with heart: woman, man, medium-light skin tone, medium-dark skin tone'],
+  ['👩🏾‍🦼‍➡️', 'woman in motorized wheelchair facing right: medium-dark skin tone'],
+];
+// Reserved seconds (units / 8) against the name read at 10 characters a second (prose runs 11-13).
+const covers = (text, said) => ttsCeilingUnits(text) / 8 >= said.length / 10;
+
+test('ttsCeilingUnits: every symbol and emoji is reserved for at least its spoken name; prose is priced as before', () => {
+  for (const [s, said] of SAID) assert.ok(covers(s, said), `${s} (${said}): ${ttsCeilingUnits(s)} units`);
+  // Adversarial texts within a tester's 1,000-unit cap: all symbols, all emoji, mixed with prose and digits.
+  const symbols = SAID.filter(([s]) => !/\p{Extended_Pictographic}/u.test(s));
+  const emoji = SAID.filter(([s]) => /\p{Extended_Pictographic}/u.test(s));
+  for (const list of [symbols, emoji, SAID]) {
+    for (const sep of ['', ' ', ' and ']) {
+      const text = list.map(([s]) => s).join(sep), said = list.map(([, n]) => n).join(sep || ' ');
+      assert.ok(covers(text, said), `${sep}: ${ttsCeilingUnits(text)} units for ${said.length} characters`);
+      const many = text.repeat(40), saidMany = `${said} `.repeat(40);
+      assert.ok(covers(many, saidMany), 'repeated');
+    }
+  }
+  // Clusters count once: a flag, keycap, skin tone or ZWJ family is one emoji (plus its parts), not one per code point.
+  assert.equal(ttsCeilingUnits('🦒'), 2 + TTS_CEILING.emoji);
+  assert.equal(ttsCeilingUnits('🇺🇸'), 4 + TTS_CEILING.emoji + TTS_CEILING.emojiPart);
+  assert.equal(ttsCeilingUnits('👨‍👩‍👧‍👦'), 11 + TTS_CEILING.emoji + 3 * TTS_CEILING.emojiPart);
+  // Prose, its punctuation (curly quotes, dashes, ellipses, CJK punctuation), digits and CJK text keep spokenUnits.
+  for (const prose of ['Hello there.', 'It’s a “state-of-the-art” idea — really… (maybe); yes: no! ok?', 'Call 555-0100 on 2026-09-30.', '你好，世界。「こんにちは」', 'Ünïcödé façade, naïve café.']) {
+    assert.equal(ttsCeilingUnits(prose), spokenUnits(prose), prose);
+  }
+  assert.equal(ttsCeilingUnits(''), 0);
+  assert.equal(ttsCeilingUnits(null), 0);
+});
+
 // ── validation: before any reserve or upstream call ──
 test('validateTts: voice ids are an allow-list, text must be a non-empty string within the cap, extra fields are ignored', () => {
   const ok = validateTts({ voice: 'atelier', text: '  Hello\u0007 there.\n', instructions: 'shout', model: 'tts-1', speed: 4 });
-  assert.deepEqual({ ...ok, voice: ok.voice.voice }, { ok: true, voiceId: 'atelier', voice: 'marin', text: 'Hello there.', units: 12, preview: false });
+  assert.deepEqual({ ...ok, voice: ok.voice.voice }, { ok: true, voiceId: 'atelier', voice: 'marin', text: 'Hello there.', units: 12, ceiling: 12, preview: false });
   const prev = validateTts({ voice: 'sage', preview: true, text: 'ignored' });
   assert.equal(prev.text, PREVIEW_TEXT);
   assert.equal(prev.preview, true);
+  assert.equal(prev.ceiling, ttsCeilingUnits(PREVIEW_TEXT));
+  // The cap counts spoken units (as the client segments); the reservation's ceiling counts symbols read as words.
+  const sym = validateTts({ voice: 'atelier', text: '≤'.repeat(1_000) }, { tester: true });
+  assert.deepEqual([sym.ok, sym.units, sym.ceiling], [true, 1_000, 21_000]);
   for (const body of [null, [], 'x', 5, { voice: 'atelier' }, { voice: 'atelier', text: 5 }, { voice: 'atelier', text: ['a'] }, { voice: 'atelier', text: ' \n\t ' },
     { text: 'hi' }, { voice: 'device', text: 'hi' }, { voice: 'Atelier', text: 'hi' }, { voice: 'constructor', text: 'hi' }, { voice: '__proto__', text: 'hi' },
     { voice: 'toString', text: 'hi' }, { voice: 'marin', text: 'hi' }, { voice: 'atelier', preview: 'yes' }]) {
@@ -215,6 +263,46 @@ test('sseToAudio: errors past maxBytes, on an error event, on bad base64 and whe
   await assert.rejects(collect(streamOf([`data: {"type":"speech.audio.delta","audio":"%%%not-base64%%%"}\n\n`]).pipeThrough(sseToAudio())), /undecodable audio/);
   await assert.rejects(collect(streamOf([done()]).pipeThrough(sseToAudio())), /no audio/);
   await assert.rejects(collect(streamOf(['x'.repeat(2_500)]).pipeThrough(sseToAudio(1_000))), /oversized event/);
+});
+
+// MP3 frames. MPEG-2 Layer III, 24 kHz, 160 kbit/s (OpenAI's speech): 480 bytes, 576 samples = 24 ms. MPEG-1, 44.1 kHz,
+// 128 kbit/s: 417 bytes (418 padded), 1,152 samples. The payload is 0xFF-heavy so a lost sync would show.
+const frame2 = () => { const f = new Uint8Array(480).fill(0xff); f.set([0xff, 0xf3, 0xe4, 0xc4]); return f; };
+const frame1 = (pad) => { const f = new Uint8Array(pad ? 418 : 417).fill(0xff); f.set([0xff, 0xfb, pad ? 0x92 : 0x90, 0x64]); return f; };
+const join = (parts) => { const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0)); let at = 0; for (const p of parts) { out.set(p, at); at += p.length; } return out; };
+const id3 = (n) => { const t = new Uint8Array(10 + n).fill(0xff); t.set([0x49, 0x44, 0x33, 4, 0, 0, (n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f]); return t; };
+const clockOf = (bytes, sizes) => {
+  const c = mp3Clock();
+  for (let at = 0, k = 0; at < bytes.length; k++) { const n = sizes[k % sizes.length]; c.push(bytes.subarray(at, at + n)); at += n; }
+  return c.seconds();
+};
+const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, `${msg}: ${a} vs ${b}`);
+
+test('mp3Clock: seconds from the frame headers across any split, past an ID3 tag and junk; never below the bytes at 320 kbit/s', () => {
+  const two = join(Array.from({ length: 100 }, frame2)); // 2.4 s
+  for (const sizes of [[two.length], [1], [3, 7, 480, 1, 2], [4096], [479, 481]]) near(clockOf(two, sizes), 2.4, `MPEG-2 split ${sizes}`);
+  const one = join(Array.from({ length: 50 }, (_, i) => frame1(i % 3 === 0))); // 50 x 1152 / 44100
+  for (const sizes of [[one.length], [1], [5, 11]]) near(clockOf(one, sizes), 50 * 1152 / 44_100, `MPEG-1 split ${sizes}`);
+  // An ID3v2 tag (its body full of 0xFF) and junk before the first frame are skipped, not timed.
+  near(clockOf(join([id3(2_000), two]), [1, 2, 3]), 2.4, 'after an ID3 tag');
+  near(clockOf(join([Uint8Array.of(0, 0xff, 0x00, 0x12, 0xff), two]), [7]), 2.4, 'after junk');
+  // Bytes it can't parse still run the clock: at least bytes / 40,000 seconds.
+  near(clockOf(new Uint8Array(80_000), [1_000]), 2, 'not mp3');
+  near(clockOf(Uint8Array.from({ length: 5_000 }, (_, i) => (i * 7) % 256), [5_000]), 5_000 / 40_000, 'the MP3 fixture of these tests');
+});
+
+test('sseToAudio: past maxSeconds of mp3 (a tester’s reserved reading time) the stream errors; within it, every byte passes', async () => {
+  const frames = Array.from({ length: 250 }, frame2); // 6 s, sent 10 frames per delta
+  const deltas = [];
+  for (let i = 0; i < frames.length; i += 10) deltas.push(delta(join(frames.slice(i, i + 10))));
+  assert.deepEqual(await collect(streamOf([...deltas, done()]).pipeThrough(sseToAudio(TTS_LIMITS.maxAudioBytes, 6))), join(frames), 'exactly at the limit');
+  const got = [];
+  const cut = streamOf([...deltas, done()]).pipeThrough(sseToAudio(TTS_LIMITS.maxAudioBytes, 5)).getReader();
+  await assert.rejects((async () => { for (let r = await cut.read(); !r.done; r = await cut.read()) got.push(r.value); })(), /ran past the reading time/);
+  const played = got.reduce((n, c) => n + c.length, 0) / 480 * 0.024;
+  assert.ok(played <= 5 && played > 4.5, `${played} s passed before the cut`);
+  // The owner (no maxSeconds) is held only to maxAudioBytes.
+  assert.equal((await collect(streamOf([...deltas, done()]).pipeThrough(sseToAudio()))).length, 250 * 480);
 });
 
 // ── errors are mapped, never passed through ──
@@ -362,6 +450,113 @@ test('Gemini: audio longer than one request allows was made and billed, so it is
   assert.equal(settles[1].usage, null);
   assert.ok(logs.some((l) => /longer than one request allows/.test(l)));
   assert.ok(!logs.some((l) => /Hello there|好好/.test(l)), 'the text is never logged');
+});
+
+// A Gemini answer delivered in pieces of the given sizes (cycled).
+const piecewise = (text, sizes) => {
+  const all = enc.encode(text);
+  return new Response(new ReadableStream({
+    start(c) { for (let at = 0, k = 0; at < all.length; k++) { const n = sizes[k % sizes.length]; c.enqueue(all.slice(at, at + n)); at += n; } c.close(); },
+  }), { headers: { 'content-type': 'application/json' } });
+};
+const geminiAnswer = (parts, extra = {}) => JSON.stringify({ candidates: [{ content: { role: 'model', parts } }], ...extra });
+
+test('Gemini: the answer is decoded as it streams, whatever the split, escapes or key order; only the audio data is decoded', async () => {
+  const pcm = Uint8Array.from({ length: 4_801 }, (_, i) => (i * 31) % 256); // odd: the stray byte is dropped
+  const want = toWav(pcm, 'audio/L16;rate=24000');
+  const usageMetadata = { promptTokenCount: 12, candidatesTokenCount: 3, totalTokenCount: 15 };
+  const data = b64(pcm), url = data.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const shapes = {
+    plain: geminiAnswer([{ inlineData: { mimeType: 'audio/L16;rate=24000', data } }], { usageMetadata }),
+    'data before mimeType, usage first': JSON.stringify({ usageMetadata, candidates: [{ content: { parts: [{ inlineData: { data, mimeType: 'audio/L16;rate=24000' } }] } }] }),
+    'escaped slashes, spaces': geminiAnswer([{ inlineData: { mimeType: 'audio/L16;rate=24000', data } }], { usageMetadata }).replace(/\//g, '\\/').replace(/":/g, '" :  '),
+    'base64url, no padding, inline_data': geminiAnswer([{ inline_data: { mime_type: 'audio/L16;rate=24000', data: url } }], { usageMetadata }),
+    'text mentioning data, an empty data first, a later one ignored': geminiAnswer([
+      { text: 'a "data": "QUJD" \\"data\\": \\"x\\" {"inlineData": {"data": "QUJD"}}' },
+      { inlineData: { mimeType: 'audio/L16;rate=24000', data: '' } },
+      { inlineData: { mimeType: 'audio/L16;rate=24000', data } },
+      { inlineData: { mimeType: 'audio/L16;rate=16000', data: b64(new Uint8Array(900)) } },
+      { executableCode: { data: 'QUJD' } },
+    ], { usageMetadata }),
+  };
+  for (const [name, text] of Object.entries(shapes)) {
+    for (const sizes of [[1], [2, 3, 5], [7, 64, 1], [1_000_000]]) {
+      const settles = [];
+      const hooks = { tester: true, reserve: async () => ({ headers: {}, settle: async (r) => { settles.push(r); return null; } }) };
+      mockFetch([[GEMINI, () => piecewise(text, sizes)]]);
+      const r = await handleTts(ttsReq({ voice: 'sulafat', text: 'Hi.' }), KEYS, hooks);
+      assert.equal(r.status, 200, `${name} ${sizes}`);
+      assert.deepEqual(await bytesOf(r), want.wav, `${name} ${sizes}`);
+      assert.deepEqual(settles, [{ usage: usageMetadata, seconds: want.seconds }], `${name} ${sizes}`);
+    }
+  }
+  // A RIFF answer passes through as it came.
+  const riff = new Uint8Array(44 + 2_400);
+  riff.set(wavHeader(2_400, 24_000), 0);
+  mockFetch([[GEMINI, () => piecewise(geminiAnswer([{ inlineData: { mimeType: 'audio/wav', data: b64(riff) } }]), [9])]]);
+  assert.deepEqual(await bytesOf(await handleTts(ttsReq({ voice: 'sulafat', text: 'Hi.' }), KEYS)), riff);
+});
+
+test('Gemini: a truncated answer, bad base64 or audio past the cap never plays; an unparseable answer keeps the reservation', async () => {
+  const settles = [];
+  const hooks = { tester: true, reserve: async () => ({ headers: {}, settle: async (r) => { settles.push(r); return null; } }) };
+  const good = geminiAnswer([{ inlineData: { mimeType: 'audio/L16;rate=24000', data: b64(new Uint8Array(480)) } }]);
+  for (const body of [good.slice(0, -3), good.slice(0, 60), geminiAnswer([{ inlineData: { data: 'AAAA*AAA' } }]), geminiAnswer([{ inlineData: { data: 'AAAAA' } }]),
+    geminiAnswer([{ inlineData: { data: 'AA==AA' } }]), geminiAnswer([{ inlineData: { data: 'AA\\nAA' } }])]) {
+    settles.length = 0;
+    mockFetch([[GEMINI, () => piecewise(body, [5])]]);
+    const r = await handleTts(ttsReq({ voice: 'sulafat', text: 'Hi.' }), KEYS, hooks);
+    assert.equal(r.status, 502, body.slice(0, 60));
+    assert.deepEqual(settles, [null], 'the full reservation stands');
+  }
+  // Bad audio mid-answer: the rest is not read (the upstream is cancelled).
+  let cancelled = false, n = 0;
+  const parts = ['{"candidates":[{"content":{"parts":[{"inlineData":{"data":"AAAA', 'AA*A', 'AAAA'.repeat(1_000), '"}}]}}]}'];
+  mockFetch([[GEMINI, () => new Response(new ReadableStream({ pull(c) { if (n < parts.length) c.enqueue(enc.encode(parts[n++])); else c.close(); }, cancel() { cancelled = true; } }, { highWaterMark: 0 }))]]);
+  assert.equal((await handleTts(ttsReq({ voice: 'sulafat', text: 'Hi.' }), KEYS, hooks)).status, 502);
+  assert.equal(cancelled, true);
+  assert.equal(n, 2);
+});
+
+test('Gemini: a tester’s output is bounded by the reservation (hooks limits.outputTokens), never above the voice’s own bound', async () => {
+  const sent = [];
+  mockFetch([[GEMINI, (call) => { sent.push(call.json.generationConfig.maxOutputTokens); return reply(200, JSON.parse(geminiAnswer([{ inlineData: { mimeType: 'audio/L16;rate=24000', data: b64(new Uint8Array(480)) } }]))); }]]);
+  for (const outputTokens of [50, GEMINI_MAX_OUTPUT_TOKENS + 1_000, undefined]) {
+    const hooks = { tester: true, reserve: async () => ({ headers: {}, limits: { outputTokens }, settle: async () => null }) };
+    assert.equal((await handleTts(ttsReq({ voice: 'sulafat', text: 'Hi.' }), KEYS, hooks)).status, 200);
+  }
+  assert.deepEqual(sent, [50, GEMINI_MAX_OUTPUT_TOKENS, GEMINI_MAX_OUTPUT_TOKENS]);
+  assert.equal(geminiSpeechBody(TTS_VOICES.sulafat, 'x', 0).generationConfig.maxOutputTokens, GEMINI_MAX_OUTPUT_TOKENS);
+});
+
+test('Gemini: no network chunk of the answer is held once read (memory stays near one copy of the audio)', async () => {
+  const { setFlagsFromString } = await import('node:v8');
+  const { runInNewContext } = await import('node:vm');
+  setFlagsFromString('--expose-gc');
+  const gc = runInNewContext('gc');
+  const pcm = Uint8Array.from({ length: 960_000 }, (_, i) => (i * 7) % 256); // 20 s
+  const all = enc.encode(geminiAnswer([{ inlineData: { mimeType: 'audio/L16;rate=24000', data: b64(pcm) } }], { usageMetadata: { promptTokenCount: 5 } }));
+  const refs = [];
+  let at = 0, alive = -1;
+  const body = new ReadableStream({
+    async pull(c) {
+      if (at >= all.length) { // the whole answer has been read: are the chunks still reachable?
+        await new Promise((ok) => setTimeout(ok, 0));
+        gc();
+        alive = refs.filter((r) => r.deref()).length;
+        return c.close();
+      }
+      const chunk = all.slice(at, at += 64 * 1024);
+      refs.push(new WeakRef(chunk));
+      c.enqueue(chunk);
+    },
+  }, { highWaterMark: 0 });
+  mockFetch([[GEMINI, () => new Response(body, { headers: { 'content-type': 'application/json' } })]]);
+  const r = await handleTts(ttsReq({ voice: 'sulafat', text: 'Hello.' }), KEYS);
+  assert.equal(r.status, 200);
+  assert.deepEqual((await bytesOf(r)).subarray(44), pcm);
+  assert.ok(refs.length >= 15, `${refs.length} chunks`);
+  assert.ok(alive >= 0 && alive <= 2, `${alive} of ${refs.length} network chunks were still held when the answer ended`);
 });
 
 // ── Settings previews ──

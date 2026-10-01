@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { makeLedger, PROFILE } from './tester-env.mjs';
 import { chatWorstCase, chatActual, imageCost, veoCost, WEB_SEARCH_USD, VEO_CALL_RESERVE_CAP } from '../src/tester/prices.js';
 
-const { DEFAULTS, DAILY_UPLOADS, OVERRUN, dayKey, monthKey, resetsAt } = await import('../src/tester/ledger.js'); // after tester-env's module hook
+const { DEFAULTS, DAILY_UPLOADS, OVERRUN, REFUSED_TTL, dayKey, monthKey, resetsAt } = await import('../src/tester/ledger.js'); // after tester-env's module hook
 
 // The real Ledger class on an in-memory SQLite shim; `ledger.clock` is pinned so days and months are deterministic.
 const T0 = Date.parse('2026-10-15T12:00:00Z');
@@ -304,6 +304,48 @@ test('retention: a tester unused for 90 days is deleted with spend, sessions, jo
   assert.equal(L.ledger.ownsJob(p.sub, 'file:files/q'), false);
   assert.equal(L.shim.db.prepare('SELECT COUNT(*) AS n FROM spend WHERE sub = ?').get(p.sub).n, 0);
   assert.equal(L.shim.db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE sub = ?').get(p.sub).n, 0);
+});
+
+test('retention: the last refused sign-in (not a tester) is kept 7 days, then dropped on read and deleted by the alarm', async () => {
+  const L = setup({ open: false });
+  const stored = () => L.shim.db.prepare("SELECT v FROM config WHERE k = 'last_refused'").get();
+  assert.equal(REFUSED_TTL, 7 * 86_400_000);
+
+  // Read path: still shown just under 7 days, gone at 7 days, and deleted rather than hidden.
+  const p = PROFILE();
+  assert.equal(L.ledger.admit(p, null).status, 'paused');
+  L.later(REFUSED_TTL - 1);
+  assert.equal(L.ledger.roster().lastRefused.sub, p.sub);
+  await L.ledger.alarm();
+  assert.ok(stored(), 'the alarm keeps a record younger than 7 days');
+  L.later(1);
+  assert.equal(L.ledger.roster().lastRefused, null);
+  assert.equal(stored(), undefined, 'dropped on read');
+
+  // Alarm path: a record nobody reads is deleted 7 days after the attempt.
+  const q = PROFILE();
+  L.ledger.admit(q, null);
+  L.later(REFUSED_TTL);
+  await L.ledger.alarm();
+  assert.equal(stored(), undefined, 'deleted by the alarm');
+
+  // A newer refusal replaces the record and starts its own 7 days.
+  L.ledger.admit(p, null);
+  L.later(3 * 86_400_000);
+  L.ledger.admit(q, null);
+  L.later(5 * 86_400_000);
+  await L.ledger.alarm();
+  assert.equal(L.ledger.roster().lastRefused.sub, q.sub, 'q was refused 5 days ago');
+
+  // An undated or unreadable record is never shown and is deleted.
+  for (const v of ['{"sub":"x","name":"X","picture":""}', '{"sub":"x","at":"soon"}', 'not json', 'null']) {
+    L.shim.db.prepare("UPDATE config SET v = ? WHERE k = 'last_refused'").run(v);
+    if (!stored()) L.shim.db.prepare("INSERT INTO config (k, v) VALUES ('last_refused', ?)").run(v);
+    assert.equal(L.ledger.roster().lastRefused, null, v);
+    assert.equal(stored(), undefined, v);
+  }
+  // The rest of the config is untouched.
+  assert.equal(L.ledger.roster().config.paused, true);
 });
 
 test('setConfig validates every field and caps the pool at $1,000', () => {

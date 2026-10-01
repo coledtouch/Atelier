@@ -172,6 +172,29 @@ test('claudeChat tester mode: a stopped answer is charged what Claude already re
   assert.deepEqual(L.ledger.allowance(t.sub).day, { spent: 2 * partial(input) + 4 * worst, reserved: 0, limit: 1_000_000 });
 });
 
+test('claudeChat tester mode: a stream that errors after message_start is charged what Claude reported when that beats the reservation', async () => {
+  // The catch path of claudeChat (an upstream reset or an error event mid-answer), not the reader's cancel().
+  const { env, L } = makeEnv();
+  const t = await signIn(L, PROFILE());
+  const body = { model: 'anthropic:claude-sonnet-5-5', max_tokens: 2_000, messages: [{ role: 'user', content: 'hi' }] };
+  const worst = chatWorstCase({ model: 'anthropic:claude-sonnet-5-5', inputTokens: Math.ceil(Buffer.byteLength(JSON.stringify(body.messages)) / 3), maxTokens: 2_000 });
+  const u = (input) => ({ input_tokens: input, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 });
+  const partial = (input) => chatActual({ model: 'anthropic:claude-sonnet-5-5', usage: u(input) });
+  let input = 60_000;
+  while (partial(input) <= worst) input *= 2;
+  assert.ok(partial(input) < 4 * worst, 'test sizing: above the reservation, under the OVERRUN cap');
+  let sent = false;
+  globalThis.fetch = async () => new Response(new ReadableStream({ pull(c) {
+    if (!sent) { sent = true; c.enqueue(bytes(ev('message_start', { message: { id: 'm', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [], stop_reason: null, stop_sequence: null, usage: u(input) } }))); }
+    else c.error(new Error('connection reset'));
+  } }), { headers: { 'content-type': 'text/event-stream' } });
+  const r = await api(env, 'chat', { method: 'POST', body }, { cookie: t.token });
+  assert.equal(r.status, 200);
+  assert.match(await r.text(), /"error"/);
+  await new Promise((res) => setTimeout(res, 20));
+  assert.deepEqual(L.ledger.allowance(t.sub).day, { spent: partial(input), reserved: 0, limit: 1_000_000 }, 'not the smaller reservation');
+});
+
 test('claudeChat without a tester is unchanged: up to four pause_turn rounds and no usage callback', async () => {
   let n = 0;
   globalThis.fetch = async () => { n++; return claude({ input_tokens: 1, output_tokens: 1 }, { stop: n < 3 ? 'pause_turn' : 'end_turn' }); };

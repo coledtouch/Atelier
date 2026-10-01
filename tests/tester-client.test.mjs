@@ -11,8 +11,8 @@ import { veoCost as serverVeoCost, PRICES, TESTER_MODELS, TESTER_IMAGE_MODELS, T
 
 const ME = (over = {}) => ({
   sub: 'abc-123', name: 'Ada Lovelace', picture: 'https://media.licdn.com/dms/image/x.jpg', email: 'ada@example.com',
-  models: { chat: ['anthropic:claude-opus-5-5', 'gemini:gemini-3.8-flash'], image: ['openai:gpt-image-2.5-flare'], video: ['gemini:veo-3.1-lite-generate-preview'] },
-  features: { web: true, video: true, veo: true, helpers: true, profile: true },
+  models: { chat: ['anthropic:claude-opus-5-5', 'gemini:gemini-3.8-flash'], image: ['openai:gpt-image-2.5-flare'], video: ['gemini:veo-3.1-lite-generate-preview'], tts: ['atelier', 'cedar', 'sage'] },
+  features: { web: true, video: true, veo: true, helpers: true, profile: true, tts: true },
   allowance: { day: { spent: 150_000, reserved: 50_000, limit: 1_000_000 }, month: { spent: 2_000_000, reserved: 0, limit: 10_000_000 } },
   pool: { paused: false, spotsLeft: 12 }, ...over,
 });
@@ -42,12 +42,29 @@ test('normalizeMe keeps a clean tester record and rejects anything else', () => 
   const t = normalizeMe(ME({ models: { chat: ['anthropic:claude-opus-5-5', '<script>', 42], image: [], video: ['gemini:veo-3.1-lite-generate-preview'] }, picture: 'javascript:alert(1)' }));
   assert.deepEqual(t.models.chat, ['anthropic:claude-opus-5-5']);
   assert.equal(t.picture, '');
-  assert.deepEqual(t.features, { web: true, video: true, veo: true, helpers: true, profile: true });
+  assert.deepEqual(t.features, { web: true, video: true, veo: true, helpers: true, profile: true, tts: true });
   assert.equal(t.left, null);
   // A feature switched off on the server takes its models with it; missing flags default to on.
   const noVeo = normalizeMe(ME({ features: { veo: false } }));
   assert.deepEqual(noVeo.models.video, []);
   assert.equal(noVeo.features.web, true);
+  // Read aloud voices: bare ids pass, junk is dropped, tts off takes them away; they are never chat/image/video models.
+  assert.deepEqual(normalizeMe(ME()).models.tts, ['atelier', 'cedar', 'sage']);
+  assert.deepEqual(normalizeMe(ME({ models: { ...ME().models, tts: ['sulafat', '<b>', 7] } })).models.tts, ['sulafat']);
+  const noTts = normalizeMe(ME({ features: { tts: false } }));
+  assert.equal(noTts.features.tts, false);
+  assert.deepEqual(noTts.models.tts, []);
+  // A record cached by v52 (no tts fields at all, re-read at boot before /me answers) is "not listed yet", not "none":
+  // null lets the reader ask and the server's allow-list decide, instead of the device voice and a wrong "not on this
+  // account" toast. It round-trips through localStorage the same way.
+  const { chat, image, video } = ME().models, { tts: _f, ...v52features } = ME().features;
+  const v52 = normalizeMe(ME({ models: { chat, image, video }, features: v52features }));
+  assert.equal(v52.features.tts, true);
+  assert.equal(v52.models.tts, null);
+  assert.equal(normalizeMe(JSON.parse(JSON.stringify(v52))).models.tts, null);
+  assert.deepEqual(normalizeMe(ME({ models: { ...ME().models, tts: [] } })).models.tts, [], 'an empty list from /me stays empty');
+  assert.equal(normalizeMe(ME({ models: { ...ME().models, tts: 'atelier' } })).models.tts, null, 'not a list: unknown');
+  assert.ok(![...allowedIds(normalizeMe(ME()))].includes('atelier'));
   assert.deepEqual([...allowedIds(t)].sort(), ['anthropic:claude-opus-5-5', 'gemini:veo-3.1-lite-generate-preview']);
   assert.equal(allowedIds(null).size, 0);
   // The Ledger's allowance may carry the pool and the paused/preview flags.

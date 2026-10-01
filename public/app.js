@@ -5,10 +5,14 @@
 // Chat models. IDs prefixed anthropic: / openai: / gemini: go to those providers; bare IDs are NVIDIA build.
 // Lists are in preference order: "Auto" uses the first model whose provider has a key, and the rest
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js';
+// Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
+// with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=53';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=53';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=53';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=53';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=53';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=53';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -173,11 +177,13 @@ const DEFAULT_SETTINGS = {
   v: SETTINGS_V, passcode: '', name: '', about: '', theme: 'auto', temperature: 0.6,
   keys: { anthropic: '', openai: '', gemini: '' },
   models: { agent: '', ask: '', smart: '', reason: '', code: '', write: '', vision: '', watch: '', ideas: '', build: '', fast: '' },
+  readAloud: { voice: 'atelier', speed: 1 }, // Settings → Read aloud (public/readaloud.js); not opts.ask.voice, the "As me" chip
 };
 // Settings saved by an older build may point at retired models; reset those roles.
 function migrateSettings(saved) {
   if (!saved || typeof saved !== 'object' || Array.isArray(saved)) saved = {};
   if (typeof saved.passcode !== 'string') delete saved.passcode;
+  if ('readAloud' in saved) saved.readAloud = normalizeReadAloud(saved.readAloud); // a known voice and one of SPEEDS
   delete saved.apiKey; delete saved.keys; // device keys are no longer used — passcode only
   if (saved.v !== SETTINGS_V) { delete saved.models; saved.v = SETTINGS_V; }
   return saved;
@@ -877,6 +883,8 @@ const ICON = {
   chat: '<svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>',
   pen: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM13 7l4 4"/></svg>',
   speak: '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9zM17 9a4 4 0 0 1 0 6"/></svg>',
+  pause: '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>',
+  stop: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>',
   x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>',
   out: '<svg viewBox="0 0 24 24"><path d="M13 4h7v7M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
@@ -976,7 +984,7 @@ function paintEntry(li, e) {
     if (!text && e.pending && !reasoning) prose.innerHTML = e.steps?.some((st) => st.status === 'awaiting') ? '' : statusLine(e.status || (e.steps?.length ? 'Working' : e.kind === 'code' ? 'Thinking in code' : 'Composing'), e);
     else prose.innerHTML = md(text) + (e.pending ? '<span class="caret"></span>' : '');
     if (!e.pending) highlightIn(prose);
-    if (!e.pending && text) acts.innerHTML = btn('copy', ICON.copy, 'Copy') + btn('speak', ICON.speak, 'Read aloud') + btn('retry', ICON.retry, 'Retry') + btn('to-build', ICON.hammer, 'Build from this');
+    if (!e.pending && text) acts.innerHTML = btn('copy', ICON.copy, 'Copy') + readBtns(e) + btn('retry', ICON.retry, 'Retry') + btn('to-build', ICON.hammer, 'Build from this');
   }
 
   if (e.kind === 'image' || e.kind === 'video') {
@@ -1064,6 +1072,61 @@ function paintEntry(li, e) {
   if (e.pending) syncLoops(out);
 }
 const btn = (act, icon, label) => `<button class="mini" data-act="${act}">${icon}${label}</button>`;
+
+// ── Read aloud (public/readaloud.js): the Atelier voice through POST /api/tts, the device's own voice offline and as the
+// fallback. One read at a time; toggle()/preview() run straight from the tap (no await before them).
+// Who may ask for an AI voice at all: the owner with a passcode, or a tester with a session.
+const readSignedIn = () => Boolean(S.tester || S.settings.passcode);
+// AI voices this account may use (null = all, [] = device voice only), for the reader, Settings → Read aloud and the
+// button title alike: a tester's from /api/tester/me (null until a /me that lists them); the owner's need the passcode.
+// The server keeps its own allow-list either way.
+const readAllowed = () => (S.tester ? (S.tester.features?.tts === false ? [] : (S.tester.models?.tts ?? null)) : (S.settings.passcode ? null : []));
+const reader = createReader({
+  apiHeaders, toast, onResponse: noteAllowance, onState: repaintReadState,
+  getSettings: () => S.settings.readAloud,
+  isTester: () => Boolean(S.tester),
+  signedIn: readSignedIn,
+  allowedVoices: readAllowed,
+  // A tester refusal (allowance used up, access paused, …) in the allowance card's words; the device voice reads instead
+  // (a Settings preview just stops).
+  onRefusal: (err, o) => toast(`${errorTitle('budget', '', budgetOf(err))}${o?.preview ? '.' : ' — reading with the device voice.'}`, { error: true }),
+  // A tester's session ended (401): signed out as a chat would be, which stops the read and opens sign-in.
+  onSignedOut: () => testerSignedOut('expired'),
+});
+// What the idle Read aloud button says it reads with: the voice the reader would really use for this account.
+const readTitle = () => `Read aloud · ${voiceFor(S.settings.readAloud.voice, readAllowed()) === 'device' ? 'device voice' : 'AI voice'}`;
+function retitleReads() { for (const b of $$('.actions [data-act="speak"][data-read="idle"]', stream)) b.title = readTitle(); }
+// An answer's Read aloud button follows the reader: Read aloud → Preparing… (a tap cancels) → Pause ⇄ Resume, plus Stop.
+function readBtns(e) {
+  const st = reader.stateFor(e.id);
+  if (st === 'idle') return `<button class="mini" data-act="speak" data-read="idle" title="${readTitle()}">${ICON.speak}Read aloud</button>`;
+  const main = st === 'preparing'
+    ? '<button class="mini" data-act="speak" data-read="preparing" aria-busy="true" title="Tap to cancel"><span class="spin" aria-hidden="true"></span>Preparing…</button>'
+    : `<button class="mini" data-act="speak" data-read="${st}" aria-pressed="true">${st === 'playing' ? `${ICON.pause}Pause` : `${ICON.play}Resume`}</button>`;
+  return `${main}<button class="mini" data-act="speak-stop" aria-label="Stop reading" title="Stop reading">${ICON.stop}</button>`;
+}
+let previewing = null; // the voice whose Settings → Read aloud preview is on
+// reader onState: repaint just that answer's read buttons (keeping keyboard focus on them), or a Settings preview button.
+function repaintReadState(id, state) {
+  const on = state !== 'idle';
+  if (id.startsWith('preview:')) {
+    const v = id.slice('preview:'.length), b = $(`#readVoices [data-preview="${v}"]`);
+    previewing = on ? v : previewing === v ? null : previewing;
+    if (b) {
+      b.textContent = on ? 'Stop' : 'Preview'; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+      b.setAttribute('aria-label', on ? `Stop the ${b.dataset.label} preview` : `Preview ${b.dataset.label}`);
+    }
+    return;
+  }
+  const li = stream.querySelector(`.entry[data-id="${CSS.escape(id)}"]`), old = li && $('.actions [data-act="speak"]', li);
+  const e = old && S.thread?.entries.find((x) => x.id === id);
+  if (!e) return;
+  const acts = old.parentElement, had = acts.contains(document.activeElement) ? document.activeElement.dataset.act : '';
+  $('[data-act="speak-stop"]', acts)?.remove();
+  old.insertAdjacentHTML('afterend', readBtns(e));
+  old.remove();
+  if (had === 'speak' || had === 'speak-stop') ($(`[data-act="${had}"]`, acts) || $('[data-act="speak"]', acts)).focus({ preventScroll: true });
+}
 // Build previews run in a sandboxed frame. A generated app that calls focus() on load or on blur (games do, to grab the
 // arrow keys) keeps the keyboard even while a drawer makes #stage inert, so Escape, Tab and Ctrl+. never reach this page.
 // The guard lets a preview move focus only once the user is in it (clicked or tabbed in). Copy code / Download keep the raw html.
@@ -1950,10 +2013,12 @@ stream.addEventListener('click', async (ev) => {
   switch (act) {
     case 'copy':
       return copy(e.kind === 'ideas' ? e.ideas.map((d, i) => `${i + 1}. ${d.title} — ${d.pitch}`).join('\n') : stripThink(e.text));
-    case 'speak': return speak(stripThink(e.text), b);
+    case 'speak': return reader.toggle(e.id, stripThink(e.text), b, { title: e.prompt, album: S.thread?.title }); // inside the tap: no await before it
+    case 'speak-stop': return reader.stop();
     case 'retry':
       if (e.pending || e.canva) return;
       if (!navigator.onLine) return toast('You’re offline — try again once you’re connected', { error: true });
+      if (reader.stateFor(e.id) !== 'idle') reader.stop(); // the answer being read is about to be replaced
       Object.assign(e, { text: '', think: '', media: [], ideas: null, app: null, error: null, errorKind: null, cut: null, steps: null, enhanced: null, budget: null });
       if (e.params?.seed) delete e.params.seed;
       for (const key of libThumbs.keys()) if (key.includes(`:${e.id}:`)) libThumbs.delete(key); // new media, same entry id: drop stale Library thumbs/posters
@@ -2060,14 +2125,6 @@ function toast(msg, { error = false, ms, link } = {}) {
 function hideToast() { clearTimeout(toastT); $('#toast').classList.remove('show'); }
 // Hand the toast back to <body> when its dialog closes ('close' does not bubble — capture it).
 document.addEventListener('close', (ev) => { const t = $('#toast'); if (ev.target.contains?.(t)) document.body.append(t); }, true);
-function speak(text, b) {
-  if (!('speechSynthesis' in window)) return toast('Speech not supported here', { error: true });
-  if (speechSynthesis.speaking) { speechSynthesis.cancel(); return; }
-  const u = new SpeechSynthesisUtterance(text.replace(/[#*`>|_-]+/g, ' ').slice(0, 6000));
-  u.rate = 1.02;
-  speechSynthesis.speak(u);
-  toast('Reading aloud — tap again to stop');
-}
 function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
 // Downscale + JPEG-compress so inline base64 stays under NVIDIA's inline payload limit.
 async function shrinkDataUrl(src, maxW = 1024, maxH = 1024, maxBytes = 170_000) {
@@ -2228,13 +2285,16 @@ $('#options').addEventListener('click', (ev) => {
 
 // ───────────────────────── composer ─────────────────────────
 const input = $('#input');
-function autosize() {
-  const vh = window.visualViewport?.height || innerHeight; // iOS: the visual height shrinks with the keyboard, innerHeight doesn't
+function fitInput() { // syncViewport() re-runs this whenever the visible area changes
+  const vh = vp.vvh || innerHeight; // what is on screen (viewport.js): shrinks with the keyboard on iOS and Android
   input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, Math.max(88, vh * (innerWidth <= 640 ? 0.3 : 0.38))) + 'px';
-  syncDock(); setBusy();
+  let cap = Math.max(88, vh * (innerWidth <= 640 ? 0.3 : 0.38));
+  // Keyboard up: the dock sits on the visible bottom, so the box may only grow into what's left above the strip under it
+  // (a landscape phone shows ~150px): the caret stays on screen even if the mode tabs go off the top.
+  if (vp.open) cap = Math.min(cap, Math.max(44, vh - ($('#dock').getBoundingClientRect().bottom - input.getBoundingClientRect().bottom) - 12));
+  input.style.height = Math.min(input.scrollHeight, cap) + 'px';
 }
-window.visualViewport?.addEventListener('resize', autosize);
+function autosize() { fitInput(); syncDock(); setBusy(); }
 input.addEventListener('input', autosize);
 input.addEventListener('keydown', (ev) => {
   // Enter sends on every device (the phone keyboard shows a Send key); Shift+Enter adds a line.
@@ -2497,6 +2557,7 @@ if (!SR) $('#micBtn').hidden = true;
 let rec;
 $('#micBtn').onclick = () => {
   if (rec) { rec.stop(); return; }
+  reader.stop(); // the mic would hear Read aloud
   rec = new SR();
   rec.interimResults = true; rec.continuous = false; rec.lang = navigator.language || 'en-US';
   const base = input.value ? input.value + ' ' : '';
@@ -2510,42 +2571,83 @@ $('#micBtn').onclick = () => {
 
 // keep --dock-h in sync so content never hides under the dock
 function syncDock() { document.documentElement.style.setProperty('--dock-h', $('#dock').offsetHeight + 'px'); }
-// ── on-screen keyboard + visual viewport (shared; contract in §8) ──
+// ── on-screen keyboard + visual viewport (math in viewport.js; contract in §8) ──
 const vv = window.visualViewport;
 const EDITABLE = 'textarea, select, [contenteditable]:not([contenteditable="false"]), input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="button"], [type="submit"], [type="color"])';
-let vpW = innerWidth, vpFullH = innerHeight, vpKey = '', vpNudged = false;
-function syncViewport() {
+// The box position:fixed elements are laid out in, measured. iOS 26 shrinks innerHeight with the keyboard but not this box,
+// so `innerHeight - vv.height` read 0 there and the dock stayed under the keyboard. Same parent as the dock: same box.
+const vpProbe = document.createElement('div');
+vpProbe.setAttribute('aria-hidden', 'true');
+vpProbe.style.cssText = 'position:fixed;top:0;bottom:0;left:0;width:0;visibility:hidden;pointer-events:none';
+document.body.append(vpProbe);
+let vp = viewportState({ innerHeight, innerWidth }), vpKey = '', vpNudged = false, vpEv = 'load', vpN = 0, vpRaf = 0, vpUntil = 0, vpChain = 0, vpPoll = 0;
+// The Build preview iframe that has focus, when it got it (frameAge in viewport.js), and whether the composer's keyboard
+// was up then (handoff: viewport.js waits FRAME_HANDOFF_MS before taking a keyboard for the preview's).
+let vpFrame = null, vpFrameAt = 0, vpHandoff = false;
+function syncViewport(ev) {
   const root = document.documentElement, el = document.activeElement;
-  const zoomed = !!vv && vv.scale > 1.01;                                  // pinch-zoom: leave the layout alone
-  const vh = vv && !zoomed ? vv.height : innerHeight;
-  const editing = !zoomed && !!el?.matches?.(EDITABLE);
-  const kb = vv && editing ? Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop)) : 0;
-  const top = vv && editing ? Math.max(0, Math.round(vv.offsetTop)) : 0;
-  if (innerWidth !== vpW) { vpW = innerWidth; vpFullH = innerHeight; }     // rotation / window resize
-  const open = editing && (kb + top > 40 || (COARSE.matches && vpFullH - innerHeight > 150)); // iOS || Android
-  if (!open) vpFullH = innerHeight;
-  const tight = open && vh < 460;
-  const key = [Math.round(vh), kb, top, open, tight, vpFullH].join();
+  vpEv = typeof ev === 'string' ? ev : ev?.type || 'sync'; vpN++;
+  const frame = el?.tagName === 'IFRAME' ? el : null;
+  if (frame !== vpFrame) {
+    vpFrame = frame; vpFrameAt = performance.now(); vpHandoff = !!frame && vp.open;
+    if (vpHandoff) setTimeout(syncViewport, FRAME_HANDOFF_MS + 20, 'handoff'); // the hold ends: read again
+  }
+  vp = viewportState({
+    layoutH: vpProbe.offsetHeight || root.clientHeight, innerHeight, innerWidth, vvHeight: vv?.height, vvOffsetTop: vv?.offsetTop, vvScale: vv?.scale,
+    scrollY, editing: !!el?.matches?.(EDITABLE), frame: !!frame, frameAge: performance.now() - vpFrameAt, frameKb: vp.frameKb, handoff: vpHandoff,
+    inDock: !!el?.closest?.('#dock'), nudged: vpNudged, coarse: COARSE.matches, fullH: vp.fullH, fullW: vp.fullW, prev: vp,
+  });
+  // fullW: a width-only resize (desktop window, split-screen, a foldable) re-fits the composer text too
+  const key = [vp.vvh, vp.kb, vp.top, vp.open, vp.tight, vp.frameKb, vp.fullH, vp.fullW].join();
   if (key !== vpKey) {
     vpKey = key;
-    root.style.setProperty('--vvh', Math.round(vh) + 'px');
-    root.style.setProperty('--kb', (open ? kb : 0) + 'px');
-    root.style.setProperty('--vv-top', (open ? top : 0) + 'px');
-    root.style.setProperty('--full-h', vpFullH + 'px');
-    root.classList.toggle('kb-open', open);
-    root.classList.toggle('kb-tight', tight);
+    root.style.setProperty('--vvh', vp.vvh + 'px');
+    root.style.setProperty('--kb', vp.kb + 'px');
+    root.style.setProperty('--vv-top', vp.top + 'px');
+    root.style.setProperty('--full-h', vp.fullH + 'px');
+    root.classList.toggle('kb-open', vp.open);
+    root.classList.toggle('kb-tight', vp.tight);
+    root.classList.toggle('kb-frame', vp.frameKb);
+    if (input.value) fitInput();
   }
-  // iOS scrolls the page to reveal a focused composer. The dock is lifted instead, so undo that scroll
-  // (body is overflow:hidden, so scrollY is always 0 on desktop and Android).
-  if (open && !vpNudged && el.closest('#dock') && scrollY > 0) { vpNudged = true; scrollTo(0, 0); }
-  else if (!open && scrollY > 0) scrollTo(0, 0);
+  // When and how often: viewport.js. vpSettle(0) re-reads the result without extending the loop, so a scroll iOS refuses
+  // can't keep it spinning.
+  if (vp.resetScroll) { if (vp.open) vpNudged = true; scrollTo(0, 0); vpSettle(0); }
+  // Home Screen apps can miss visualViewport events entirely: re-read slowly while typing on a touch screen.
+  const poll = vp.typing && COARSE.matches;
+  if (poll !== !!vpPoll) vpPoll = poll ? setInterval(syncViewport, 700, 'poll') : (clearInterval(vpPoll), 0);
+  kbDebug?.render();
 }
-vv?.addEventListener('resize', syncViewport);
-vv?.addEventListener('scroll', syncViewport);
+// Follow the keyboard animation: WebKit often reports the final visual viewport only after it, sometimes with no event.
+// Every frame for ~600ms, plus a fixed chain of re-reads that a throttled frame or a background tab can't skip.
+const VP_REREAD = [50, 150, 300, 600, 1000];
+function vpSettle(ms = 600) {
+  vpUntil = Math.max(vpUntil, performance.now() + ms);
+  if (!vpRaf) vpRaf = requestAnimationFrame(function tick() { syncViewport('raf'); vpRaf = performance.now() < vpUntil ? requestAnimationFrame(tick) : 0; });
+  if (!vpChain) { let i = 0; const step = () => { syncViewport('reread'); vpChain = ++i < VP_REREAD.length ? setTimeout(step, VP_REREAD[i] - VP_REREAD[i - 1]) : 0; }; vpChain = setTimeout(step, VP_REREAD[0]); }
+}
+const vpEvent = (ev) => { syncViewport(ev); vpSettle(); };
+vv?.addEventListener('resize', vpEvent);
+vv?.addEventListener('scroll', vpEvent);
 addEventListener('resize', syncViewport);
-document.addEventListener('focusin', () => { vpNudged = false; syncViewport(); });
-document.addEventListener('focusout', () => requestAnimationFrame(syncViewport));
-syncViewport();
+document.addEventListener('focusin', (ev) => { vpNudged = false; vpEvent(ev); });
+document.addEventListener('focusout', () => vpSettle());
+addEventListener('blur', () => setTimeout(vpEvent, 0, 'blur')); // focus went into a Build preview frame (no focusin here)…
+addEventListener('focus', vpEvent);                              // …and came back
+document.addEventListener('compositionend', () => vpSettle(0));  // an IME candidate bar can resize the keyboard silently
+// ?kbdebug=1 (or the owner's Settings → Keyboard readout): live keyboard numbers in this tab. ?kbdebug=0 turns it off.
+// Read here, before boot() strips the query string; nothing renders unless asked for.
+const KB_DEBUG = 'atelier.kbdebug';
+let kbDebug = null;
+function setKbDebug(on) {
+  try { on ? sessionStorage.setItem(KB_DEBUG, '1') : sessionStorage.removeItem(KB_DEBUG); } catch {}
+  kbDebug?.remove();
+  kbDebug = on ? createKbDebug({ win: window, probe: vpProbe, dock: $('#dock'), state: () => ({ s: vp, ev: vpEv, n: vpN }) }) : null;
+  $('#kbDebugBtn')?.setAttribute('aria-pressed', String(on));
+}
+{ let stored = null; try { stored = sessionStorage.getItem(KB_DEBUG); } catch {} setKbDebug(kbDebugFlag(location.search, stored)); }
+$('#kbDebugBtn')?.addEventListener('click', () => setKbDebug(!kbDebug));
+syncViewport('load');
 new ResizeObserver(syncDock).observe($('#dock'));
 new ResizeObserver(() => moveInk()).observe(modesNav);
 // Keep the phone keyboard up while tapping composer controls (tabs, chips, thumbnail ×).
@@ -2658,6 +2760,7 @@ $('#threadList').addEventListener('click', async (ev) => {
   if (!li) return;
   persist(true);
   const t = liveThreads.get(li.dataset.id) || recoverThread(await DB.get(li.dataset.id));
+  if (t && t.id !== S.thread?.id) reader.stop(); // Read aloud belongs to the thread on screen
   if (t) { S.thread = t; renderThread(); closeDrawers(); renderOptions(); requestAnimationFrame(() => scrollDown(true, true)); LS.set('lastThread', t.id); }
 });
 
@@ -3186,6 +3289,7 @@ function openSettings() {
   f.passcode.value = s.passcode;
   f.temperature.value = s.temperature; $('#tempVal').textContent = s.temperature;
   $$('input[name=theme]', f).forEach((r) => (r.checked = r.value === s.theme));
+  renderReadAloud();
   $('#modelFields').innerHTML = MODEL_ROLES.map(([k, l]) => {
     const tint = { code: 'code', vision: 'image', watch: 'video', ideas: 'ideas', build: 'build' }[k] || 'ask';
     return `<label class="field" style="--accent:var(--c-${tint})"><span><i></i>${l}</span><input name="m_${k}" list="modelList" value="${esc(s.models[k] || '')}" placeholder="Auto · ${esc(modelLabel(modelFor(k)))}" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" enterkeyhint="done" /></label>`;
@@ -3209,6 +3313,36 @@ function openSettings() {
 }
 $('#settingsBtn').onclick = openSettings;
 $('#settingsClose').onclick = () => $('#settings').close('cancel');
+// Settings → General → Read aloud: voice (each with a Preview), speed, and what the AI voice means. Saved on change.
+function renderReadAloud() {
+  // The voices the reader can use here (readAllowed): with no passcode and no tester session, only the device voice.
+  const ra = S.settings.readAloud, allowed = readAllowed(), choices = voiceChoices(allowed);
+  // A voice this account can't use reads with the first one it can (as the reader does): show that one as chosen.
+  const chosen = voiceFor(ra.voice, allowed);
+  $('#readVoices').innerHTML = choices.map((v) => {
+    const on = reader.stateFor(`preview:${v.id}`) !== 'idle';
+    return `<div class="ra-voice"><label><input type="radio" name="readVoice" value="${esc(v.id)}"${v.id === chosen ? ' checked' : ''} /><span><b>${esc(v.label)}</b> <small>— ${esc(v.hint)}</small></span></label>`
+      + `<button type="button" class="chip${on ? ' on' : ''}" data-preview="${esc(v.id)}" data-label="${esc(v.label)}" aria-pressed="${on}" aria-label="${on ? `Stop the ${esc(v.label)} preview` : `Preview ${esc(v.label)}`}">${on ? 'Stop' : 'Preview'}</button></div>`;
+  }).join('');
+  $('#readSpeed').innerHTML = SPEEDS.map((x) => `<button type="button" class="chip${x === ra.speed ? ' on' : ''}" data-speed="${x}" aria-pressed="${x === ra.speed}">${x}×</button>`).join('');
+  // No AI voice on offer: say why (and what reads) instead of the AI-voice caption.
+  $('#readCaption').textContent = choices.some((v) => v.provider !== 'device') ? AI_CAPTION
+    : readSignedIn() ? 'The AI voices aren’t part of this account, so Read aloud uses your device’s own voice.'
+      : 'Add your studio passcode under Access for the AI voices. Until then, Read aloud uses your device’s own voice.';
+}
+$('#readVoices').addEventListener('change', (ev) => {
+  if (ev.target.name !== 'readVoice') return;
+  S.settings.readAloud.voice = ev.target.value; saveSettings(); retitleReads();
+});
+$('#readVoices').addEventListener('click', (ev) => { const b = ev.target.closest('[data-preview]'); if (b) reader.preview(b.dataset.preview); }); // inside the tap
+$('#readSpeed').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-speed]');
+  if (!b) return;
+  const x = Number(b.dataset.speed);
+  S.settings.readAloud.speed = x; saveSettings(); reader.setSpeed(x);
+  $$('[data-speed]', $('#readSpeed')).forEach((c) => { const on = c === b; c.classList.toggle('on', on); c.setAttribute('aria-pressed', String(on)); });
+});
+$('#settings').addEventListener('close', () => { if (previewing) reader.stop(); }); // a preview ends with the sheet
 // A focused field in an open dialog stays visible as the on-screen keyboard resizes the viewport.
 vv?.addEventListener('resize', () => { const f = document.activeElement; if (f?.matches?.('input:not([type=range], [type=radio], [type=checkbox]), textarea') && f.closest('dialog[open]')) requestAnimationFrame(() => f.scrollIntoView({ block: 'nearest' })); });
 $('#settingsForm').temperature.oninput = (ev) => { $('#tempVal').textContent = ev.target.value; };
@@ -3232,6 +3366,7 @@ $('#settingsForm').addEventListener('submit', (ev) => {
   MODEL_ROLES.forEach(([k]) => { s.models[k] = f['m_' + k].value.trim().replace(/^(anthropic|openai|gemini|zai|deepseek|meta):/i, (p) => p.toLowerCase()); });
   saveSettings(); syncRole(); applyTheme(); renderOptions(); renderWelcome(); checkKey(); loadTools(); pullMe();
   syncClip(); // the Video model pin decides clip vs frames
+  retitleReads(); // a passcode added or cleared changes which voice Read aloud uses
   if (lim) testersPost('config', lim.body, null).then((ok) => { if (ok) { toast('Saved · tester limits updated'); loadTesters(); } });
   else toast('Saved');
   if (sub) tpAddPreview(sub, null);
@@ -3313,6 +3448,7 @@ $('#wipeBtn').onclick = async () => {
   if (!confirm('Clear Atelier threads, media, profile and saved sign-in on this device? Export your threads first. This cannot be undone. Your synced profile and connected accounts on the server will remain.')) return;
   try {
     clearTimeout(persistTimer); clearTimeout(meTimer);
+    await reader.clearCache(); // Read aloud clips (Cache Storage 'atelier-tts'); its localStorage keys go with atelier.* below
     if (S.tester) await fetch('/api/li/logout', { method: 'POST' }).catch(() => {}); // "saved sign-in" includes the tester session
     await DB.clear(); await DB.kvClear();
     // Prevent the legacy migration from restoring erased conversations on reload.
@@ -3619,6 +3755,7 @@ function setTester(raw) {
     // A tester's name never outlives their session: the next person on this device (or nobody) starts without it.
     if (prev && !S.settings.passcode && S.settings.name) { S.settings.name = ''; saveSettings(); renderWelcome(); }
     if (t) LS.set('outReason', '');
+    reader.clearCache(); // sign-out or another account: no Read aloud clip of theirs stays on this device
     deadProviders.clear(); ME = loadMe(); setSync('');
     if (!$('#youDrawer').hidden) renderYou();
     if ($('[data-settings="connections"]').classList.contains('on')) selectSettings('general');
@@ -3626,6 +3763,8 @@ function setTester(raw) {
   syncRole(); renderAllowance(); updateKeyState(null);
   if (!$('#options').contains(document.activeElement)) renderOptions(); // never rebuild a select the user has open
   if ($('#settings').open && t) renderTesterAccess();
+  if ($('#settings').open && !$('#readVoices').contains(document.activeElement)) renderReadAloud(); // the voices this account may use
+  retitleReads();
 }
 // GET /api/tester/me → 'ok' | 'none' (no tester session) | 'error' (offline or server trouble: keep what we had).
 async function loadTester() {
@@ -4187,6 +4326,7 @@ document.addEventListener('keydown', (ev) => {
 
 function startFresh() {
   persist(true);
+  reader.stop();
   S.thread = null;
   $('#activityStatus').textContent = '';
   renderThread();
