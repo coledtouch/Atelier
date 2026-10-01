@@ -545,7 +545,7 @@ test('video chat: every video_file part is priced (a repeated clip too), and a r
   const { L, sub, call } = await tester();
   L.ledger.addJob(sub, 'file:files/clip1', 'file');
   mockFetch([
-    [/^GET .*\/v1beta\/files\/clip1$/, () => reply(200, { name: 'files/clip1', videoMetadata: { videoDuration: '30s' } })],
+    [/^GET .*\/v1beta\/files\/clip1$/, () => reply(200, { name: 'files/clip1', state: 'ACTIVE', videoMetadata: { videoDuration: '30s' } })],
     [/:streamGenerateContent\?alt=sse$/, () => sseOf(['data: {"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}\r\n\r\n'])],
   ]);
   const part = { type: 'video_file', video_file: { file_uri: VIDEO_URI, mime_type: 'video/mp4' } };
@@ -568,7 +568,7 @@ test('video chat: a stream that breaks after a usage chunk keeps the full reserv
   L.ledger.addJob(sub, 'file:files/clip1', 'file');
   const enc = new TextEncoder();
   mockFetch([
-    [/^GET .*\/v1beta\/files\/clip1$/, () => reply(200, { name: 'files/clip1', videoMetadata: { videoDuration: '12.4s' } })],
+    [/^GET .*\/v1beta\/files\/clip1$/, () => reply(200, { name: 'files/clip1', state: 'ACTIVE', videoMetadata: { videoDuration: '12.4s' } })],
     [/:streamGenerateContent\?alt=sse$/, () => new Response(new ReadableStream({
       start(c) { c.enqueue(enc.encode(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: 'A dog' }] } }], usageMetadata: { promptTokenCount: 3_500, candidatesTokenCount: 5 } })}\r\n\r\n`)); },
       pull(c) { c.error(new TypeError('connection reset')); },
@@ -589,7 +589,7 @@ test('video chat: the clip must be the tester’s own; it is priced from its len
   const usageMetadata = { promptTokenCount: 4_500, candidatesTokenCount: 300, thoughtsTokenCount: 200, totalTokenCount: 5_000 };
   const gem = (o) => `data: ${JSON.stringify(o)}\r\n\r\n`;
   mockFetch([
-    [/^GET .*\/v1beta\/files\/clip1$/, () => reply(200, { name: 'files/clip1', videoMetadata: { videoDuration: '12.4s' } })],
+    [/^GET .*\/v1beta\/files\/clip1$/, () => reply(200, { name: 'files/clip1', state: 'ACTIVE', videoMetadata: { videoDuration: '12.4s' } })],
     [/:streamGenerateContent\?alt=sse$/, () => sseOf([
       gem({ candidates: [{ content: { parts: [{ text: 'A dog runs.' }] } }], usageMetadata: { promptTokenCount: 4_500 } }),
       gem({ candidates: [{ content: { parts: [{ text: '' }] }, finishReason: 'STOP' }], usageMetadata }),
@@ -611,22 +611,33 @@ test('video chat: the clip must be the tester’s own; it is priced from its len
   assert.deepEqual(spent(L, sub), { spent: chatActual({ model: 'gemini:gemini-3.8-flash', usage: usageMetadata }), reserved: 0, limit: 1_000_000 });
 });
 
-test('a clip over 3 minutes is refused; an unreadable length is priced at 180 s', async () => {
+test('a clip over 3 minutes is refused; a clip whose length is unknown or still processing is refused, not guessed', async () => {
   const { L, sub, call } = await tester();
   L.ledger.addJob(sub, 'file:files/clip1', 'file');
-  let meta = { videoDuration: '181s' };
+  let file = { state: 'ACTIVE', videoMetadata: { videoDuration: '181s' } };
   mockFetch([
-    [/^GET .*\/v1beta\/files\/clip1$/, () => (meta ? reply(200, { videoMetadata: meta }) : reply(500, {}))],
+    [/^GET .*\/v1beta\/files\/clip1$/, () => (file ? reply(200, file) : reply(500, {}))],
     [/:streamGenerateContent/, () => sseOf(['data: {"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}\r\n\r\n'])],
   ]);
   const messages = [{ role: 'user', content: [{ type: 'video_file', video_file: { file_uri: VIDEO_URI, mime_type: 'video/mp4' } }, { type: 'text', text: 'hi' }] }];
-  let r = await call('chat', post({ model: 'gemini:gemini-3.8-flash', max_tokens: 2_000, messages }));
+  const send = () => call('chat', post({ model: 'gemini:gemini-3.8-flash', max_tokens: 2_000, messages }));
+  let r = await send();
   assert.equal(r.status, 413);
-  meta = null;
-  r = await call('chat', post({ model: 'gemini:gemini-3.8-flash', max_tokens: 2_000, messages }));
-  assert.equal(allowanceOf(r).dayLeft, 1_000_000 - chatWorstCase({ model: 'gemini:gemini-3.8-flash', inputTokens: textTokens(messages), maxTokens: 2_000, videoSeconds: 180 }));
+  // Unknown length: the file GET fails, Gemini is still processing, the record has no videoMetadata, or the duration is 0 s.
+  for (const f of [null, { state: 'PROCESSING' }, { state: 'PROCESSING', videoMetadata: { videoDuration: '30s' } }, { state: 'ACTIVE' }, { state: 'ACTIVE', videoMetadata: { videoDuration: '0s' } }]) {
+    file = f;
+    r = await send();
+    assert.equal(r.status, 409, JSON.stringify(f));
+    assert.equal(await codeOf(r), 'tester_video_not_ready');
+  }
+  assert.equal(upstream.calls.filter((c) => /:streamGenerateContent/.test(c.url)).length, 0, 'never sent to Gemini');
+  assert.deepEqual(spent(L, sub), { spent: 0, reserved: 0, limit: 1_000_000 }, 'nothing reserved or charged');
+  // Ready with a readable length: priced from that length.
+  file = { state: 'ACTIVE', videoMetadata: { videoDuration: '42.2s' } };
+  r = await send();
+  assert.equal(r.status, 200);
+  assert.equal(allowanceOf(r).dayLeft, 1_000_000 - chatWorstCase({ model: 'gemini:gemini-3.8-flash', inputTokens: textTokens(messages), maxTokens: 2_000, videoSeconds: 43 }));
   await r.text();
-  assert.equal(spent(L, sub).reserved, 0, 'no usage: settled at the full reservation');
 });
 
 // ── me + profile ──
