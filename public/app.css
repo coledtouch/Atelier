@@ -114,6 +114,14 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   -webkit-app-region: drag;
 }
 .top > * { -webkit-app-region: no-drag; }
+/* Installed app with the title bar hidden (window-controls-overlay): the window's drag region ignores z-index, the scrim and
+   inert, so anything drawn over the header (the Threads drawer's ×, the viewer bar, a dialog's head) would drag the window
+   instead of taking the click. While an overlay is up, the header stops being a drag handle. */
+body.overlay-open .top, body:has(dialog[open]) .top { -webkit-app-region: no-drag; app-region: no-drag; }
+/* …and keep the header's own controls clear of the Windows/Linux caption buttons drawn over its right end. */
+@media (display-mode: window-controls-overlay) {
+  .top { padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 12px); }
+}
 .brand { display: flex; align-items: center; gap: 10px; font-size: 26px; letter-spacing: -0.01em; }
 .brand-mark { /* the logo alone is the header mark: no wordmark next to it */
   width: 40px; height: 40px; border-radius: 11px; flex: none;

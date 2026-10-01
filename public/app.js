@@ -1047,7 +1047,7 @@ function paintEntry(li, e) {
           <span class="grow"></span>
           <button class="mini" data-act="app-refine" style="color:var(--accent)">${ICON.pen}Refine</button>
         </div></div>`;
-      $('iframe', out).srcdoc = e.app.html;
+      $('iframe', out).srcdoc = guardFocus(e.app.html);
       $('.appcode code', out).textContent = e.app.html;
       acts.innerHTML = btn('retry', ICON.retry, 'Rebuild');
     } else if (!e.error && e.text) {
@@ -1064,6 +1064,15 @@ function paintEntry(li, e) {
   if (e.pending) syncLoops(out);
 }
 const btn = (act, icon, label) => `<button class="mini" data-act="${act}">${icon}${label}</button>`;
+// Build previews run in a sandboxed frame. A generated app that calls focus() on load or on blur (games do, to grab the
+// arrow keys) keeps the keyboard even while a drawer makes #stage inert, so Escape, Tab and Ctrl+. never reach this page.
+// The guard lets a preview move focus only once the user is in it (clicked or tabbed in). Copy code / Download keep the raw html.
+function guardFocus(html) {
+  const guard = '<script>(()=>{const ok=()=>document.hasFocus(),h=HTMLElement.prototype.focus,s=SVGElement.prototype.focus,w=window.focus;HTMLElement.prototype.focus=function(...a){if(ok())return h.apply(this,a)};SVGElement.prototype.focus=function(...a){if(ok())return s.apply(this,a)};window.focus=function(){if(ok())return w.call(window)}})()<\/script>';
+  const m = /<head(\s[^>]*)?>/i.exec(html) || /^\s*<!doctype[^>]*>/i.exec(html);
+  const at = m ? m.index + m[0].length : 0;
+  return html.slice(0, at) + guard + html.slice(at);
+}
 // The ONE error card: serif title by kind, raw detail in mono, recovery buttons inside the card.
 function errorBox(e) {
   // Only known kinds: errorKind is persisted and can arrive from an imported backup (never trust it into markup).
@@ -3149,7 +3158,7 @@ function openViewer({ title, img, video, poster, frames, html, full, dl, more })
     const f = document.createElement('iframe');
     f.title = title || 'App preview';
     f.sandbox = 'allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock allow-downloads';
-    f.srcdoc = html;
+    f.srcdoc = guardFocus(html);
     body.append(f);
   }
   const fromShot = (a) => more && stream.querySelector(`.entry[data-id="${more.id}"] [data-act="${a}"][data-k="${more.k}"]`);
