@@ -153,12 +153,23 @@ test('claudeChat tester mode: a stopped answer is charged what Claude already re
   await r.body.cancel();
   await new Promise((res) => setTimeout(res, 20));
   assert.deepEqual(L.ledger.allowance(t.sub).day, { spent: partial(input), reserved: 0, limit: 1_000_000 }, 'charged what Claude reported, not the smaller reservation');
+  // message_delta may carry null counters; they must not erase message_start's input count.
+  const before = L.ledger.allowance(t.sub).day.spent;
+  globalThis.fetch = async () => new Response(new ReadableStream({ start(c) {
+    c.enqueue(bytes(ev('message_start', { message: { id: 'm', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: input, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } })));
+    c.enqueue(bytes(ev('message_delta', { delta: { stop_reason: null, stop_sequence: null }, usage: { output_tokens: 1, input_tokens: null, cache_creation_input_tokens: null, cache_read_input_tokens: null } })));
+  } }), { headers: { 'content-type': 'text/event-stream' } });
+  r = await api(env, 'chat', { method: 'POST', body }, { cookie: t.token });
+  await new Promise((res) => setTimeout(res, 20)); // both events handled; neither emits text, so don't read
+  await r.body.cancel();
+  await new Promise((res) => setTimeout(res, 20));
+  assert.equal(L.ledger.allowance(t.sub).day.spent - before, partial(input), 'nulls in message_delta keep message_start’s counts');
   // A huge reported input is still capped at OVERRUN x the reservation.
   globalThis.fetch = start(50_000_000);
   r = await api(env, 'chat', { method: 'POST', body }, { cookie: t.token });
   await r.body.cancel();
   await new Promise((res) => setTimeout(res, 20));
-  assert.deepEqual(L.ledger.allowance(t.sub).day, { spent: partial(input) + 4 * worst, reserved: 0, limit: 1_000_000 });
+  assert.deepEqual(L.ledger.allowance(t.sub).day, { spent: 2 * partial(input) + 4 * worst, reserved: 0, limit: 1_000_000 });
 });
 
 test('claudeChat without a tester is unchanged: up to four pause_turn rounds and no usage callback', async () => {

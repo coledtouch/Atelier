@@ -205,6 +205,12 @@ test('privacy page and tester welcome name every provider Auto or a fallback can
   assert.doesNotMatch(app, /— Claude, GPT and Gemini for answers, code, ideas and apps/);
 });
 
+test('the clip-not-ready refusal gets its own budget-card title', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /tester_video_not_ready: 'video'/);
+  assert.match(app, /video: 'This clip isn’t ready yet'/);
+});
+
 test('tester client guards: a per-call refusal moves down the chain, Auto demotes the tightest models, a name ends with its session', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /const callCap = err\.code === 'tester_budget' && err\.scope === 'call';\s*if \(isTesterCode\(err\.code\) && !callCap\) throw err;/);

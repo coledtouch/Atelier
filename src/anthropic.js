@@ -133,7 +133,10 @@ export async function claudeChat(body, apiKey, workspaceId, tester = null) {
       let toolIndex = -1;
       const handle = (ev) => {
         if (ev.type === 'message_start' && ev.message?.usage) partial = { ...ev.message.usage };
-        else if (ev.type === 'message_delta' && ev.usage) partial = { ...partial, ...ev.usage };
+        else if (ev.type === 'message_delta' && ev.usage) {
+          partial = { ...partial };
+          for (const [k, v] of Object.entries(ev.usage)) if (v != null) partial[k] = v; // a null counter keeps the earlier count
+        }
         if (ev.type === 'content_block_start' && ev.content_block.type === 'server_tool_use') {
           delta({ status: 'Searching the web' });
         } else if (ev.type === 'content_block_start' && ev.content_block.type === 'tool_use') {

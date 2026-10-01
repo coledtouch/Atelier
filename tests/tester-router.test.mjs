@@ -632,6 +632,22 @@ test('a clip over 3 minutes is refused; a clip whose length is unknown or still 
   }
   assert.equal(upstream.calls.filter((c) => /:streamGenerateContent/.test(c.url)).length, 0, 'never sent to Gemini');
   assert.deepEqual(spent(L, sub), { spent: 0, reserved: 0, limit: 1_000_000 }, 'nothing reserved or charged');
+  // A clip Gemini no longer has, or one it failed to process, is gone (the app re-uploads it or sends frames).
+  for (const gone of [reply(404, { error: { code: 404, message: 'File files/clip1 not found.' } }),
+    reply(403, { error: { code: 403, message: 'You do not have permission to access the File clip1 or it may not exist.' } }),
+    reply(200, { state: 'FAILED', error: { message: 'bad codec' } })]) {
+    mockFetch([[/^GET .*\/v1beta\/files\/clip1$/, () => gone.clone()]]);
+    r = await send();
+    assert.equal(r.status, 409);
+    const j = await r.json();
+    assert.equal(j.code, 'video_file_gone');
+    assert.match(j.error, /isn’t available any more/, 'the app’s re-upload recovery keys on this text');
+  }
+  assert.deepEqual(spent(L, sub), { spent: 0, reserved: 0, limit: 1_000_000 }, 'still nothing reserved or charged');
+  mockFetch([
+    [/^GET .*\/v1beta\/files\/clip1$/, () => (file ? reply(200, file) : reply(500, {}))],
+    [/:streamGenerateContent/, () => sseOf(['data: {"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}\r\n\r\n'])],
+  ]);
   // Ready with a readable length: priced from that length.
   file = { state: 'ACTIVE', videoMetadata: { videoDuration: '42.2s' } };
   r = await send();
