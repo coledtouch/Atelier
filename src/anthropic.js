@@ -95,7 +95,8 @@ const errorResponse = (err) => new Response(JSON.stringify({ error: err.error?.e
 
 // workspaceId: needed only for org-level keys that aren't scoped to a workspace.
 // tester (LinkedIn testers only): {maxTokens, webUses, fallbacks, onUsage}. One round only (no pause_turn continuation);
-// onUsage(list of final.usage) runs once when the answer completes, onUsage(null) when it fails or is cancelled.
+// onUsage(list of final.usage, true) runs once when the answer completes. When it fails or is cancelled,
+// onUsage(list, false) reports what Claude had already counted (message_start / message_delta usage), or null.
 export async function claudeChat(body, apiKey, workspaceId, tester = null) {
   const client = new Anthropic({
     apiKey,
@@ -104,8 +105,9 @@ export async function claudeChat(body, apiKey, workspaceId, tester = null) {
   });
   let params = buildParams(body, tester);
   const rounds = tester ? 1 : 4, usage = [];
-  let reported = false;
-  const report = (list) => { if (reported || !tester?.onUsage) return undefined; reported = true; return Promise.resolve().then(() => tester.onUsage(list)).catch(() => {}); };
+  let reported = false, partial = null; // partial: this round's usage so far, until its finalMessage
+  const report = (list, complete = true) => { if (reported || !tester?.onUsage) return undefined; reported = true; return Promise.resolve().then(() => tester.onUsage(list, complete)).catch(() => {}); };
+  const soFar = () => (partial ? [...usage, partial] : usage.length ? [...usage] : null);
   // Pull the first event before answering so auth/model errors surface as real HTTP statuses.
   const open = async (p) => {
     const stream = client.beta.messages.stream(p);
@@ -130,6 +132,11 @@ export async function claudeChat(body, apiKey, workspaceId, tester = null) {
       const delta = (d, finish = null) => send({ choices: [{ index: 0, delta: d, finish_reason: finish }] });
       let toolIndex = -1;
       const handle = (ev) => {
+        if (ev.type === 'message_start' && ev.message?.usage) partial = { ...ev.message.usage };
+        else if (ev.type === 'message_delta' && ev.usage) {
+          partial = { ...partial };
+          for (const [k, v] of Object.entries(ev.usage)) if (v != null) partial[k] = v; // a null counter keeps the earlier count
+        }
         if (ev.type === 'content_block_start' && ev.content_block.type === 'server_tool_use') {
           delta({ status: 'Searching the web' });
         } else if (ev.type === 'content_block_start' && ev.content_block.type === 'tool_use') {
@@ -151,6 +158,7 @@ export async function claudeChat(body, apiKey, workspaceId, tester = null) {
           for (let r = await cur.iter.next(); !r.done; r = await cur.iter.next()) handle(r.value);
           const final = await cur.stream.finalMessage();
           usage.push(final.usage);
+          partial = null;
           if (final.stop_reason === 'pause_turn' && round < rounds - 1) {
             params = { ...params, messages: [...params.messages, { role: 'assistant', content: final.content }] };
             continue;
@@ -161,13 +169,13 @@ export async function claudeChat(body, apiKey, workspaceId, tester = null) {
         await report(usage);
       } catch (err) {
         send({ error: { message: err.error?.error?.message || err.message || 'Claude stream failed' } });
-        await report(null);
+        await report(soFar(), false);
       }
       ctrl.enqueue(enc.encode('data: [DONE]\n\n'));
       ctrl.close();
     },
     cancel() {
-      report(null);
+      report(soFar(), false);
       cur?.stream.abort();
     },
   });

@@ -109,6 +109,8 @@ async function failed(r, what, key) {
 }
 const failure = ({ status, msg }, what) => new GeminiError(`${what} failed (${status})${msg ? `: ${msg}` : ''}`, 502);
 const goneMsg = (status, msg) => status === 404 || (status === 403 && FILE_GONE.test(msg));
+// A failed file GET (status + raw body) that means Gemini no longer has the file (404, or 403 "may not exist").
+export const fileGone = (status, text) => goneMsg(status, upstreamMessage(text));
 
 // A failed call to an upload session. Offset/session problems → 409 (the browser asks upload/query where Google is);
 // 408/429 are transient → 503 (+ retry-after when Google sent seconds) so the browser retries; the rest (401/403, 5xx…)

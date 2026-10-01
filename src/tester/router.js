@@ -4,7 +4,7 @@
 // usage afterwards (the full reservation stands when usage is missing or the stream is cut off).
 import { waitUntil } from 'cloudflare:workers';
 import { claudeChat } from '../anthropic.js';
-import { geminiNativeChat, handleVideoApi, isGeminiFileUri, fileNameOf, normalizeVideoMime, GEMINI_BASE, GEMINI_VIDEO_MIMES, VIDEO_NEEDS_GEMINI } from '../gemini.js';
+import { geminiNativeChat, handleVideoApi, isGeminiFileUri, fileNameOf, normalizeVideoMime, fileGone, GEMINI_BASE, GEMINI_VIDEO_MIMES, VIDEO_NEEDS_GEMINI, FILE_GONE_ERROR } from '../gemini.js';
 import {
   PRICES, TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, TESTER_TTS_MODELS, PER_CALL_RESERVE_CAP, WEB_CALL_RESERVE_CAP, VEO_CALL_RESERVE_CAP,
   PriceError, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, ttsWorstCase, ttsActual,
@@ -233,12 +233,18 @@ function shapeMessages(list, provider) {
   return { messages, images, videos: [...videos], textBytes };
 }
 
-// Seconds of an uploaded clip from Gemini's file record (videoMetadata), or null when it can't be read.
+// Seconds of an uploaded clip from Gemini's file record; 'gone' when Gemini no longer has it (or failed to process
+// it); otherwise null unless the file is ACTIVE with a readable length. A clip that is still PROCESSING (or whose
+// record can't be read) has no trustworthy length yet, and Gemini bills the real length, so the caller refuses it
+// rather than guessing (the app only sends ACTIVE clips).
 async function clipSeconds(key, name) {
   try {
     const r = await fetch(`${GEMINI_BASE}/v1beta/${name}`, { headers: { 'x-goog-api-key': key }, redirect: 'manual' });
-    if (!r.ok) { r.body?.cancel().catch(() => {}); return null; }
-    const s = parseFloat((await r.json())?.videoMetadata?.videoDuration);
+    if (!r.ok) return fileGone(r.status, await r.text().catch(() => '')) ? 'gone' : null;
+    const f = await r.json();
+    if (f?.state === 'FAILED') return 'gone';
+    if (f?.state !== 'ACTIVE') return null;
+    const s = parseFloat(f?.videoMetadata?.videoDuration);
     return Number.isFinite(s) && s > 0 ? Math.ceil(s) : null;
   } catch { return null; }
 }
@@ -273,15 +279,18 @@ async function chat(c) {
   const key = c.env[c.up.PROVIDERS[provider].secret];
   if (!key) return noProvider(c.up, provider);
 
-  // A2: a video_file part must name the tester's own upload; every part is priced from the clip's length (else 180 s).
+  // A2: a video_file part must name the tester's own upload; every part is priced from the clip's known length.
   let videoSeconds = 0;
   if (shaped.videos.length) {
     if (provider !== 'gemini') return json({ error: VIDEO_NEEDS_GEMINI }, 400);
     for (const [name] of shaped.videos) if (!(await c.stub.ownsJob(c.who.sub, `file:${name}`))) return notYours();
     for (const [name, parts] of shaped.videos) {
       const s = await clipSeconds(key, name);
+      // Same answer geminiNativeChat gives for a missing file: the app re-uploads the clip or sends frames.
+      if (s === 'gone') return json({ error: FILE_GONE_ERROR, code: 'video_file_gone' }, 409);
+      if (s == null) return fail(409, 'tester_video_not_ready', 'Gemini hasn’t finished reading this clip’s length yet — try again in a moment.');
       if (s > LIMITS.clipSeconds) return tooLarge('A clip over 3 minutes');
-      videoSeconds += parts * (s ?? LIMITS.clipSeconds);
+      videoSeconds += parts * s;
     }
   }
 
@@ -305,9 +314,16 @@ async function chat(c) {
   const mtr = await reserve(c, p.worst);
   if (mtr.res) return mtr.res;
   const headers = { ...mtr.headers, ...(p.model !== requested ? { 'x-tester-model': p.model } : {}) };
-  const settleUsage = (usage) => {
+  // A complete answer settles at its reported cost. A stopped or failed one settles at no less than the reservation,
+  // and at more when the provider had already reported a bigger bill (the Ledger still caps it at OVERRUN x).
+  const settleUsage = (usage, complete = true) => {
     let actual = mtr.amount;
-    if (usage) try { actual = chatActual({ model: p.model, usage }); } catch {}
+    if (usage) {
+      try {
+        const reported = chatActual({ model: p.model, usage });
+        actual = complete ? reported : Math.max(mtr.amount, reported);
+      } catch {}
+    }
     return mtr.settle(actual);
   };
   const body = { model: p.model, messages: shaped.messages, stream: true, max_tokens: p.maxTokens };

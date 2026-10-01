@@ -123,7 +123,7 @@ test('tester clip limits: 200 MB and 3 min (addendum A2); frames stand in past t
 });
 
 test('tester codes bypass the fallback chain; model_no_images does not', () => {
-  for (const c of ['tester_budget', 'tester_paused', 'tester_model', 'tester_signin', 'tester_too_large', 'tester_owner', 'tester_origin', 'owner_only']) assert.ok(isTesterCode(c), c);
+  for (const c of ['tester_budget', 'tester_paused', 'tester_model', 'tester_signin', 'tester_too_large', 'tester_owner', 'tester_origin', 'tester_video_not_ready', 'owner_only']) assert.ok(isTesterCode(c), c);
   for (const c of ['model_no_images', 'video_file_gone', undefined, null, 42]) assert.ok(!isTesterCode(c), String(c));
 });
 
@@ -188,6 +188,27 @@ test('link previews carry the A7a launch copy; the privacy page names both sign-
   assert.match(html, /<meta name="twitter:card" content="summary_large_image" \/>/);
   for (const c of ['__Host-atelier_tester', '__Host-atelier_li']) assert.ok(privacy.includes(`<code>${c}</code>`), c);
   assert.doesNotMatch(privacy, /the only cookie is/);
+});
+
+test('privacy page and tester welcome name every provider Auto or a fallback can send a tester prompt to', async () => {
+  const privacy = await readFile(new URL('../public/privacy.html', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const row = privacy.match(/<tr><td>Z\.ai, DeepSeek and Meta<\/td><td>([^<]*)<\/td><\/tr>/);
+  assert.ok(row, 'the Z.ai/DeepSeek/Meta processor row');
+  assert.doesNotMatch(row[1], /models you can choose\./, 'not only when picked: Auto and fallbacks use them too');
+  assert.match(row[1], /Auto/);
+  assert.match(row[1], /fall back/);
+  // Testers: Auto puts GLM 5.3 first for Code/Build (Opus is demoted), so the copy must say so.
+  assert.match(app, /code: \[\s*\['anthropic:claude-opus-5-5', 'Claude Opus 5\.5'\], \['zai:glm-5\.3'/);
+  assert.match(row[1], /GLM 5\.3/);
+  assert.match(app, /Claude, GPT, Gemini and others \(Z\.ai, DeepSeek, Meta\) for answers, code, ideas and apps/);
+  assert.doesNotMatch(app, /— Claude, GPT and Gemini for answers, code, ideas and apps/);
+});
+
+test('the clip-not-ready refusal gets its own budget-card title', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /tester_video_not_ready: 'video'/);
+  assert.match(app, /video: 'This clip isn’t ready yet'/);
 });
 
 test('tester client guards: a per-call refusal moves down the chain, Auto demotes the tightest models, a name ends with its session', async () => {

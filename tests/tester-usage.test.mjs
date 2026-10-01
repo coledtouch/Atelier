@@ -56,18 +56,28 @@ test('a stream without a usage chunk reports null, so the full reservation stand
   assert.equal(p.result(), null);
 });
 
-test('a cancelled or failed stream reports null exactly once and cancels the upstream', async () => {
+test('a cancelled or failed stream reports the usage seen so far as incomplete, exactly once, and cancels the upstream', async () => {
   let calls = [];
   const src = source([bytes('data: {"usage":{"prompt_tokens":1}}\n\n'), bytes('data: [DONE]\n\n')]);
-  const reader = meter(src.stream, openaiUsage(), (u) => { calls.push(u); }).getReader();
+  const reader = meter(src.stream, openaiUsage(), (u, complete) => { calls.push([u, complete]); }).getReader();
   await reader.read();
   await reader.cancel('client went away');
-  assert.deepEqual(calls, [null], 'usage seen so far does not count: the stream did not finish');
+  await reader.cancel('again');
+  assert.deepEqual(calls, [[{ prompt_tokens: 1 }, false]], 'incomplete: the router settles at no less than the reservation');
   assert.equal(src.cancelled, true);
   calls = [];
   const broken = source([bytes('data: {"usage":{"prompt_tokens":1}}\n\n')], { failAt: 1 });
-  await assert.rejects(drain(meter(broken.stream, openaiUsage(), (u) => { calls.push(u); })), /upstream reset/);
-  assert.deepEqual(calls, [null]);
+  await assert.rejects(drain(meter(broken.stream, openaiUsage(), (u, complete) => { calls.push([u, complete]); })), /upstream reset/);
+  assert.deepEqual(calls, [[{ prompt_tokens: 1 }, false]]);
+  calls = [];
+  const empty = source([bytes('data: {"choices":[]}\n\n')]);
+  const r2 = meter(empty.stream, openaiUsage(), (u, complete) => { calls.push([u, complete]); }).getReader();
+  await r2.read();
+  await r2.cancel();
+  assert.deepEqual(calls, [[null, false]], 'nothing parsed yet: null, and the full reservation stands');
+  calls = [];
+  await drain(meter(source([bytes('data: {"usage":{"prompt_tokens":2}}\n\n')]).stream, openaiUsage(), (u, complete) => { calls.push([u, complete]); }));
+  assert.deepEqual(calls, [[{ prompt_tokens: 2 }, true]], 'a complete stream is marked complete');
 });
 
 test('Gemini tap keeps the last usageMetadata (the cumulative one) and tolerates array-wrapped events', () => {
@@ -124,6 +134,42 @@ test('claudeChat tester mode: a cut-off stream or a cancelled reader keeps the f
   await r.body.cancel();
   await new Promise((res) => setTimeout(res, 20));
   assert.deepEqual(L.ledger.allowance(t.sub).day, { spent: 2 * worst, reserved: 0, limit: 1_000_000 });
+});
+
+test('claudeChat tester mode: a stopped answer is charged what Claude already reported when that beats the reservation (capped at OVERRUN x)', async () => {
+  const { env, L } = makeEnv();
+  const t = await signIn(L, PROFILE());
+  const body = { model: 'anthropic:claude-sonnet-5-5', max_tokens: 2_000, messages: [{ role: 'user', content: 'hi' }] };
+  const worst = chatWorstCase({ model: 'anthropic:claude-sonnet-5-5', inputTokens: Math.ceil(Buffer.byteLength(JSON.stringify(body.messages)) / 3), maxTokens: 2_000 });
+  // message_start reports far more input than the byte estimate (e.g. a tokenizer mismatch); the app then stops reading.
+  const start = (input) => async () => new Response(new ReadableStream({ start(c) { c.enqueue(bytes(ev('message_start', { message: { id: 'm', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: input, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }))); } }), { headers: { 'content-type': 'text/event-stream' } });
+  const partial = (input) => chatActual({ model: 'anthropic:claude-sonnet-5-5', usage: { input_tokens: input, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } });
+  let input = 60_000;
+  while (partial(input) <= worst) input *= 2;
+  assert.ok(partial(input) < 4 * worst, 'test sizing: above the reservation, under the OVERRUN cap');
+  globalThis.fetch = start(input);
+  let r = await api(env, 'chat', { method: 'POST', body }, { cookie: t.token });
+  assert.equal(r.status, 200);
+  await r.body.cancel();
+  await new Promise((res) => setTimeout(res, 20));
+  assert.deepEqual(L.ledger.allowance(t.sub).day, { spent: partial(input), reserved: 0, limit: 1_000_000 }, 'charged what Claude reported, not the smaller reservation');
+  // message_delta may carry null counters; they must not erase message_start's input count.
+  const before = L.ledger.allowance(t.sub).day.spent;
+  globalThis.fetch = async () => new Response(new ReadableStream({ start(c) {
+    c.enqueue(bytes(ev('message_start', { message: { id: 'm', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: input, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } })));
+    c.enqueue(bytes(ev('message_delta', { delta: { stop_reason: null, stop_sequence: null }, usage: { output_tokens: 1, input_tokens: null, cache_creation_input_tokens: null, cache_read_input_tokens: null } })));
+  } }), { headers: { 'content-type': 'text/event-stream' } });
+  r = await api(env, 'chat', { method: 'POST', body }, { cookie: t.token });
+  await new Promise((res) => setTimeout(res, 20)); // both events handled; neither emits text, so don't read
+  await r.body.cancel();
+  await new Promise((res) => setTimeout(res, 20));
+  assert.equal(L.ledger.allowance(t.sub).day.spent - before, partial(input), 'nulls in message_delta keep message_start’s counts');
+  // A huge reported input is still capped at OVERRUN x the reservation.
+  globalThis.fetch = start(50_000_000);
+  r = await api(env, 'chat', { method: 'POST', body }, { cookie: t.token });
+  await r.body.cancel();
+  await new Promise((res) => setTimeout(res, 20));
+  assert.deepEqual(L.ledger.allowance(t.sub).day, { spent: 2 * partial(input) + 4 * worst, reserved: 0, limit: 1_000_000 });
 });
 
 test('claudeChat without a tester is unchanged: up to four pause_turn rounds and no usage callback', async () => {

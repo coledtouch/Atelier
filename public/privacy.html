@@ -96,7 +96,7 @@
       <tr><td>Cloudflare</td><td>Hosting, network security, and storage of your profile, memory, connection tokens and — for testers — the tester record and usage ledger.</td></tr>
       <tr><td>LinkedIn</td><td>Tester sign-in only: confirms who you are and shares your basic profile and email address with Atelier.</td></tr>
       <tr><td>Anthropic (Claude), OpenAI, Google (Gemini, Veo) and NVIDIA</td><td>AI models that generate responses, images and video. Only the content needed for the request is sent, via their business APIs, which do not use API data to train their models by default. Testers never use NVIDIA models.</td></tr>
-      <tr><td>Z.ai, DeepSeek and Meta</td><td>Further AI models you can choose. Only the content needed for the request is sent, under each provider’s own API data terms.</td></tr>
+      <tr><td>Z.ai, DeepSeek and Meta</td><td>Further AI models. Atelier uses them when you pick one, or when Auto or a fallback does: for testers, Auto starts Code and Build on Z.ai’s GLM 5.3, and other requests can fall back to Z.ai, DeepSeek or Meta when the first model is busy or unavailable. Only the content needed for the request is sent, under each provider’s own API data terms.</td></tr>
       <tr><td>Gmail, Slack, GitHub, Stripe, Cloudflare, Railway</td><td>Only when you connect them, to read or act on your own account at your request.</td></tr>
     </tbody>
   </table>

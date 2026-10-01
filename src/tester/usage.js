@@ -36,9 +36,11 @@ export function sseUsage(pick, field) {
 export const openaiUsage = () => sseUsage((j) => j?.usage, 'usage');
 export const geminiUsage = () => sseUsage((j) => j?.usageMetadata, 'usageMetadata');
 
-// Wraps a byte stream: every chunk is passed on as the same object, the parser sees it too, and onEnd runs exactly once
-// — with parser.result() after a complete stream (before the consumer sees it close), or with null when the stream
-// failed or the reader cancelled it (the full reservation stands).
+// Wraps a byte stream: every chunk is passed on as the same object, the parser sees it too, and onEnd(usage, complete)
+// runs exactly once — after a complete stream (before the consumer sees it close) with complete=true, or when the
+// stream failed or the reader cancelled it with complete=false. usage is whatever the parser has seen (null if
+// nothing): a stopped stream may already have reported a bill bigger than the reservation (Gemini sends
+// usageMetadata with early chunks), and the caller settles an incomplete stream at no less than the reservation.
 export function meter(src, parser, onEnd) {
   const reader = src.getReader();
   let ended = false;
@@ -46,10 +48,8 @@ export function meter(src, parser, onEnd) {
     if (ended) return undefined;
     ended = true;
     let usage = null;
-    if (ok) {
-      try { usage = parser.result(); } catch {}
-    }
-    return Promise.resolve().then(() => onEnd(usage)).catch(() => {});
+    try { usage = parser.result(); } catch {}
+    return Promise.resolve().then(() => onEnd(usage, ok)).catch(() => {});
   };
   return new ReadableStream({
     async pull(ctrl) {
