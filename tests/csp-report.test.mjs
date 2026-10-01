@@ -121,7 +121,7 @@ test('every /api response over HTTPS carries Strict-Transport-Security (public/_
   const { env } = makeEnv();
   for (const [path, init, who] of [['health', {}, {}], ['csp-report', { method: 'POST', body: '{}' }, { origin: null }], ['me', {}, {}], ['me', {}, { pass: 'pw' }], ['tester/me', {}, { cookie: 'x'.repeat(43) }]]) {
     const r = await api(env, path, init, who);
-    assert.equal(r.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains', `${path} ${r.status}`);
+    assert.equal(r.headers.get('strict-transport-security'), 'max-age=31536000', `${path} ${r.status}`);
   }
   // Over plain http (local dev) browsers ignore it, so it isn't sent.
   const r = await worker.fetch(new Request('http://127.0.0.1:8787/api/health'), env);
@@ -136,7 +136,7 @@ test('only the two types browsers send are read (case and parameters aside); any
     const r = await report(legacy(), { 'content-type': type }, {}, env);
     assert.equal(r.status, 415, JSON.stringify(type));
     assert.deepEqual(await r.json(), { error: 'Send CSP reports as application/csp-report or application/reports+json.' });
-    assert.equal(r.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+    assert.equal(r.headers.get('strict-transport-security'), 'max-age=31536000');
     assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
   }
   // No Content-Type header at all.
@@ -196,7 +196,7 @@ test('a route that throws answers a generic 500 with no-store, nosniff and HSTS;
     assert.equal(r.headers.get('cache-control'), 'no-store');
     assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(r.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
-    assert.equal(r.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+    assert.equal(r.headers.get('strict-transport-security'), 'max-age=31536000');
     assert.deepEqual(errors, ['api failed /api/health RangeError']);
     // Over plain http (local dev) HSTS isn't sent; the rest is the same.
     const local = await worker.fetch(new Request('http://127.0.0.1:8787/api/health'), broken);

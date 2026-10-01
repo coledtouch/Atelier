@@ -638,10 +638,14 @@ async function viaOpenAI(key, v, m, cacheKey) {
   // maxSeconds, hung up or broken) keeps the full reservation, or more if OpenAI had already reported a bigger bill
   // (speech.audio.done arrived, then the stream broke or was cut in that same chunk: the usage is the whole bill, so the
   // seconds aren't sent) or, before any usage, if the audio already timed (clock, the same one that cuts it off) costs
-  // more at the reserved token rate: OpenAI sends usage only at the end, so a stream cut early never reports it.
+  // more at the reserved token rate: OpenAI sends usage only at the end, so a stream cut early never reports it. A
+  // stream that finishes without usage (plain audio/mpeg, which never carries it, or a speech.audio.done without it)
+  // settles like a stopped one: max(the reservation, the audio it timed), so it never pays less than a cut-off stream
+  // with the same audio. The owner has no clock, so that case still reaches the hooks as {usage: null}.
   const clock = maxSeconds < Infinity ? mp3Clock() : null;
   const metered = meter(up.body, parser, async (usage, complete) => {
-    settled = await m.settle(complete ? { usage } : usage ? { usage, stopped: true } : clock ? { usage: null, stopped: true, seconds: clock.seconds() } : null);
+    settled = await m.settle(complete && usage ? { usage } : usage ? { usage, stopped: true }
+      : clock ? { usage: null, stopped: true, seconds: clock.seconds() } : complete ? { usage: null } : null);
   });
   const audio = metered.pipeThrough(plain ? capBytes(TTS_LIMITS.maxAudioBytes, maxSeconds, clock) : sseToAudio(TTS_LIMITS.maxAudioBytes, maxSeconds, clock));
   if (!cacheKey) return audioResponse(audio, 'audio/mpeg', v.voiceId, m.headers);

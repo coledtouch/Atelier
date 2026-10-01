@@ -76,3 +76,14 @@ test('every module the app loads is imported and precached at ?v=<VERSION number
   assert.ok(seen.size > 1, 'app.js imports its modules');
   for (const f of seen) assert.ok(!s.cached.includes(`/${f}`), `/${f} is precached only at its ?v= URL (never a second, stale copy)`);
 });
+// Chrome's WebAPK update check fetches the manifest through this worker: a cache-first copy would report "no change"
+// for a day after every manifest deploy (new shortcuts, share_target). Pages and the manifest go network-first.
+test('the manifest is fetched network-first (cache only offline); other shell files stay cache-first', async () => {
+  const s = setup();
+  assert.equal(await (await s.dispatch('/manifest.webmanifest', { destination: 'manifest' })).text(), 'network');
+  assert.equal(await (await s.dispatch('/manifest.webmanifest')).text(), 'network', 'by path too (a request without a destination)');
+  assert.equal(await (await s.dispatch('/app.js')).text(), 'cached', 'scripts and styles stay cache-first (versioned URLs)');
+  const off = setup({ offline: true });
+  assert.equal(await (await off.dispatch('/manifest.webmanifest', { destination: 'manifest' })).text(), 'cached');
+  await Promise.all(off.waited);
+});

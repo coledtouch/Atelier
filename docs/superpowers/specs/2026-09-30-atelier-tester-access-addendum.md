@@ -47,6 +47,8 @@ This replaces the spec's §8 "Hidden and off in tester mode" list. Everything be
   - The profile is deleted together with the tester record.
 - **Client-side features unchanged for testers:** Library, viewer, downloads, the device read-aloud voice, the browser's own speech recognition for dictation, and thread export/import.
   - The AI Read aloud voices (`POST /api/tts`), server dictation (`POST /api/transcribe`) and Look up (`GET /api/lookup`, `/api/lookup/img`) are tester routes too: see A8.
+  - Meta Muse Image (`POST /api/x/meta/images/generations`) is a tester image route too (owner decision): see A7b.
+  - The Gemini image (`generateContent`) and file-download (`files/<id>:download`) routes accept `v1` as well as `v1beta`, for the client's v1 fallback. Veo's `predictLongRunning` and operation polling stay `v1beta` only.
 
 Public before identity (dispatched in `src/worker.js` before `identify()`, so neither the passcode nor a tester session decides them; `PUBLIC_PATHS` in `src/tester/router.js`). A request carrying `x-app-pass` still passes the passcode lockout guard first (`passcodeGuard`: it reads the per-IP KV failure counter, adds to it on a wrong passcode, and answers 429 once that IP is locked out). Browsers never send that header with a CSP report, and the app's own health check and sign-in calls don't send it either, so in practice it has no effect on these routes:
 - `GET /api/health`, and the LinkedIn sign-in routes `/api/li/*` (spec).
@@ -114,7 +116,9 @@ Requirements:
 - **No NVIDIA for testers (owner decision).** NVIDIA's free API tier is meant for development and testing.
   - Testers can't use `/api/genai/*`, `/api/status/*` or `/api/fn/*` (FLUX, Cosmos, the motion still), or any NVIDIA chat model.
   - Free NVIDIA entries stay out of `TESTER_MODELS`, `TESTER_IMAGE_MODELS` and `TESTER_VIDEO_MODELS`.
-  - Tester images come from GPT Image / Nano Banana, and tester video from Veo, all metered.
+  - Tester images come from GPT Image, Nano Banana and Meta Muse Image, and tester video from Veo, all metered.
+    - Meta Muse Image (owner decision; the route was already live, recorded 2026-10-01): `POST /api/x/meta/images/generations` on the owner's `META_API_KEY`, `src/tester/router.js` `metaImages`. Only model `muse-image-1.0` (`TESTER_IMAGE_MODELS`); a prompt of up to 32,000 characters; `n` 1 to 4 (`LIMITS.imageN`); `size` one of the model's `sizes` in prices.js (`1024x1024`, `1024x1280`, `1536x1024`, `1536x864`, `864x1536`), anything else becomes `1024x1024`; `response_format` `b64_json` (default) or `url`; any other field is dropped; a 24 MB body cap (`LIMITS.imageBody`).
+    - Metered like the other image routes: reserved at $0.01 x `n` x the 1.25 margin, settled at $0.01 per image returned (`imageActual`; failed or filtered images aren't billed).
   - In tester mode the client hides the motion-still and NVIDIA options. Fallback chains skip NVIDIA, so they never end on a model the tester can't use.
 - **Per-call chat cap stays $0.25, with exceptions:**
   - Web-search calls get a $0.50 cap.
@@ -167,6 +171,7 @@ Requirements:
   - A stream that stops (cut off, hung up or broken) after the provider reported usage: max(reservation, reported).
     - OpenAI sends usage only in `speech.audio.done`, its last event, so a reported usage is the complete bill. The timed seconds are then not used: `src/tts.js` sends them only with no usage, and `ttsActual` ignores them when usage is present. This holds even when the cut-off lands in the same chunk as `speech.audio.done`.
   - An OpenAI stream that stops (cut off, hung up or broken) before any usage arrives: max(reservation, the seconds the cut-off clock timed x 50 tokens/s at the audio rate + input estimated from the characters). The cut-off bounds what the tester hears; this settle bounds what is billed.
+  - An OpenAI stream that finishes without usage settles like a stopped one: max(reservation, the timed seconds x 50 tokens/s). This covers a plain `audio/mpeg` answer (the fallback branch, which never carries usage) and a `speech.audio.done` without usage, so a finished answer never pays less than a cut-off one with the same audio (`src/tts.js` `viaOpenAI`; the owner has no clock and is unchanged).
   - A hang-up with no usage and no audio timed: the full reservation stands.
 - **When the allowance is out**, or a passage would take too long to say in one request, the client reads with the device voice (`speechSynthesis`), which sends nothing to Atelier.
 - **Privacy:** the text read aloud goes to OpenAI, or to Google for Sulafat (privacy page §5). Clips are cached only on the device (browser Cache Storage, about 30 MB / 200 clips), cleared by Clear this device or a tester sign-out. The ToS states the typical price and the rate limit.
@@ -178,7 +183,7 @@ Requirements:
   - OpenAI `gpt-4o-mini-transcribe-2025-12-15` is reserved on its whole context window plus its output cap (`sttWorstCase`, about $0.0375 with the margin).
   - The Gemini fallback (`gemini-3.5-flash-lite`) is reserved on the WAV's seconds, or the 3-minute cap, plus its output bound.
   - Each provider that runs is reserved and settled on its own, and a provider's refusal costs $0.
-- Limits: 20 recordings a minute per tester (`LI_LIMIT`, key `stt:<sub>`, checked once per request), 10 MB and 180 s on the server, and 2 minutes per recording in the client.
+- Limits: 20 recordings a minute per tester (`LI_LIMIT`, key `stt:<sub>`, checked once per request), and 2 minutes per recording in the client. On the server: 10 MB for every container; 180 s exactly for WAV (its header gives the length), and for the Gemini fallback through `countTokens`; for other containers sent to OpenAI (MP4, WebM, Ogg, MP3, FLAC) nothing measures the length, and OpenAI's 16,000-token context bounds the bill (no `chunking_strategy` is sent). The 413 `too_large` text names the limit that was hit: "up to 10 MB" for the byte cap, "up to 3 minutes" only where the length was measured.
 - Neither the recording nor the transcript is stored on the server.
 
 ### A8.3 Look up for testers (free, rate-limited)
@@ -189,6 +194,7 @@ Requirements:
   - `LOOKUP_LIMIT`: 30 a minute per tester, key `t:<sub>`; preview images count separately on `t:<sub>:img`.
   - `WIKI_LIMIT` for Atelier's own calls to Wikimedia, with testers sharing separate keys from the owner, so testers can never use up Look up for the owner.
 - A tester starts on "On tap": nothing leaves the browser until they tap Look up. The owner's default is automatic.
+- Cache: Look up answers are kept in the serving data centre's edge cache (`caches.default`) for 24 h when an article was found (`ttlFound`) or 1 h when none was (`ttlMiss`), and preview images for 7 days (`IMAGE.ttl`). An answer repeats the selected phrase (`query`, up to 120 characters). The keys are SHA-256 hashes that include who asked (`owner` or `t:<sub>`) together with the phrase, the wiki language and script variant (for an image, the Commons file key), so entries are served only back to the same person. Failures are never cached. This is the one exception to spec §10's "No prompts or outputs are stored on the server"; privacy §2 (testers) and §6 say so.
 
 ### A8.4 Runway stays owner-only
 

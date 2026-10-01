@@ -10,7 +10,8 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"],
+    // /share: the share target's fallback when no service worker answers the POST (src/worker.js; it never reads the body).
+    "run_worker_first": ["/api/*", "/share"],
     "not_found_handling": "single-page-application"
   },
   // Profile + memory sync ("You" panel), guarded by APP_PASSCODE.

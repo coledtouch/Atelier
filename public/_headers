@@ -8,10 +8,10 @@
 # attributes stay disallowed: the app has none, so any report there is worth a look.
 # report-uri is for browsers without the Reporting API; report-to names the "csp" endpoint in Reporting-Endpoints.
 # Both are relative, so a local or preview copy reports to itself, never to production.
-# Strict-Transport-Security: HTTPS only for a year. includeSubDomains covers *.atelier.ciprari.ai (there are none),
-# not the rest of ciprari.ai; no preload. src/worker.js sends the same header on /api responses.
+# Strict-Transport-Security: HTTPS only for a year, no includeSubDomains, no preload: the value the ciprari.ai zone's
+# edge HSTS setting serves (it overrides the origin's header at Cloudflare's edge). src/worker.js sends the same on /api.
 /*
-  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Strict-Transport-Security: max-age=31536000
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin

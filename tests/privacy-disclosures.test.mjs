@@ -1,6 +1,7 @@
 // The privacy page and terms must name what the code actually asks for and loads: every Google and Canva OAuth scope
 // (src/tools.js; one consent asks for all of them) and the Cloudflare Web Analytics beacon the edge injects (allowed by
-// public/_headers' CSP). A new scope or beacon without a disclosure fails here.
+// public/_headers' CSP), the Google Fonts every page loads, and the Look-up cache (src/lookup.js). A new scope, beacon
+// or third-party load without a disclosure fails here.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -62,4 +63,57 @@ test('Cloudflare Web Analytics is disclosed whenever the CSP lets its beacon run
 
 test('the legal pages keep the October 1, 2026 effective date', () => {
   for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective October 1, 2026<\/p>/);
+});
+
+test('Google Fonts is disclosed while any page loads it: in Technical data, as a processor and in the short summary', async () => {
+  const pages = await Promise.all(['public/index.html', 'public/privacy.html', 'public/tos.html'].map(read));
+  const loads = pages.some((p) => /<link [^>]*href="https:\/\/fonts\.googleapis\.com\/css2/.test(p));
+  assert.ok(loads, 'the pages still load Google Fonts (else drop this disclosure too)');
+  assert.ok(HEADERS.includes('https://fonts.googleapis.com') && HEADERS.includes('https://fonts.gstatic.com'), 'the CSP allows both Google Fonts hosts');
+  const item = /<li><b>Fonts<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1];
+  assert.ok(item, 'a Fonts item under Technical data');
+  assert.ok(PRIVACY.indexOf('<h3 id="technical">') < PRIVACY.indexOf('<li><b>Fonts</b>'), 'inside Technical data');
+  for (const words of ['Google Fonts', 'fonts.googleapis.com', 'fonts.gstatic.com', 'directly from Google', 'IP address', 'browser details', 'no cookies', 'jsDelivr', 'unpkg'])
+    assert.ok(text(item).includes(words), words);
+  assert.match(PRIVACY, /<tr><td>Google Fonts<\/td><td>[^<]*directly from Google/);
+  assert.match(PRIVACY, /<b>In short:<\/b>[^<]*web-font downloads/);
+});
+
+test('the Look-up cache is disclosed with the lifetimes src/lookup.js gives it, and the tester section no longer says nothing is stored', async () => {
+  const LOOKUP = await read('src/lookup.js');
+  const found = Number(/ttlFound: (\d+)/.exec(LOOKUP)?.[1]), miss = Number(/ttlMiss: (\d+)/.exec(LOOKUP)?.[1]), image = Number(/ttl: (\d+), \/\/ edge cache/.exec(LOOKUP)?.[1]);
+  assert.deepEqual([found, miss, image], [86_400, 3_600, 604_800], 'update the privacy wording with any change');
+  assert.match(LOOKUP, /JSON\.stringify\(\[String\(who \?\? ''\), site\.lang, site\.acceptLanguage \|\| '', mode, String\(norm\)\]\)/, 'the summary key hashes who asked and the phrase');
+  assert.match(LOOKUP, /JSON\.stringify\(\[String\(who \?\? ''\), key\]\)/, 'the image key hashes who asked and the file');
+  const cache = /<li><b>Look-up cache \(Cloudflare\):<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1];
+  assert.ok(cache, 'a Look-up cache item in section 6');
+  for (const words of ['up to 24 hours', '1 hour when Wikipedia has no article', 'up to 7 days', 'repeats the phrase you selected', 'who asked', 'SHA-256', 'edge cache', 'only ever served back to the same person'])
+    assert.ok(text(cache).includes(words), words);
+  const testers = /<h3 id="testers">([\s\S]*?)<\/ul>/.exec(PRIVACY)?.[1];
+  assert.ok(testers, 'the tester section');
+  assert.doesNotMatch(testers, /No prompts or outputs are stored on our servers\.<\/b>/, 'no unqualified promise');
+  assert.match(text(testers), /No prompts or outputs are stored on our servers , except that a Look up answer, which repeats the few words you selected, is cached for up to a day \(see “Look-up cache” in section 6\)\./);
+  assert.match(text(/<li><b>Look up<\/b> — free([\s\S]*?)<\/li>/.exec(testers)?.[1] || ''), /cached briefly at Cloudflare for you alone/);
+  // The addendum records it as the one exception to spec §10.
+  const a83 = /### A8\.3([\s\S]*?)\n### /.exec(await read('docs/superpowers/specs/2026-09-30-atelier-tester-access-addendum.md'))?.[1] || '';
+  for (const words of ['`caches.default`', '24 h', '1 h', '7 days', '`t:<sub>`', 'one exception to spec §10']) assert.ok(a83.includes(words), `A8.3: ${words}`);
+});
+
+test('Quick launch’s on-device storage is disclosed with the lifetimes public/launch.js gives it, and dictation covers a mic Atelier opens', async () => {
+  const { SHARE_TTL, DRAFT_TTL, PENDING_TTL, SHARE_CACHE, LAUNCH_STORE_KEYS } = await import('../public/launch.js');
+  assert.deepEqual([SHARE_TTL, DRAFT_TTL, PENDING_TTL].map((ms) => ms / 60e3), [30, 360, 15], 'update the privacy wording with any change');
+  assert.equal(SHARE_CACHE, 'atelier-share');
+  for (const k of ['draft', 'pendingLaunch', 'quick', 'launchKey']) assert.ok(LAUNCH_STORE_KEYS.includes(k), `${k} is one of the keys sign-out forgets`);
+  const s6 = /<h2>6\. Where data is stored and for how long<\/h2>([\s\S]*?)<h2>/.exec(PRIVACY)?.[1] || '';
+  const item = /<li><b>Quick launch \(this device only\):<\/b>([\s\S]*?)<\/li>/.exec(s6)?.[1];
+  assert.ok(item, 'a Quick launch item in section 6');
+  for (const words of ['share to Atelier', 'a website sends to it the same way', 'Cache Storage', 'up to 30 minutes', 'one video or 4 photos', 'deleted once opened',
+    'when you sign out', 'Clear this device', 'typed or dictated', 'up to 6 hours', 'up to 15 minutes', 'Quick launch choices', 'Send without a tap', 'the key never does'])
+    assert.ok(text(item).includes(words), words);
+  // The mic can open without a tap (Talk to Atelier, listen-on-open): both dictation descriptions say so.
+  const voice = /<li><b>Voice dictation<\/b> — on an iPhone([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '';
+  assert.match(text(voice), /whether you tap it, or Talk to Atelier or “Start listening when I open Atelier” opens it for you/);
+  const row = /<tr><td>OpenAI and Google \(dictation\)<\/td><td>([\s\S]*?)<\/td><\/tr>/.exec(PRIVACY)?.[1] || '';
+  assert.doesNotMatch(row, /^When you tap the microphone/, 'not only a tap');
+  assert.match(text(row), /Talk to Atelier or “Start listening when I open Atelier” opens the microphone for you/);
 });

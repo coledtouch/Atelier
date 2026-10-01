@@ -27,7 +27,10 @@ import { GEMINI_BASE } from './gemini.js';
 const MB = 1024 * 1024;
 export const TRANSCRIBE_LIMITS = Object.freeze({
   maxBytes: 10 * MB, // owner and testers; 180 s of 16 kHz mono WAV is 5.76 MB, recorded AAC/Opus far less
-  maxSeconds: 180, // exact for WAV (its length is in the header); other containers are bounded by maxBytes
+  // Enforced only where the length is measured: a WAV's header, and a tester's Gemini fallback (countTokens). Other
+  // containers (MP4, WebM, Ogg, MP3, FLAC) are held to maxBytes alone; at OpenAI, its 16,000-token context bounds what
+  // one is billed (no chunking_strategy is sent, so it is one block).
+  maxSeconds: 180,
   minSeconds: 0.1, // OpenAI refuses shorter audio
   minBytes: 128, // less than this can't hold a container header and any sound
   promptChars: 300, // x-dictate-prompt, in code points after decoding
@@ -89,8 +92,12 @@ function deepFreeze(o) {
 }
 const JSON_HEADERS = Object.freeze({ 'content-type': 'application/json', 'cache-control': 'no-store' });
 const fail = (status, code, error, headers = {}) => new Response(JSON.stringify({ error, code }), { status, headers: { ...JSON_HEADERS, ...headers } });
-const TOO_LARGE = `Dictation takes up to ${TRANSCRIBE_LIMITS.maxSeconds / 60} minutes at a time.`;
-const tooLarge = () => fail(413, 'too_large', TOO_LARGE);
+// 413 too_large says which limit was hit: the byte cap (every container), the length cap (only where the length is
+// measured: a WAV's header, a tester's Gemini count), or a provider's own refusal.
+const TOO_BIG = `Dictation takes recordings of up to ${TRANSCRIBE_LIMITS.maxBytes / MB} MB.`;
+const TOO_LONG = `Dictation takes up to ${TRANSCRIBE_LIMITS.maxSeconds / 60} minutes at a time.`;
+const TOO_LARGE_UPSTREAM = 'That recording is too large to transcribe.';
+const tooLarge = (why = TOO_BIG) => fail(413, 'too_large', why);
 const UNSUPPORTED = 'That recording isn’t in an audio format dictation can read.';
 const unavailable = () => fail(502, 'transcribe_unavailable', 'Dictation is unavailable right now.');
 // An error message for the log (network failures only): at most 200 characters, with anything key-shaped removed.
@@ -196,7 +203,7 @@ export function validateAudio(bytes, { lang = null, prompt = null } = {}) {
   const bad = (status, code, error) => ({ ok: false, status, code, error });
   const L = TRANSCRIBE_LIMITS;
   if (!(bytes instanceof Uint8Array) || !bytes.length) return bad(400, 'bad_request', 'Send the recording as the request body.');
-  if (bytes.length > L.maxBytes) return bad(413, 'too_large', TOO_LARGE);
+  if (bytes.length > L.maxBytes) return bad(413, 'too_large', TOO_BIG);
   if (bytes.length < L.minBytes) return bad(422, 'transcribe_short', 'That recording is too short to transcribe.');
   const format = sniffAudio(bytes);
   if (!format) return bad(415, 'unsupported_audio', UNSUPPORTED);
@@ -206,7 +213,7 @@ export function validateAudio(bytes, { lang = null, prompt = null } = {}) {
     if (!w) return bad(415, 'unsupported_audio', UNSUPPORTED);
     seconds = w.seconds;
     if (seconds < L.minSeconds) return bad(422, 'transcribe_short', 'That recording is too short to transcribe.');
-    if (seconds > L.maxSeconds) return bad(413, 'too_large', TOO_LARGE);
+    if (seconds > L.maxSeconds) return bad(413, 'too_large', TOO_LONG);
   }
   return { ok: true, audio: { bytes, format, seconds, language: langCode(lang), hint: langHint(lang), prompt: cleanPrompt(prompt) } };
 }
@@ -457,7 +464,7 @@ function failedResponse(failures) {
   const has = (c) => failures.some((f) => f.cls === c);
   const order = has('format') && PASSING.some(has) ? ORDER.filter((c) => c !== 'format') : ORDER;
   const worst = order.find(has) || 'down';
-  if (worst === 'too_large') return tooLarge();
+  if (worst === 'too_large') return tooLarge(failures.some((f) => f.cls === 'too_large' && f.measured) ? TOO_LONG : TOO_LARGE_UPSTREAM);
   if (worst === 'short') return fail(422, 'transcribe_short', 'That recording is too short to transcribe.');
   if (worst === 'unreadable') return fail(422, 'transcribe_unreadable', 'Couldn’t make out that recording. Try again.');
   if (worst === 'format') return fail(415, 'unsupported_audio', UNSUPPORTED);
@@ -481,7 +488,7 @@ async function geminiInput(key, audio, model, tester) {
   const counted = await geminiCountTokens(key, audio, model);
   if (counted == null) return { cls: 'down' };
   // The count holds the audio and the text part; past maxSeconds of audio is over a tester's cap.
-  if (counted > TRANSCRIBE_LIMITS.maxSeconds * model.audioTokensPerSecond + utf8(geminiAsk(audio)) + GEMINI_OVERHEAD_TOKENS) return { cls: 'too_large' };
+  if (counted > TRANSCRIBE_LIMITS.maxSeconds * model.audioTokensPerSecond + utf8(geminiAsk(audio)) + GEMINI_OVERHEAD_TOKENS) return { cls: 'too_large', measured: true };
   return { inputTokens: counted + geminiTextTokens(audio, { counted: true }) };
 }
 
@@ -523,7 +530,7 @@ export async function handleTranscribe(req, env, hooks = OWNER_HOOKS) {
         if (m.res) return refusal(m);
       }
       const g = await geminiInput(key, audio, model, tester);
-      if (g.cls) { await m?.settle({ billed: false }); failures.push({ cls: g.cls }); continue; }
+      if (g.cls) { await m?.settle({ billed: false }); failures.push({ cls: g.cls, ...(g.measured ? { measured: true } : {}) }); continue; }
       inputTokens = g.inputTokens;
     }
     m ||= await reserve(inputTokens);

@@ -837,3 +837,28 @@ test('tester/me: features.dictation follows the provider keys', { skip: TESTER_R
     assert.equal(j.features.dictation, on, JSON.stringify(missing));
   }
 });
+
+test('the 413 text names the limit the server enforces: 10 MB for every container; 3 minutes only where the length is measured (a WAV, a tester’s Gemini count)', async () => {
+  // validateAudio: the byte cap and the WAV header are the only checks before a provider; a WebM of unknown length passes.
+  const big = validateAudio(new Uint8Array(TRANSCRIBE_LIMITS.maxBytes + 1));
+  assert.equal(big.error, 'Dictation takes recordings of up to 10 MB.');
+  assert.doesNotMatch(big.error, /minute/);
+  assert.equal(validateAudio(wav(181, { rate: 8_000, bits: 8 })).error, 'Dictation takes up to 3 minutes at a time.');
+  assert.equal(validateAudio(WEBM).audio.seconds, null, 'no length is measured for a WebM');
+  mockFetch([]);
+  // A declared or streamed body over the cap (any container) is refused on its bytes, never on a length nobody measured.
+  let r = await handleTranscribe(sttReq(new Uint8Array(TRANSCRIBE_LIMITS.maxBytes + 1)), KEYS);
+  assert.equal(r.status, 413);
+  assert.equal((await r.json()).error, 'Dictation takes recordings of up to 10 MB.');
+  // OpenAI refusing the file (its own size limit): no claim about minutes.
+  mockFetch([[OPENAI, () => openaiErr(413, 'Maximum content size limit exceeded.')]]);
+  r = await handleTranscribe(sttReq(WEBM), ONLY_OPENAI);
+  assert.equal(r.status, 413);
+  assert.equal((await r.json()).error, 'That recording is too large to transcribe.');
+  // A tester’s Gemini fallback counts the audio: past 180 s is the 3-minute cap, measured.
+  const ask = Buffer.byteLength('Transcribe this recording.');
+  mockFetch([[OPENAI, () => openaiErr(503, 'x')], [GEMINI, () => geminiOk()], [COUNT, () => reply(200, { totalTokens: 180 * 32 + ask + GEMINI_OVERHEAD_TOKENS + 1 })]]);
+  r = await handleTranscribe(sttReq(WEBM), KEYS, recorder().hooks);
+  assert.equal(r.status, 413);
+  assert.equal((await r.json()).error, 'Dictation takes up to 3 minutes at a time.');
+});

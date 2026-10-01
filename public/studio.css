@@ -368,7 +368,7 @@ html.kb-open .lookup { display: none; } /* (0,2,1) beats .lookup[data-state='pil
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; }
   .shimmer { background: none; color: var(--ink-2); }
-  .spin, .status::before, .skel, .buildmeter .bar i, .send[data-state='stop']::after, #micBtn[data-state='transcribing']::after, #micBtn[data-state='listening'] svg, #micBtn.armed::after { animation: breathe 2.4s ease-in-out infinite !important; }
+  .spin, .status::before, .skel, .buildmeter .bar i, .send[data-state='stop']::after, #micBtn[data-state='transcribing']::after, #micBtn[data-state='listening'] svg { animation: breathe 2.4s ease-in-out infinite !important; }
   #micBtn[data-state='recording']::after { transition: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--c-video) 40%, transparent); } /* a steady ring, not one that moves with the voice */
   .buildmeter .bar i { width: 100%; transform: none; }
   .lookup { translate: none; }

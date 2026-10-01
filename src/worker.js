@@ -74,8 +74,10 @@ const CHAT_UPSTREAM = {
 };
 
 const PASS_HEADERS = ['content-type', 'content-length', 'nvcf-reqid', 'nvcf-status', 'nvcf-percent-complete', 'retry-after'];
-// Same value as public/_headers. includeSubDomains covers only *.atelier.ciprari.ai (none exist); no preload.
-const HSTS = 'max-age=31536000; includeSubDomains';
+// Same value as public/_headers, and as the live header: the ciprari.ai zone's edge HSTS setting (12 months, no
+// includeSubDomains, no preload; it adds nosniff too) overrides the origin's at Cloudflare's edge, so the code says what
+// production serves.
+const HSTS = 'max-age=31536000';
 const SEG = /^[A-Za-z0-9._-]+$/;
 
 const json = (data, status = 200) =>
@@ -768,6 +770,12 @@ export default {
         return apiFailed(url, err);
       }
     }
+    // Share target fallback (run_worker_first "/share"): sw.js answers this POST on the device. With no service worker
+    // in control (site data cleared, the first moments after install, a worker that crashed on a huge share) the share is
+    // lost: never read, parse or echo it. A body over the zone plan's request limit (100 MB on Free/Pro, 200 MB on
+    // Business) never reaches this code: Cloudflare answers it with its own 413 page, and the share is lost all the same
+    // (accepted, quicklaunch-integration §8; the post-deploy curl check uses a small body).
+    if (url.pathname === '/share') return new Response(null, { status: 303, headers: { Location: req.method === 'POST' ? '/?share=lost' : '/', 'Cache-Control': 'no-store' } });
     return env.ASSETS.fetch(req);
   },
 };

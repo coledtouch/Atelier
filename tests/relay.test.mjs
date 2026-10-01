@@ -176,7 +176,8 @@ test('_headers: a report-only CSP for every page, alongside the existing securit
   assert.equal(all['x-frame-options'], 'DENY');
   assert.equal(all['referrer-policy'], 'strict-origin-when-cross-origin');
   assert.equal(all['content-security-policy'], undefined, 'report-only first: nothing is enforced yet');
-  assert.equal(all['strict-transport-security'], 'max-age=31536000; includeSubDomains', 'HTTPS only (worker.js sends the same on /api)');
+  // The live value: the zone's edge HSTS setting (12 months, no includeSubDomains, no preload) overrides the origin's.
+  assert.equal(all['strict-transport-security'], 'max-age=31536000', 'HTTPS only (worker.js sends the same on /api)');
   assert.equal(rules['/sw.js']['cache-control'], 'no-cache');
   assert.equal(rules['/index.html']['cache-control'], 'no-cache');
 

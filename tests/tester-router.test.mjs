@@ -233,6 +233,24 @@ test('Meta images: allow-listed model, n ≤ 4, explicit size; settled per image
   assert.equal(await codeOf(r), 'tester_model');
 });
 
+test('the addendum records the live tester image routes: Meta Muse Image as an owner decision, and the Gemini v1 variants', async () => {
+  const addendum = await readFile(new URL('../docs/superpowers/specs/2026-09-30-atelier-tester-access-addendum.md', import.meta.url), 'utf8');
+  // The routes as the router has them: if one is closed, drop its record too.
+  assert.ok(matchTesterRoute('POST', 'x/meta/images/generations'), 'Meta images is a tester route');
+  assert.ok(TESTER_IMAGE_MODELS.includes('meta:muse-image-1.0'));
+  assert.deepEqual(PRICES['meta:muse-image-1.0'].sizes, ['1024x1024', '1024x1280', '1536x1024', '1536x864', '864x1536']);
+  assert.equal(LIMITS.imageN, 4);
+  const a7b = /## A7b\.([\s\S]*?)\n## /.exec(addendum)?.[1] || '';
+  assert.match(a7b, /Tester images come from GPT Image, Nano Banana and Meta Muse Image/);
+  for (const words of ['owner decision', '`POST /api/x/meta/images/generations`', '`muse-image-1.0`', '`n` 1 to 4', '`1024x1024`, `1024x1280`, `1536x1024`, `1536x864`, `864x1536`', '`b64_json`', '`url`', '$0.01 per image returned'])
+    assert.ok(a7b.includes(words), words);
+  assert.ok(matchTesterRoute('POST', 'x/gemini/v1/models/gemini-3-pro-image:generateContent') && matchTesterRoute('GET', 'x/gemini/v1/files/abc123:download'));
+  assert.ok(!matchTesterRoute('POST', 'x/gemini/v1/models/veo-3.1-lite-generate-preview:predictLongRunning'));
+  const a3 = /## A3\.([\s\S]*?)\n## /.exec(addendum)?.[1] || '';
+  assert.match(a3, /accept `v1` as well as `v1beta`/);
+  assert.match(a3, /Meta Muse Image \(`POST \/api\/x\/meta\/images\/generations`\) is a tester image route/);
+});
+
 test('chat: unknown, NVIDIA and free models are refused with tester_model; oversized requests with tester_too_large', async () => {
   const { L, sub, call } = await tester();
   mockFetch([]);
@@ -822,6 +840,36 @@ test('tts: usage missing, or no audio tokens, keeps the full reservation', async
     const r = await call('tts', post({ voice: 'sage', text: 'Hello there.' }));
     assert.deepEqual(await bytesOf(r), CLIP, 'the audio still plays');
     assert.deepEqual(spent(L, sub), { spent: ttsWorstCase({ model: TTS_MODEL, chars: 12 }), reserved: 0, limit: 1_000_000 }, JSON.stringify(usage));
+  }
+});
+
+test('tts: an OpenAI stream that finishes without usage (SSE or plain audio/mpeg) settles like a stopped one: no less than the audio it timed', async () => {
+  const enc = new TextEncoder();
+  // 4.8 s of MPEG-2 Layer III frames (200 x 24 ms): inside the 5 s cut-off of a 12-character text, longer than its 2 s.
+  const frames = Buffer.concat(Array.from({ length: 200 }, () => { const f = Buffer.alloc(480, 0x55); f.set([0xff, 0xf3, 0xe4, 0xc4]); return f; }));
+  const sseNoUsage = () => new Response(new ReadableStream({
+    start(c) {
+      for (let i = 0; i < frames.length; i += 12_000) c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'speech.audio.delta', audio: frames.subarray(i, i + 12_000).toString('base64') })}\n\n`));
+      c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'speech.audio.done' })}\n\n`)); // no usage
+      c.close();
+    },
+  }), { headers: { 'content-type': 'text/event-stream' } });
+  const plainMpeg = () => new Response(new ReadableStream({
+    start(c) { for (let i = 0; i < frames.length; i += 12_000) c.enqueue(new Uint8Array(frames.subarray(i, i + 12_000))); c.close(); },
+  }), { headers: { 'content-type': 'audio/mpeg' } });
+  const reserved = ttsWorstCase({ model: TTS_MODEL, chars: 12 });
+  const timed = ttsActual({ model: TTS_MODEL, seconds: 4.8, chars: 12 });
+  assert.deepEqual([reserved, timed], [1_653, 3_003], 'a finished 4.8 s read costs more than its reservation');
+  for (const [name, up] of [['sse without usage', sseNoUsage], ['plain audio/mpeg', plainMpeg]]) {
+    const { L, sub, call } = await tester();
+    mockFetch([[TTS_UP, up]]);
+    const r = await call('tts', post({ voice: 'atelier', text: 'Hello there.' }));
+    assert.equal(r.status, 200, name);
+    assert.equal((await bytesOf(r)).length, frames.length, `${name}: all of it plays`);
+    await new Promise((ok) => setTimeout(ok, 20));
+    // Before the fix both settled { usage: null } and kept exactly the reservation (1,653), less than a stream cut off
+    // with the same audio would pay.
+    assert.deepEqual(spent(L, sub), { spent: timed, reserved: 0, limit: 1_000_000 }, name);
   }
 });
 

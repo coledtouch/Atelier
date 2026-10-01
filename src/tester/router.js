@@ -400,8 +400,9 @@ async function tts(c) {
         limits: voice.provider === 'gemini' ? { outputTokens: held.audioTokens } : { seconds: held.cutoffSeconds },
         // null: keep the full reservation; {billed: false}: $0; {usage, seconds}: the provider's report; {usage,
         // stopped}: an OpenAI stream that stopped (cut off, hung up or broke) after the provider reported, settled at
-        // max(reservation, the reported bill); {usage: null, stopped, seconds}: one that stopped before that, after
-        // audio was timed, settled at max(reservation, the timed seconds x 50 tokens/s). ttsActual ignores the seconds
+        // max(reservation, the reported bill); {usage: null, stopped, seconds}: one that stopped before that, or finished
+        // without usage (plain audio/mpeg; a speech.audio.done without it), after audio was timed, settled at
+        // max(reservation, the timed seconds x 50 tokens/s). ttsActual ignores the seconds
         // of an OpenAI answer that has usage (it comes only in speech.audio.done, the whole bill).
         async settle(r) {
           let actual = mtr.amount;

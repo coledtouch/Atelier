@@ -490,7 +490,8 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 .send[data-state='stop']::after { content: ''; position: absolute; inset: 6px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); animation: turn 0.9s linear infinite; pointer-events: none; }
 /* dictation (public/dictate.js, painted by app.js paintMic): data-state idle | listening (Web Speech, live text) |
    recording (a stop square, the elapsed time, a ring that follows the voice) | transcribing (an orbiting arc) | error;
-   .armed = quick launch's "Tap to talk". #micBtn's id beats the .composer-row .icon-btn sizes in both stylesheets. */
+   .armed = quick launch's "Tap to talk": one accent ring, drawn in the Quick launch section below (with Send's).
+   #micBtn's id beats the .composer-row .icon-btn sizes in both stylesheets. */
 #micBtn { position: relative; --level: 0; }
 #micBtn .i-stop { display: none; fill: currentColor; stroke: none; }
 #micBtn .mic-time { display: none; font: 500 11px/1 var(--mono); font-variant-numeric: tabular-nums; }
@@ -505,7 +506,6 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 #micBtn[data-state='transcribing'] svg { opacity: 0.45; }
 #micBtn[data-state='transcribing']::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--c-video); animation: turn 0.9s linear infinite; pointer-events: none; }
 #micBtn[data-state='error'] { color: var(--c-video); }
-#micBtn.armed::after { content: ''; position: absolute; inset: -2px; border-radius: 50%; pointer-events: none; box-shadow: 0 0 0 2px var(--c-video); animation: pulse 1.4s ease-in-out infinite; }
 @media (pointer: coarse) { #micBtn { min-width: 44px; min-height: 44px; } } /* a 44px target on touch, in every state */
 
 /* options strip: one line, never wraps; edges fade only while it overflows (.fade-l/.fade-r from syncOptFade) */
@@ -1107,3 +1107,59 @@ a.lk-title:hover { text-decoration: underline 1px var(--accent); text-underline-
 .lookup[data-side='dock'] .lk-thumb { display: none; }
 .lookup[data-side='dock'] .lk-text { -webkit-line-clamp: 2; }
 ::highlight(atelier-lookup) { background-color: color-mix(in srgb, var(--accent) 24%, transparent); }
+
+/* ── Quick launch (public/launch.js) ── */
+/* "From a link / From another app or site — check it before sending." above the composer row (and #input's description);
+   cleared on the first edit or on send */
+.composer-src { margin: 0; padding: 8px 14px 0; font: 500 11.5px/1.4 var(--mono); color: var(--accent); overflow-wrap: anywhere; }
+.composer-src::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
+/* armed: "tap me next" — a ring drawn with box-shadow (no layout shift) that pulses; any click clears it. Send is filled
+   with the accent, so its ring sits outside a 2px gap in the composer's colour (--bg-2): it still shows with the pulse off. */
+#micBtn.armed { color: var(--accent); box-shadow: 0 0 0 2px var(--accent); animation: ql-armed 1.6s ease-in-out infinite; }
+.send.armed { box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px var(--accent); animation: ql-armed-send 1.6s ease-in-out infinite; }
+@keyframes ql-armed { 50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 0 7px color-mix(in srgb, var(--accent) 14%, transparent); } }
+@keyframes ql-armed-send { 50% { box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 0 9px color-mix(in srgb, var(--accent) 14%, transparent); } }
+@media (prefers-reduced-motion: reduce) { #micBtn.armed, .send.armed { animation: none; } } /* the static rings above stay */
+/* the send hold: a conic countdown ring around Send for --hold (1.5 s after voice, 2.5 s for a keyed link). It follows
+   the button's shape like the armed ring: Send is a 44px square with 14px corners (studio.css), so the ring is the box
+   5px out with corners 14 + 5 = 19px, hollowed to a 3px band (content box minus border box: a 2px gap to the button). */
+@property --ql-hold { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.send.holding::before { content: ''; position: absolute; inset: -5px; padding: 3px; border-radius: 19px; pointer-events: none; box-sizing: border-box;
+  background: conic-gradient(var(--accent) var(--ql-hold), color-mix(in srgb, var(--accent) 18%, transparent) 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: ql-hold var(--hold, 1.5s) linear forwards; }
+@keyframes ql-hold { to { --ql-hold: 360deg; } }
+/* toast({ action }): a real Cancel button, at least 44 px tall (the toast itself ignores taps) */
+.toast .toast-act { appearance: none; -webkit-appearance: none; border: 0; margin: -4px -8px -4px 10px; min-height: 44px; padding: 0 16px; border-radius: 99px; vertical-align: middle;
+  background: color-mix(in srgb, var(--bg) 16%, transparent); color: inherit; font: 600 13.5px/1 var(--sans); cursor: pointer; }
+.toast.bad .toast-act { background: var(--surface-2); }
+.toast.show .toast-act { pointer-events: auto; }
+.toast .toast-act:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+/* Settings → General → Quick launch */
+.ql-lead { margin-bottom: 4px; }
+.ql-label { display: block; font-size: 13.5px; color: var(--ink); margin: 0 0 8px; }
+.ql-phone { margin: 12px 0 0; font: 500 10px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.ql-plat { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); margin: 10px 0 0; padding: 0 14px; }
+.ql-plat[open] { padding-bottom: 14px; }
+.ql-plat > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; font: 500 14px/1.3 var(--sans); color: var(--ink); border-radius: 10px; }
+.ql-plat > summary::-webkit-details-marker { display: none; }
+.ql-plat > summary::after { content: '+'; font: 400 16px/1 var(--mono); color: var(--ink-3); }
+.ql-plat[open] > summary::after { content: '\2212'; }
+.ql-plat > summary:focus-visible { outline-offset: -2px; }
+.ql-note, .ql-plat > summary + .hint { margin: 0 0 10px; }
+.ql-note { color: var(--ink-2); }
+.ql-steps { margin: 4px 0 10px; padding-left: 20px; display: grid; gap: 10px; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); overflow-wrap: anywhere; }
+.ql-steps b { color: var(--ink); font-weight: 600; }
+.ql-steps code { font: 400 12px var(--mono); color: var(--ink); }
+.ql-sub { margin: 6px 0 0; padding-left: 16px; display: grid; gap: 6px; }
+.ql-small { font-size: 12px; }
+ul.ql-small { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.ql-row { margin: 14px 0 0; }
+.ql .seg { display: flex; flex-wrap: wrap; max-width: 100%; margin: 0 0 8px; width: fit-content; }
+.ql .seg span { min-height: 44px; display: flex; align-items: center; justify-content: center; padding: 0 18px; font-size: 13.5px; }
+.ql-acts { gap: 8px; margin-top: 10px; }
+.ql-acts .chip { min-height: 44px; padding: 0 16px; border-radius: 99px; display: inline-flex; align-items: center; justify-content: center; font-family: var(--sans); font-size: 13px; }
+.ql-link { display: block; width: 100%; min-height: 44px; margin-top: 8px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--bg); color: var(--ink); font: 400 12px/1.4 var(--mono); }
+#qlTestMsg { margin-top: 8px; }
+@media (max-width: 640px) { #settings .ql .seg { width: 100%; } }
+@media (pointer: coarse) { .ql-link { font-size: 16px; } } /* copyLink() focuses it: under 16px, iPhone Safari zooms the page */

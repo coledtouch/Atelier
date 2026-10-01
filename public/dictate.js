@@ -17,7 +17,7 @@
 
 // ── limits and wording ──
 export const DICTATE_LIMITS = Object.freeze({
-  maxMs: 120_000, // longest recording; the server takes up to 180 s / 10 MB
+  maxMs: 120_000, // longest recording; the server takes up to 10 MB (and 180 s where it measures the length: WAV)
   warnMs: 10_000, // onLevel reports leftMs: the UI may count down the last 10 s
   maxBytes: 10 * 1024 * 1024, // src/transcribe.js cap: a bigger recording isn't sent
   minBytes: 256, // a container header and a moment of sound; less is an empty recording

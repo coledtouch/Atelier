@@ -7,15 +7,16 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=54';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=54';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=54';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=54';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=54';
-import { initLookup } from './lookup.js?v=54';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=54';
-import { createDictation, startFromGesture, insertText, clock as micClock } from './dictate.js?v=54';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=54';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=55';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=55';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=55';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=55';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=55';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS } from './launch.js?v=55';
+import { initLookup } from './lookup.js?v=55';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=55';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=55';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=55';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -174,6 +175,7 @@ const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)'); // JS beh
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('atelier.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('atelier.' + k, JSON.stringify(v)); } catch {} },
+  del(k) { try { localStorage.removeItem('atelier.' + k); } catch {} },
 };
 
 const SETTINGS_V = 3;
@@ -1205,7 +1207,7 @@ async function submit(textArg, modeArg, extra = {}) {
   let text = (textArg ?? $('#input').value).trim();
   let mode = modeArg || S.mode;
 
-  const slash = text.match(/^\/(ask|code|img|image|vid|video|idea|ideas|build|app)\b\s*/i);
+  const slash = !extra.launch && text.match(/^\/(ask|code|img|image|vid|video|idea|ideas|build|app)\b\s*/i); // a launch send (H4) stays in its mode
   if (slash) {
     const map = { img: 'image', vid: 'video', idea: 'ideas', app: 'build' };
     mode = map[slash[1].toLowerCase()] || slash[1].toLowerCase();
@@ -1222,10 +1224,11 @@ async function submit(textArg, modeArg, extra = {}) {
   if (!text) text = 'What’s in this image?';
   if (!hasCredentials()) { openOnboard(signinReason); return; }
   if (!navigator.onLine) { toast('You’re offline — connect, then send again', { error: true }); return; }
+  launchSubmitted(textArg == null); // quick launch: the hold, the armed ring, the source note and the saved draft (H4)
   if (video && mode !== 'ask' && mode !== 'code') { mode = 'ask'; setMode('ask'); toast('Sent to Ask — videos are answered there'); }
 
   // One request, several deliverables ("answer this, make an image and a video") → parallel tasks.
-  if (mode === 'ask' && !images.length && !video && !extra.entry && !extra.images && feat('helpers') && MULTI_HINT.test(text) && MULTI_JOIN.test(text)) {
+  if (mode === 'ask' && !images.length && !video && !extra.entry && !extra.images && !extra.launch && feat('helpers') && MULTI_HINT.test(text) && MULTI_JOIN.test(text)) {
     if (textArg == null) { $('#input').value = ''; autosize(); }
     const ctrl = new AbortController(); running.add(ctrl); setBusy();
     const tasks = await planTasks(text, ctrl.signal).catch(() => null).finally(() => { running.delete(ctrl); setBusy(); hideToast(); });
@@ -2166,14 +2169,18 @@ function busyBtn(b, label) {
 const skel = (w = '100%', h = 12) => `<span class="skel skel-line" style="width:${w};height:${h}px" aria-hidden="true"></span>`;
 const netText = (err) => (err instanceof TypeError || /failed to fetch|networkerror|\bload failed/i.test(err?.message || '') ? 'Couldn’t reach Atelier — check your connection.' : err?.message || String(err));
 let toastT;
-// toast(msg, { error, ms, link }) — error: dark bordered variant; ms: override the length-based duration; link: { href, label } appended as a new-tab link.
-function toast(msg, { error = false, ms, link } = {}) {
+// toast(msg, { error, ms, link, action, silent }) — error: dark bordered variant; ms: override the length-based duration; link: { href, label } appended as a new-tab link;
+// silent: shown but never announced (#toast is role="status"): for anything said while the mic is open, where a screen
+// reader speaking it would be transcribed. The next toast is announced as usual.
+function toast(msg, { error = false, ms, link, action, silent = false } = {}) {
   const t = $('#toast');
   // Modal <dialog>s render in the top layer, above every z-index: show the toast inside the topmost open one.
   const host = $$('dialog[open]').pop() || document.body;
   if (t.parentElement !== host) host.append(t);
+  if (silent) t.setAttribute('aria-hidden', 'true'); else t.removeAttribute('aria-hidden'); // before the text changes
   t.textContent = msg; t.classList.toggle('bad', !!error); t.classList.add('show');
   if (link) t.append(' ', Object.assign(document.createElement('a'), { href: link.href, target: '_blank', rel: 'noopener noreferrer', textContent: link.label }));
+  if (action) { const b = Object.assign(document.createElement('button'), { type: 'button', className: 'toast-act', textContent: action.label }); b.onclick = () => { hideToast(); action.onClick(); }; t.append(' ', b); }
   clearTimeout(toastT);
   toastT = setTimeout(() => t.classList.remove('show'), ms ?? Math.min(9000, Math.max(2200, String(msg).length * 60)));
 }
@@ -2405,7 +2412,61 @@ input.addEventListener('keydown', (ev) => {
 // While something is running, the button stops everything — unless you've typed a new prompt,
 // in which case it sends (tasks can run side by side).
 const hasDraft = () => Boolean($('#input').value.trim() || S.attachments.length || S.video);
-$('#sendBtn').onclick = () => (S.busy && !hasDraft() ? stopAll() : submit());
+// ── quick launch (public/launch.js): the source note, armed buttons, the send hold and the device-local draft ──
+const PLATFORM = detectPlatform(navigator); // 'ios' | 'android' | 'desktop'
+const STANDALONE = () => isStandalone(window);
+let srcKind = ''; // 'link' | 'share' while the "From a link / From another app or site" note shows (saved with a draft, shown again on restore)
+function showSource(msg) { const p = $('#composerSrc'); if (!p) return; p.textContent = msg; p.hidden = false; srcKind = msg === NOTES.shared ? 'share' : 'link'; syncDock(); }
+function clearSource() { srcKind = ''; const p = $('#composerSrc'); if (p && !p.hidden) { p.hidden = true; p.textContent = ''; syncDock(); } }
+function armSend() { $('#sendBtn').classList.add('armed'); }
+function clearArm() { $$('.armed').forEach((b) => b.classList.remove('armed')); }
+document.addEventListener('click', (ev) => ev.target.closest?.('.armed')?.classList.remove('armed'), true); // any click on an armed button clears it
+let sendHold = null;
+// The visible, cancellable hold before a launch sends by itself: a keyed iPhone link (2.5 s) or Talk after you speak
+// into an empty composer (1.5 s). Cancel, a tap or a key in the prompt, or the page going hidden holds it; Send sends now.
+// It sends what was shown as a plain prompt in the mode it was shown in (submit's extra.launch: no "/video" prefix
+// switch, no multi-task split). A mode switch or the mic opening meanwhile holds it instead.
+function holdThenSend({ ms }) {
+  if (!hasDraft() || sendHold) return;
+  const b = $('#sendBtn'), mode = S.mode;
+  const onEdit = () => sendHold?.cancel('edit');
+  const onHide = () => { if (document.visibilityState === 'hidden') sendHold?.cancel('hidden'); };
+  const done = () => {
+    b.classList.remove('holding'); b.style.removeProperty('--hold');
+    input.removeEventListener('pointerdown', onEdit); input.removeEventListener('keydown', onEdit); document.removeEventListener('visibilitychange', onHide);
+    sendHold = null;
+  };
+  // The hold's own "Sending… Cancel" toast is up while its Cancel button is still in #toast (a newer toast replaces it).
+  let act = null;
+  const dropToast = () => { if (act && $('#toast').contains(act)) hideToast(); };
+  sendHold = createHold({ ms,
+    onFire: () => { done(); hideToast(); if (S.mode !== mode || micOn()) { armSend(); toast(NOTES.held); return; } submit(undefined, mode, { launch: true }); },
+    // 'sent': the composer went out some other way (Enter, Send while dictating); 'quiet': sign-out or Clear this device.
+    // Either way nothing is held, and a Cancel left on screen would do nothing: take the toast down.
+    onCancel: (why) => { done(); if (why === 'sent' || why === 'quiet') dropToast(); else { armSend(); toast(NOTES.held); } } });
+  b.classList.add('holding'); b.style.setProperty('--hold', `${ms}ms`);
+  input.addEventListener('pointerdown', onEdit); input.addEventListener('keydown', onEdit); document.addEventListener('visibilitychange', onHide);
+  toast(NOTES.sending, { ms: ms + 600, action: { label: 'Cancel', onClick: () => sendHold?.cancel('cancel') } });
+  act = $('#toast .toast-act');
+}
+// submit() past its sign-in and offline checks. The composer going out clears the hold, the armed ring, the source note
+// and the saved draft; a button sending its own text meanwhile only cancels the composer's hold (it then waits for a tap).
+function launchSubmitted(composer) {
+  if (!composer) { sendHold?.cancel('edit'); return; }
+  sendHold?.cancel('sent'); clearArm(); clearSource(); clearTimeout(draftT); drafts.sent();
+}
+// The composer survives Android's force-reload on a shortcut or share launch: localStorage 'draft' {t, at, src}, 6 h.
+// Only text you typed or dictated is kept (launch.js draftKeeper): an untouched link or share prefill is never saved, so
+// it can't come back unlabelled, or pile up across iPhone Shortcut runs. Sign-out and Clear this device stop it (H9, H13).
+let draftT;
+const drafts = draftKeeper({ store: LS, text: () => input.value, source: () => srcKind });
+const keepDraft = () => { clearTimeout(draftT); drafts.keep(); };
+// Only your own edit clears the "From a link / Shared" note (dictate.js writes dictated words with a synthetic 'input');
+// any input, typed or dictated, makes the composer yours to keep.
+input.addEventListener('input', (ev) => { if (ev.isTrusted) clearSource(); drafts.edit(); clearTimeout(draftT); draftT = setTimeout(keepDraft, 500); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') keepDraft(); });
+addEventListener('pagehide', keepDraft);
+$('#sendBtn').onclick = () => { if (sendHold) { sendHold.fire(); return; } return S.busy && !hasDraft() ? stopAll() : submit(); };
 // Keep focus (and the phone keyboard) in the composer: otherwise the first tap only blurs it, the keyboard drops, the
 // dock jumps and the tap misses Send (Android needed two taps).
 $('#sendBtn').addEventListener('pointerdown', (ev) => { if (document.activeElement === input) ev.preventDefault(); });
@@ -2535,20 +2596,23 @@ function attNote(n) {
   return n >= MAX_ATT ? `${n} of ${MAX_ATT} — limit reached` : `${n} of ${MAX_ATT} images`;
 }
 const MIXED = 'A message can carry photos or one video — remove the current attachment first';
-async function addFiles(list) {
+async function addFiles(list, { from = '' } = {}) {
   const files = [...list];
   const vids = files.filter(isVideoFile), imgs = files.filter((f) => f.type.startsWith('image/'));
   if (vids.length) {
     if (S.attachments.length || S.video) return toast(MIXED);
     if (vids.length > 1 || imgs.length) toast('Attached the first video — one video per message');
-    return attachVideo(vids[0]);
+    return attachVideo(vids[0], { deferClip: from === 'share' }); // a share (maybe a drive-by POST) never uploads before Send
   }
   const room = MAX_ATT - S.attachments.length;
   if (!imgs.length) return toast('Only images and videos can be attached', { error: true });
   if (S.video) return toast(MIXED);
   if (room <= 0) return toast(`${MAX_ATT} images max — remove one first`);
   for (const f of imgs.slice(0, room)) {
-    const raw = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f); });
+    // A share can come from any site (a drive-by POST): no shared photo over SHARE_LIMITS.imageBytes is read into memory,
+    // and a read error (a huge or unreadable file) skips that file instead of leaving the launch waiting forever.
+    const raw = from === 'share' && f.size > SHARE_LIMITS.imageBytes ? '' : await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = r.onabort = () => res(''); r.readAsDataURL(f); });
+    if (!raw) { toast('Couldn’t read one of the images — skipped it', { error: true }); continue; }
     S.attachments.push({ src: await shrinkDataUrl(raw, 1280, 1280) });
   }
   if (imgs.length > room) toast(`Added ${room} — ${MAX_ATT} images max`);
@@ -2567,10 +2631,10 @@ function renderAttachments() {
 // ── composer video (S.video): one per message, never mixed with photos ──
 // Frames are read locally (poster + 4–16 stills); when Gemini will watch it, the clip upload starts right away
 // (with Data Saver on, at send instead), so it is usually done before the question is typed.
-async function attachVideo(file) {
+async function attachVideo(file, { deferClip = false } = {}) {
   if (file.size > LOCAL_MAX_BYTES) return toast('That video is over 4 GB — too big to read on this device', { error: true });
   const v = S.video = { file, url: URL.createObjectURL(file), name: cleanName(file.name), mime: normalizeVideoMime(file.type, file.name), size: file.size,
-    duration: 0, width: 0, height: 0, poster: null, frames: [], status: 'reading', progress: 0, done: 0, total: 0, clip: null, ctrl: new AbortController() };
+    duration: 0, width: 0, height: 0, poster: null, frames: [], status: 'reading', progress: 0, done: 0, total: 0, clip: null, ctrl: new AbortController(), deferClip };
   if (!chatMode()) { setMode('ask'); toast('Switched to Ask to talk about the video'); }
   renderAttachments(); renderOptions();
   maybeStartClip();
@@ -2600,7 +2664,7 @@ const clipRoute = (v) => geminiUsable() && (providerOf(modelFor('watch')) === 'g
 // Start the Gemini upload now when the clip path applies (a pinned non-Gemini video model gets frames).
 function maybeStartClip() {
   const v = S.video;
-  if (!v || v.clip || navigator.connection?.saveData || !clipOk(v) || !clipRoute(v)) return;
+  if (!v || v.deferClip || v.clip || navigator.connection?.saveData || !clipOk(v) || !clipRoute(v)) return;
   v.clip = startClip(v.file, { apiHeaders, name: v.name, mime: v.mime, onChange: clipChanged });
 }
 // The Video model pin or the providers changed: stop (or delete) an upload Gemini won't get, start one it now will.
@@ -2686,7 +2750,7 @@ const dictation = createDictation({
     micTime.textContent = micClock(elapsedMs);
     micBtn.toggleAttribute('data-warn', leftMs <= 10_000);
   },
-  onText: (text, { final, autoSend }) => {
+  onText: (text, { final, auto, autoSend }) => {
     const v = input.value;
     if (!micAt || micAt.value !== v) { // the first words, or the box was edited meanwhile: write where the starting tap
       // found the caret (micSel; the tap may have blurred the box), else at its selection now (the end if never placed)
@@ -2701,6 +2765,10 @@ const dictation = createDictation({
     input.dispatchEvent(new Event('input')); // autosize, the Send state, drafts
     if (final) micAdded = `Added: ${text.length > 80 ? `${text.slice(0, 80)}…` : text}`; // said by paintMic once the mic is closed
     if (final && autoSend) dictatedSend?.();
+    // A launch that listens without sending (After you speak: Review, ?start=voice&q=…, a restored draft, listen when I
+    // open): Send pulses once the words are in. A tap on the mic (auto false) is plain dictation; Send pressed while it
+    // listened (micSendAfter) sends it all once dictation ends.
+    else if (final && auto && !micSendAfter) armSend();
   },
   onResponse: (r) => noteAllowance(r), // x-tester-allowance
   onRefusal: (r) => { if (r.code === 'tester_signin') refreshTesterSoon(); },
@@ -3499,6 +3567,7 @@ function openSettings() {
   $('#passResult').textContent = ''; $('#passResult').className = 'hint';
   syncMigrateBtn();
   $('#settingsScroll').scrollTop = 0;
+  renderQuickLaunch();
   $('#settings').showModal();
 }
 $('#settingsBtn').onclick = openSettings;
@@ -3558,6 +3627,7 @@ $('#settingsForm').addEventListener('submit', (ev) => {
   const lk = $('input[name=lookup]:checked', f)?.value || lookupMode();
   s.lookup = lk === lookupDefault() ? '' : lk; if (lk === 'off') lookup.close('off');
   MODEL_ROLES.forEach(([k]) => { s.models[k] = f['m_' + k].value.trim().replace(/^(anthropic|openai|gemini|zai|deepseek|meta):/i, (p) => p.toLowerCase()); });
+  saveQuickLaunch(f);
   saveSettings(); syncRole(); applyTheme(); renderOptions(); renderWelcome(); checkKey(); loadTools(); pullMe();
   syncClip(); // the Video model pin decides clip vs frames
   retitleReads(); // a passcode added or cleared changes which voice Read aloud uses
@@ -3647,6 +3717,8 @@ $('#wipeBtn').onclick = async () => {
     await DB.clear(); await DB.kvClear();
     // Prevent the legacy migration from restoring erased conversations on reload.
     await new Promise((res, rej) => { const r = indexedDB.deleteDatabase('atelier'); r.onsuccess = res; r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('Close other Atelier tabs and try clearing this device again.')); });
+    clearTimeout(draftT); drafts.stop(); sendHold?.cancel('quiet'); input.value = ''; // no draft is written back on pagehide
+    await self.caches?.delete(SHARE_CACHE).catch(() => {}); // a pending share (sw.js) is device data too
     Object.keys(localStorage).filter(k => k.startsWith('atelier.')).forEach(k => localStorage.removeItem(k));
     location.reload();
   } catch (err) { toast(err.message || 'Couldn’t clear this device. Please try again.', { error: true }); }
@@ -3946,6 +4018,7 @@ $('#onboardForm').addEventListener('submit', async (ev) => {
   DB.kvSet('passcode', pass).catch(() => {});
   $('#onboard').close();
   toast('You’re in');
+  resumeLaunch(); // a launch that arrived signed out: prefill and arm (never start the mic or send)
   pullMe(); loadTools();
   input.focus();
 });
@@ -3956,6 +4029,10 @@ $('#onboardForm').addEventListener('submit', async (ev) => {
 function syncRole() {
   document.body.classList.toggle('tester', Boolean(S.tester));
   document.body.classList.toggle('owner', Boolean(S.settings.passcode) && !S.tester);
+  // Quick launch state belongs to one role: sign-out or an owner/tester switch forgets the launch key, the pending launch,
+  // the draft and the composer it comes from, and a pending share (so an owner's Shortcut link can't spend a tester's
+  // allowance, or the reverse).
+  if (syncLaunchRole(LS, roleOf({ passcode: S.settings.passcode, tester: S.tester })) === 'wiped') launchWiped();
   syncMic(); // dictation needs the passcode (owner) or the tester's dictation feature
 }
 function setTester(raw) {
@@ -4089,7 +4166,7 @@ function welcomeTester() {
   dlg.setAttribute('aria-labelledby', 'twTitle');
   dlg.innerHTML = `<form method="dialog"><p class="eyebrow">LinkedIn tester</p><h3 id="twTitle">Welcome${first ? `, <em>${esc(first)}</em>` : ''}.</h3><p class="hint">You have <b>${money(t.allowance.day.limit)}</b> a day and <b>${money(t.allowance.month.limit)}</b> a month on paid models — Claude, GPT, Gemini and others (Z.ai, DeepSeek, Meta) for answers, code, ideas and apps, plus images and Veo video. The line above the prompt shows what’s left.</p><p class="hint">Your threads stay on this device. Your You profile is saved to your tester account.</p><div class="row"><button class="btn-primary" value="ok">Start making</button></div></form>`;
   document.body.append(dlg);
-  dlg.addEventListener('close', () => { dlg.remove(); if (!COARSE.matches) input.focus({ preventScroll: true }); });
+  dlg.addEventListener('close', () => { dlg.remove(); if (!COARSE.matches) input.focus({ preventScroll: true }); resumeLaunch(); });
   dlg.showModal();
 }
 
@@ -4640,14 +4717,163 @@ async function refreshServer(tries = 4) {
   return false;
 }
 
+// ───────────────────────── quick launch (public/launch.js) ─────────────────────────
+// Owner-published iCloud link for the "Ask Atelier" Shortcut (its Text action is an Import Question; no key baked in).
+const QUICK_SHORTCUT_URL = '';
+const roleNow = () => roleOf({ passcode: S.settings.passcode, tester: S.tester });
+const micOn = () => $('#micBtn')?.getAttribute('aria-pressed') === 'true';
+// Talk to Atelier through public/dictate.js. dictation.start({ auto: true, autoSend }) opens the mic by itself on Android and
+// desktop; iPhone/iPad open it only from a tap, so launch.js arms "Tap to talk" there instead. autoSend reaches onText →
+// dictatedSend, and applyLaunch checked the composer was empty right before start(): your own words only, behind the hold.
+// An ARMED launch never sends by itself (tab, replay, dialog, iOS, blocked, failed start): the tap is plain dictation.
+function armTapToTalk() {
+  micArm?.();
+  if (!dictation.available() || micBtn.hidden) return false;
+  micBtn.classList.add('armed');
+  micArm = startFromGesture(dictation, micBtn, { autoSend: false, reason: 'launch', timeoutMs: 60_000,
+    onDisarm: () => { micBtn.classList.remove('armed'); micArm = null; } });
+  return true;
+}
+// Talk's auto-send, your own words only: nothing prefilled while it listened (a replayed link or share shows the note),
+// no attachment, the page visible and idle. Otherwise Send pulses. If Send or Enter was pressed while it listened
+// (micSendAfter), paintMic sends everything once dictation ends: no hold (and no stale "Sending… Cancel") on top.
+dictatedSend = () => {
+  if (micSendAfter) return;
+  if (!S.busy && document.visibilityState === 'visible' && $('#composerSrc').hidden && !S.attachments.length && !S.video) holdThenSend({ ms: HOLD_MS.voice });
+  else armSend();
+};
+// First use of a "Send without a tap" key: show what will be sent, default to Not now.
+function confirmLinkSend() {
+  return new Promise((resolve) => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'tok-dialog';
+    dlg.setAttribute('aria-labelledby', 'qlcTitle');
+    const said = input.value.trim();
+    dlg.innerHTML = `<form method="dialog"><h3 id="qlcTitle">${esc(NOTES.confirmTitle)}</h3><p class="hint">${esc(NOTES.confirmHint)}</p>${said ? `<p class="hint"><b>${esc(said.length > 240 ? said.slice(0, 240) + '…' : said)}</b></p>` : ''}<div class="row"><button class="chip" value="no">Not now</button><button class="btn-primary" value="yes">Allow</button></div></form>`;
+    document.body.append(dlg);
+    dlg.addEventListener('close', () => { dlg.remove(); resolve(dlg.returnValue === 'yes'); });
+    dlg.showModal();
+  });
+}
+const launchDeps = {
+  store: LS, platform: PLATFORM, setMode,
+  // A launch writing into the composer (a replayed prefill, a share) cancels a running hold: what was shown is what sends.
+  getText: () => input.value, setText: (t) => { sendHold?.cancel('edit'); input.value = t; autosize(); },
+  showSource, toast, armSend,
+  // Dictation through public/dictate.js (§J). armTapToTalk ignores o.autoSend: an armed launch never sends by itself.
+  armMic: () => armTapToTalk(),
+  micHint: () => toast(micHelp(dictation.platform), { error: true, ms: 9000 }),
+  holdThenSend, confirmLinkSend,
+  startVoice: ({ autoSend = false } = {}) => (dictation.needsGesture() ? false : dictation.start({ reason: 'launch', auto: true, autoSend })),
+  composerEmpty: () => !hasDraft(), dialogOpen: () => Boolean($('dialog[open]')),
+  whenVisible: (ms) => whenVisible(document, { ms }), caches: self.caches, File, // ms: launch.js VISIBLE_WAIT_MS
+  addFiles: (files, opts) => addFiles(files, opts),
+  focusInput: () => { if (!COARSE.matches) input.focus({ preventScroll: true }); },
+};
+async function launchCtx(extra = {}) {
+  const perm = await micPermission(navigator);
+  return {
+    signedIn: hasCredentials(), role: roleNow(), standalone: STANDALONE(), sr: dictation.available(), needsTap: dictation.needsGesture(),
+    perm, dialogOpen: Boolean($('dialog[open]')), online: navigator.onLine, busy: S.busy, visible: document.visibilityState === 'visible',
+    ios: PLATFORM === 'ios', now: Date.now(), composer: input.value, attachments: S.attachments.length + (S.video ? 1 : 0), store: LS, ...extra,
+  };
+}
+async function runLaunch(intent, extra = {}) {
+  try { return await applyLaunch(planLaunch(intent, await launchCtx(extra)), launchDeps); }
+  catch (err) { console.warn('[atelier] launch', err); }
+}
+// After a sign-in (the owner passcode, the LinkedIn welcome, or a tester session found at boot): the stashed launch, as
+// a replay that never starts the mic or sends. Never into something already running (a hold, the mic, a reply): the
+// stash may be a stranger's link or share, so then it is dropped.
+function resumeLaunch() {
+  const p = takePendingLaunch(LS, Date.now());
+  if (p && !sendHold && !micOn() && !S.busy) runLaunch(p, { replay: true });
+}
+// Sign-out or an owner/tester switch (H11): nothing of the last role's launch state stays. Not the hold or the armed
+// rings, not the composer text (its next pagehide would save it as a draft with no role), not a pending share.
+function launchWiped() {
+  sendHold?.cancel('quiet'); clearArm(); clearTimeout(draftT); drafts.reset();
+  if (input.value) { input.value = ''; autosize(); }
+  clearSource(); self.caches?.delete(SHARE_CACHE).catch(() => {});
+}
+// Settings → General → Quick launch
+function renderQuickLaunch() {
+  const f = $('#settingsForm'), q = quickPrefs(LS), sa = STANDALONE(), ios = PLATFORM === 'ios';
+  if (!$('#quickLaunch')) return;
+  for (const [name, v] of [['qlSend', q.send ? 'send' : 'review'], ['qlListen', q.listen ? 'on' : 'off'], ['qlLinkSend', q.linkSend ? 'on' : 'off']]) $$(`input[name=${name}]`, f).forEach((r) => (r.checked = r.value === v));
+  $('#qlAndroid').open = PLATFORM === 'android'; $('#qlIos').open = ios;
+  $('#qlPhoneLabel').hidden = PLATFORM !== 'desktop';
+  $('#qlInstall').hidden = PLATFORM !== 'android' || sa;
+  $('#qlListenRow').hidden = ios;
+  $('#qlTest').hidden = $('#qlTestMsg').hidden = ios;
+  const iosApp = ios && sa; // Home Screen app: set up in Safari (separate sign-in), no buttons here
+  $('#qlIosStandalone').hidden = !iosApp; $('#qlIosSetup').hidden = iosApp;
+  // A keyed link works only in the browser that copied it: off the iPhone, Copy gives the plain link (it fills the box).
+  $('#qlIosElsewhere').hidden = ios; $('#qlLinkSendStep').hidden = !ios;
+  $('#qlGet').hidden = $('#qlGetHint').hidden = !QUICK_SHORTCUT_URL; if (QUICK_SHORTCUT_URL) $('#qlGet').href = QUICK_SHORTCUT_URL;
+  $('#qlBuildHint').hidden = Boolean(QUICK_SHORTCUT_URL); // "Build the Shortcut:" when building it is the only way
+  $('#qlReset').hidden = !ios || !keyState(LS).mine;
+  $('#qlLink').hidden = true; $('#qlLink').value = '';
+}
+function saveQuickLaunch(f) {
+  if (!$('#quickLaunch')) return;
+  const val = (n) => $(`input[name=${n}]:checked`, f)?.value;
+  const prev = quickPrefs(LS);
+  const next = { send: val('qlSend') ? val('qlSend') === 'send' : prev.send, listen: val('qlListen') ? val('qlListen') === 'on' : prev.listen, linkSend: val('qlLinkSend') ? val('qlLinkSend') === 'on' : prev.linkSend };
+  LS.set('quick', next); // device-local: no SETTINGS_V migration
+  if (prev.linkSend && !next.linkSend) forgetLaunchKey(LS); // Off: old Shortcut links only fill the box from now on
+}
+// From the tap (a user gesture): copy, or where the clipboard is refused, show the link to copy by hand.
+async function copyLink(link, ok, manual) {
+  try { await navigator.clipboard.writeText(link); $('#qlLink').hidden = true; $('#qlLink').value = ''; toast(ok, { ms: 9000 }); }
+  catch { const i = $('#qlLink'); i.value = link; i.hidden = false; i.focus(); i.select(); toast(manual, { ms: 9000 }); }
+}
+$('#qlCopy')?.addEventListener('click', () => {
+  const role = roleNow();
+  // The key lives in this browser only: anywhere but the iPhone, Copy gives the plain link (it fills the box, Send pulses).
+  const on = PLATFORM === 'ios' && $('input[name=qlLinkSend]:checked', $('#settingsForm'))?.value === 'on';
+  if (on && !role) return toast('Sign in first — the link only works in a signed-in browser.');
+  LS.set('quick', { ...quickPrefs(LS), linkSend: on }); // copying is the choice: no Save needed for the link to work
+  if (!on) forgetLaunchKey(LS);
+  $('#qlReset').hidden = !on;
+  copyLink(shortcutLink(location.origin, on ? ensureLaunchKey(LS, role) : ''), NOTES.linkCopied, NOTES.copyBelow);
+});
+// New link: a fresh key, copied at once (the old one only fills the box from now on; the new one asks once, as before).
+$('#qlReset')?.addEventListener('click', () => {
+  const role = roleNow(); if (!role || PLATFORM !== 'ios') return;
+  LS.set('quick', { ...quickPrefs(LS), linkSend: true });
+  copyLink(shortcutLink(location.origin, rotateLaunchKey(LS, role)), NOTES.newLink, NOTES.newLinkManual);
+});
+$('#qlTest')?.addEventListener('click', async () => {
+  const msg = $('#qlTestMsg');
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true }); // a permission probe from the tap; nothing is recorded
+    s.getTracks().forEach((t) => t.stop());
+    msg.className = 'hint ok'; msg.textContent = 'Mic works ✓';
+  } catch (err) {
+    msg.className = 'hint bad';
+    // The same steps the mic gives (dictate.js micHelp): an Android tab has no Atelier icon to touch and hold.
+    msg.textContent = ['NotAllowedError', 'SecurityError'].includes(err?.name) ? micHelp(dictation.platform) : err?.name === 'NotFoundError' ? 'No microphone found.' : 'Mic unavailable.';
+  }
+});
+
 (async function boot() {
   applyTheme();
   renderWelcome();
-  const params = new URLSearchParams(location.search);
-  setMode(MODES[params.get('mode')] ? params.get('mode') : LS.get('mode', 'ask'));
-  const shared = [params.get('title'), params.get('text'), params.get('url')].filter(Boolean).join('\n');
-  if (shared) { input.value = shared; autosize(); }
-  if (params.toString()) history.replaceState(null, '', '/');
+  const params = new URLSearchParams(location.search); // still read below for ?tester= and ?connected=
+  // Quick launch: shortcuts (?start=), the iPhone Shortcut (#…&q=), shares (?share=), legacy ?mode= and GET shares.
+  // URL text is only prefilled here; what may start or send is decided once sign-in is known (runLaunch below).
+  // The URL is cleaned at once, query and fragment, so a reload never listens or sends twice.
+  const launch = readLaunch(location.search, location.hash);
+  setMode(launch.mode || LS.get('mode', 'ask'));
+  // The draft: read once, only into an empty composer. It was the user's (only typed or dictated text is saved), and if
+  // the "From a link / Shared" note was still showing when it was saved, it shows again.
+  const draft = takeDraft(LS, Date.now());
+  if (draft.text && !input.value.trim()) { input.value = draft.text; autosize(); drafts.restored(); if (draft.src) showSource(draft.src === 'share' ? NOTES.shared : NOTES.link); }
+  if (launch.text) { if (!input.value.includes(launch.text)) input.value = joinDraft(input.value, launch.text); autosize(); showSource(launch.from === 'share' ? NOTES.shared : NOTES.link); }
+  if (params.toString() || location.hash.length > 1) history.replaceState(null, '', '/'); // query and fragment (the key never lingers)
+  const shared = launch.text || launch.share || launch.voice; // a launch skips the thread resume below
+  sweepShare({ caches: self.caches, keep: [launch.share, peekPendingLaunch(LS, Date.now())?.share] }); // drop a stale share
 
   const health = refreshServer();
   // Bring threads over from the old database first (bounded — never delays startup by more than ~2s).
@@ -4680,13 +4906,17 @@ async function refreshServer(tries = 4) {
       if (st === 'ok' && S.tester) {
         if ($('#onboard').open) $('#onboard').close();
         updateKeyState(null); health.then(() => pullMe());
-        if (testerResult === 'welcome') welcomeTester();
+        if (testerResult === 'welcome') welcomeTester(); else if (!cached) resumeLaunch(); // a session found now is a sign-in
       } else if (st === 'none') {
         if (cached) testerSignedOut('expired');
         else if (testerResult === 'welcome') openOnboard('nocookie');
       }
     });
   }
+  // Already signed in (passcode or a cached tester): a stash left by an earlier signed-out launch is stale, because
+  // replays only follow a sign-in (H10, H12, H15). Then this launch: start/arm/send per launch.js, or, signed out, stash.
+  if (hasCredentials()) takePendingLaunch(LS, Date.now());
+  runLaunch(launch);
   const connected = params.get('connected');
   if (connected) {
     // denied / error don't say which sign-in they came from: use the one this device started last.
@@ -4703,7 +4933,7 @@ async function refreshServer(tries = 4) {
       let reloaded = false;
       const reloadWhenIdle = () => {
         if (reloaded) return;
-        if (S.busy || dictation.busy() || hasDraft() || lookup.pinned() || $('dialog[open]') || $('.drawer:not([hidden])') || !$('#viewer').hidden || learning) return setTimeout(reloadWhenIdle, 3000);
+        if (S.busy || dictation.busy() || hasDraft() || sendHold || micOn() || lookup.pinned() || $('dialog[open]') || $('.drawer:not([hidden])') || !$('#viewer').hidden || learning) return setTimeout(reloadWhenIdle, 3000);
         reloaded = true; location.reload();
       };
       navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) reloadWhenIdle(); });

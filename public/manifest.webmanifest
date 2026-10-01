@@ -39,44 +39,50 @@
   ],
   "shortcuts": [
     {
-      "name": "Ask",
-      "url": "/?mode=ask",
+      "name": "Talk to Atelier",
+      "short_name": "Talk",
+      "description": "Open Atelier already listening",
+      "url": "/?start=voice",
       "icons": [
-        {
-          "src": "/icons/atelier-v2-192.png",
-          "sizes": "192x192"
-        }
+        { "src": "/icons/shortcut-talk-96.png", "sizes": "96x96", "type": "image/png", "purpose": "any" },
+        { "src": "/icons/shortcut-talk-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+        { "src": "/icons/shortcut-talk-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" }
+      ]
+    },
+    {
+      "name": "Ask Atelier",
+      "short_name": "Ask",
+      "description": "Type a question",
+      "url": "/?start=ask",
+      "icons": [
+        { "src": "/icons/shortcut-ask-96.png", "sizes": "96x96", "type": "image/png", "purpose": "any" },
+        { "src": "/icons/shortcut-ask-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+        { "src": "/icons/shortcut-ask-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" }
       ]
     },
     {
       "name": "Imagine an image",
-      "url": "/?mode=image",
+      "short_name": "Imagine",
+      "description": "Describe a picture to make",
+      "url": "/?start=image",
       "icons": [
-        {
-          "src": "/icons/atelier-v2-192.png",
-          "sizes": "192x192"
-        }
-      ]
-    },
-    {
-      "name": "Build an app",
-      "url": "/?mode=build",
-      "icons": [
-        {
-          "src": "/icons/atelier-v2-192.png",
-          "sizes": "192x192"
-        }
+        { "src": "/icons/shortcut-image-96.png", "sizes": "96x96", "type": "image/png", "purpose": "any" },
+        { "src": "/icons/shortcut-image-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+        { "src": "/icons/shortcut-image-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" }
       ]
     }
   ],
   "share_target": {
-    "action": "/",
-    "method": "GET",
-    "enctype": "application/x-www-form-urlencoded",
+    "action": "/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
     "params": {
       "title": "title",
       "text": "text",
-      "url": "url"
+      "url": "url",
+      "files": [
+        { "name": "media", "accept": ["image/*", "video/*"] }
+      ]
     }
   }
 }

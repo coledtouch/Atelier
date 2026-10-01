@@ -28,8 +28,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=54" />
-  <link rel="stylesheet" href="/studio.css?v=54" />
+  <link rel="stylesheet" href="/app.css?v=55" />
+  <link rel="stylesheet" href="/studio.css?v=55" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -97,12 +97,13 @@
           <span class="mode-ink" id="modeInk" aria-hidden="true"></span>
         </nav>
         <div class="attachments" id="attachments"></div>
+        <p class="hint composer-src" id="composerSrc" hidden></p>
         <div class="composer-row" id="promptPanel" role="tabpanel" aria-label="Ask prompt">
           <button class="icon-btn subtle" id="attachBtn" type="button" aria-label="Attach image or video" title="Attach image or video">
             <svg viewBox="0 0 24 24"><path d="M21 12.5 12.6 21a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>
           </button>
           <input type="file" id="fileInput" accept="image/*,video/*" multiple hidden />
-          <textarea id="input" rows="1" placeholder="Ask anything…" autocomplete="off" enterkeyhint="send" aria-label="Prompt"></textarea>
+          <textarea id="input" rows="1" placeholder="Ask anything…" autocomplete="off" enterkeyhint="send" aria-label="Prompt" aria-describedby="composerSrc"></textarea>
           <button class="icon-btn subtle" id="micBtn" type="button" aria-pressed="false" aria-label="Dictate" title="Dictate" data-state="idle">
             <svg class="i-mic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
             <svg class="i-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
@@ -272,6 +273,77 @@
             <label><input type="radio" name="theme" value="light" /> <span>Paper</span></label>
           </div>
         </section>
+        <section class="field-group ql" id="quickLaunch">
+          <h4>Quick launch</h4>
+          <p class="hint ql-lead">Atelier, one gesture away. Your phone keeps its own assistant button; these put Atelier right beside it.</p>
+          <p class="ql-label ql-phone" id="qlPhoneLabel" hidden>On your phone</p>
+          <details class="ql-plat" id="qlAndroid">
+            <summary>Android</summary>
+            <p class="hint ql-note" id="qlInstall" hidden>Install Atelier first: Chrome ⋮ → Add to Home screen → Install. Everything below needs the installed app.</p>
+            <ol class="ql-steps">
+              <li><b>Talk button on your home screen.</b> Touch and hold the Atelier icon, then drag <b>Talk to Atelier</b> onto your home screen. One tap opens Atelier listening.</li>
+              <li><b>Back tap (Pixel 4a 5G and newer).</b> Settings → System → Gestures → Quick tap → Use Quick tap → Open app → tap ⚙ → Atelier. If the list offers <b>Talk to Atelier</b>, choose it so a double-tap starts listening.</li>
+              <li><b>Side button (Samsung).</b> Settings → Advanced features → Side button → Double press → Apps → Atelier. If a ⚙ appears, choose <b>Talk to Atelier</b>.</li>
+              <li><b>By voice.</b> “Hey Google, open Atelier” (phone unlocked).</li>
+              <li><b>Share sheet.</b> Share a link, text, photo or video and choose Atelier.</li>
+            </ol>
+            <p class="hint ql-small">Holding the power button stays with your phone’s assistant — Android gives that only to native apps.</p>
+            <div class="ql-row">
+              <span class="ql-label" id="qlSendLabel">After you speak (Talk to Atelier)</span>
+              <div class="seg" role="radiogroup" aria-labelledby="qlSendLabel">
+                <label><input type="radio" name="qlSend" value="review" /> <span>Review</span></label>
+                <label><input type="radio" name="qlSend" value="send" /> <span>Send</span></label>
+              </div>
+              <p class="hint">Send goes about 1.5 seconds after you stop — tap Cancel or the prompt to hold it. Words added to an existing draft always wait for you.</p>
+            </div>
+            <div class="ql-row" id="qlListenRow">
+              <span class="ql-label" id="qlListenLabel">Start listening when I open Atelier</span>
+              <div class="seg" role="radiogroup" aria-labelledby="qlListenLabel">
+                <label><input type="radio" name="qlListen" value="off" /> <span>Off</span></label>
+                <label><input type="radio" name="qlListen" value="on" /> <span>On</span></label>
+              </div>
+              <p class="hint">Starts the mic when Atelier opens fresh from its icon, back tap, side button or “Hey Google”. It never sends without you. Signing out turns it off.</p>
+            </div>
+            <div class="row-actions ql-acts"><button type="button" class="chip" id="qlTest">Test the mic</button></div>
+            <p class="hint" id="qlTestMsg" role="status">When Chrome asks, choose “Allow while visiting the site” so it won’t ask again.</p>
+          </details>
+          <details class="ql-plat" id="qlIos">
+            <summary>iPhone</summary>
+            <p class="hint">iPhone keeps the side button for Siri, and a Shortcut can’t open the Home Screen app with your words. The <b>Ask Atelier</b> Shortcut listens, then opens Atelier in Safari with your words in the box.</p>
+            <p class="hint ql-note" id="qlIosStandalone" hidden>Set this up in Safari: open atelier.ciprari.ai in Safari, sign in there, then come back to Settings → Quick launch. Safari keeps its own sign-in.</p>
+            <div id="qlIosSetup">
+              <p class="hint ql-note" id="qlIosElsewhere" hidden>The link you copy here only fills the box, and you tap Send. For <b>Send without a tap</b>, copy the link on the iPhone itself, in Safari: its private key works only in the browser that copied it.</p>
+              <ol class="ql-steps">
+                <li>On the iPhone, in <b>Safari</b>, sign in to Atelier.</li>
+                <li id="qlLinkSendStep"><span class="ql-label" id="qlLinkSendLabel">Send without a tap</span>
+                  <div class="seg" role="radiogroup" aria-labelledby="qlLinkSendLabel">
+                    <label><input type="radio" name="qlLinkSend" value="off" /> <span>Off</span></label>
+                    <label><input type="radio" name="qlLinkSend" value="on" /> <span>On</span></label>
+                  </div>
+                  <p class="hint">On adds a private key to your link that only this browser accepts. The first time, Atelier asks you to confirm. Signing out turns it off.</p></li>
+                <li>Tap <b>Copy Shortcut link</b>.
+                  <div class="row-actions ql-acts"><button type="button" class="chip" id="qlCopy">Copy Shortcut link</button><a class="chip" id="qlGet" href="#" target="_blank" rel="noopener noreferrer" hidden>Get the Shortcut</a><button type="button" class="chip" id="qlReset" hidden>New link</button></div>
+                  <input class="ql-link" id="qlLink" type="text" readonly aria-label="Your Shortcut link" hidden /></li>
+                <li><span id="qlGetHint" hidden>Tap <b>Get the Shortcut</b> and paste your link when it asks. Or build it yourself: </span><span id="qlBuildHint">Build the Shortcut: </span>Shortcuts → + → name it <b>Ask Atelier</b> → add <b>Dictate Text</b> (Stop Listening: After Pause) → <b>URL Encode</b> (Dictated Text) → <b>Text</b>: paste your link, then insert <b>URL Encoded Text</b> right after <code>q=</code> → <b>Open URLs</b> (Text).</li>
+                <li>Put it on a button:
+                  <ul class="ql-sub">
+                    <li><b>Action button</b> (iPhone 15 Pro, iPhone 16 and later, 16e, 17e): Settings → Action Button → swipe to Shortcut → Choose a Shortcut → Ask Atelier.</li>
+                    <li><b>Back Tap:</b> Settings → Accessibility → Touch → Back Tap → Double Tap → Ask Atelier.</li>
+                    <li><b>Control Center:</b> open it → + → Add a Control → Shortcut → Ask Atelier.</li>
+                    <li><b>Lock Screen:</b> touch and hold the Lock Screen → Customize → Lock Screen → remove a bottom control → + → Shortcut → Ask Atelier.</li>
+                    <li><b>Siri:</b> “Hey Siri, Ask Atelier.”</li>
+                  </ul></li>
+              </ol>
+              <ul class="hint ql-small">
+                <li>Each run opens a new Safari tab.</li>
+                <li>If the phone is locked, iPhone asks you to unlock before Safari opens.</li>
+                <li>Safari can clear a site’s data after 7 days of using Safari without visiting it. If Ask Atelier lands on sign-in, sign in again and copy a fresh link.</li>
+                <li>Safari history (synced through iCloud) can keep the links Ask Atelier opens, including your words. <b>New link</b> retires the old key.</li>
+                <li>Don’t share a Shortcut that contains your link: with Send without a tap on, it carries your private key. Each person copies their own link in Settings → Quick launch.</li>
+              </ul>
+            </div>
+          </details>
+        </section>
         <section class="field-group">
           <h4>Look up</h4>
           <p class="hint" style="margin-bottom:10px">Select a name or term in a finished answer to see a short Wikipedia summary. Atelier’s server fetches the summary and its preview image, so Wikipedia never sees your device.</p>
@@ -351,6 +423,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=54" type="module"></script>
+  <script src="/app.js?v=55" type="module"></script>
 </body>
 </html>
