@@ -1,0 +1,38 @@
+{
+ "recorded": "2026-10-01T04:24:26.947Z",
+ "url": "https://de.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&redirects=1&generator=search&gsrsearch=Nero%27s+Golden+House&gsrnamespace=0&gsrlimit=4&gsrinfo=&gsrprop=&prop=extracts%7Cpageimages%7Cdescription%7Cpageprops%7Cinfo&exintro=1&explaintext=1&exlimit=4&piprop=thumbnail%7Cname%7Coriginal&pithumbsize=330&pilicense=free&ppprop=disambiguation&inprop=url%7Cdisplaytitle&maxage=3600&smaxage=86400",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "s-maxage=86400, max-age=3600, public",
+  "content-length": "659",
+  "set-cookie-present": true
+ },
+ "body": {
+  "batchcomplete": true,
+  "query": {
+   "pages": [
+    {
+     "pageid": 723751,
+     "ns": 0,
+     "title": "Kevin – Allein zu Haus",
+     "index": 1,
+     "extract": "Kevin – Allein zu Haus (Originaltitel: Home Alone) ist eine Filmkomödie von John Hughes aus dem Jahr 1990, bei der Chris Columbus Regie führte. Der Film handelt von dem achtjährigen Kevin McCallister, der zu Weihnachten daheim vergessen wird und das elterliche Haus gegen zwei tollpatschige Einbrecher verteidigen muss. Der Film stellt, gemeinsam mit seinem Nachfolger Kevin – Allein in New York, den größten Erfolg des Hauptdarstellers Macaulay Culkin dar und gilt als Weihnachtsklassiker.\n\n",
+     "description": "Film von Chris Columbus (1990)",
+     "descriptionsource": "central",
+     "contentmodel": "wikitext",
+     "pagelanguage": "de",
+     "pagelanguagehtmlcode": "de",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-26T09:13:22Z",
+     "lastrevid": 270256931,
+     "length": 26207,
+     "fullurl": "https://de.wikipedia.org/wiki/Kevin_%E2%80%93_Allein_zu_Haus",
+     "editurl": "https://de.wikipedia.org/w/index.php?title=Kevin_%E2%80%93_Allein_zu_Haus&action=edit",
+     "canonicalurl": "https://de.wikipedia.org/wiki/Kevin_%E2%80%93_Allein_zu_Haus",
+     "displaytitle": "Kevin – Allein zu Haus"
+    }
+   ]
+  }
+ }
+}

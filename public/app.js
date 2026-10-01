@@ -7,12 +7,15 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=53';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=53';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=53';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=53';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=53';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=53';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=54';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=54';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=54';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=54';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=54';
+import { initLookup } from './lookup.js?v=54';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=54';
+import { createDictation, startFromGesture, insertText, clock as micClock } from './dictate.js?v=54';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=54';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -95,8 +98,8 @@ const NVIDIA_MODELS = {
 const CHAT_MODELS = Object.fromEntries(Object.keys(PREMIUM_MODELS).map((r) => [r, [...PREMIUM_MODELS[r], ...(NVIDIA_MODELS[r] || NVIDIA_MODELS[r === 'code' ? 'code' : 'ask'])]]));
 // Roles that borrow another role's list.
 const ROLE_LIST = { agent: 'agent', web: 'web', ask: 'ask', smart: 'smart', reason: 'reason', code: 'code', write: 'write', vision: 'vision', watch: 'watch', ideas: 'ask', build: 'code', fast: 'fast' };
-const providerOf = (id = '') => (id.match(/^(anthropic|openai|gemini|zai|deepseek|meta):/) || [, 'nvidia'])[1];
-const PROVIDER_NAMES = { nvidia: 'NVIDIA', anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', zai: 'Z.ai', deepseek: 'DeepSeek', meta: 'Meta' };
+const providerOf = (id = '') => (id.match(/^(anthropic|openai|gemini|zai|deepseek|meta|runway):/) || [, 'nvidia'])[1];
+const PROVIDER_NAMES = { nvidia: 'NVIDIA', anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', zai: 'Z.ai', deepseek: 'DeepSeek', meta: 'Meta', runway: 'Runway' };
 
 // Visual generation. NVIDIA entries build a genai `body`; OpenAI/Gemini entries have `run`, and `edit`
 // marks models that accept a photo to modify. "Auto" picks the first model whose provider has a key.
@@ -130,6 +133,8 @@ const VIDEO_MODELS = [
   { id: 'gemini:veo-3.1-lite-generate-preview', label: 'Veo 3.1 Lite · best value', veo: true, note: 'Veo Lite ≈ $0.05–0.08/sec · 4 s ≈ $0.25' },
   { id: 'gemini:veo-3.1-fast-generate-preview', label: 'Veo 3.1 Fast', veo: true, note: 'Veo Fast ≈ $0.10–0.30/sec' },
   { id: 'gemini:veo-3.1-generate-preview', label: 'Veo 3.1 · max quality', veo: true, note: 'Veo ≈ $0.40/sec' },
+  // Runway Gen-4.5 / Gen-4 Turbo (owner only, public/runway.js). auto:false: Auto never spends Runway credits.
+  ...RUNWAY_VIDEO_MODELS,
   {
     id: 'nvidia/cosmos3-nano', fn: 'cosmos3-nano', label: 'Cosmos 3 Nano',
     body: (p, img, o) => ({
@@ -174,7 +179,7 @@ const LS = {
 const SETTINGS_V = 3;
 // models: '' means Auto (best available); a value pins that role to a model.
 const DEFAULT_SETTINGS = {
-  v: SETTINGS_V, passcode: '', name: '', about: '', theme: 'auto', temperature: 0.6,
+  v: SETTINGS_V, passcode: '', name: '', about: '', theme: 'auto', lookup: '', temperature: 0.6,
   keys: { anthropic: '', openai: '', gemini: '' },
   models: { agent: '', ask: '', smart: '', reason: '', code: '', write: '', vision: '', watch: '', ideas: '', build: '', fast: '' },
   readAloud: { voice: 'atelier', speed: 1 }, // Settings → Read aloud (public/readaloud.js); not opts.ask.voice, the "As me" chip
@@ -208,7 +213,7 @@ const S = {
 };
 
 // Last known provider list (refreshed from /api/health at boot) so startup never waits on the network.
-let server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, ...LS.get('server', {}) };
+let server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, runway: false, ...LS.get('server', {}) };
 // A tester device starts in tester mode from its last /api/tester/me (boot checks it again). The owner passcode always wins.
 if (!S.settings.passcode) S.tester = normalizeMe(LS.get('tester', null));
 let testerAllow = allowedIds(S.tester); // model ids the tester may use (from the Worker's TESTER_* lists)
@@ -640,7 +645,7 @@ const splitDataUrl = (u) => { const m = u.match(/^data:([^;]+);base64,(.+)$/); r
 
 // null only for a tester whose plan has no image (or video) model: there is no free fallback for testers.
 const imageModel = (id) => IMAGE_MODELS.find((m) => m.id === id && modelReady(m.id)) || IMAGE_MODELS.find((m) => modelReady(m.id)) || (S.tester ? null : IMAGE_MODELS.find((m) => !m.run));
-const videoModel = (id) => VIDEO_MODELS.find((m) => m.id === id && modelReady(m.id)) || VIDEO_MODELS.find((m) => modelReady(m.id)) || (S.tester ? null : VIDEO_MODELS.find((m) => m.local));
+const videoModel = (id) => VIDEO_MODELS.find((m) => m.id === id && modelReady(m.id)) || VIDEO_MODELS.find((m) => m.auto !== false && modelReady(m.id)) || (S.tester ? null : VIDEO_MODELS.find((m) => m.local));
 const canEdit = (m) => m.edit && modelReady(m.id) && (!m.editId || modelReady(m.editId));
 
 const OPENAI_SIZES = { '1:1': '1024x1024', '4:5': '1024x1280', '3:2': '1536x1024', '16:9': '1792x1008', '9:16': '1008x1792' };
@@ -990,7 +995,7 @@ function paintEntry(li, e) {
   if (e.kind === 'image' || e.kind === 'video') {
     const media = e.media || [];
     const n = Math.max(e.pending ? (e.expect || 1) : 0, media.length);
-    const [w, h] = e.kind === 'image' ? ASPECTS[e.params?.aspect] || ASPECTS['1:1'] : e.params?.aspect === '9:16' ? [576, 1024] : [1024, 576];
+    const [w, h] = e.kind === 'image' ? ASPECTS[e.params?.aspect] || ASPECTS['1:1'] : ratioBox(e.ratio) || (e.params?.aspect === '9:16' ? [576, 1024] : [1024, 576]);
     let html = meta;
     if (e.enhanced) html += `<p class="meta-line enhanced" title="Enhanced prompt"><span>✦ ${esc(e.enhanced)}</span></p>`;
     html += `<div class="shots${n > 1 ? ' multi' : ''}" style="grid-template-columns:${n > 1 ? 'repeat(2, minmax(0,1fr))' : '1fr'}">`;
@@ -1196,6 +1201,7 @@ stream.addEventListener('loadedmetadata', () => { if (stickToBottom) scrollDown(
 
 // ───────────────────────── run pipeline ─────────────────────────
 async function submit(textArg, modeArg, extra = {}) {
+  if (textArg == null && micHold()) return; // dictation is still writing into the box: it sends once that's done (C2)
   let text = (textArg ?? $('#input').value).trim();
   let mode = modeArg || S.mode;
 
@@ -1219,7 +1225,7 @@ async function submit(textArg, modeArg, extra = {}) {
   if (video && mode !== 'ask' && mode !== 'code') { mode = 'ask'; setMode('ask'); toast('Sent to Ask — videos are answered there'); }
 
   // One request, several deliverables ("answer this, make an image and a video") → parallel tasks.
-  if (mode === 'ask' && !images.length && !video && !extra.entry && feat('helpers') && MULTI_HINT.test(text) && MULTI_JOIN.test(text)) {
+  if (mode === 'ask' && !images.length && !video && !extra.entry && !extra.images && feat('helpers') && MULTI_HINT.test(text) && MULTI_JOIN.test(text)) {
     if (textArg == null) { $('#input').value = ''; autosize(); }
     const ctrl = new AbortController(); running.add(ctrl); setBusy();
     const tasks = await planTasks(text, ctrl.signal).catch(() => null).finally(() => { running.delete(ctrl); setBusy(); hideToast(); });
@@ -1245,7 +1251,8 @@ async function submit(textArg, modeArg, extra = {}) {
     if (video.clip) clipJobs.set(e.id, video.clip);
     S.video = null; renderOptions();
   }
-  S.attachments = []; renderAttachments();
+  if (!extra.images) { S.attachments = []; renderAttachments(); } // a caller's own images (Look up's ask: none) leave the composer's photos waiting
+  syncRunwayHint();
   welcome.classList.add('gone');
   stream.append(renderEntry(e));
   scrollDown(true);
@@ -1814,6 +1821,7 @@ async function runVideo(e, signal) {
   // Skip a doomed call if Cosmos was refused for this key in the last 24h.
   if (cfg.fn && Date.now() - LS.get('cosmosDeniedAt', 0) < 864e5) cfg = VIDEO_MODELS.find((m) => m.local);
   const still = e.images?.[0] || null;
+  if (cfg.runway) return runRunway(e, cfg, still, signal);
   e.meta = { model: cfg.id, note: still ? 'image → video' : 'text → video' };
   e.media = []; e.expect = 1;
   const prompt = await enhance(e, 'video', signal);
@@ -1846,6 +1854,53 @@ async function runVideo(e, signal) {
     }
   }
   await runMotionStill(e, prompt, still, signal);
+}
+
+// Runway (owner only; public/runway.js): the same pending card and result card as Veo. The browser only talks to
+// /api/runway/*; the Worker keeps the key and Runway's expiring links. e.runway {task, model, at} lets Try again pick
+// up the earlier task instead of paying for a new one: one still running, one that finished but didn't download, or
+// one that Stop cancelled (Try again then sees it cancelled and starts afresh). runwayVideo marks those errors resumable.
+async function runRunway(e, cfg, still, signal) {
+  e.meta = { model: cfg.id, note: still ? 'image → video' : 'text → video' };
+  e.media = []; e.expect = 1;
+  const prompt = await enhance(e, 'video', signal);
+  let img = null, size = null, ratio = null;
+  if (still) {
+    // Runway refuses a still outside 1:2–2:1 (Turbo 2.36:1) instead of cropping it (a phone screenshot is ~9:20):
+    // centre-crop it to the clip's shape first, as Runway would for an in-range one.
+    const cut = await runwayCropStill(still, cfg.runway);
+    img = await shrinkDataUrl(cut.src, 1280, 1280, 3_000_000); // ≤ ~4 MB of base64: Runway takes 5 MB inline
+    const i = await loadImg(img);
+    size = { w: i.naturalWidth, h: i.naturalHeight }; ratio = cut.ratio;
+  }
+  const req = runwayRequest({ model: cfg.runway, prompt, still: img, stillSize: size, ratio, aspect: e.params.aspect, secs: e.params.secs });
+  e.ratio = req.ratio; // the 'developing' placeholder takes the clip's shape
+  e.meta.note = `${req.note} · ${req.seconds} s · ${runwayQuote(cfg.runway, req.seconds)}`;
+  const prev = e.runway, resume = prev?.task && prev.model === cfg.runway && Date.now() - prev.at < 864e5 ? prev.task : null;
+  // The thread this entry lives in. The owner may have opened another thread since sending, and persist() saves S.thread.
+  const home = () => [...liveThreads.values()].find((t) => t.entries.includes(e)) || (S.thread?.entries.includes(e) ? S.thread : null);
+  e.stage = 'Sending to Runway'; repaint(e);
+  let out;
+  try {
+    out = await runwayVideo(req, {
+      apiHeaders, signal, resume,
+      onTask: (id) => {
+        e.runway = { task: id, model: cfg.runway, at: Date.now() };
+        // Save the task id now: if the app is closed or killed before the video lands, Try again resumes it (no second charge).
+        const t = home();
+        if (t) { t.updatedAt = Date.now(); DB.put(t).catch(storageError); }
+      },
+      onStatus: (text) => { e.stage = text; repaint(e); },
+    });
+  } catch (err) {
+    if (!err.resumable) delete e.runway; // failed, refused or gone at Runway: Try again starts afresh
+    throw err;
+  }
+  delete e.runway;
+  e.stage = 'Saving'; repaint(e);
+  e.media = [{ type: 'video', src: await blobToDataUrl(out.blob) }];
+  const cost = runwayCredits(out.credits ?? out.estimate);
+  e.meta.note = `${req.note} · ${req.seconds} s${cost ? ` · ${cost}` : ''} · Powered by Runway`;
 }
 
 // FLUX paints the frame (unless one was attached), then a slow push-in/pan is recorded in-browser.
@@ -2013,7 +2068,7 @@ stream.addEventListener('click', async (ev) => {
   switch (act) {
     case 'copy':
       return copy(e.kind === 'ideas' ? e.ideas.map((d, i) => `${i + 1}. ${d.title} — ${d.pitch}`).join('\n') : stripThink(e.text));
-    case 'speak': return reader.toggle(e.id, stripThink(e.text), b, { title: e.prompt, album: S.thread?.title }); // inside the tap: no await before it
+    case 'speak': micYield(); return reader.toggle(e.id, stripThink(e.text), b, { title: e.prompt, album: S.thread?.title }); // inside the tap: no await before it
     case 'speak-stop': return reader.stop();
     case 'retry':
       if (e.pending || e.canva) return;
@@ -2229,13 +2284,21 @@ function renderOptions() {
       // Testers see only the lengths and resolutions whose worst case fits what's left (and $1 a clip).
       const fit = S.tester && vm.veo ? veoChoices(vm.id, leftOf(S.tester)) : null;
       if (fit?.secs.length) { if (o.aspect === '16:9hd' && !fit.hd) o.aspect = '16:9'; if (!fit.secs.includes(+o.secs)) o.secs = fit.secs.at(-1); }
-      const secs = fit ? fit.secs : [4, 6, 8];
+      // Runway: 2–10 s and no HD choice; back on Veo/Cosmos a Runway-only length snaps to 4/6/8.
+      const rw = vm.runway || null;
+      if (rw) { if (o.aspect === '16:9hd') o.aspect = '16:9'; if (!RUNWAY_SECONDS.includes(+o.secs)) o.secs = 4; }
+      else if (!fit) o.secs = veoSeconds(o.secs);
+      const secs = fit ? fit.secs : rw ? RUNWAY_SECONDS : [4, 6, 8];
       h = selectOpt('', 'model', [['', `Auto · ${videoModel('').label}`], ...VIDEO_MODELS.filter((m) => modelReady(m.id)).map((m) => [m.id, m.label])], o.model)
-        + selectOpt('', 'aspect', [['16:9', '16:9'], ['9:16', '9:16'], ...(!fit || fit.hd ? [['16:9hd', '16:9 · HD']] : [])], o.aspect)
+        // "Use Runway Gen-4.5?" (syncRunwayHint) sits next to the model it would change: a phone's strip scrolls, and
+        // at the end the chip would start off-screen
+        + '<span class="rw-hint-slot"></span>'
+        + selectOpt('', 'aspect', [['16:9', '16:9'], ['9:16', '9:16'], ...(!rw && (!fit || fit.hd) ? [['16:9hd', '16:9 · HD']] : [])], o.aspect)
         + (secs.length ? selectOpt('', 'secs', secs.map((x) => [x, `${x} s`]), o.aspect === '16:9hd' ? 8 : o.secs) : '')
         + `<button class="chip ${o.enhance ? 'on' : ''}" data-toggle="enhance"><span aria-hidden="true">✦</span> Enhance</button>`
         // kept on phones whenever a length or HD was left out of the menus, so the tester sees why (A7b)
-        + `<span class="opt-note${fit && (!fit.hd || fit.secs.length < 3) ? ' keep' : ''}">${esc(fit ? veoNote(vm, fit, o) : vm.note || 'attach an image to animate it')}</span>`;
+        + (rw ? `<span class="opt-note keep">${esc(runwayOptNote(vm, o.secs))} · ${RUNWAY_POWERED}</span>`
+          : `<span class="opt-note${fit && (!fit.hd || fit.secs.length < 3) ? ' keep' : ''}">${esc(fit ? veoNote(vm, fit, o) : vm.note || 'attach an image to animate it')}</span>`);
       break;
     }
     case 'ideas':
@@ -2254,9 +2317,31 @@ function renderOptions() {
   box.innerHTML = h;
   $$('button', box).forEach((b) => b.setAttribute('aria-pressed', b.classList.contains('on')));
   if (box.dataset.for !== S.mode) { box.dataset.for = S.mode; box.scrollLeft = 0; }
+  syncRunwayHint();
   syncOptFade(box);
 }
 const videoOptNote = () => `<span class="opt-note">video → ${esc(modelLabel(modelFor('watch')))}</span>`;
+// "Use Runway Gen-4.5?": offered while a Video-mode prompt mentions Runway (the AI company, not a catwalk) and another
+// model is picked. Mentioning Runway never switches models by itself (that would spend credits on a guess); a tap does.
+function syncRunwayHint() {
+  const slot = $('#options .rw-hint-slot');
+  if (!slot) return;
+  const hint = S.mode === 'video' && !S.tester
+    ? runwayHint($('#input').value, { current: videoModel(S.opts.video.model)?.id, ready: modelReady('runway:gen4.5'), hasImage: S.attachments.length > 0 }) : null;
+  const html = hint && modelReady(hint.id) ? `<button type="button" class="chip rw-hint" data-runway-hint="${esc(hint.id)}" title="Switch the Video model to ${esc(hint.label.slice(4, -1))}">${esc(hint.label)}</button>` : '';
+  if (slot.innerHTML !== html) {
+    slot.innerHTML = html; syncOptFade();
+    if (html) revealInStrip(slot.firstElementChild); // on a 360–390 px phone it began after the 174 px model pill and ran under the fade
+  }
+}
+// Scrolls the options strip just enough that `el` sits clear of its edge fades (.fade-l 22 px, .fade-r 30 px).
+function revealInStrip(el, box = $('#options')) {
+  const b = box.getBoundingClientRect(), r = el?.getBoundingClientRect();
+  if (!r || !b.width) return;
+  const left = b.left + 26, right = b.right - 34;
+  const dx = r.left < left ? r.left - left : r.right > right ? Math.min(r.right - right, r.left - left) : 0;
+  if (dx > 0.5 || dx < -0.5) box.scrollTo({ left: box.scrollLeft + dx, behavior: REDUCED_MOTION.matches ? 'auto' : 'smooth' });
+}
 // edge fades only while the strip overflows (dataset.for, not data-mode: [data-mode] would re-scope --accent)
 function syncOptFade(box = $('#options')) { const max = box.scrollWidth - box.clientWidth; box.classList.toggle('fade-l', box.scrollLeft > 2); box.classList.toggle('fade-r', max - box.scrollLeft > 2); }
 $('#options').addEventListener('scroll', () => syncOptFade(), { passive: true });
@@ -2268,10 +2353,27 @@ $('#options').addEventListener('change', (ev) => {
   const v = s.value;
   S.opts[S.mode][s.dataset.opt] = /^\d+$/.test(v) ? +v : v;
   saveOpts();
+  if (S.mode === 'video' && (s.dataset.opt === 'model' || (s.dataset.opt === 'secs' && isRunwayId(S.opts.video.model)))) {
+    const key = s.dataset.opt; // keep focus on the select that changed
+    renderOptions(); saveOpts(); // renderOptions may snap the length/aspect to what the new model takes: keep that
+    $(`[data-opt="${key}"]`, $('#options'))?.focus({ preventScroll: true });
+    return;
+  }
   // update the pill in place — re-rendering would destroy the focused select
   const val = $('.opt-val', s.parentElement); if (val) { val.textContent = s.selectedOptions[0]?.text || ''; s.parentElement.title = val.textContent; }
 });
+// A tap on the Runway hint keeps the composer focused (the phone keyboard stays up), like the Send button.
+$('#options').addEventListener('pointerdown', (ev) => { if (ev.target.closest('[data-runway-hint]') && document.activeElement === $('#input')) ev.preventDefault(); });
 $('#options').addEventListener('click', (ev) => {
+  const rh = ev.target.closest('[data-runway-hint]');
+  if (rh) {
+    const hadFocus = document.activeElement === rh; // Enter or Space on it: the chip goes away with the re-render
+    S.opts.video.model = rh.dataset.runwayHint; renderOptions(); saveOpts(); // (renderOptions snaps HD/length for Runway)
+    const model = hadFocus && $('[data-opt="model"]', $('#options'));
+    if (model) { model.focus({ preventScroll: true }); revealInStrip(model.closest('.opt')); } // where it was: the model it picked
+    toast(`Video model: ${VIDEO_MODELS.find((m) => m.id === rh.dataset.runwayHint)?.label || 'Runway'}`);
+    return;
+  }
   const t = ev.target.closest('[data-toggle]');
   const set = ev.target.closest('[data-set]');
   if (t) { S.opts[S.mode][t.dataset.toggle] = !S.opts[S.mode][t.dataset.toggle]; }
@@ -2308,6 +2410,7 @@ $('#sendBtn').onclick = () => (S.busy && !hasDraft() ? stopAll() : submit());
 // dock jumps and the tap misses Send (Android needed two taps).
 $('#sendBtn').addEventListener('pointerdown', (ev) => { if (document.activeElement === input) ev.preventDefault(); });
 input.addEventListener('input', setBusy);
+input.addEventListener('input', syncRunwayHint);
 
 let clock = null; // 1s interval that keeps every elapsed-time label current while anything runs
 function setBusy() {
@@ -2551,23 +2654,109 @@ $('#attachments').addEventListener('click', (ev) => {
   }
 });
 
-// dictation
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (!SR) $('#micBtn').hidden = true;
-let rec;
-$('#micBtn').onclick = () => {
-  if (rec) { rec.stop(); return; }
-  reader.stop(); // the mic would hear Read aloud
-  rec = new SR();
-  rec.interimResults = true; rec.continuous = false; rec.lang = navigator.language || 'en-US';
-  const base = input.value ? input.value + ' ' : '';
-  rec.onresult = (ev) => { input.value = base + [...ev.results].map((r) => r[0].transcript).join(''); autosize(); };
-  rec.onend = () => { rec = null; $('#micBtn').classList.remove('listening'); $('#micBtn').setAttribute('aria-pressed', 'false'); }; // name stays 'Dictate': aria-pressed carries the state
-  rec.onerror = () => toast('Mic unavailable', { error: true });
-  $('#micBtn').classList.add('listening');
-  $('#micBtn').setAttribute('aria-pressed', 'true');
-  rec.start();
-};
+// dictation (public/dictate.js). iPhone/iPad, Safari and the Home Screen app alike: record → POST /api/transcribe
+// (WebKit's Web Speech never delivers in a Home Screen app). Android/desktop: the browser's live recognizer, switching to
+// a recording when it can't run. toggle()/start() run straight from the tap: iOS only opens the mic, and only lets the
+// level meter's AudioContext run, inside the gesture.
+const micBtn = $('#micBtn'), micTime = $('#micTime'), micStatus = $('#micStatus');
+// #micStatus speaks only while the mic is closed: a screen reader talking into an open mic gets transcribed. While
+// listening or recording, aria-pressed carries the state.
+const MIC_SAY = { transcribing: 'Transcribing…' };
+let micAt = null; // where dictation writes in #input: {start, end, value, base, sel}; Web Speech's live text is replaced there
+let micSel = null; // #input's selection at the tap that started dictation ({start, end, value}); it survives the blur
+let micAdded = ''; // "Added: …" for #micStatus once the mic has closed
+let micSendAfter = false; // Send or Enter while dictating: send once dictation has finished writing into the box
+let micArm = null; // disarm() of a quick-launch "Tap to talk"
+let dictatedSend = null; // quick launch "talk, then send": set by quicklaunch-integration.md §J (holdThenSend)
+const dictation = createDictation({
+  apiHeaders, // apiHeaders({'content-type': <audio>}): the owner's x-app-pass; testers ride on their cookie
+  serverReady: () => {
+    const up = Boolean(server.openai || server.gemini); // OpenAI, with Gemini as the server's fallback
+    if (S.settings.passcode) return up ? true : 'down';
+    if (S.tester) return up && feat('dictation') ? true : 'off';
+    return 'passcode';
+  },
+  isTester: () => Boolean(S.tester) && !S.settings.passcode,
+  lang: () => navigator.languages?.[0] || navigator.language || 'en-US',
+  prefer: () => LS.get('dictateEngine', 'auto'), // 'record': server transcription even where Web Speech exists (review)
+  beforeStart: () => { micArm?.(); reader.stop(); }, // the mic would hear Read aloud (and iOS plays through the earpiece)
+  onState: paintMic,
+  onLevel: (level, { elapsedMs, leftMs }) => {
+    micBtn.style.setProperty('--level', level.toFixed(2));
+    micTime.textContent = micClock(elapsedMs);
+    micBtn.toggleAttribute('data-warn', leftMs <= 10_000);
+  },
+  onText: (text, { final, autoSend }) => {
+    const v = input.value;
+    if (!micAt || micAt.value !== v) { // the first words, or the box was edited meanwhile: write where the starting tap
+      // found the caret (micSel; the tap may have blurred the box), else at its selection now (the end if never placed)
+      const sel = micSel?.value === v ? micSel : { start: input.selectionStart ?? v.length, end: input.selectionEnd ?? v.length };
+      micAt = { start: sel.start, end: Math.max(sel.start, sel.end), base: v, sel };
+    }
+    const out = insertText(v, micAt.start, micAt.end, text);
+    input.value = out.value;
+    micAt = final ? null : { ...micAt, end: out.caret, value: out.value };
+    if (document.activeElement === input) input.setSelectionRange(out.caret, out.caret);
+    else if (final && !COARSE.matches) { input.focus({ preventScroll: true }); input.setSelectionRange(out.caret, out.caret); } // phones: no keyboard pop
+    input.dispatchEvent(new Event('input')); // autosize, the Send state, drafts
+    if (final) micAdded = `Added: ${text.length > 80 ? `${text.slice(0, 80)}…` : text}`; // said by paintMic once the mic is closed
+    if (final && autoSend) dictatedSend?.();
+  },
+  onResponse: (r) => noteAllowance(r), // x-tester-allowance
+  onRefusal: (r) => { if (r.code === 'tester_signin') refreshTesterSoon(); },
+  toast: (msg, o) => toast(msg, o),
+});
+function paintMic(state, { engine, reason, fallback } = {}) {
+  micBtn.dataset.state = state;
+  if (engine) micBtn.dataset.engine = engine;
+  const on = state === 'listening' || state === 'recording';
+  micBtn.setAttribute('aria-pressed', String(on)); // the name stays 'Dictate': aria-pressed carries the state
+  if (state === 'transcribing') micBtn.setAttribute('aria-busy', 'true'); else micBtn.removeAttribute('aria-busy'); // an empty aria-busy reads as false
+  micBtn.title = state === 'transcribing' ? 'Transcribing… (tap twice to cancel)' : !on ? 'Dictate'
+    : fallback ? 'Recording (live dictation isn’t working here). Tap to stop.' : 'Stop dictation';
+  if (state !== 'recording') { micBtn.style.removeProperty('--level'); micBtn.removeAttribute('data-warn'); micTime.textContent = ''; }
+  else if (!micTime.textContent) micTime.textContent = '0:00';
+  micStatus.textContent = state === 'idle' ? micAdded : MIC_SAY[state] || ''; // "Added: …" once the text is in and the mic closed
+  micAdded = '';
+  if (state !== 'idle' && state !== 'error') return;
+  if (reason === 'cancel' && micAt?.value === input.value) { // Escape: take Web Speech's live words back out
+    input.value = micAt.base;
+    if (document.activeElement === input) input.setSelectionRange(micAt.sel.start, micAt.sel.end);
+    input.dispatchEvent(new Event('input'));
+  }
+  micAt = null; micSel = null; syncMic();
+  const send = micSendAfter && state === 'idle' && reason !== 'cancel';
+  micSendAfter = false;
+  if (send) submit(); // Send was pressed while dictating: all it wrote is in the box now (an error or Escape sends nothing)
+}
+// Hidden only where it can never work here: no recorder and no recognizer, or a tester account without dictation and no
+// recognizer (dictate.js keeps Web Speech as the engine wherever one exists, so whyNot() is null there). Otherwise a tap
+// explains (add your passcode, the server is down).
+function syncMic() { const why = dictation.whyNot(); micBtn.hidden = why === 'unsupported' || why === 'off'; }
+syncMic();
+// Keep focus (and the phone keyboard) in the box, as #sendBtn does: otherwise the tap blurs it first (Android's first tap
+// only drops the keyboard and the dock jumps). A starting tap also notes the caret, which onText writes at.
+micBtn.addEventListener('pointerdown', (ev) => {
+  if (!dictation.busy()) micSel = { start: input.selectionStart, end: input.selectionEnd, value: input.value };
+  if (document.activeElement === input) ev.preventDefault();
+});
+micBtn.onclick = () => { dictation.toggle(); }; // straight from the tap: nothing awaited before it
+// Send or Enter while dictating (submit() asks first, C4): let dictation finish writing into the box (Web Speech's last
+// words, a recording's transcript), then paintMic sends it all, once. Sending straight away would leave the recognizer
+// refilling the emptied box, or a late transcript landing alone (and auto-sent after a quick launch).
+function micHold() {
+  if (!dictation.busy()) return false;
+  micSendAfter = true;
+  dictation.stop();
+  return true;
+}
+// Read aloud (an answer's button, a Settings voice preview) while the mic is open: close the mic first, in the same tap,
+// keeping what was said (it is still transcribed into the box). Otherwise the recording hears the reader, and iOS plays
+// it through the earpiece while it records. The other way round is dictation's beforeStart: the mic stops the reader.
+function micYield() {
+  const st = dictation.state();
+  if (st === 'listening' || st === 'recording') dictation.stop('user');
+}
 
 // keep --dock-h in sync so content never hides under the dock
 function syncDock() { document.documentElement.style.setProperty('--dock-h', $('#dock').offsetHeight + 'px'); }
@@ -3289,6 +3478,7 @@ function openSettings() {
   f.passcode.value = s.passcode;
   f.temperature.value = s.temperature; $('#tempVal').textContent = s.temperature;
   $$('input[name=theme]', f).forEach((r) => (r.checked = r.value === s.theme));
+  $$('input[name=lookup]', f).forEach((r) => (r.checked = r.value === lookupMode()));
   renderReadAloud();
   $('#modelFields').innerHTML = MODEL_ROLES.map(([k, l]) => {
     const tint = { code: 'code', vision: 'image', watch: 'video', ideas: 'ideas', build: 'build' }[k] || 'ask';
@@ -3298,7 +3488,7 @@ function openSettings() {
   else {
     if (!$('#connList').children.length) $('#connList').innerHTML = `<li class="conn-loading">${statusLine('Checking connections', null)}</li>`;
     renderConnections();
-    $('#provStatus').innerHTML = ['nvidia', 'anthropic', 'openai', 'gemini', 'zai', 'deepseek', 'meta'].map((p) => {
+    $('#provStatus').innerHTML = ['nvidia', 'anthropic', 'openai', 'gemini', 'zai', 'deepseek', 'meta', 'runway'].map((p) => {
       const on = providerReady(p); const why = on ? '' : server[p] ? 'needs passcode' : 'no key on server';
       return `<span class="${on ? 'ok' : 'bad'}">${PROVIDER_NAMES[p]}${why ? `<small>${why}</small>` : ''}</span>`;
     }).join('');
@@ -3334,7 +3524,7 @@ $('#readVoices').addEventListener('change', (ev) => {
   if (ev.target.name !== 'readVoice') return;
   S.settings.readAloud.voice = ev.target.value; saveSettings(); retitleReads();
 });
-$('#readVoices').addEventListener('click', (ev) => { const b = ev.target.closest('[data-preview]'); if (b) reader.preview(b.dataset.preview); }); // inside the tap
+$('#readVoices').addEventListener('click', (ev) => { const b = ev.target.closest('[data-preview]'); if (b) { micYield(); reader.preview(b.dataset.preview); } }); // inside the tap
 $('#readSpeed').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-speed]');
   if (!b) return;
@@ -3363,6 +3553,10 @@ $('#settingsForm').addEventListener('submit', (ev) => {
   DB.kvSet('passcode', s.passcode).catch(() => {});
   s.temperature = +f.temperature.value;
   s.theme = $('input[name=theme]:checked', f)?.value || 'auto';
+  // Only a choice that differs from the role's default is stored: a Save never pins an implicit “Automatic” for whoever
+  // signs in next on this device.
+  const lk = $('input[name=lookup]:checked', f)?.value || lookupMode();
+  s.lookup = lk === lookupDefault() ? '' : lk; if (lk === 'off') lookup.close('off');
   MODEL_ROLES.forEach(([k]) => { s.models[k] = f['m_' + k].value.trim().replace(/^(anthropic|openai|gemini|zai|deepseek|meta):/i, (p) => p.toLowerCase()); });
   saveSettings(); syncRole(); applyTheme(); renderOptions(); renderWelcome(); checkKey(); loadTools(); pullMe();
   syncClip(); // the Video model pin decides clip vs frames
@@ -3379,7 +3573,7 @@ $('#diagBtn').onclick = async () => {
     const r = await fetch('/api/diag', { headers: apiHeaders() });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `Check failed (${r.status})`);
-    const names = { anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini', veo: 'Veo (model access)', zai: 'Z.ai (GLM)', deepseek: 'DeepSeek', meta: 'Meta (Muse)', nvidia: 'NVIDIA' };
+    const names = { anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini', veo: 'Veo (model access)', zai: 'Z.ai (GLM)', deepseek: 'DeepSeek', meta: 'Meta (Muse)', nvidia: 'NVIDIA', runway: 'Runway' };
     box.innerHTML = Object.entries(j).map(([k, v]) => `<span class="${v.ok ? 'ok' : 'err'}">${v.ok ? '✓' : '✗'} ${names[k] || k}${v.ok ? '' : ` — ${esc(v.status ? `(${v.status}) ` : '')}${esc(v.message || '')}`}${v.keyShape ? ` <i style="color:var(--ink-3)">[key ${esc(v.keyShape)}]</i>` : ''}</span>`).join('');
   } catch (err) { box.innerHTML = `<span class="err">${esc(netText(err))}</span>`; }
   finally { done(); box.removeAttribute('aria-busy'); }
@@ -3475,12 +3669,26 @@ const CONNECTORS = [
   ['railway', 'Railway', 'RAILWAY_API_TOKEN'],
 ];
 // One Settings → Connections row: dot · name · action on line 1, STATUS + detail and account chips below.
-const connRow = ({ on, name, state, detail = '', accts = '', action = '' }) => `<li class="conn${on ? ' on' : ''}"><span class="dot" aria-hidden="true"></span><b>${name}</b>${action}<span class="conn-info"><span class="conn-state">${state}</span>${detail ? `<span class="conn-detail">${detail}</span>` : ''}</span>${accts ? `<span class="accts">${accts}</span>` : ''}</li>`;
+const connRow = ({ key = '', on, name, state, detail = '', accts = '', action = '' }) => `<li class="conn${on ? ' on' : ''}"${key ? ` data-row="${key}"` : ''}><span class="dot" aria-hidden="true"></span><b>${name}</b>${action}<span class="conn-info"><span class="conn-state">${state}</span>${detail ? `<span class="conn-detail">${detail}</span>` : ''}</span>${accts ? `<span class="accts">${accts}</span>` : ''}</li>`;
 const acctChip = (label, btnHtml = '') => `<span class="acct" title="${esc(label)}"><span class="acct-name">${esc(label)}</span>${btnHtml}</span>`;
 let connSeq = 0;
 async function renderConnections() {
   const seq = ++connSeq; // a slower earlier call must not overwrite a newer list
   $('#connList').setAttribute('aria-busy', 'true');
+  // Runway's credit balance never holds the list (a slow Runway took up to 30 s): the rows go up as soon as the tools
+  // and the browser relay answer, the Runway row says it is still checking, and only that row is filled in later.
+  const rwAccount = server.runway && S.settings.passcode ? runwayAccount({ apiHeaders }) : null;
+  let rwAcct = null, rwBack = !rwAccount, drawn = false;
+  const rwRow = () => runwayConnection({ configured: Boolean(server.runway), passcode: Boolean(S.settings.passcode), account: rwAcct });
+  rwAccount?.then((a) => a, () => null).then((a) => {
+    rwAcct = a; rwBack = true;
+    const li = drawn && seq === connSeq && $('#connList [data-row="runway"]');
+    if (!li) return;
+    const rw = rwRow(); // in place: a focused Developer portal link keeps its focus
+    li.classList.toggle('on', rw.on);
+    $('.conn-state', li).textContent = rw.state;
+    $('.conn-detail', li).textContent = rw.detail;
+  });
   await loadTools();
   const sv = TOOLS.services || {};
   await refreshRemote(true);
@@ -3488,6 +3696,8 @@ async function renderConnections() {
   const browserState = EXT.ready ? `extension v${esc(EXT.version)} here${REMOTE.online ? ' · reachable from your other devices' : ' · pairing…'}`
     : REMOTE.online ? 'your computer’s browser is online' : 'offline — turn on your computer and open Chrome';
   const rows = [connRow({ on: browserAvailable(), name: 'Browser', state: EXT.ready ? 'This browser' : REMOTE.online ? 'Online' : 'Offline', detail: browserState, action: EXT.ready || REMOTE.online ? '' : '<a class="chip" href="/atelier-browser.zip" download>Get extension</a>' })];
+  const rw = rwRow();
+  rows.push(connRow({ key: 'runway', on: rw.on, name: 'Runway', state: esc(rw.state), detail: esc(rwBack ? rw.detail : 'checking credits…'), action: `<a class="chip" href="${RUNWAY_PORTAL}" target="_blank" rel="noopener">Developer portal</a>` }));
   for (const [k, name, how] of CONNECTORS) {
     const on = sv[k] === true;
     if (k === 'gmail' && sv.gmailConfigured) {
@@ -3509,6 +3719,7 @@ async function renderConnections() {
   }
   $('#connList').innerHTML = rows.join('');
   $('#connList').removeAttribute('aria-busy');
+  drawn = true;
 }
 $('#connList').addEventListener('click', async (ev) => {
   const b = ev.target.closest('[data-conn]');
@@ -3745,6 +3956,7 @@ $('#onboardForm').addEventListener('submit', async (ev) => {
 function syncRole() {
   document.body.classList.toggle('tester', Boolean(S.tester));
   document.body.classList.toggle('owner', Boolean(S.settings.passcode) && !S.tester);
+  syncMic(); // dictation needs the passcode (owner) or the tester's dictation feature
 }
 function setTester(raw) {
   const prev = S.tester, t = raw ? normalizeMe(raw) : null;
@@ -3754,6 +3966,9 @@ function setTester(raw) {
   if ((prev?.sub || '') !== (t?.sub || '')) {
     // A tester's name never outlives their session: the next person on this device (or nobody) starts without it.
     if (prev && !S.settings.passcode && S.settings.name) { S.settings.name = ''; saveSettings(); renderWelcome(); }
+    // Nor does their Look up choice: settings live in this browser, not the account, and a tester must start on “On tap”
+    // as privacy §2 and terms §3 promise (an earlier person's “Automatic” would send selections without a tap).
+    if (!S.settings.passcode && S.settings.lookup) { S.settings.lookup = ''; saveSettings(); }
     if (t) LS.set('outReason', '');
     reader.clearCache(); // sign-out or another account: no Read aloud clip of theirs stays on this device
     deadProviders.clear(); ME = loadMe(); setSync('');
@@ -4244,6 +4459,15 @@ $('#impChatgpt').onchange = (ev) => { runImport('ChatGPT', ev.target.files[0]); 
 $('#impClaude').onchange = (ev) => { runImport('Claude', ev.target.files[0]); ev.target.value = ''; };
 
 // Claude Code: read session transcripts (~/.claude/projects/**/*.jsonl) straight from disk.
+// A project goes to the analysis model as its own folder name only (privacy.html §2): never the drive, the folders
+// above it, or a home folder, whose name is the computer's user name. "C:\Users\jane\Clients\Acme" → "Acme";
+// "C:\Users\jane", "/home/jane", "D:\" and "/mnt/c" → '' (left out).
+function claudeCodeFolder(cwd) {
+  const parts = (typeof cwd === 'string' ? cwd : '').split(/[\\/]+/).map((p) => p.trim()).filter(Boolean);
+  const name = parts.at(-1) || '';
+  if (!name || /^[a-z]:?$/i.test(name) || /^(users|home)$/i.test(parts.at(-2) || '')) return '';
+  return name.slice(0, 80);
+}
 async function readClaudeCode(dir, since = 0) {
   const items = [];
   const projects = new Map();
@@ -4264,14 +4488,15 @@ async function readClaudeCode(dir, since = 0) {
           const t = (typeof c === 'string' ? c : (c || []).filter((x) => x.type === 'text').map((x) => x.text).join('\n')).trim();
           if (!t || t.startsWith('<') || t.startsWith('Caveat:')) continue;
           items.push({ text: t, at: Date.parse(j.timestamp) || f.lastModified });
-          if (j.cwd) projects.set(j.cwd, (projects.get(j.cwd) || 0) + 1);
+          const folder = j.cwd ? claudeCodeFolder(j.cwd) : '';
+          if (folder) projects.set(folder, (projects.get(folder) || 0) + 1);
         }
       }
     }
   }
   await walk(dir, 0);
   const top = [...projects.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([p, n]) => `${p} (${n} prompts)`);
-  return { items, extra: top.length ? `Projects they work on in Claude Code (working directories):\n${top.join('\n')}` : '' };
+  return { items, extra: top.length ? `Projects they work on in Claude Code (folder names only):\n${top.join('\n')}` : '' };
 }
 async function importClaudeCode(dir, incremental) {
   try {
@@ -4297,6 +4522,28 @@ $('#impCodeSync').onclick = async () => {
   if (dir) importClaudeCode(dir, true);
 };
 
+// ── Look up (lookup.js): a short Wikipedia summary + free image for words selected in a finished answer ──
+function lookupDefault() { return S.tester ? 'tap' : 'auto'; } // testers start on “On tap”: nothing leaves until they tap
+function lookupMode() { return S.settings.lookup || lookupDefault(); } // '' = the role's default (reset when the account changes)
+// Testers: “Ask about this” only fills the composer, so their allowance is spent by their own Send. The owner keeps one-tap send.
+function lookupPrefill(prompt) {
+  setMode('ask');
+  const draft = input.value.replace(/\s+$/, '');
+  input.value = draft ? draft + '\n\n' + prompt : prompt;
+  autosize();
+  if (!COARSE.matches) { input.focus({ preventScroll: true }); input.setSelectionRange(input.value.length, input.value.length); } // no phone keyboard pop
+}
+const lookup = initLookup({
+  stage, stream, dock: $('#dock'), topBar: $('.top'), status: $('#lookupStatus'),
+  apiHeaders, mode: lookupMode, coarse: COARSE, reducedMotion: REDUCED_MOTION, toast,
+  ready: () => hasCredentials() && !$('dialog[open]'),
+  // The owner's one-tap ask: an Ask entry with its own (empty) images, never the composer's waiting photos (A7/A8). The
+  // composer's mode is left alone too, so a Video draft or an Image edit's photos still go where they were headed.
+  ask: (prompt) => submit(prompt, 'ask', { images: [] }),
+  prefill: lookupPrefill, askSends: () => !S.tester,
+  debug: () => LS.get('lookupDebug', false) === true,
+});
+
 // ───────────────────────── global keys ─────────────────────────
 document.addEventListener('keydown', (ev) => {
   const modal = $('dialog[open]');
@@ -4320,6 +4567,7 @@ document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape') {
     if (!$('#viewer').hidden) $('#viewerClose').click();
     else if (!$('#scrim').hidden) closeDrawers();
+    else if (dictation.busy()) dictation.cancel();
     else if (S.busy) stopAll();
   }
 });
@@ -4379,9 +4627,10 @@ async function refreshServer(tries = 4) {
       if (r.ok) {
         const h = await r.json();
         serverKey = h.serverKey;
-        server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, ...(h.server || {}) };
+        server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, runway: false, ...(h.server || {}) };
         LS.set('server', server);
         renderOptions();
+        syncMic();
         syncClip();
         return true;
       }
@@ -4454,7 +4703,7 @@ async function refreshServer(tries = 4) {
       let reloaded = false;
       const reloadWhenIdle = () => {
         if (reloaded) return;
-        if (S.busy || hasDraft() || $('dialog[open]') || $('.drawer:not([hidden])') || !$('#viewer').hidden || learning) return setTimeout(reloadWhenIdle, 3000);
+        if (S.busy || dictation.busy() || hasDraft() || lookup.pinned() || $('dialog[open]') || $('.drawer:not([hidden])') || !$('#viewer').hidden || learning) return setTimeout(reloadWhenIdle, 3000);
         reloaded = true; location.reload();
       };
       navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) reloadWhenIdle(); });

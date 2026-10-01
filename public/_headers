@@ -1,7 +1,7 @@
 # Content-Security-Policy-Report-Only: nothing is blocked yet. Violations are reported to POST /api/csp-report (one
 # compact line each in the Worker log: directive, blocked origin, page path, no IP, user agent or query string) and show
 # in the browser console; collect them before the policy is enforced. It allows what the app loads today: its own files
-# and /api, Google Fonts (also fetched by sw.js, hence connect-src), data:/blob: images and media, Canva thumbnails,
+# and /api, Google Fonts (also fetched by sw.js, hence connect-src), data:/blob: images and media (Look up previews arrive as blobs from /api), Canva thumbnails,
 # LinkedIn profile photos (tester avatars, media.licdn.com), the Cloudflare Web Analytics beacon the edge injects, and
 # Build previews. Those run in srcdoc iframes, which inherit this policy, so inline <script>/<style> and the
 # jsdelivr/unpkg CDNs they are told to use are allowed until previews move to their own origin. Inline event-handler

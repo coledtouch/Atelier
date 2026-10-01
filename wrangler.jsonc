@@ -20,9 +20,18 @@
   "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "Relay" }, { "name": "LEDGER", "class_name": "Ledger" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }, { "tag": "v2", "new_sqlite_classes": ["Ledger"] }],
   // Per-IP throttle on the public LinkedIn sign-in routes (/api/li/start, /api/li/callback), ahead of the Ledger.
-  "ratelimits": [{ "name": "LI_LIMIT", "namespace_id": "4711", "simple": { "limit": 20, "period": 60 } }],
+  // Look up (src/lookup.js): LOOKUP_LIMIT per user ('owner' or t:<sub>; preview images count on <key>:img) and WIKI_LIMIT
+  // for Atelier's calls to Wikimedia: testers share 'wikimedia' (API) and 'commons' (images); the owner has
+  // 'wikimedia:owner' and 'commons:owner', so testers can never use up Look up for the owner.
+  "ratelimits": [
+    { "name": "LI_LIMIT", "namespace_id": "4711", "simple": { "limit": 20, "period": 60 } },
+    { "name": "LOOKUP_LIMIT", "namespace_id": "4712", "simple": { "limit": 30, "period": 60 } },
+    { "name": "WIKI_LIMIT", "namespace_id": "4713", "simple": { "limit": 120, "period": 60 } }
+  ],
   // Canva app client ID (public - it appears in the sign-in URL). CANVA_CLIENT_SECRET is a Worker secret.
-  "vars": { "CANVA_CLIENT_ID": "OC-AaD0HxvGYkj2" },
+  // WIKI_CONTACT: the public contact in Atelier's Wikimedia User-Agent (the address on /privacy). LOOKUP_DISABLED "1"
+  // turns Look up off (503 lookup_off; the app then hides it for the session).
+  "vars": { "CANVA_CLIENT_ID": "OC-AaD0HxvGYkj2", "WIKI_CONTACT": "cole@ciprari.ai", "LOOKUP_DISABLED": "0" },
   // Workers Logs keep our own console output, but not the automatic per-request invocation logs: those record full
   // request URLs, which can carry OAuth codes and invite codes.
   "observability": { "enabled": true, "logs": { "invocation_logs": false } }

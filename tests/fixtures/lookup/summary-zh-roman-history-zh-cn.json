@@ -1,0 +1,49 @@
+{
+ "recorded": "2026-10-01T04:24:20.207Z",
+ "url": "https://zh.wikipedia.org/api/rest_v1/page/summary/%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B%E6%AD%B7%E5%8F%B2",
+ "acceptLanguage": "zh-cn",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8; profile=\"https://www.mediawiki.org/wiki/Specs/Summary/1.5.0\"",
+  "cache-control": "s-maxage=1209600, max-age=300",
+  "content-length": "759",
+  "set-cookie-present": true
+ },
+ "body": {
+  "type": "standard",
+  "title": "羅馬帝國歷史",
+  "displaytitle": "<span lang=\"zh-Hans-CN\" dir=\"ltr\"><span class=\"mw-page-title-main\">罗马帝国历史</span></span>",
+  "namespace": {
+   "id": 0,
+   "text": ""
+  },
+  "wikibase_item": "Q2671119",
+  "titles": {
+   "canonical": "羅馬帝國歷史",
+   "normalized": "羅馬帝國歷史",
+   "display": "<span lang=\"zh-Hans-CN\" dir=\"ltr\"><span class=\"mw-page-title-main\">罗马帝国历史</span></span>"
+  },
+  "pageid": 3919379,
+  "lang": "zh",
+  "dir": "ltr",
+  "revision": "92419883",
+  "tid": "6414a830-b817-11f1-9154-db3c2dac7b6c",
+  "timestamp": "2026-04-26T05:42:27Z",
+  "content_urls": {
+   "desktop": {
+    "page": "https://zh.wikipedia.org/wiki/%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B%E6%AD%B7%E5%8F%B2",
+    "revisions": "https://zh.wikipedia.org/wiki/%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B%E6%AD%B7%E5%8F%B2?action=history",
+    "edit": "https://zh.wikipedia.org/wiki/%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B%E6%AD%B7%E5%8F%B2?action=edit",
+    "talk": "https://zh.wikipedia.org/wiki/Talk:%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B%E6%AD%B7%E5%8F%B2"
+   },
+   "mobile": {
+    "page": "https://zh.wikipedia.org/wiki/%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B%E6%AD%B7%E5%8F%B2",
+    "revisions": "https://zh.wikipedia.org/wiki/Special:History/%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B%E6%AD%B7%E5%8F%B2",
+    "edit": "https://zh.wikipedia.org/wiki/%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B%E6%AD%B7%E5%8F%B2?action=edit",
+    "talk": "https://zh.wikipedia.org/wiki/Talk:%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B%E6%AD%B7%E5%8F%B2"
+   }
+  },
+  "extract": "罗马帝国历史由罗马共和国结束后的公元前27年开始，横跨十六个世纪、包括了罗马在数个不同阶段的转变；古罗马帝国时代、帝国分裂时期、延续到中世纪的东罗马帝国（又称拜占庭帝国）时代、并现代史的开始都包含在罗马帝国的历史中。\n",
+  "extract_html": "<p><b>罗马帝国历史</b>由罗马共和国结束后的公元前27年开始，横跨十六个世纪、包括了罗马在数个不同阶段的转变；古罗马帝国时代、帝国分裂时期、延续到中世纪的东罗马帝国（又称拜占庭帝国）时代、并现代史的开始都包含在罗马帝国的历史中。\n</p>"
+ }
+}

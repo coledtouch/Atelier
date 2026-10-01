@@ -206,6 +206,10 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   .tp-tester .tp-spend { grid-area: 2 / 2; flex-direction: row; gap: 12px; align-items: baseline; }
   .tp-tester > .chip { grid-area: 1 / 3 / span 2; }
   .tp-refused :is(.chip, .tp-tag) { margin-left: 52px; } /* under the name, past the photo */
+  .lookup:not([data-state='pill']) { width: min(420px, calc(100vw - 32px)); max-width: none; }
+  .lk-title { font-size: 22px; }
+  .lk-text { -webkit-line-clamp: 3; font-size: 14.5px; line-height: 1.5; }
+  .lk-thumb { width: 72px; height: 72px; }
 }
 @media (max-width: 480px) {
   .top { gap: 6px; padding-inline: max(10px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-right)); }
@@ -234,6 +238,7 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   .allowance { gap: 6px; font-size: 10px; letter-spacing: 0.01em; }
   .al-bar { width: 26px; }
   .ta-meters { padding: 12px; }
+  .lk-thumb { width: 64px; height: 64px; }
 }
 @media (pointer: coarse) {
   .tile-key { display: none; }
@@ -279,6 +284,18 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   .tp-subs .acct { height: 36px; padding: 0 12px 0 14px; font-size: 13px; } /* same as #connList chips: the HIT-44 ::after on .acct button sticks out */
   .tp-subs .acct button { width: 32px; height: 32px; margin-right: -9px; }
   .tester-welcome .btn-primary { min-height: 48px; }
+  .lookup .mini { min-height: 44px; }
+  .lookup .lk-x { width: 44px; height: 44px; }
+  .lk-pill { height: 44px; }
+  .lk-choices button { min-height: 48px; }
+  .lk-alts button { display: inline-flex; align-items: center; min-height: 44px; padding-block: 0; }
+  .lk-foot { margin-top: 16px; padding-bottom: 10px; } /* room for the links' tap areas: clear of the action row above, inside the scroller below */
+  .lk-foot a { display: inline-block; padding: 15px 6px; margin: -15px -6px; } /* the .legal-links pattern: 14.25px line + 2×15px = a 44px-tall tap area on the same line box; its top stays 3px under the action buttons */
+  /* the same pattern, weighted toward what isn't a control: the figure's caption link grows up over the (inert) image, the
+     title link up over the eyebrow, so neither takes taps from the actions row or from the extract (which opens the card) */
+  .lk-figure figcaption a { display: inline-block; padding: 20px 6px 10px; margin: -20px -6px -10px; } /* 14px line + 30 = 44 */
+  a.lk-title { padding-top: 20px; margin-top: -20px; } /* one 22–23px serif line (24.6–25.8) + 20 = 44.6+; all of it on top: a bottom padding would show the clipped third line's tops under the 2-line clamp */
+  .opt-note a.rw-powered { display: inline-block; padding: 17px 6px; margin: -17px -6px; } /* 11px line + 34 = 45; inside .options' 6/12px padding, so the scroller never clips it */
 }
 @media (hover: none) {
   /* body sets -webkit-tap-highlight-color: transparent, so give taps their own feedback */
@@ -294,6 +311,7 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   #connList a.chip[download] { display: none; } /* phones and tablets can't install the extension zip */
   .lib-canva { opacity: 1; } /* no hover to reveal Send to Canva on image tiles */
   .lib-canva:not(.is-busy):active { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+  .lk-choices button:active, .lk-alts button:active, .lk-pill:active, .lk-thumb:active { background: var(--surface-2); }
 }
 @media (max-height: 500px) {
   /* landscape phones and short windows (also Android portrait with the keyboard up — keep .options visible) */
@@ -326,6 +344,9 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   .cvc-title { font-size: 18px; -webkit-line-clamp: 1; }
   .cvc-fmt { margin-top: 10px; }
   .cvc-acts { margin-top: 10px; }
+  .lookup .lk-thumb { display: none; }
+  .lk-text { -webkit-line-clamp: 2; }
+  .lk-figure img { max-height: 40vh; }
 }
 /* keyboard state — classes/vars from syncViewport() in app.js */
 html.kb-open .dock { padding-bottom: 8px; } /* the keyboard covers the home indicator */
@@ -343,9 +364,13 @@ html.kb-tight :is(.onboard-copy, .ob-by, .ob-brand) { display: none; } /* iOS tw
 html.kb-tight .allowance { display: none; } /* <460px visible: the composer keeps the rows */
 html.kb-tight #settings .settings-nav { display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-block: 2px 6px; } /* one row of tabs while typing: at 360x400 the middle grows 169 → 221px */
 html.kb-tight #settings .settings-nav .chip { flex: 1 0 auto; padding-inline: 10px; } /* all four tabs fit at 360px */
+html.kb-open .lookup { display: none; } /* (0,2,1) beats .lookup[data-state='pill'] {display:flex}; lookup.js also closes the card on kb-open */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; }
   .shimmer { background: none; color: var(--ink-2); }
-  .spin, .status::before, .skel, .buildmeter .bar i, .send[data-state='stop']::after { animation: breathe 2.4s ease-in-out infinite !important; }
+  .spin, .status::before, .skel, .buildmeter .bar i, .send[data-state='stop']::after, #micBtn[data-state='transcribing']::after, #micBtn[data-state='listening'] svg, #micBtn.armed::after { animation: breathe 2.4s ease-in-out infinite !important; }
+  #micBtn[data-state='recording']::after { transition: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--c-video) 40%, transparent); } /* a steady ring, not one that moves with the voice */
   .buildmeter .bar i { width: 100%; transform: none; }
+  .lookup { translate: none; }
+  .lk-thumb img, .lk-figure img { transition: none; }
 }

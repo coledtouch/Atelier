@@ -1,0 +1,64 @@
+{
+ "recorded": "2026-10-01T04:24:16.255Z",
+ "url": "https://en.wikipedia.org/api/rest_v1/page/summary/UK",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8; profile=\"https://www.mediawiki.org/wiki/Specs/Summary/1.5.0\"",
+  "cache-control": "s-maxage=1209600, max-age=300",
+  "content-length": "1132",
+  "set-cookie-present": true
+ },
+ "body": {
+  "type": "standard",
+  "title": "United Kingdom",
+  "displaytitle": "<span lang=\"en\" dir=\"ltr\"><span class=\"mw-page-title-main\">United Kingdom</span></span>",
+  "namespace": {
+   "id": 0,
+   "text": ""
+  },
+  "wikibase_item": "Q145",
+  "titles": {
+   "canonical": "United_Kingdom",
+   "normalized": "United Kingdom",
+   "display": "<span lang=\"en\" dir=\"ltr\"><span class=\"mw-page-title-main\">United Kingdom</span></span>"
+  },
+  "pageid": 31717,
+  "thumbnail": {
+   "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a5/Flag_of_the_United_Kingdom_%281-2%29.svg/330px-Flag_of_the_United_Kingdom_%281-2%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+   "width": 330,
+   "height": 165
+  },
+  "originalimage": {
+   "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a5/Flag_of_the_United_Kingdom_%281-2%29.svg/1280px-Flag_of_the_United_Kingdom_%281-2%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+   "width": 1200,
+   "height": 600
+  },
+  "lang": "en",
+  "dir": "ltr",
+  "revision": "1376709067",
+  "tid": "dd680507-b91c-11f1-9a83-ba5a2a88a1fa",
+  "timestamp": "2026-09-25T20:08:25Z",
+  "description": "Country in Northwestern Europe",
+  "description_source": "local",
+  "coordinates": {
+   "lat": 55,
+   "lon": -3
+  },
+  "content_urls": {
+   "desktop": {
+    "page": "https://en.wikipedia.org/wiki/United_Kingdom",
+    "revisions": "https://en.wikipedia.org/wiki/United_Kingdom?action=history",
+    "edit": "https://en.wikipedia.org/wiki/United_Kingdom?action=edit",
+    "talk": "https://en.wikipedia.org/wiki/Talk:United_Kingdom"
+   },
+   "mobile": {
+    "page": "https://en.wikipedia.org/wiki/United_Kingdom",
+    "revisions": "https://en.wikipedia.org/wiki/Special:History/United_Kingdom",
+    "edit": "https://en.wikipedia.org/wiki/United_Kingdom?action=edit",
+    "talk": "https://en.wikipedia.org/wiki/Talk:United_Kingdom"
+   }
+  },
+  "extract": "The United Kingdom of Great Britain and Northern Ireland, commonly known as the United Kingdom (UK) or Britain, is a country in Northwestern Europe, off the coast of the continental mainland. It comprises England, Scotland, Wales and Northern Ireland, with a population of over 69 million in 2024. The UK includes the island of Great Britain, the north-eastern part of the island of Ireland, and most of the smaller islands within the British Isles, covering 94,354 square miles (244,376 km2). It shares a land border with the Republic of Ireland and is surrounded by the Atlantic Ocean, the North Sea, the English Channel, the Celtic Sea and the Irish Sea, while maintaining sovereignty over the Crown Dependencies and the British Overseas Territories. The capital and largest city of England and the UK is London; Edinburgh, Cardiff and Belfast are the national capitals of Scotland, Wales and Northern Ireland, respectively.",
+  "extract_html": "<p>The <b>United Kingdom of Great Britain and Northern Ireland</b>, commonly known as the <b>United Kingdom</b> (<b>UK</b>) or <b>Britain</b>, is a country in Northwestern Europe, off the coast of the continental mainland. It comprises England, Scotland, Wales and Northern Ireland, with a population of over 69 million in 2024. The UK includes the island of Great Britain, the north-eastern part of the island of Ireland, and most of the smaller islands within the British Isles, covering 94,354 square miles (244,376 km<sup>2</sup>). It shares a land border with the Republic of Ireland and is surrounded by the Atlantic Ocean, the North Sea, the English Channel, the Celtic Sea and the Irish Sea, while maintaining sovereignty over the Crown Dependencies and the British Overseas Territories. The capital and largest city of England and the UK is London; Edinburgh, Cardiff and Belfast are the national capitals of Scotland, Wales and Northern Ireland, respectively.</p>"
+ }
+}

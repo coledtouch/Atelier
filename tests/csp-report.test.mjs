@@ -128,3 +128,87 @@ test('every /api response over HTTPS carries Strict-Transport-Security (public/_
   assert.equal(r.status, 200);
   assert.equal(r.headers.get('strict-transport-security'), null);
 });
+
+test('only the two types browsers send are read (case and parameters aside); any other Content-Type is 415 and never logged', async () => {
+  const { env, L } = makeEnv();
+  // CORS-safelisted types (sendBeacon, a no-cors fetch or a form from another site), plain JSON, near misses, none.
+  for (const type of ['text/plain;charset=UTF-8', 'application/x-www-form-urlencoded', 'multipart/form-data; boundary=x', 'application/json', 'application/csp-reports', 'application/reports+jsonp', 'text/csp-report', '']) {
+    const r = await report(legacy(), { 'content-type': type }, {}, env);
+    assert.equal(r.status, 415, JSON.stringify(type));
+    assert.deepEqual(await r.json(), { error: 'Send CSP reports as application/csp-report or application/reports+json.' });
+    assert.equal(r.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+    assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
+  }
+  // No Content-Type header at all.
+  const bare = await worker.fetch(new Request('https://atelier.ciprari.ai/api/csp-report', { method: 'POST', body: new TextEncoder().encode(JSON.stringify(legacy())) }), env);
+  assert.equal(bare.headers.get('content-type'), 'application/json');
+  assert.equal(bare.status, 415);
+  assert.equal(lines.length, 0, 'nothing logged');
+  assert.deepEqual(L.calls, [], 'never reads the Ledger');
+  // What browsers send, in any case and with parameters.
+  assert.equal((await report(legacy(), { 'content-type': 'Application/CSP-Report; charset=utf-8' }, {}, env)).status, 204);
+  assert.equal((await report([modern()], { 'content-type': ' APPLICATION/REPORTS+JSON ;charset=UTF-8' }, {}, env)).status, 204);
+  assert.equal(lines.length, 2);
+});
+
+test('a field of any JSON type never throws: only strings and finite numbers are read (an object with its own toString or valueOf is skipped)', async () => {
+  const { env } = makeEnv();
+  let now = realNow() + 7_200_000; // a fresh minute, so the per-isolate line cap doesn't hide the lines checked below
+  Date.now = () => now;
+  const hostile = [{ toString: 1 }, { valueOf: 1, toString: 1 }, { toString: 'x' }, [{ toString: 1 }], ['img-src'], true, null, {}];
+  for (const v of hostile) {
+    for (const field of ['effective-directive', 'violated-directive', 'blocked-uri', 'document-uri', 'source-file', 'line-number', 'column-number', 'disposition']) {
+      const r = await report(legacy({ [field]: v }), {}, {}, env);
+      assert.equal(r.status, 204, `${field}: ${JSON.stringify(v)}`);
+    }
+    const r = await report([modern({ effectiveDirective: v, blockedURL: v, documentURL: v, sourceFile: v, lineNumber: v, columnNumber: v, disposition: v })], { 'content-type': 'application/reports+json' }, {}, env);
+    assert.equal(r.status, 204, `report-to: ${JSON.stringify(v)}`);
+  }
+  // The report object itself with its own toString, and a field that isn't there.
+  assert.equal((await report('{"csp-report":{"toString":1}}', {}, {}, env)).status, 204);
+  now += 60_000;
+  lines.length = 0;
+  await report(legacy({ 'effective-directive': { toString: 1 }, 'line-number': { valueOf: 1, toString: 1 }, disposition: { toString: 'x' }, 'column-number': [7] }), {}, {}, env);
+  assert.deepEqual(JSON.parse(lines[0]), { blocked: 'https://media.licdn.com', page: 'https://atelier.ciprari.ai/', src: 'https://atelier.ciprari.ai/app.js' },
+    'an unreadable field is left out, never logged as "object"');
+  // Strings and finite numbers are still read; a number past the safe range, a negative one or a blank string isn't.
+  lines.length = 0;
+  await report('{"csp-report":{"effective-directive":"img-src","line-number":"12","column-number":1e400,"disposition":"enforce"}}', {}, {}, env);
+  await report(legacy({ 'line-number': -3, 'column-number': ' ', 'effective-directive': 5 }), {}, {}, env);
+  assert.deepEqual(lines.map((l) => JSON.parse(l)), [
+    { dir: 'img-src', line: 12, mode: 'enforce' },
+    { dir: '5', blocked: 'https://media.licdn.com', page: 'https://atelier.ciprari.ai/', src: 'https://atelier.ciprari.ai/app.js', mode: 'report' },
+  ]);
+});
+
+test('a route that throws answers a generic 500 with no-store, nosniff and HSTS; the log names the route and the error type, never its message', async () => {
+  const { env } = makeEnv();
+  // An env whose passcode read throws, with a message quoting what someone typed (as a real error message could).
+  const broken = new Proxy(env, { get(t, k) { if (k === 'APP_PASSCODE') throw new RangeError('boom: jane@example.com typed "my private note"'); return t[k]; } });
+  const errors = [];
+  const realError = console.error;
+  console.error = (...a) => errors.push(a.map(String).join(' '));
+  try {
+    const r = await api(broken, 'health?q=private-query');
+    assert.equal(r.status, 500);
+    assert.deepEqual(await r.json(), { error: 'Something went wrong.' });
+    assert.equal(r.headers.get('content-type'), 'application/json');
+    assert.equal(r.headers.get('cache-control'), 'no-store');
+    assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(r.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+    assert.equal(r.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+    assert.deepEqual(errors, ['api failed /api/health RangeError']);
+    // Over plain http (local dev) HSTS isn't sent; the rest is the same.
+    const local = await worker.fetch(new Request('http://127.0.0.1:8787/api/health'), broken);
+    assert.equal(local.status, 500);
+    assert.equal(local.headers.get('strict-transport-security'), null);
+    assert.equal(local.headers.get('x-content-type-options'), 'nosniff');
+    // Something thrown that isn't an Error is named by its type.
+    const odd = new Proxy(env, { get(t, k) { if (k === 'APP_PASSCODE') throw 'a thrown string with secrets'; return t[k]; } });
+    assert.equal((await api(odd, 'health')).status, 500);
+    assert.equal(errors.at(-1), 'api failed /api/health string');
+    for (const e of errors) for (const p of ['boom', 'jane', 'private', 'secrets']) assert.ok(!e.includes(p), `${p} in ${e}`);
+  } finally {
+    console.error = realError;
+  }
+});

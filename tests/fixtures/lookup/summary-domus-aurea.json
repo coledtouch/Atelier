@@ -1,0 +1,64 @@
+{
+ "recorded": "2026-10-01T03:10:42.879Z",
+ "url": "https://en.wikipedia.org/api/rest_v1/page/summary/Domus_Aurea",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8; profile=\"https://www.mediawiki.org/wiki/Specs/Summary/1.5.0\"",
+  "cache-control": "s-maxage=1209600, max-age=300",
+  "content-length": "762",
+  "set-cookie-present": true
+ },
+ "body": {
+  "type": "standard",
+  "title": "Domus Aurea",
+  "displaytitle": "<span lang=\"en\" dir=\"ltr\"><span class=\"mw-page-title-main\">Domus Aurea</span></span>",
+  "namespace": {
+   "id": 0,
+   "text": ""
+  },
+  "wikibase_item": "Q622438",
+  "titles": {
+   "canonical": "Domus_Aurea",
+   "normalized": "Domus Aurea",
+   "display": "<span lang=\"en\" dir=\"ltr\"><span class=\"mw-page-title-main\">Domus Aurea</span></span>"
+  },
+  "pageid": 225521,
+  "thumbnail": {
+   "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/03/Domus_Aurea_pianta_generale.png/330px-Domus_Aurea_pianta_generale.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+   "width": 330,
+   "height": 229
+  },
+  "originalimage": {
+   "source": "https://upload.wikimedia.org/wikipedia/commons/0/03/Domus_Aurea_pianta_generale.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail_unscaled",
+   "width": 2601,
+   "height": 1801
+  },
+  "lang": "en",
+  "dir": "ltr",
+  "revision": "1374210112",
+  "tid": "ff5f6637-ad26-11f1-b1d1-ce70f7443dc6",
+  "timestamp": "2026-09-10T14:50:43Z",
+  "description": "Roman palace",
+  "description_source": "local",
+  "coordinates": {
+   "lat": 41.89138889,
+   "lon": 12.49527778
+  },
+  "content_urls": {
+   "desktop": {
+    "page": "https://en.wikipedia.org/wiki/Domus_Aurea",
+    "revisions": "https://en.wikipedia.org/wiki/Domus_Aurea?action=history",
+    "edit": "https://en.wikipedia.org/wiki/Domus_Aurea?action=edit",
+    "talk": "https://en.wikipedia.org/wiki/Talk:Domus_Aurea"
+   },
+   "mobile": {
+    "page": "https://en.wikipedia.org/wiki/Domus_Aurea",
+    "revisions": "https://en.wikipedia.org/wiki/Special:History/Domus_Aurea",
+    "edit": "https://en.wikipedia.org/wiki/Domus_Aurea?action=edit",
+    "talk": "https://en.wikipedia.org/wiki/Talk:Domus_Aurea"
+   }
+  },
+  "extract": "The Domus Aurea was a vast landscaped complex built by the Emperor Nero largely on the Oppian Hill in the heart of ancient Rome after the great fire in 64 AD had destroyed a large part of the city.",
+  "extract_html": "<p>The <b>Domus Aurea</b> was a vast landscaped complex built by the Emperor Nero largely on the Oppian Hill in the heart of ancient Rome after the great fire in 64 AD had destroyed a large part of the city.</p>"
+ }
+}

@@ -1,0 +1,146 @@
+{
+ "recorded": "2026-10-01T04:24:25.647Z",
+ "url": "https://zh.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&redirects=1&generator=search&gsrsearch=%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B&gsrnamespace=0&gsrlimit=4&gsrinfo=&gsrprop=&prop=extracts%7Cpageimages%7Cdescription%7Cpageprops%7Cinfo&exintro=1&explaintext=1&exlimit=4&piprop=thumbnail%7Cname%7Coriginal&pithumbsize=330&pilicense=free&ppprop=disambiguation&inprop=url%7Cdisplaytitle&maxage=3600&smaxage=86400",
+ "acceptLanguage": "zh-cn",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "s-maxage=86400, max-age=3600, public",
+  "set-cookie-present": true
+ },
+ "body": {
+  "batchcomplete": true,
+  "continue": {
+   "gsroffset": 4,
+   "continue": "gsroffset||"
+  },
+  "query": {
+   "pages": [
+    {
+     "pageid": 7980,
+     "ns": 0,
+     "title": "神圣罗马帝国",
+     "index": 2,
+     "extract": "神圣罗马帝国（德语：Heiliges Römisches Reich，拉丁语：Sacrum Romanum Imperium）是位于欧洲中西部的一个政治实体，萌芽于800年或962年，直至1806年拿破仑战争期间解体。帝国起初在皇帝的宗主权下，由“德意志王国”（位于今德国、捷克及荷兰部分地区）、“意大利王国”以及1032年并入的“勃艮第王国”组成。15世纪，皇帝对意大利与勃艮第的有效统治基本丧失，行政重心遂向阿尔卑斯山以北转移。\n800年12月25日，教宗良三世加冕法兰克国王查理曼为“罗马人的皇帝”，成为自476年西罗马帝国灭亡后第一位此头衔拥有者。查理曼的三个孙子于843年据《凡尔登条约》三分法兰克，其中东法兰克被日耳曼人路易所统治。962年，奥托一世加冕为“罗马人的皇帝”，该国在奥托王朝时期发动一系列军事征伐与文艺赞助，自建国至12世纪被认为是欧洲最强大的君主制。12世纪末，亨利六世试图废除皇帝选举制度改为世袭制，但遭教宗与诸侯反对。其死后帝位空悬，韦尔夫家族的奥托四世短暂成为皇帝，但于1214年的布汶之战中被法兰西王国击败，皇位回到霍亨斯陶芬王朝的腓特烈二世手中。13世纪中叶，帝国进入大空位时代，转而走向地方分权的统治模式。1356年，查理四世颁布《金玺诏书》，稳定了帝国局势。\n16世纪初期，马克西米利安一世开启帝国改革，该时期所制定的大部分政策能一直维持到帝国灭亡之时。帝国于此世纪开始被奥地利的哈布斯堡王朝掌管。因宗教改革的影响，帝国面临许多内部叛乱，最终引爆了17世纪前期的三十年战争，导致帝国体制的形骸化。18世纪，普鲁士王国崛起，经常与奥地利大公国在西里西亚等地区上进行争夺，导致帝国的权力逐渐被奥普两国瓜分，促成了德意志二元化，皇帝也不再能对旗下诸侯国拥有实际的约束力。1804年，皇帝弗朗茨二世建立奥地利帝国。1806年，法国皇帝拿破仑一世在第三次反法同盟胜利后，将十余个德意志邦国组建成亲法的莱茵邦联，弗朗茨二世则宣布放弃神圣罗马皇帝头衔，致使神圣罗马帝国灭亡。",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/dd/Banner_of_the_Holy_Roman_Emperor_with_haloes_%281430-1806%29.svg/330px-Banner_of_the_Holy_Roman_Emperor_with_haloes_%281430-1806%29.svg.png?utm_source=zh.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 220
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/d/dd/Banner_of_the_Holy_Roman_Emperor_with_haloes_%281430-1806%29.svg?utm_source=zh.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 900,
+      "height": 600
+     },
+     "pageimage": "Banner_of_the_Holy_Roman_Emperor_with_haloes_(1430-1806).svg",
+     "description": "歐洲歷史國家（962－1806），在公元800年查理大帝到羅馬被教宗良三世加冕後正式成立",
+     "descriptionsource": "central",
+     "contentmodel": "wikitext",
+     "pagelanguage": "zh",
+     "pagelanguagehtmlcode": "zh",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-30T23:49:48Z",
+     "lastrevid": 94677034,
+     "length": 83748,
+     "fullurl": "https://zh.wikipedia.org/wiki/%E7%A5%9E%E5%9C%A3%E7%BD%97%E9%A9%AC%E5%B8%9D%E5%9B%BD",
+     "editurl": "https://zh.wikipedia.org/w/index.php?title=%E7%A5%9E%E5%9C%A3%E7%BD%97%E9%A9%AC%E5%B8%9D%E5%9B%BD&action=edit",
+     "canonicalurl": "https://zh.wikipedia.org/wiki/%E7%A5%9E%E5%9C%A3%E7%BD%97%E9%A9%AC%E5%B8%9D%E5%9B%BD",
+     "displaytitle": "神圣罗马帝国"
+    },
+    {
+     "pageid": 16037,
+     "ns": 0,
+     "title": "東羅馬帝國",
+     "index": 3,
+     "extract": "东罗马帝国，后世又称拜占庭帝国，正式名称为罗马帝国，中国古代隋、唐时期则称拂菻（lǐn），是罗马帝国于公元286年实行东西分治后，于原帝国东部（相对于西部的西罗马帝国）分离出的政权。东罗马帝国主要领土位于欧洲东南部，疆域曾包括欧亚非三大洲的亚洲西部和非洲北部，是古典时代和中世纪欧洲历史上最悠久的君主制国家。\n历史学界对东罗马帝国的起始纪年仍存有争议，最根本的原因还是因为东罗马帝国虽然文化上有变化，但名义上就是原罗马帝国存续下来的政权。主流观点之一认为，330年君士坦丁大帝建立新罗马、罗马帝国政治中心东移，是东罗马帝国开始的标志。另一主流观点认为，395年最后一位统治整个罗马帝国的皇帝狄奥多西一世的去世，标志东罗马帝国的开始。德国学者斯坦因以戴克里先皇帝即位（284年；这位皇帝首次将罗马帝国分为东西两半分治）为东罗马帝国的起始纪年；其他观点分别以476年（西罗马帝国灭亡）、527年（查士丁尼一世登基）、7世纪（希腊化开始）和8世纪（希腊化完成）为东罗马帝国起始的标志。\n东罗马帝国本为罗马帝国的东半部，较为崇尚希腊文化；与西罗马帝国分裂后，更逐渐发展为以希腊文化、希腊语和及后的东正教为立国基础。620年，希拉克略皇帝首次让希腊语取代拉丁语，成为帝国的官方语言，使得东罗马帝国成为不同于古罗马和西罗马帝国的国家。在476年西罗马帝国灭亡前和神圣罗马帝国成立后，这个帝国就被外人称为“东罗马帝国”加以区分，尽管其正式国号仍延续着古罗马帝国时期的国号，而其公民皆自认为罗马人（中古希腊语：Ῥωμαῖοι，罗马化：Rhōmaîoi），而非“拜占庭人”或“希腊人”；直到1557年，德意志历史学家赫罗尼姆斯·沃尔夫为了区分其帝国的古罗马时期及神圣罗马帝国而引入了“拜占庭帝国”作为称呼，并被现代史学所使用。\n1204年，东罗马帝国首都君士坦丁堡曾被第四次十字军东征攻陷和劫掠，直到1261年才被东罗马帝国的流亡政权尼西亚帝国收复。然而虽收复首都，但国力与版图自此再也无法从战争的浩劫下恢复。1453年，来自小亚细亚的奥斯曼帝国攻陷了其首都君士坦丁堡，末代皇帝君士坦丁十一世在巷战中殉国，历时一千余年的东罗马帝国就此灭亡，国祚达1480年的罗马帝国也正式终结。在许多历史学家眼中，东罗马帝国的覆灭也被视作中世纪的结束和近代早期的开端。\n时至今日，虽然东罗马帝国的文化和宗教在现代土耳其已经不复存在，但其对于今日的东欧各国有很大的影响。此外帝国在其11个世纪的悠久历史中所保存下来的古典希腊和罗马史料、著作，以及理性的哲学思想，也为中世纪欧洲突破天主教会神权束缚提供了最直接的动力。从地中海战争与贸易中的东西文明交流、东罗马帝国的遗民西迁，间接引发了意大利乃至整个西欧的文艺复兴运动。该运动的宗旨试图重塑罗马的辉煌文化，并深远地影响了人类历史。",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f2/Byzantine_imperial_flag%2C_14th_century.svg/330px-Byzantine_imperial_flag%2C_14th_century.svg.png?utm_source=zh.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 238
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/f/f2/Byzantine_imperial_flag%2C_14th_century.svg?utm_source=zh.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 900,
+      "height": 648
+     },
+     "pageimage": "Byzantine_imperial_flag,_14th_century.svg",
+     "description": "古代後期和中世紀的帝國",
+     "descriptionsource": "central",
+     "contentmodel": "wikitext",
+     "pagelanguage": "zh",
+     "pagelanguagehtmlcode": "zh",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-29T15:24:32Z",
+     "lastrevid": 94244583,
+     "length": 291888,
+     "fullurl": "https://zh.wikipedia.org/wiki/%E6%9D%B1%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B",
+     "editurl": "https://zh.wikipedia.org/w/index.php?title=%E6%9D%B1%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B&action=edit",
+     "canonicalurl": "https://zh.wikipedia.org/wiki/%E6%9D%B1%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B",
+     "displaytitle": "東羅馬帝國"
+    },
+    {
+     "pageid": 459860,
+     "ns": 0,
+     "title": "羅馬帝國",
+     "index": 1,
+     "extract": "罗马帝国是古典时代统治环地中海地区、部分欧洲、西亚和北非地区的帝国，为罗马共和国的继承者。前27年，屋大维崛起并建立奥古斯都元首制，共和国转型为帝国。3世纪末，帝国数度被分为东西罗马，最终西罗马帝国于476年灭亡，而东罗马帝国则持续存在至1453年君士坦丁堡陷落。古代中国称该国为大秦或海西国，于明代经天主教传教士利玛窦音译后改称罗马。\n截至前100年，罗马共和国已将其统治范围从亚平宁半岛扩张至地中海大部分地区。然而，罗马随后受到内战与政治冲突的严重动摇。前44年，独裁官尤利乌斯·凯撒被元老院封为终身独裁官后不久，便遭刺杀身亡。最终，屋大维于前31年的亚克兴海战中，击败马克·安东尼与克娄巴特拉七世，并征服埃及的托勒密王国，结束内战。前27年，罗马元老院授予屋大维广泛的军事权力，并赋予他“奥古斯都”的新称号，其成为罗马的首位皇帝。广大的罗马领土被划分为元老院行省与皇帝行省；前者由每年抽签任命的总督治理，后者则属于皇帝所有，但由其任命的雷加图斯治理。\n帝国在最初的两个世纪经历被称为“罗马治世”的稳定与繁荣时期。该国在图拉真统治时达到版图极盛，人口亦增长至传统学界认为的5,500万至6,000万，乃至现代研究的7,000万以上。罗马帝国的衰退始于康茂德统治期间，并于3世纪经历长达约50年的“三世纪危机”，面临内战、瘟疫和蛮族入侵，同时伴随着大量短命统治的皇帝与地方势力脱离帝国。270年，奥勒良称帝，在数年的战争中击败高卢帝国和帕米拉帝国，重新统一罗马。戴克里先最终赢得内战，并在西方拉丁世界与东方希腊世界分别建立帝国宫廷。313年，君士坦丁大帝颁布米兰敕令合法化基督教，并赢得四帝内战。330年，他将帝国的都城从罗马迁至拜占庭，并将其改名为君士坦丁堡。民族大迁徙时期中，日耳曼人与匈人发动大规模入侵，导致西罗马帝国逐渐衰落。476年，拉文纳落入赫鲁利人手中，奥多亚克废黜罗慕路斯·奥古斯都，西罗马帝国遂告覆亡。东罗马帝国则以君士坦丁堡为唯一首都，又延续了一千年，直到1453年该城陷落。\n由于帝国疆域广阔且延续时间极长，其制度与文化对其统治领域内的语言、宗教、艺术、建筑、文学、哲学、法律以及政府形式的发展产生持久影响。中世纪欧洲重新发现其古典科学与技术，促成科学文艺复兴与科学革命。罗马的共和制度也深刻影响中世纪意大利城邦共和国、早期美国以及现代民主共和国。",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/00/Roman_Empire_Trajan_117AD.png/330px-Roman_Empire_Trajan_117AD.png?utm_source=zh.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 210
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/0/00/Roman_Empire_Trajan_117AD.png?utm_source=zh.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 2534,
+      "height": 1614
+     },
+     "pageimage": "Roman_Empire_Trajan_117AD.png",
+     "description": "古羅馬帝制時期",
+     "descriptionsource": "central",
+     "contentmodel": "wikitext",
+     "pagelanguage": "zh",
+     "pagelanguagehtmlcode": "zh",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-30T18:24:45Z",
+     "lastrevid": 94252921,
+     "length": 164067,
+     "fullurl": "https://zh.wikipedia.org/wiki/%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B",
+     "editurl": "https://zh.wikipedia.org/w/index.php?title=%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B&action=edit",
+     "canonicalurl": "https://zh.wikipedia.org/wiki/%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B",
+     "displaytitle": "羅馬帝國"
+    },
+    {
+     "pageid": 697670,
+     "ns": 0,
+     "title": "西羅馬帝國",
+     "index": 4,
+     "extract": "西罗马帝国是罗马帝国基于286年被戴克里先分为两部分后，把政权一分为二建立四帝共治制，从而开始有的东西两部的概念，位处西部的部分即是在395年最后分裂的西罗马帝国；而东部最后则是东罗马帝国。正式名称与东罗马帝国相同，均用罗马共和时代的“元老院与罗马人民”（Senatus Populusque Romanus）。当时罗马人并不认为国家已被划分为两个独立国家，而是视为由两个朝廷管理的单一政体。由于西罗马帝国日趋减弱，因而受到东罗马帝国的扶持。476年西罗马帝国解体为多个日耳曼人王国。\n西罗马帝国的皇帝之位在3世纪到5世纪间断续存在。随着戴克里先建立的四帝共治制以306年四帝内战的爆发而崩溃，帝国西部奥古斯都（皇帝）及凯撒（副皇帝）互相攻伐，324年西部奥古斯都（皇帝）君士坦丁大帝击败帝国东部皇帝李锡尼，赢得内战重新统一成为全罗马帝国皇帝，之后迁都拜占庭并改名“君士坦丁堡”。他之后的君士坦提乌斯二世和尤利安（337－363年）也是如此。363年尤利安在远征萨珊波斯帝国期间阵亡，军队拥立约维安为皇帝，但他在位仅八个月就因一氧化碳中毒去世。364年瓦伦提尼安一世被拥为皇帝，一个月后之后任命他的弟弟瓦伦斯统治东部，他自己统治西部。从这一刻起到西罗马帝国灭亡，此后所有罗马帝国政权都由至少两位皇帝共同统治，领土开始习惯地分为东部和西部两个管辖区。东部皇帝狄奥多西一世在394-395年间因打赢西部帝国僭位者尤吉尼厄斯后没有任命西部皇帝而统治整个帝国四个月直到他在395年过世，帝国最终正式分割给他两个儿子霍诺留（西罗马帝国）和阿卡狄奥斯（东罗马帝国）继承。\n476年9月4日，日耳曼裔将领奥多亚塞控制意大利全境，导致仅拥立一年的西罗马皇帝罗慕路斯·奥古斯都被迫退位，历史学者爱德华·吉本亦将西罗马帝国的灭亡定于这一年。另有观点定于公元480年曾在罗慕路斯之前上位的原西罗马皇帝尼波斯逝世的那年，因为他在流亡后仍获东罗马和奥多亚塞等势力的形式上承认。由于罗马帝国在欧洲历史上中的巨大影响力，因此公元476年西罗马帝国灭亡之时，一般也被划分为古代欧洲的终结，并进入了中古时代。\n480年以后，东罗马帝国的芝诺也不再拥立新的西部皇帝，而是先后册封入主西罗马旧地的日耳曼裔统治者奥多亚塞及狄奥多里克为意大利国王。\n800年，罗马教会（即天主教会）为了与当时位于东罗马帝国的君士坦丁堡教会（即东正教会）抗衡，法兰克国王查理曼被教宗良三世加冕为罗马人的皇帝，而查理大帝亦被视作继承西罗马帝国，并形成了一个新的皇室世系；之后发展成神圣罗马帝国，而神圣罗马皇帝也以继承西罗马皇帝自居，但是这个“复活”的西罗马帝国不论在血统还是语言上都已经与原本的古罗马没有关联了。",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/bb/Mapa_Imperio_Occidental_a%C3%B1o_418.svg/330px-Mapa_Imperio_Occidental_a%C3%B1o_418.svg.png?utm_source=zh.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 334
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/b/bb/Mapa_Imperio_Occidental_a%C3%B1o_418.svg?utm_source=zh.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 1220,
+      "height": 1235
+     },
+     "pageimage": "Mapa_Imperio_Occidental_año_418.svg",
+     "description": "羅馬帝國分裂後的西半部分",
+     "descriptionsource": "central",
+     "contentmodel": "wikitext",
+     "pagelanguage": "zh",
+     "pagelanguagehtmlcode": "zh",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-28T13:13:40Z",
+     "lastrevid": 94499244,
+     "length": 43394,
+     "fullurl": "https://zh.wikipedia.org/wiki/%E8%A5%BF%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B",
+     "editurl": "https://zh.wikipedia.org/w/index.php?title=%E8%A5%BF%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B&action=edit",
+     "canonicalurl": "https://zh.wikipedia.org/wiki/%E8%A5%BF%E7%BE%85%E9%A6%AC%E5%B8%9D%E5%9C%8B",
+     "displaytitle": "西羅馬帝國"
+    }
+   ]
+  }
+ }
+}

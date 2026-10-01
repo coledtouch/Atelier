@@ -28,8 +28,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=53" />
-  <link rel="stylesheet" href="/studio.css?v=53" />
+  <link rel="stylesheet" href="/app.css?v=54" />
+  <link rel="stylesheet" href="/studio.css?v=54" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -86,6 +86,7 @@
     </section>
     <ol class="stream" id="stream" aria-label="Conversation"></ol>
     <div class="sr-only" id="activityStatus" role="status" aria-live="polite"></div>
+    <div class="sr-only" id="lookupStatus" role="status" aria-live="polite"></div>
   </main>
 
   <footer class="dock" id="dock">
@@ -102,9 +103,12 @@
           </button>
           <input type="file" id="fileInput" accept="image/*,video/*" multiple hidden />
           <textarea id="input" rows="1" placeholder="Ask anything…" autocomplete="off" enterkeyhint="send" aria-label="Prompt"></textarea>
-          <button class="icon-btn subtle" id="micBtn" type="button" aria-pressed="false" aria-label="Dictate" title="Dictate">
-            <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          <button class="icon-btn subtle" id="micBtn" type="button" aria-pressed="false" aria-label="Dictate" title="Dictate" data-state="idle">
+            <svg class="i-mic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+            <svg class="i-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+            <span class="mic-time" id="micTime" aria-hidden="true"></span>
           </button>
+          <span class="sr-only" id="micStatus" role="status" aria-live="polite"></span>
           <button class="send" id="sendBtn" type="button" data-state="idle" aria-label="Send">
             <svg class="i-send" viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
             <svg class="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
@@ -178,7 +182,7 @@
 
       <section class="you-card">
         <h4>Import your history</h4>
-        <p class="hint">Atelier reads what <i>you</i> wrote and distills who you are and how you write. Files are read in this browser; only your own messages are sent to an AI model for analysis.</p>
+        <p class="hint">Atelier reads what <i>you</i> wrote and distills who you are and how you write. Files are read in this browser; only your own messages (and, for Claude Code, your project folder names and prompt counts) are sent to an AI model for analysis.</p>
         <div class="row-actions" style="margin-top:10px">
           <label class="chip file-chip">ChatGPT export<input type="file" id="impChatgpt" accept=".zip,.json" aria-label="Import ChatGPT history" /></label>
           <label class="chip file-chip">Claude export<input type="file" id="impClaude" accept=".zip,.json" aria-label="Import Claude history" /></label>
@@ -268,6 +272,15 @@
             <label><input type="radio" name="theme" value="light" /> <span>Paper</span></label>
           </div>
         </section>
+        <section class="field-group">
+          <h4>Look up</h4>
+          <p class="hint" style="margin-bottom:10px">Select a name or term in a finished answer to see a short Wikipedia summary. Atelier’s server fetches the summary and its preview image, so Wikipedia never sees your device.</p>
+          <div class="seg" id="lookupSeg">
+            <label><input type="radio" name="lookup" value="auto" /> <span>Automatic</span></label>
+            <label><input type="radio" name="lookup" value="tap" /> <span>On tap</span></label>
+            <label><input type="radio" name="lookup" value="off" /> <span>Off</span></label>
+          </div>
+        </section>
         <section class="field-group read-aloud">
           <h4>Read aloud</h4>
           <div role="radiogroup" aria-label="Voice" id="readVoices" class="ra-voices"></div>
@@ -338,6 +351,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=53" type="module"></script>
+  <script src="/app.js?v=54" type="module"></script>
 </body>
 </html>

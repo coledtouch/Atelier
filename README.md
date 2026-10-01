@@ -35,6 +35,7 @@ npx wrangler secret put NVIDIA_API_KEY      # any of these four
 npx wrangler secret put ANTHROPIC_API_KEY   # (+ ANTHROPIC_WORKSPACE_ID for org-level keys)
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put GEMINI_API_KEY
+npx wrangler secret put RUNWAYML_API_SECRET # optional: Runway video, owner only (+ var RUNWAY_MAX_CREDITS as a per-video cap)
 ```
 Connected accounts use more secrets (GITHUB_TOKEN, STRIPE_API_KEY, CLOUDFLARE_API_TOKEN, RAILWAY_API_TOKEN,
 SLACK_USER_TOKEN, GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET, CANVA_CLIENT_ID + CANVA_CLIENT_SECRET) — see Settings → Connections.

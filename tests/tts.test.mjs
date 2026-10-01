@@ -305,6 +305,62 @@ test('sseToAudio: past maxSeconds of mp3 (a tester’s reserved reading time) th
   assert.equal((await collect(streamOf([...deltas, done()]).pipeThrough(sseToAudio()))).length, 250 * 480);
 });
 
+test('a tester stream stopped before speech.audio.done settles on the audio it timed (the clock that cuts it off is the one read); one cut after it, on its usage alone', async () => {
+  const frames = Array.from({ length: 250 }, frame2); // 6 s, 10 frames (0.24 s) a delta
+  const deltas = [];
+  for (let i = 0; i < frames.length; i += 10) deltas.push(delta(join(frames.slice(i, i + 10))));
+  // sseToAudio times into a clock its caller passes, so the caller can read it once the stream has stopped.
+  const clock = mp3Clock();
+  await assert.rejects(collect(streamOf(deltas).pipeThrough(sseToAudio(TTS_LIMITS.maxAudioBytes, 5, clock))), /ran past the reading time/);
+  near(clock.seconds(), 21 * 0.24, 'timed up to and including the delta that crossed 5 s');
+  // OpenAI keeps talking and never reaches speech.audio.done (where its usage would be): the settle hook gets the
+  // seconds that same clock timed, marked stopped, with no usage.
+  const runaway = () => {
+    let n = 0;
+    return new Response(new ReadableStream({ pull(c) { c.enqueue(enc.encode(deltas[n++ % deltas.length])); } }), { headers: { 'content-type': 'text/event-stream' } });
+  };
+  const settles = [];
+  const hooks = { tester: true, reserve: async () => ({ headers: {}, limits: { seconds: 5 }, settle: async (r) => { settles.push(r); return null; } }) };
+  mockFetch([[OPENAI, runaway]]);
+  const res = await handleTts(ttsReq({ voice: 'atelier', text: 'Hello there.' }), KEYS, hooks);
+  assert.equal(res.status, 200);
+  await assert.rejects(res.arrayBuffer(), /ran past the reading time/);
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.equal(settles.length, 1);
+  assert.deepEqual(Object.keys(settles[0]).sort(), ['seconds', 'stopped', 'usage']);
+  assert.equal(settles[0].usage, null);
+  assert.equal(settles[0].stopped, true);
+  near(settles[0].seconds, 21 * 0.24, 'the seconds the cut-off timed');
+  // A finished stream still settles from its usage alone.
+  settles.length = 0;
+  mockFetch([[OPENAI, () => speech(sseText(join(frames.slice(0, 50))))]]);
+  await bytesOf(await handleTts(ttsReq({ voice: 'atelier', text: 'Hello there.' }), KEYS, hooks));
+  assert.deepEqual(settles, [{ usage: { input_tokens: 150, output_tokens: 900, total_tokens: 1_050 } }]);
+  // A cut landing in the chunk that also carries speech.audio.done (the upstream not yet closed): the usage is OpenAI's
+  // complete bill, so the settle gets it, marked stopped, and no timed seconds.
+  settles.length = 0;
+  mockFetch([[OPENAI, () => {
+    let n = 0;
+    return new Response(new ReadableStream({
+      pull(c) {
+        if (n < 20) return c.enqueue(enc.encode(deltas[n++]));
+        if (n++ === 20) return c.enqueue(enc.encode(deltas[20] + done({ input_tokens: 204, output_tokens: 113, total_tokens: 317 })));
+        return new Promise(() => {});
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } });
+  }]]);
+  await assert.rejects((await handleTts(ttsReq({ voice: 'atelier', text: 'Hello there.' }), KEYS, hooks)).arrayBuffer(), /ran past the reading time/);
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.deepEqual(settles, [{ usage: { input_tokens: 204, output_tokens: 113, total_tokens: 317 }, stopped: true }]);
+  // Without a time limit (the owner's hooks) nothing is timed: a stream that breaks before its usage settles null.
+  settles.length = 0;
+  const unlimited = { tester: false, reserve: async () => ({ headers: {}, settle: async (r) => { settles.push(r); return null; } }) };
+  mockFetch([[OPENAI, () => { let n = 0; return new Response(new ReadableStream({ pull(c) { if (n < 3) c.enqueue(enc.encode(deltas[n++])); else c.error(new Error('connection reset')); } }), { headers: { 'content-type': 'text/event-stream' } }); }]]);
+  await assert.rejects((await handleTts(ttsReq({ voice: 'atelier', text: 'Hello there.' }), KEYS, unlimited)).arrayBuffer());
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.deepEqual(settles, [null]);
+});
+
 // ── errors are mapped, never passed through ──
 test('an upstream 401 quoting the key becomes a generic 502; nothing upstream reaches the client or the log', async () => {
   const leak = 'Incorrect API key provided: sk-proj-AbCdEf123456********************wxyz. You can find your API key at https://platform.openai.com/account/api-keys.';

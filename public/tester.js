@@ -22,7 +22,7 @@ export const isTesterCode = (code) => typeof code === 'string' && (code.startsWi
 export function normalizeMe(j) {
   if (!j || typeof j !== 'object' || typeof j.sub !== 'string' || !j.sub) return null;
   const m = j.models || {}, f = j.features || {}, a = j.allowance || {}, p = j.pool || {};
-  const features = Object.fromEntries(['web', 'video', 'veo', 'helpers', 'profile', 'tts'].map((k) => [k, f[k] !== false]));
+  const features = Object.fromEntries(['web', 'video', 'veo', 'helpers', 'profile', 'tts', 'dictation'].map((k) => [k, f[k] !== false]));
   const period = (x = {}) => ({ spent: int(x.spent), reserved: int(x.reserved), limit: int(x.limit) });
   // tts: Read aloud voice ids ('atelier', 'sulafat', …) the tester may use; allowedIds() stays chat/image/video only.
   // null = not listed (a record cached before v53, before its first /me): unknown, not none, so the reader asks and the

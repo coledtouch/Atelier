@@ -1,0 +1,60 @@
+{
+ "recorded": "2026-10-01T03:10:45.830Z",
+ "url": "https://en.wikipedia.org/api/rest_v1/page/summary/Inception",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8; profile=\"https://www.mediawiki.org/wiki/Specs/Summary/1.5.0\"",
+  "cache-control": "s-maxage=1209600, max-age=300",
+  "content-length": "884",
+  "set-cookie-present": true
+ },
+ "body": {
+  "type": "standard",
+  "title": "Inception",
+  "displaytitle": "<i>Inception</i>",
+  "namespace": {
+   "id": 0,
+   "text": ""
+  },
+  "wikibase_item": "Q25188",
+  "titles": {
+   "canonical": "Inception",
+   "normalized": "Inception",
+   "display": "<i>Inception</i>"
+  },
+  "pageid": 23270459,
+  "thumbnail": {
+   "source": "https://upload.wikimedia.org/wikipedia/en/2/2e/Inception_%282010%29_theatrical_poster.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail_unscaled",
+   "width": 220,
+   "height": 326
+  },
+  "originalimage": {
+   "source": "https://upload.wikimedia.org/wikipedia/en/2/2e/Inception_%282010%29_theatrical_poster.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail_unscaled",
+   "width": 220,
+   "height": 326
+  },
+  "lang": "en",
+  "dir": "ltr",
+  "revision": "1375989069",
+  "tid": "8dddade9-b597-11f1-bc06-656b150bd045",
+  "timestamp": "2026-09-21T08:36:35Z",
+  "description": "2010 film by Christopher Nolan",
+  "description_source": "local",
+  "content_urls": {
+   "desktop": {
+    "page": "https://en.wikipedia.org/wiki/Inception",
+    "revisions": "https://en.wikipedia.org/wiki/Inception?action=history",
+    "edit": "https://en.wikipedia.org/wiki/Inception?action=edit",
+    "talk": "https://en.wikipedia.org/wiki/Talk:Inception"
+   },
+   "mobile": {
+    "page": "https://en.wikipedia.org/wiki/Inception",
+    "revisions": "https://en.wikipedia.org/wiki/Special:History/Inception",
+    "edit": "https://en.wikipedia.org/wiki/Inception?action=edit",
+    "talk": "https://en.wikipedia.org/wiki/Talk:Inception"
+   }
+  },
+  "extract": "Inception is a 2010 science fiction heist film written and directed by Christopher Nolan, who also produced it with his wife Emma Thomas. The film stars Leonardo DiCaprio as a professional thief who steals information by infiltrating his targets' subconscious. He is offered a chance to have his criminal history erased as payment for implanting an idea into a target's subconscious. The ensemble cast includes Ken Watanabe, Joseph Gordon-Levitt, Marion Cotillard, Elliot Page, Tom Hardy, Cillian Murphy, Tom Berenger, Dileep Rao, and Michael Caine.",
+  "extract_html": "<p><i><b>Inception</b></i> is a 2010 science fiction heist film written and directed by Christopher Nolan, who also produced it with his wife Emma Thomas. The film stars Leonardo DiCaprio as a professional thief who steals information by infiltrating his targets' subconscious. He is offered a chance to have his criminal history erased as payment for implanting an idea into a target's subconscious. The ensemble cast includes Ken Watanabe, Joseph Gordon-Levitt, Marion Cotillard, Elliot Page, Tom Hardy, Cillian Murphy, Tom Berenger, Dileep Rao, and Michael Caine.</p>"
+ }
+}

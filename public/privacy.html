@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Privacy Policy · Atelier</title>
-  <meta name="description" content="How Atelier collects, uses, stores, shares and deletes data, including LinkedIn tester sign-in and data from Google APIs (Gmail)." />
+  <meta name="description" content="How Atelier collects, uses, stores, shares and deletes data, including LinkedIn tester sign-in, cookieless page analytics and data from Google APIs (Gmail, Calendar, Drive and Photos)." />
   <link rel="icon" href="/icons/atelier-v2-32.png" type="image/png" sizes="32x32" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -19,7 +19,7 @@
   <p class="lede">Atelier (“Atelier”, “we”, “us”) is a personal AI assistant available at <a href="https://atelier.ciprari.ai">atelier.ciprari.ai</a>. This policy explains what data Atelier accesses, how it is used, where it is stored, who it is shared with, and how you can delete it.</p>
 
   <div class="box">
-    <b>In short:</b> Atelier accesses your data only to do what you ask it to do. It never sells your data, never uses it for advertising, and never uses it to train AI models. Data from Google APIs is handled under Google’s Limited Use requirements (see <a href="#google">Google user data</a>).
+    <b>In short:</b> Atelier accesses your data only to do what you ask it to do, plus the cookieless page-view counts and security reports that keep it working (see <a href="#technical">Technical data</a>). It never sells your data, never uses it for advertising, and never uses it to train AI models. Data from Google APIs is handled under Google’s Limited Use requirements (see <a href="#google">Google user data</a>).
   </div>
 
   <h2>1. Who can use Atelier</h2>
@@ -29,8 +29,10 @@
   <h3>Information you provide</h3>
   <ul>
     <li><b>Prompts and conversations</b> — the questions, instructions, text and images you enter.</li>
+    <li><b>Voice dictation</b> — on an iPhone or iPad, or wherever your browser can’t transcribe speech itself, a recording you make with the mic is sent to OpenAI (or to Google’s Gemini when OpenAI is busy, unavailable or can’t read the recording) only to turn it into text in your message box. Atelier doesn’t store the recording or the text on its servers. On Android and desktop, your browser’s own speech recognition is used first, under its maker’s terms.</li>
+    <li><b>Look up</b> — when you select a short phrase in a finished answer, that phrase (up to 120 characters) is sent to Atelier’s server, which asks Wikipedia for a public summary and preview image (see <a href="#sharing">Sharing</a>). Depending on your Look up setting this happens automatically, only when you tap Look up, or never.</li>
     <li><b>Profile and memory</b> — optional information you add in the “You” panel (name, a description of yourself, writing samples, a style guide, and remembered facts), plus facts Atelier notes from your conversations, which you can view and delete.</li>
-    <li><b>Imported history</b> — if you choose to import a ChatGPT/Claude data export or Claude Code session files, Atelier reads the messages <i>you</i> wrote in them to build your profile. The files are opened in your browser and are never uploaded or stored as files. To build the profile, the messages you wrote — newest first, each cut to its first 900 characters, up to about 150,000 characters in all for testers (280,000 for the owner) — are sent to an AI model for analysis (Google’s Gemini when it is available, otherwise another of the models listed under <a href="#sharing">Sharing</a>), together with, for Claude Code sessions, the names of up to 25 project folders you worked in. The profile, writing style and remembered facts that come back are saved like the rest of your “You” panel (on the server, so they sync between your devices; for testers, in your tester record). Nothing else from the files is sent or kept.</li>
+    <li><b>Imported history</b> — if you choose to import a ChatGPT/Claude data export or Claude Code session files, Atelier reads the messages <i>you</i> wrote in them to build your profile. The files are opened in your browser and are never uploaded or stored as files. To build the profile, the messages you wrote — newest first, each cut to its first 900 characters, up to about 150,000 characters in all for testers (280,000 for the owner) — are sent to an AI model for analysis (Google’s Gemini when it is available, otherwise another of the models listed under <a href="#sharing">Sharing</a>), together with, for Claude Code sessions, the last folder name of up to 25 projects you worked in and how many prompts each had (for example “Acme-Site (212 prompts)”) — never the drive, the folders above it or your home folder, whose name is usually your computer’s user name. The profile, writing style and remembered facts that come back are saved like the rest of your “You” panel (on the server, so they sync between your devices; for testers, in your tester record). Nothing else from the files is sent or kept.</li>
   </ul>
   <h3 id="testers">If you sign in as a LinkedIn tester</h3>
   <ul>
@@ -39,41 +41,51 @@
     <li><b>Your profile, style and memory</b> — what you keep in the “You” panel (name, a description of yourself, writing samples, a style guide, learned facts and remembered items) is stored on the server in your tester record so Atelier can use it in your answers.</li>
     <li><b>Your threads</b> — conversations and generated media stay in your browser on your device.</li>
     <li><b>Prompts</b> — what you send goes to the AI provider of the model chosen for that request, only to produce the answer (see <a href="#sharing">Sharing</a>).</li>
+    <li><b>Voice dictation</b> — recordings are transcribed as described above and not stored; the usage ledger records only what each one cost.</li>
+    <li><b>Look up</b> — free: it never touches your usage ledger. It starts on “On tap”, so a phrase you select is sent only when you tap Look up (you can change this in Settings).</li>
     <li><b>Video files</b> — a video you attach for analysis may be uploaded to Google’s Gemini Files API, which holds it for up to 48 hours and then deletes it.</li>
     <li><b>Sign-in cookies</b> — two strictly necessary cookies: <code>__Host-atelier_tester</code> keeps you signed in for up to 30 days, and <code>__Host-atelier_li</code> lasts at most 10 minutes and is used only to finish the LinkedIn sign-in round trip. Neither is used for tracking.</li>
   </ul>
   <h3>Connected accounts (only if you connect them)</h3>
+  <p>Only the owner can connect accounts or install the browser extension; testers can’t.</p>
   <ul>
-    <li><b>Gmail</b> (via Google OAuth) — see <a href="#google">Google user data</a> below.</li>
+    <li><b>Google</b> (Gmail, Calendar, Drive and Photos, through one Google sign-in) — see <a href="#google">Google user data</a> below.</li>
+    <li><b>Canva</b> (through Canva sign-in) — Atelier lists and searches your designs and reads their details, exports a design you choose to import into Atelier, and — when you tap Send to Canva or approve it on an approval card — uploads an image or creates a design in your Canva account. It asks Canva for these permissions: read design details (<code>design:meta:read</code>), read and create design content (<code>design:content:read</code>, <code>design:content:write</code>), read and upload images (<code>asset:read</code>, <code>asset:write</code>) and read your basic Canva profile (<code>profile:read</code>, for the account’s display name). Only the Canva sign-in tokens and that display name are stored on the server; a design you import is saved in your browser, like the rest of your Library.</li>
     <li><b>Slack, GitHub, Stripe, Cloudflare, Railway</b> — when connected, Atelier reads the data needed to answer a request (for example, messages matching a search, open pull requests, recent payments, DNS records or deployments).</li>
     <li><b>Browser extension</b> — if you install the optional Atelier Browser extension, Atelier can list your open tabs and read the page you ask about. Clicks and typing happen only after you approve each one, and the extension never enters passwords or payment details.</li>
   </ul>
-  <h3>Technical data</h3>
+  <h3 id="technical">Technical data</h3>
   <ul>
-    <li>Our host, Cloudflare, processes standard request data (such as IP address and request logs) to operate and secure the service. We use IP addresses to block repeated wrong-passcode attempts and to limit repeated sign-in attempts and security reports. We do not use analytics, advertising or tracking cookies; the only cookies are the tester sign-in cookies described above.</li>
+    <li>Our host, Cloudflare, processes standard request data (such as IP address and request logs) to operate and secure the service. We use IP addresses to block repeated wrong-passcode attempts and to limit repeated sign-in attempts and security reports. We do not use advertising or tracking cookies; the only cookies are the tester sign-in cookies described above.</li>
+    <li><b>Page analytics</b> — Atelier’s pages load Cloudflare Web Analytics, a small script from <code>static.cloudflareinsights.com</code> that counts visits. It sets no cookies, stores nothing on your device (no local storage) and, per Cloudflare, does not fingerprint you by your IP address, browser details or anything else. For each page view it reports the page address, the site that referred you, your country, your browser, operating system and device type (desktop, mobile or tablet), and how fast the page loaded. The owner sees only aggregate statistics in Cloudflare’s dashboard — visits, page views, top pages, referring sites, countries and browsers — never linked to your sign-in, your prompts or your tester record. The owner can switch it off in Cloudflare at any time.</li>
     <li><b>Security reports</b> — Atelier’s pages carry a Content Security Policy. If your browser sees a page try to load something the policy doesn’t list, it may send Atelier a short automatic report. The browser’s report can include the full page address, the page you came from and a snippet of the blocked code; Atelier discards all of that. It records one line per report with only: the policy rule involved, the website (domain only) of the blocked item or a word such as “inline”, the Atelier page and script file without anything after “?” or “#”, a line and column number, and whether the policy was enforced. Atelier does not record your IP address, browser or device details (user agent), the referring page, query strings or any page content with it, and the report is never linked to your sign-in. Your IP address is used only briefly, as a counter key that stops one connection from flooding reports. These lines are kept in Cloudflare’s Worker logs for at most 7 days and are used only to keep Atelier secure and working.</li>
   </ul>
 
-  <h2 id="google">3. Google user data (Gmail)</h2>
-  <p>If you connect Gmail, Atelier requests these permissions:</p>
+  <h2 id="google">3. Google user data (Gmail, Calendar, Drive and Photos)</h2>
+  <p>Only the owner can connect a Google account; testers never can. When a Google account is connected, Google’s consent screen asks for all of these permissions at once (each scope below is <code>https://www.googleapis.com/auth/</code> followed by the name shown):</p>
   <table>
     <thead><tr><th>Scope</th><th>What Atelier does with it</th></tr></thead>
     <tbody>
       <tr><td><code>gmail.readonly</code></td><td>Searches and reads your email when you ask (for example, “what’s unread from today?” or “summarize the thread with Alex”).</td></tr>
       <tr><td><code>gmail.compose</code></td><td>Saves draft emails you ask Atelier to write.</td></tr>
       <tr><td><code>gmail.send</code></td><td>Sends an email <b>only after you review and approve it</b> on an approval card in the app. Atelier never sends email on its own.</td></tr>
+      <tr><td><code>calendar.events</code></td><td>Lists the events on your main (primary) calendar when you ask (for example, “what’s on tomorrow?”). Creates or deletes an event <b>only after you approve it</b> on an approval card; if the event has guests, Google emails them the invitation or cancellation.</td></tr>
+      <tr><td><code>calendar.<wbr>calendarlist.<wbr>readonly</code></td><td>Lets Atelier see which calendars are in your account (their names and settings, not their events). Today Atelier reads events only from your primary calendar.</td></tr>
+      <tr><td><code>drive.readonly</code></td><td>Searches your Drive by file name and content, and reads the files you ask about as text (Docs and Slides as text, Sheets as comma-separated values, and plain-text files). Read-only: it can’t change or delete your files.</td></tr>
+      <tr><td><code>drive.file</code></td><td>Creates a new Google Doc with the text you asked for, <b>only after you approve it</b>. This permission reaches only files Atelier itself creates or that you open with it.</td></tr>
+      <tr><td><code>photospicker.<wbr>mediaitems.<wbr>readonly</code></td><td>Opens Google Photos’ own picker when you attach from Google Photos. Atelier receives only the photos you pick there — never the rest of your library — and attaches them to your request.</td></tr>
     </tbody>
   </table>
   <h3>How Google user data is used</h3>
   <ul>
-    <li>Only to provide the user-facing features you request: searching, reading, summarizing, drafting and — with your approval — sending email.</li>
-    <li>Email content needed for a request is sent to the AI model provider selected for that request (see <a href="#sharing">Sharing</a>) solely to generate the response you asked for.</li>
+    <li>Only to provide the user-facing features you request: searching, reading, summarizing, drafting and — with your approval — sending email; listing and — with your approval — creating or deleting calendar events; searching and reading Drive files and — with your approval — creating a Google Doc; and attaching the photos you pick.</li>
+    <li>Email, calendar, Drive and photo content needed for a request is sent to the AI model provider selected for that request (see <a href="#sharing">Sharing</a>) solely to generate the response you asked for.</li>
     <li>It is <b>not</b> used for advertising, <b>not</b> sold, <b>not</b> used to develop, improve or train generalized AI or machine-learning models, and <b>not</b> read by humans unless you explicitly ask for help with a specific message, it is necessary for security or legal compliance, or the data is aggregated and anonymized for internal operations.</li>
   </ul>
   <h3>How Google user data is stored</h3>
   <ul>
-    <li>Atelier stores only the OAuth <b>refresh token</b> (and a short-lived access token) in encrypted Cloudflare storage so it can call Gmail on your behalf. Email content is not stored on our servers.</li>
-    <li>Answers that quote or summarize your email are saved in your conversation history in your own browser, where you can delete them.</li>
+    <li>Atelier stores only the OAuth <b>refresh token</b> (and a short-lived access token) in encrypted Cloudflare storage so it can call Google on your behalf. Email, calendar, Drive and photo content is not stored on our servers.</li>
+    <li>Answers that quote or summarize this content, and photos you attach, are saved in your conversation history in your own browser, where you can delete them.</li>
   </ul>
   <div class="box">
     <b>Limited Use disclosure.</b> Atelier’s use and transfer to any other app of information received from Google APIs will adhere to the
@@ -85,6 +97,7 @@
     <li>To answer your requests and perform the actions you ask for (chat, code, images, video, ideas, apps, and account tasks).</li>
     <li>To personalize answers using your profile, memory and writing style.</li>
     <li>To keep the service secure and working (for example, rate-limiting passcode attempts and diagnosing errors).</li>
+    <li>To see, in aggregate, which pages are used and how fast they load (Cloudflare Web Analytics, without cookies).</li>
     <li>For testers: to enforce each tester’s spending allowance and the shared monthly tester budget.</li>
   </ul>
   <p>We do not use your data for advertising, profiling for third parties, or selling.</p>
@@ -94,12 +107,15 @@
   <table>
     <thead><tr><th>Processor</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>Cloudflare</td><td>Hosting, network security, and storage of your profile, memory, connection tokens and — for testers — the tester record and usage ledger.</td></tr>
+      <tr><td>Cloudflare</td><td>Hosting, network security, cookieless page-view and page-speed analytics (Cloudflare Web Analytics), and storage of your profile, memory, connection tokens and — for testers — the tester record and usage ledger.</td></tr>
       <tr><td>LinkedIn</td><td>Tester sign-in only: confirms who you are and shares your basic profile and email address with Atelier.</td></tr>
       <tr><td>Anthropic (Claude), OpenAI, Google (Gemini, Veo) and NVIDIA</td><td>AI models that generate responses, images and video. Only the content needed for the request is sent, via their business APIs, which do not use API data to train their models by default. Testers never use NVIDIA models.</td></tr>
       <tr><td>Z.ai, DeepSeek and Meta</td><td>Further AI models. Atelier uses them when you pick one, or when Auto or a fallback does: for testers, Auto starts Code and Build on Z.ai’s GLM 5.3, and other requests can fall back to Z.ai, DeepSeek or Meta when the first model is busy or unavailable. Only the content needed for the request is sent, under each provider’s own API data terms.</td></tr>
       <tr><td>OpenAI and Google (Read aloud)</td><td>When you use Read aloud with an AI voice, the answer’s text is sent to OpenAI (or to Google for the Sulafat voice) to generate the speech. The voice you hear is AI-generated. The Device voice uses your browser’s own speech engine and sends nothing to Atelier.</td></tr>
-      <tr><td>Gmail, Slack, GitHub, Stripe, Cloudflare, Railway</td><td>Only when you connect them, to read or act on your own account at your request.</td></tr>
+      <tr><td>OpenAI and Google (dictation)</td><td>When you tap the microphone on an iPhone or iPad, or where your browser can’t transcribe speech itself, the recording is sent to OpenAI’s transcription API (or to Google’s Gemini API when OpenAI is busy, unavailable or can’t read the recording) to turn it into text for the message box. Atelier doesn’t store the audio or the transcript. On Android and desktop, your browser’s own speech recognition is used first, under its maker’s terms.</td></tr>
+      <tr><td>Wikimedia Foundation (Wikipedia, Wikimedia Commons)</td><td>Look up only: when you select a short phrase in a finished answer (automatically, or when you tap Look up), Atelier’s server sends just that phrase — up to 120 characters — to Wikipedia to fetch a public summary, and fetches the summary’s preview image from Wikimedia Commons itself. Wikipedia and Wikimedia see only Atelier’s server: never your IP address, your device or who you are. You can turn Look up off in Settings.</td></tr>
+      <tr><td>Runway</td><td>Video generation, only when the owner picks a Runway model (testers can’t). The prompt, and any image attached to animate, is sent to Runway’s API under Runway’s terms. Atelier’s server fetches the finished video and it is saved on the owner’s device.</td></tr>
+      <tr><td>Google (Gmail, Calendar, Drive, Photos), Canva, Slack, GitHub, Stripe, Cloudflare, Railway</td><td>Only when the owner connects them (testers can’t), to read or act on that account at the owner’s request.</td></tr>
     </tbody>
   </table>
   <p>We may disclose information if required by law or to protect the rights, safety or security of users or the service.</p>
@@ -108,12 +124,16 @@
   <ul>
     <li><b>In your browser:</b> conversations, generated media and settings — kept until you delete them (Settings → Your data → Clear this device, or delete individual threads).</li>
     <li><b>Read aloud clips:</b> audio made for Read aloud is cached only on this device (browser Cache Storage, up to about 30 MB or 200 clips) until it is cleared with Settings → Your data → Clear this device, or when a tester signs out.</li>
+    <li><b>Dictation recordings:</b> never saved. A recording stays in the page’s memory only until it has been transcribed (or, if sending it fails, until you record again or close Atelier), and Atelier’s server passes it to the transcription provider without storing it.</li>
+    <li><b>Look-up cache (Cloudflare):</b> the Wikipedia answer to a look-up (which repeats the phrase you selected) is kept for up to a day, and its preview image for up to a week, in the Cloudflare data centre that served you. Each person’s entries are filed under a one-way hash of the phrase or image and of who asked, so they are only ever served back to the same person — no other Atelier user can see or detect what you looked up.</li>
     <li><b>Cloudflare (server):</b> your profile/memory (so it syncs between your devices) and connection tokens — kept until you delete or disconnect them.</li>
     <li><b>Tester records:</b> your LinkedIn ID, name, email and photo link, your usage ledger and your profile, style and memory are deleted together 90 days after you last use Atelier, or sooner on request.</li>
     <li><b>Refused tester sign-ins:</b> if a LinkedIn sign-in is turned away (all tester spots are taken, tester access is paused, or your access was revoked), Atelier keeps a note of the most recent such attempt — the LinkedIn member ID, name and profile photo link LinkedIn returned, and the time — so the owner can see it in the Testers panel and decide whether to open a spot. Your email address is not part of it. Only the latest attempt is kept (a newer one replaces it), and it is deleted 7 days after the attempt, or sooner on request.</li>
     <li><b>Gemini Files API:</b> videos uploaded for analysis are deleted by Google within 48 hours.</li>
+    <li><b>Runway (owner only):</b> Runway’s links to finished videos expire within 48 hours; Atelier keeps its own copy on the owner’s device, not on its server.</li>
     <li><b>AI providers:</b> may retain request data briefly under their own API policies for abuse monitoring; they do not use it for advertising.</li>
     <li><b>Operational logs:</b> short-lived request logs kept by Cloudflare for reliability and security. Atelier’s own log lines, including security reports, are kept for at most 7 days.</li>
+    <li><b>Page analytics:</b> Cloudflare Web Analytics data is kept by Cloudflare under its own retention and shown to the owner only as aggregate page-view and page-speed statistics in Cloudflare’s dashboard; nothing is stored on your device for it.</li>
   </ul>
 
   <h2>7. Security</h2>
@@ -123,7 +143,8 @@
   <ul>
     <li><b>Delete conversations and media:</b> delete threads in the app, or use Settings → Your data → Clear this device.</li>
     <li><b>Delete profile and memory:</b> edit or remove entries in the “You” panel.</li>
-    <li><b>Disconnect Gmail:</b> Settings → Connections → Disconnect (this deletes the stored token), and/or revoke access at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</li>
+    <li><b>Disconnect Google:</b> Settings → Connections → Disconnect (this deletes the stored token), and/or revoke access at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</li>
+    <li><b>Disconnect Canva:</b> Settings → Connections → Disconnect (this revokes Atelier’s access at Canva and deletes the stored tokens).</li>
     <li><b>Disconnect other services:</b> revoke the token in that service’s settings; Atelier then loses access immediately.</li>
     <li><b>Testers:</b> sign out in Settings → Access. Your tester record, usage ledger and profile are deleted 90 days after your last use; to delete them sooner, email <a href="mailto:cole@ciprari.ai">cole@ciprari.ai</a>. You can also remove Atelier from your LinkedIn account’s permitted services.</li>
     <li><b>Request deletion of everything:</b> email <a href="mailto:cole@ciprari.ai">cole@ciprari.ai</a> and we will delete server-side data within 30 days.</li>

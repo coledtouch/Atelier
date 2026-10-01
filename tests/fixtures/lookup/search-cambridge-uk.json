@@ -1,0 +1,134 @@
+{
+ "recorded": "2026-10-01T04:24:17.551Z",
+ "url": "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&redirects=1&generator=search&gsrsearch=Cambridge+UK&gsrnamespace=0&gsrlimit=4&gsrinfo=&gsrprop=&prop=extracts%7Cpageimages%7Cdescription%7Cpageprops%7Cinfo&exintro=1&explaintext=1&exlimit=4&piprop=thumbnail%7Cname%7Coriginal&pithumbsize=330&pilicense=free&ppprop=disambiguation&inprop=url%7Cdisplaytitle&maxage=3600&smaxage=86400",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "s-maxage=86400, max-age=3600, public",
+  "set-cookie-present": true
+ },
+ "body": {
+  "batchcomplete": true,
+  "continue": {
+   "gsroffset": 4,
+   "continue": "gsroffset||"
+  },
+  "query": {
+   "pages": [
+    {
+     "pageid": 36995,
+     "ns": 0,
+     "title": "Cambridge",
+     "index": 1,
+     "extract": "Cambridge (  KAYM-brij) is a city and non-metropolitan district in the county of Cambridgeshire, England. It is the county town of Cambridgeshire and is located on the River Cam, 55 miles (89 km) north of London. As of the 2021 United Kingdom census, the population of the City of Cambridge was 145,700; the population of the wider built-up area (which extends outside the city council area) was 181,137. There is archaeological evidence of settlement in the area dating back to as early as the Bronze Age, and Cambridge became an important trading centre during the Roman and Viking eras. The first town charters were granted in the 12th century, although modern city status was not officially conferred until 1951.\nThe city is well known as the home of the University of Cambridge, which was founded in 1209 and consistently ranks among the best universities in the world. The buildings of the university include King's College Chapel, Cavendish Laboratory, and the Cambridge University Library, one of the largest legal deposit libraries in the world. The city's skyline is dominated by several college buildings, along with the spire of the Our Lady and the English Martyrs Church, and the chimney of Addenbrooke's Hospital. Anglia Ruskin University, which evolved from the Cambridge School of Art and the Cambridgeshire College of Arts and Technology, also has its main campus in the city.\nCambridge is at the heart of the high-technology Silicon Fen also known as the  Cambridge Cluster, which contains industries such as software and bioscience and many start-up companies born out of the university. Over 40 per cent of the workforce have a higher education qualification, more than twice the national average. The Cambridge Biomedical Campus, one of the largest biomedical research clusters in the world, includes the headquarters of AstraZeneca and the relocated Royal Papworth Hospital.\nCambridge produced the first 'Laws of the Game' for association football and was the site of the first game, which was held at Parker's Piece. The Strawberry Fair music and art festival and Midsummer Fair are held on Midsummer Common, and the annual Cambridge Beer Festival takes place on Jesus Green. The city is adjacent to the M11 and A14 roads.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/08/Cambridge_-_Kings_College_vue_des_backs.jpg/330px-Cambridge_-_Kings_College_vue_des_backs.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 220
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/0/08/Cambridge_-_Kings_College_vue_des_backs.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 4898,
+      "height": 3265
+     },
+     "pageimage": "Cambridge_-_Kings_College_vue_des_backs.jpg",
+     "description": "City and district in Cambridgeshire, England",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-29T18:57:26Z",
+     "lastrevid": 1376156582,
+     "length": 183815,
+     "fullurl": "https://en.wikipedia.org/wiki/Cambridge",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=Cambridge&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/Cambridge",
+     "displaytitle": "Cambridge"
+    },
+    {
+     "pageid": 1818251,
+     "ns": 0,
+     "title": "Cambridge (constituency)",
+     "index": 3,
+     "extract": "Cambridge is a constituency represented in the House of Commons of the UK Parliament since 2015 by Daniel Zeichner of the Labour Party.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/58/East_of_England_-_Cambridge_constituency.svg/330px-East_of_England_-_Cambridge_constituency.svg.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 298
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/5/58/East_of_England_-_Cambridge_constituency.svg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 898,
+      "height": 810
+     },
+     "pageimage": "East_of_England_-_Cambridge_constituency.svg",
+     "description": "Parliamentary constituency in the United Kingdom, 1801 onwards",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-30T23:49:25Z",
+     "lastrevid": 1370545543,
+     "length": 214105,
+     "fullurl": "https://en.wikipedia.org/wiki/Cambridge_(constituency)",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=Cambridge_(constituency)&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/Cambridge_(constituency)",
+     "displaytitle": "Cambridge (constituency)"
+    },
+    {
+     "pageid": 3810352,
+     "ns": 0,
+     "title": "Cambridge University (constituency)",
+     "index": 4,
+     "extract": "Cambridge University was a university constituency electing two members to the English House of Commons from 1603, and from 1707 until 1950 to the British House of Commons.",
+     "description": "Parliamentary constituency in the United Kingdom, 1801–1950",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-30T16:29:02Z",
+     "lastrevid": 1373925223,
+     "length": 89723,
+     "fullurl": "https://en.wikipedia.org/wiki/Cambridge_University_(constituency)",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=Cambridge_University_(constituency)&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/Cambridge_University_(constituency)",
+     "displaytitle": "Cambridge University (constituency)"
+    },
+    {
+     "pageid": 25978572,
+     "ns": 0,
+     "title": "University of Cambridge",
+     "index": 2,
+     "extract": "The University of Cambridge is a collegiate public research university in Cambridge, England. Founded in 1209, the University of Cambridge is the second-oldest university in the English-speaking world and the world's third-oldest university in continuous operation. The university's founding followed the arrival of scholars who left the University of Oxford for Cambridge after a dispute with local townspeople. The two ancient English universities, although sometimes described as rivals, share many common features and are often jointly referred to as Oxbridge.\nIn 1231, 22 years after its founding, the university was recognised with a royal charter, granted by King Henry III. The University of Cambridge includes 31 semi-autonomous constituent colleges and more than 150 academic departments, faculties, and other institutions organised into six schools. The largest department is Cambridge University Press and Assessment, which contains the oldest university press in the world, with £1 billion of annual revenue and with 100 million learners. All of the colleges are self-governing institutions within the university, managing their own personnel and policies, and all students are required to have a college affiliation within the university. Undergraduate teaching at Cambridge is centred on weekly small-group supervisions in the colleges with lectures, seminars, laboratory work, and occasionally further supervision provided by the central university faculties and departments.\nThe university operates eight cultural and scientific museums, including the Fitzwilliam Museum and Cambridge University Botanic Garden. Cambridge's 116 libraries hold a total of approximately 16 million books, around 9 million of which are in Cambridge University Library, a legal deposit library and one of the world's largest academic libraries.\nAmong the university's notable alumni are reigning King Charles III, Francis Bacon, Lord Byron, Oliver Cromwell, Charles Darwin, Rosalind Franklin, Rajiv Gandhi, John Harvard, Stephen Hawking, John Maynard Keynes, John Milton, Vladimir Nabokov, Jawaharlal Nehru, Isaac Newton, Salman Rushdie, Bertrand Russell, Alan Turing, Ludwig Wittgenstein, William Wordsworth, 15 British prime ministers including the sitting prime minister Andy Burnham and 194 Olympic medal-winning athletes. Its alumni, academics, and affiliates have won 126 Nobel Prizes.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c3/Coat_of_Arms_of_the_University_of_Cambridge.svg/330px-Coat_of_Arms_of_the_University_of_Cambridge.svg.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 386
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/c/c3/Coat_of_Arms_of_the_University_of_Cambridge.svg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 2000,
+      "height": 2339
+     },
+     "pageimage": "Coat_of_Arms_of_the_University_of_Cambridge.svg",
+     "description": "Public collegiate university in England",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-29T19:25:48Z",
+     "lastrevid": 1376915146,
+     "length": 202482,
+     "fullurl": "https://en.wikipedia.org/wiki/University_of_Cambridge",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=University_of_Cambridge&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/University_of_Cambridge",
+     "displaytitle": "University of Cambridge"
+    }
+   ]
+  }
+ }
+}

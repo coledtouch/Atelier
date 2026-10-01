@@ -1,0 +1,15 @@
+{
+ "recorded": "2026-10-01T04:24:16.785Z",
+ "url": "https://en.wikipedia.org/api/rest_v1/page/summary/Cambridge_(UK)",
+ "status": 404,
+ "headers": {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "s-maxage=600",
+  "content-length": "38",
+  "set-cookie-present": true
+ },
+ "body": {
+  "status": 404,
+  "type": "Internal error"
+ }
+}

@@ -1,0 +1,145 @@
+{
+ "recorded": "2026-10-01T04:24:29.290Z",
+ "url": "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&redirects=1&generator=search&gsrsearch=C%3A+drive&gsrnamespace=0&gsrlimit=4&gsrinfo=&gsrprop=&prop=extracts%7Cpageimages%7Cdescription%7Cpageprops%7Cinfo&exintro=1&explaintext=1&exlimit=4&piprop=thumbnail%7Cname%7Coriginal&pithumbsize=330&pilicense=free&ppprop=disambiguation&inprop=url%7Cdisplaytitle&maxage=3600&smaxage=86400",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "s-maxage=86400, max-age=3600, public",
+  "set-cookie-present": true
+ },
+ "body": {
+  "batchcomplete": true,
+  "continue": {
+   "gsroffset": 4,
+   "continue": "gsroffset||"
+  },
+  "query": {
+   "pages": [
+    {
+     "pageid": 13777,
+     "ns": 0,
+     "title": "Hard disk drive",
+     "index": 3,
+     "extract": "A hard disk drive (HDD), hard disk, hard drive, or fixed disk is an electro-mechanical computer data storage device that stores and retrieves digital data using magnetic storage with one or more rigid rapidly rotating platters coated with magnetic material. The platters are paired with magnetic heads, usually arranged on a moving actuator arm, which read and write data to the platter surfaces. Data is accessed in a random-access manner, meaning that individual blocks of data can be stored and retrieved in any order. HDDs are a type of non-volatile storage, retaining stored data when powered off. Modern HDDs are typically in the form of a small rectangular box, possibly in a disk enclosure for portability. Modern disks do not have removable media, in contrast to the disk drives common in the 1960s and 1970s which often used removable disk packs.\nIBM introduced the first disk drive, the 350 for the 305 RAMAC, in 1956, and disks were the dominant secondary storage device for general-purpose computers beginning in the early 1960s. HDDs maintained this position into the modern era of servers and personal computers, though personal computing devices produced in large volume, like mobile phones and tablets, rely on flash memory storage devices. More than 224 companies have produced HDDs historically, though after extensive industry consolidation, most units are manufactured by Seagate, Toshiba, and Western Digital. HDDs dominate the volume of storage produced (exabytes per year) for servers. Though production is growing slowly (by exabytes shipped), sales revenues and unit shipments are declining, because solid-state drives (SSDs) have higher data-transfer rates, higher areal storage density, somewhat better reliability, and much lower latency and access times.\nThe revenues for SSDs, most of which use NAND flash memory, slightly exceeded those for HDDs in 2018. Flash storage products had more than twice the revenue of hard disk drives as of 2017. Though SSDs have four to nine times higher cost per bit, they are replacing HDDs in applications where speed, power consumption, small size, high capacity and durability are important. As of 2017, the cost per bit of SSDs was falling, and the price premium over HDDs had narrowed.\nThe primary characteristics of an HDD are its capacity and performance. Capacity is specified in unit prefixes corresponding to powers of 1000: a 1-terabyte (TB) drive has a capacity of 1,000 gigabytes, where 1 gigabyte = 1 000 megabytes = 1 000 000 kilobytes (1 million) = 1 000 000 000 bytes (1 billion). Typically, some of an HDD's capacity is unavailable to the user because it is used by the file system and the computer operating system, and possibly inbuilt redundancy for error correction and recovery. There can be confusion regarding storage capacity since capacities are stated in decimal gigabytes (powers of 1000) by HDD manufacturers, whereas the most commonly used operating systems report capacities in powers of 1024, which results in a smaller number than advertised. Performance is specified as the time required to move the heads to a track or cylinder (average access time), the time it takes for the desired sector to move under the head (average latency, which is a function of the physical rotational speed in revolutions per minute), and finally, the speed at which the data is transmitted (data rate).\nThe two most common form factors for modern HDDs are 3.5-inch, for desktop computers, and 2.5-inch, primarily for laptops and servers. HDDs are connected to systems by standard interface cables such as SATA (Serial ATA), USB, SAS (Serial Attached SCSI), or PATA (Parallel ATA) cables.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b2/Hatachi_500_GB_hard_drive%2C_2011.jpg/330px-Hatachi_500_GB_hard_drive%2C_2011.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 192
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/b/b2/Hatachi_500_GB_hard_drive%2C_2011.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 5879,
+      "height": 3429
+     },
+     "pageimage": "Hatachi_500_GB_hard_drive,_2011.jpg",
+     "description": "Electro-mechanical data storage device",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-30T16:25:24Z",
+     "lastrevid": 1375252035,
+     "length": 146754,
+     "fullurl": "https://en.wikipedia.org/wiki/Hard_disk_drive",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=Hard_disk_drive&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/Hard_disk_drive",
+     "displaytitle": "Hard disk drive"
+    },
+    {
+     "pageid": 55424,
+     "ns": 0,
+     "title": "Drive letter assignment",
+     "index": 1,
+     "extract": "In computer data storage, drive letter assignment is the process of assigning alphabetical identifiers to volumes. Unlike the concept of UNIX mount points, where volumes are named and located arbitrarily in a single hierarchical namespace, drive letter assignment allows multiple highest-level namespaces. Drive letter assignment is thus a process of using letters to name the roots of the \"forest\" representing the file system; each volume holds an independent \"tree\" (or, for non-hierarchical file systems, an independent list of files).",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/03/WinFile_10.0_Screen.PNG/330px-WinFile_10.0_Screen.PNG?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 244
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/0/03/WinFile_10.0_Screen.PNG?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 629,
+      "height": 465
+     },
+     "pageimage": "WinFile_10.0_Screen.PNG",
+     "description": "Alphabetical assignment to logical drives on computers (e.g., C:\\)",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-30T16:25:30Z",
+     "lastrevid": 1362285685,
+     "length": 28427,
+     "fullurl": "https://en.wikipedia.org/wiki/Drive_letter_assignment",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=Drive_letter_assignment&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/Drive_letter_assignment",
+     "displaytitle": "Drive letter assignment"
+    },
+    {
+     "pageid": 1845708,
+     "ns": 0,
+     "title": "Variable-frequency drive",
+     "index": 4,
+     "extract": "A variable-frequency drive (VFD, or adjustable-frequency drive, adjustable-speed drive, variable-speed drive, AC drive, micro drive, inverter drive, variable voltage variable frequency drive, VVVF drive, or drive) is a type of AC motor drive (system incorporating a motor) that controls speed and torque by varying the frequency of the input electricity. Depending on its topology, it controls the associated voltage or current variation.\nVFDs are used in applications ranging from small appliances to large compressors. Systems using VFDs can be more efficient than hydraulic systems, such as in systems with pumps and damper control for fans.\nSince the 1980s, power electronics technology has reduced VFD cost and size and has improved performance through advances in semiconductor switching devices, drive topologies, simulation and control techniques, and control hardware and software.\nVFDs include low- and medium-voltage AC–AC and DC–AC topologies.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/45/Small_variable-frequency_drive.jpg/330px-Small_variable-frequency_drive.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 379
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/4/45/Small_variable-frequency_drive.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 925,
+      "height": 1062
+     },
+     "pageimage": "Small_variable-frequency_drive.jpg",
+     "description": "Type of adjustable-speed drive",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-29T19:24:21Z",
+     "lastrevid": 1367459418,
+     "length": 67414,
+     "fullurl": "https://en.wikipedia.org/wiki/Variable-frequency_drive",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=Variable-frequency_drive&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/Variable-frequency_drive",
+     "displaytitle": "Variable-frequency drive"
+    },
+    {
+     "pageid": 33367993,
+     "ns": 0,
+     "title": "Google Drive",
+     "index": 2,
+     "extract": "Google Drive is a file-hosting service and synchronization service developed by Google. Launched on April 24, 2012, Google Drive allows users to store files in the cloud (on Google servers), synchronize files across devices, and share files. In addition to a web interface, Google Drive offers apps with offline capabilities for Windows and macOS computers, and Android and iOS smartphones and tablets. Google Drive encompasses Google Docs, Google Sheets, and Google Slides, which are a part of the Google Docs Editors office suite that allows collaborative editing of documents, spreadsheets, presentations, drawings, forms, and more. Files created and edited through the Google Docs suite are saved in Google Drive.\nGoogle Drive offers users 15 GB of free storage, sharing it with Gmail and Google Photos. Through Google One, Google Drive also offers paid plans at tiers of 100 GB and 2 TB, along with a premium 2 TB plan that comes with Google's Gemini chatbot. Files uploaded can be up to 750 GB in size. Users can change privacy settings for individual files and folders, including enabling sharing with other users or making content public. On the website, users can search for an image by describing its visuals, and use natural language to find specific files, such as \"find my budget spreadsheet from last December\".\nThe website and Android app offer a Backups section to see what Android devices have data backed up to the service, and a completely overhauled computer app released in July 2017 allows for backing up specific folders on the user's computer. A Quick Access feature can intelligently predict the files users need.\nGoogle Drive is a key component of Google Workspace, Google's monthly subscription offering for businesses and organizations that operated as G Suite until October 2020. As part of select Google Workspace plans, Drive offers unlimited storage, advanced file audit reporting, enhanced administration controls, and greater collaboration tools for teams.\nFollowing the launch of the service, Google Drive's privacy policy was criticized by some members of the media. Google has one set of Terms of Service and Privacy Policy agreements that cover all of its services. Some members of the media noted that the agreements were no worse than those of competing cloud storage services, but that the competition uses \"more artful language\" in the agreements, and also stated that Google needs the rights in order to \"move files around on its servers, cache your data, or make image thumbnails\".",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5f/Google_Drive_icon_%282026%29.svg/330px-Google_Drive_icon_%282026%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 306
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/5/5f/Google_Drive_icon_%282026%29.svg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 800,
+      "height": 741
+     },
+     "pageimage": "Google_Drive_icon_(2026).svg",
+     "description": "Cloud storage and file synchronization service",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-29T19:30:27Z",
+     "lastrevid": 1376110301,
+     "length": 109088,
+     "fullurl": "https://en.wikipedia.org/wiki/Google_Drive",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=Google_Drive&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/Google_Drive",
+     "displaytitle": "Google Drive"
+    }
+   ]
+  }
+ }
+}

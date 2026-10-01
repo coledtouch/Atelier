@@ -10,6 +10,9 @@ import { toolList, runTool, GOOGLE_SCOPES, saveGoogleAccount, removeGoogleAccoun
 import { identify, handleLinkedIn, signedOut, fail } from './tester/auth.js';
 import { testerRouter, testerAdmin } from './tester/router.js';
 import { handleTts } from './tts.js';
+import { handleRunway, runwayDiag, RUNWAY_PROVIDER } from './runway.js';
+import { handleLookup } from './lookup.js';
+import { handleTranscribe } from './transcribe.js';
 export { Relay } from './relay.js';
 export { Ledger } from './tester/ledger.js';
 
@@ -33,6 +36,8 @@ const PROVIDERS = {
   zai: { secret: 'ZAI_API_KEY', name: 'Z.ai' },
   deepseek: { secret: 'DEEPSEEK_API_KEY', name: 'DeepSeek' },
   meta: { secret: 'META_API_KEY', name: 'Meta' },
+  // Video only (src/runway.js): never in providerOf, CHAT_UPSTREAM, PASSTHRU or the /api/x/ regex, so /api/chat can't reach it.
+  runway: RUNWAY_PROVIDER,
 };
 
 // Non-chat pass-through routes: /api/x/<provider>/<path>, only for these method + path shapes.
@@ -261,10 +266,20 @@ async function readCapped(req, cap) {
 // inline / eval / data / blob), the page and source as origin + path (no query string or fragment), line and column.
 // IP addresses, user agents, query strings and script samples are never logged. Per IP (LI_LIMIT, key csp:<ip>) and
 // per isolate (CSP_PER_MINUTE lines), so a flood can't fill the logs. Accepted reports always get 204.
+// Only the two types browsers send are read (report-uri: application/csp-report; report-to: application/reports+json),
+// anything else is 415 and never logged. Neither is CORS-safelisted, so another site's page can't make its visitors'
+// browsers post forged reports here (sendBeacon / a no-cors fetch) without a preflight, which gets no CORS headers.
 const CSP_MAX_BYTES = 16 * 1024, CSP_PER_REQUEST = 5, CSP_PER_MINUTE = 60;
+const CSP_TYPES = ['application/csp-report', 'application/reports+json'];
 let cspMinute = 0, cspLines = 0;
-const cspWord = (v) => String(v ?? '').trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40);
-const cspInt = (v) => (v === '' || v == null ? undefined : Number.isSafeInteger(Number(v)) && Number(v) >= 0 ? Math.min(Number(v), 9_999_999) : undefined);
+// Report fields are whatever JSON the sender wrote: only strings and finite numbers are read, never coerced from an
+// object or array (one with its own toString/valueOf, e.g. {"toString": 1}, would throw), so no field can throw.
+const cspText = (v) => (typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
+const cspWord = (v) => cspText(v).trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40);
+const cspInt = (v) => {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? Math.min(n, 9_999_999) : undefined;
+};
 // A URL → origin (+ path) for http(s), about:srcdoc as is, the bare scheme for anything else; CSP keywords pass through.
 function cspPlace(v, { path = true } = {}) {
   const s = typeof v === 'string' ? v.trim() : '';
@@ -299,6 +314,8 @@ async function cspThrottled(req, env) {
 }
 async function handleCspReport(req, env) {
   if (req.method !== 'POST') return json({ error: 'Send CSP reports with POST.' }, 405);
+  const type = (req.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  if (!CSP_TYPES.includes(type)) return json({ error: 'Send CSP reports as application/csp-report or application/reports+json.' }, 415);
   const text = await readCapped(req, CSP_MAX_BYTES);
   if (text == null) return json({ error: 'Report too large.' }, 413);
   let data = null;
@@ -347,6 +364,15 @@ async function handleApi(req, env, url) {
   if (path === 'testers' || path.startsWith('testers/')) {
     if (!passOk(req, env)) return json({ error: 'Enter your passcode.' }, 401);
     return testerAdmin(req, env, path);
+  }
+
+  // GET /api/lookup?q=|title=&lang=&v= → a short Wikipedia summary for words selected in an answer; GET /api/lookup/img?k=
+  // → that summary's free Commons thumbnail, fetched by the Worker so Wikimedia never sees the viewer (src/lookup.js).
+  // Testers reach the same handler through TESTER_ROUTES (free, LOOKUP_LIMIT per tester). The selected words travel in
+  // the query string: keep invocation_logs off (wrangler.jsonc) or move this to POST before turning request logging on.
+  if (path === 'lookup' || path === 'lookup/img') {
+    if (!passOk(req, env)) return json({ error: 'Enter your passcode.' }, 401);
+    return handleLookup(req, env, url, { key: 'owner' });
   }
 
   // GET/PUT /api/me → the synced "You" profile (bio, writing style, memory). Passcode only.
@@ -479,6 +505,7 @@ async function handleApi(req, env, url) {
     }
     if (env.META_API_KEY) out.meta = await check('https://api.meta.ai/v1/models', { authorization: `Bearer ${env.META_API_KEY}` });
     if (env.NVIDIA_API_KEY) out.nvidia = { ok: /^nvapi-/.test(env.NVIDIA_API_KEY), status: 0, message: 'format check only' };
+    if (env.RUNWAYML_API_SECRET) out.runway = await runwayDiag(env.RUNWAYML_API_SECRET);
     return json(out);
   }
 
@@ -646,10 +673,21 @@ async function handleApi(req, env, url) {
     return handleVideoApi(req, env, path, url.searchParams);
   }
 
+  // /api/runway/* → Runway video, owner only (src/runway.js). Testers never get here: the tester router above answers
+  // runway/* with 403 owner_only (deny by default). The passcode gate is resolveKey's, as for every provider.
+  if (path.startsWith('runway/')) {
+    const key = resolveKey(req, env, 'runway');
+    if (!key) return missingKey(req, env, 'runway');
+    return handleRunway(req, env, url, path, { key });
+  }
+
   // POST /api/chat → routed by model prefix (anthropic: / openai: / gemini: / NVIDIA default)
   if (path === 'chat' && req.method === 'POST') return handleChat(req, env);
   // POST /api/tts {voice, text} | {voice, preview: true} → read aloud in the Atelier voice (src/tts.js; testers never get here)
   if (path === 'tts' && req.method === 'POST') return passOk(req, env) ? handleTts(req, env) : missingKey(req, env, 'openai');
+  // POST /api/transcribe (body: the recording; ?lang= or x-dictate-lang, x-dictate-prompt) → {text, provider} for the
+  // composer's mic (src/transcribe.js: OpenAI, Gemini as the fallback; testers never get here)
+  if (path === 'transcribe' && req.method === 'POST') return passOk(req, env) ? handleTranscribe(req, env) : missingKey(req, env, 'openai');
 
   // /api/x/<provider>/<path> → allow-listed image / video endpoints for OpenAI and Gemini
   const x = path.match(/^x\/(openai|gemini|meta)\/(.+)$/);
@@ -697,6 +735,20 @@ async function handleApi(req, env, url) {
   return json({ error: 'Not found' }, 404);
 }
 
+// A route that threw: a generic 500 with the same security headers as every other /api response. The log line is one
+// compact tag, the route path (no query string) and the error's name: never its message, which can quote what a user
+// sent, and never a body.
+function apiFailed(url, err) {
+  let name = 'Error';
+  try { name = String(err?.name || typeof err).replace(/[^\w]/g, '').slice(0, 40) || 'Error'; } catch {}
+  console.error('api failed', url.pathname.replace(/[^\w./-]/g, '_').slice(0, 100), name);
+  const failed = json({ error: 'Something went wrong.' }, 500);
+  failed.headers.set('X-Content-Type-Options', 'nosniff');
+  failed.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (url.protocol === 'https:') failed.headers.set('Strict-Transport-Security', HSTS);
+  return failed;
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -713,7 +765,7 @@ export default {
         if (url.protocol === 'https:') secured.headers.set('Strict-Transport-Security', HSTS);
         return secured;
       } catch (err) {
-        return json({ error: err.message || 'Proxy error' }, 500);
+        return apiFailed(url, err);
       }
     }
     return env.ASSETS.fetch(req);

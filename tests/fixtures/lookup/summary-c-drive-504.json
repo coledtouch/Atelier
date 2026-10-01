@@ -1,0 +1,15 @@
+{
+ "recorded": "2026-10-01T04:24:28.480Z",
+ "url": "https://en.wikipedia.org/api/rest_v1/page/summary/C%3A_drive",
+ "status": 504,
+ "headers": {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "s-maxage=1209600, max-age=300",
+  "content-length": "38",
+  "set-cookie-present": true
+ },
+ "body": {
+  "status": 504,
+  "type": "Internal error"
+ }
+}

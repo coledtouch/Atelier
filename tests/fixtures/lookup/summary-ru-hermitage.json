@@ -1,0 +1,64 @@
+{
+ "recorded": "2026-10-01T04:24:29.936Z",
+ "url": "https://ru.wikipedia.org/api/rest_v1/page/summary/%D0%AD%D1%80%D0%BC%D0%B8%D1%82%D0%B0%D0%B6",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8; profile=\"https://www.mediawiki.org/wiki/Specs/Summary/1.5.0\"",
+  "cache-control": "s-maxage=1209600, max-age=300",
+  "content-length": "918",
+  "set-cookie-present": true
+ },
+ "body": {
+  "type": "standard",
+  "title": "Эрмитаж",
+  "displaytitle": "<span lang=\"ru\" dir=\"ltr\"><span class=\"mw-page-title-main\">Эрмитаж</span></span>",
+  "namespace": {
+   "id": 0,
+   "text": ""
+  },
+  "wikibase_item": "Q132783",
+  "titles": {
+   "canonical": "Эрмитаж",
+   "normalized": "Эрмитаж",
+   "display": "<span lang=\"ru\" dir=\"ltr\"><span class=\"mw-page-title-main\">Эрмитаж</span></span>"
+  },
+  "pageid": 51,
+  "thumbnail": {
+   "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/73/Hermitage_logo.svg/langru-330px-Hermitage_logo.svg.png?utm_source=ru.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+   "width": 330,
+   "height": 136
+  },
+  "originalimage": {
+   "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/73/Hermitage_logo.svg/langru-3840px-Hermitage_logo.svg.png?utm_source=ru.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+   "width": 2723,
+   "height": 1125
+  },
+  "lang": "ru",
+  "dir": "ltr",
+  "revision": "155016107",
+  "tid": "eba13474-aecb-11f1-81f0-e7fa65bf3358",
+  "timestamp": "2026-09-12T17:03:48Z",
+  "description": "крупнейший в России и мире художественный и культурно-исторический музей в Санкт-Петербурге",
+  "description_source": "central",
+  "coordinates": {
+   "lat": 59.94056,
+   "lon": 30.31361
+  },
+  "content_urls": {
+   "desktop": {
+    "page": "https://ru.wikipedia.org/wiki/%D0%AD%D1%80%D0%BC%D0%B8%D1%82%D0%B0%D0%B6",
+    "revisions": "https://ru.wikipedia.org/wiki/%D0%AD%D1%80%D0%BC%D0%B8%D1%82%D0%B0%D0%B6?action=history",
+    "edit": "https://ru.wikipedia.org/wiki/%D0%AD%D1%80%D0%BC%D0%B8%D1%82%D0%B0%D0%B6?action=edit",
+    "talk": "https://ru.wikipedia.org/wiki/%D0%9E%D0%B1%D1%81%D1%83%D0%B6%D0%B4%D0%B5%D0%BD%D0%B8%D0%B5:%D0%AD%D1%80%D0%BC%D0%B8%D1%82%D0%B0%D0%B6"
+   },
+   "mobile": {
+    "page": "https://ru.wikipedia.org/wiki/%D0%AD%D1%80%D0%BC%D0%B8%D1%82%D0%B0%D0%B6",
+    "revisions": "https://ru.wikipedia.org/wiki/Special:History/%D0%AD%D1%80%D0%BC%D0%B8%D1%82%D0%B0%D0%B6",
+    "edit": "https://ru.wikipedia.org/wiki/%D0%AD%D1%80%D0%BC%D0%B8%D1%82%D0%B0%D0%B6?action=edit",
+    "talk": "https://ru.wikipedia.org/wiki/%D0%9E%D0%B1%D1%81%D1%83%D0%B6%D0%B4%D0%B5%D0%BD%D0%B8%D0%B5:%D0%AD%D1%80%D0%BC%D0%B8%D1%82%D0%B0%D0%B6"
+   }
+  },
+  "extract": "Эрмита́ж, Госуда́рственный Эрмита́ж — российский государственный художественный и культурно-исторический музей в Санкт-Петербурге, одно из крупнейших в мире учреждений подобного рода.",
+  "extract_html": "<p><b>Эрмита́ж</b>, <b>Госуда́рственный Эрмита́ж</b> — российский государственный художественный и культурно-исторический музей в Санкт-Петербурге, одно из крупнейших в мире учреждений подобного рода.</p>"
+ }
+}

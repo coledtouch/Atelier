@@ -12,7 +12,7 @@ import { veoCost as serverVeoCost, PRICES, TESTER_MODELS, TESTER_IMAGE_MODELS, T
 const ME = (over = {}) => ({
   sub: 'abc-123', name: 'Ada Lovelace', picture: 'https://media.licdn.com/dms/image/x.jpg', email: 'ada@example.com',
   models: { chat: ['anthropic:claude-opus-5-5', 'gemini:gemini-3.8-flash'], image: ['openai:gpt-image-2.5-flare'], video: ['gemini:veo-3.1-lite-generate-preview'], tts: ['atelier', 'cedar', 'sage'] },
-  features: { web: true, video: true, veo: true, helpers: true, profile: true, tts: true },
+  features: { web: true, video: true, veo: true, helpers: true, profile: true, tts: true, dictation: true },
   allowance: { day: { spent: 150_000, reserved: 50_000, limit: 1_000_000 }, month: { spent: 2_000_000, reserved: 0, limit: 10_000_000 } },
   pool: { paused: false, spotsLeft: 12 }, ...over,
 });
@@ -42,12 +42,14 @@ test('normalizeMe keeps a clean tester record and rejects anything else', () => 
   const t = normalizeMe(ME({ models: { chat: ['anthropic:claude-opus-5-5', '<script>', 42], image: [], video: ['gemini:veo-3.1-lite-generate-preview'] }, picture: 'javascript:alert(1)' }));
   assert.deepEqual(t.models.chat, ['anthropic:claude-opus-5-5']);
   assert.equal(t.picture, '');
-  assert.deepEqual(t.features, { web: true, video: true, veo: true, helpers: true, profile: true, tts: true });
+  assert.deepEqual(t.features, { web: true, video: true, veo: true, helpers: true, profile: true, tts: true, dictation: true });
   assert.equal(t.left, null);
   // A feature switched off on the server takes its models with it; missing flags default to on.
   const noVeo = normalizeMe(ME({ features: { veo: false } }));
   assert.deepEqual(noVeo.models.video, []);
   assert.equal(noVeo.features.web, true);
+  // Dictation (/api/transcribe): the server's me() reports features.dictation; off when no dictation model has its key.
+  assert.equal(normalizeMe(ME({ features: { dictation: false } })).features.dictation, false);
   // Read aloud voices: bare ids pass, junk is dropped, tts off takes them away; they are never chat/image/video models.
   assert.deepEqual(normalizeMe(ME()).models.tts, ['atelier', 'cedar', 'sage']);
   assert.deepEqual(normalizeMe(ME({ models: { ...ME().models, tts: ['sulafat', '<b>', 7] } })).models.tts, ['sulafat']);

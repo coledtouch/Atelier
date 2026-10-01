@@ -99,7 +99,7 @@ const PCM_BYTES_PER_SECOND = 48_000; // Gemini speech: 24 kHz, 16-bit, mono
 const GEMINI_AUDIO_TOKENS_PER_SECOND = 25; // published; prices.js bills by it
 /**
  * Gemini output is bounded at the source: generationConfig.maxOutputTokens = as many audio tokens as fit in
- * TTS_LIMITS.maxAudioBytes (4,369 ≈ 174.8 s). Google bills what it generates, so a longer answer must not be produced
+ * TTS_LIMITS.maxAudioBytes (4,369: 174.8 s at the published 25/s, about 137 s at the ≈ 32/s Sulafat really speaks). Google bills what it generates, so a longer answer must not be produced
  * only to be thrown away; tester reservations use this bound as their ceiling (prices.js ttsWorstCase maxAudioTokens).
  */
 export const GEMINI_MAX_OUTPUT_TOKENS = Math.floor(TTS_LIMITS.maxAudioBytes / PCM_BYTES_PER_SECOND * GEMINI_AUDIO_TOKENS_PER_SECOND);
@@ -252,11 +252,11 @@ const overTime = () => new Error('the audio ran past the reading time this reque
  * bytes. Lines may be split anywhere across chunks and end in LF or CRLF. Deltas after speech.audio.done are ignored
  * (the stream is still read to its end, so the usage tap sees it). Errors on an error event, on undecodable audio,
  * once the decoded audio passes maxBytes or plays longer than maxSeconds (mp3Clock; a tester's reservation, since
- * OpenAI speech has no output bound), or when the stream ends without any audio.
+ * OpenAI speech has no output bound), or when the stream ends without any audio. `clock` may be passed in so the caller
+ * can read how much audio was timed after the stream stops (a cut-off tester stream is settled on it).
  */
-export function sseToAudio(maxBytes = TTS_LIMITS.maxAudioBytes, maxSeconds = Infinity) {
+export function sseToAudio(maxBytes = TTS_LIMITS.maxAudioBytes, maxSeconds = Infinity, clock = maxSeconds < Infinity ? mp3Clock() : null) {
   const dec = new TextDecoder();
-  const clock = maxSeconds < Infinity ? mp3Clock() : null;
   let buf = '', total = 0, done = false;
   const line = (raw, ctrl) => {
     const l = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
@@ -297,9 +297,8 @@ export function sseToAudio(maxBytes = TTS_LIMITS.maxAudioBytes, maxSeconds = Inf
 }
 
 // Passes bytes through unchanged, erroring past maxBytes or maxSeconds (used if OpenAI answers with plain audio instead
-// of SSE).
-function capBytes(maxBytes, maxSeconds = Infinity) {
-  const clock = maxSeconds < Infinity ? mp3Clock() : null;
+// of SSE). `clock` as in sseToAudio.
+function capBytes(maxBytes, maxSeconds = Infinity, clock = maxSeconds < Infinity ? mp3Clock() : null) {
   let total = 0;
   return new TransformStream({
     transform(chunk, ctrl) {
@@ -586,11 +585,14 @@ const audioResponse = (body, type, voiceId, headers = {}) => new Response(body, 
  *     headers|null}
  *     (chars: the text's length; units: its spoken length, spokenUnits; ceiling: ttsCeilingUnits, a ceiling on its
  *     reading time; voice.maxOutputTokens bounds Gemini's audio)
- *     limits: {seconds} cuts OpenAI audio off once it plays longer (the response errors, the upstream is cancelled and
- *     the reservation stands); {outputTokens} lowers Gemini's maxOutputTokens.
- *     settle(result): null = keep the full reservation (cut off, failed, unknown); {billed: false} = nothing was billed;
+ *     limits: {seconds} cuts OpenAI audio off once it plays longer (the response errors and the upstream is
+ *     cancelled: this bounds what is heard); {outputTokens} lowers Gemini's maxOutputTokens.
+ *     settle(result): null = keep the full reservation (failed, unknown); {billed: false} = nothing was billed;
  *     {usage, seconds?} = the provider's report (usage may be null when a finished stream reported none);
- *     {usage, stopped: true} = a stream that stopped after the provider reported usage: no less than the reservation.
+ *     {usage, stopped: true} = a tester's OpenAI stream that stopped (cut off, hung up or broken) after the provider
+ *     reported usage (speech.audio.done, the last event: the complete bill); {usage: null, stopped: true, seconds} =
+ *     one that stopped before it, after audio was timed (seconds, mp3Clock). Either: no less than the reservation, and
+ *     no less than the reported bill or the timed audio (this bounds what is billed).
  */
 export const OWNER_HOOKS = Object.freeze({
   tester: false,
@@ -632,10 +634,16 @@ async function viaOpenAI(key, v, m, cacheKey) {
   const parser = plain ? NO_USAGE : openaiUsage();
   const maxSeconds = m.limits?.seconds > 0 ? m.limits.seconds : Infinity;
   let settled = null;
-  // meter: onEnd(usage, complete) runs once. A complete stream settles from its usage. A cut-off one keeps the full
-  // reservation, or more if OpenAI had already reported a bigger bill (speech.audio.done arrived, then the stream broke).
-  const metered = meter(up.body, parser, async (usage, complete) => { settled = await m.settle(complete ? { usage } : usage ? { usage, stopped: true } : null); });
-  const audio = metered.pipeThrough(plain ? capBytes(TTS_LIMITS.maxAudioBytes, maxSeconds) : sseToAudio(TTS_LIMITS.maxAudioBytes, maxSeconds));
+  // meter: onEnd(usage, complete) runs once. A complete stream settles from its usage. A stopped one (cut off at
+  // maxSeconds, hung up or broken) keeps the full reservation, or more if OpenAI had already reported a bigger bill
+  // (speech.audio.done arrived, then the stream broke or was cut in that same chunk: the usage is the whole bill, so the
+  // seconds aren't sent) or, before any usage, if the audio already timed (clock, the same one that cuts it off) costs
+  // more at the reserved token rate: OpenAI sends usage only at the end, so a stream cut early never reports it.
+  const clock = maxSeconds < Infinity ? mp3Clock() : null;
+  const metered = meter(up.body, parser, async (usage, complete) => {
+    settled = await m.settle(complete ? { usage } : usage ? { usage, stopped: true } : clock ? { usage: null, stopped: true, seconds: clock.seconds() } : null);
+  });
+  const audio = metered.pipeThrough(plain ? capBytes(TTS_LIMITS.maxAudioBytes, maxSeconds, clock) : sseToAudio(TTS_LIMITS.maxAudioBytes, maxSeconds, clock));
   if (!cacheKey) return audioResponse(audio, 'audio/mpeg', v.voiceId, m.headers);
   const bytes = await readCapped(audio, TTS_LIMITS.maxAudioBytes); // a stream error throws: the reservation stands
   if (!bytes?.length) throw new Error('the provider returned no audio');

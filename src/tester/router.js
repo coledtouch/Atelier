@@ -10,10 +10,13 @@ import {
   PriceError, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, ttsWorstCase, ttsReserved, ttsActual,
 } from './prices.js';
 import { handleTts, TTS_VOICES, TTS_VOICE_IDS, ttsPriceId } from '../tts.js';
+import { handleTranscribe, STT_MODELS } from '../transcribe.js';
+import { TESTER_STT_MODELS, sttWorstCase, sttActual } from './prices.js';
 import { ALLOWED_ORIGINS, fail, ledger, sha256, signedOut, resetTesterCaches } from './auth.js';
 import { SUB, DAILY_UPLOADS } from './ledger.js';
 import { meter, openaiUsage, geminiUsage } from './usage.js';
 import { PROFILE_MAX_BYTES, getProfile, putProfile } from './profile.js';
+import { handleLookup } from '../lookup.js';
 
 const KB = 1024, MB = 1024 * 1024;
 export const LIMITS = Object.freeze({
@@ -81,9 +84,10 @@ function refused(r, message) {
 }
 
 // Reserves `amount` µ$ for the tester → {res} (refused) | {id, amount, headers, settle(actual)}; settle runs once.
-async function reserve(c, amount) {
+// words(refusal) → the caller's own wording for a refused reservation, or undefined for refused()'s usual words.
+async function reserve(c, amount, words) {
   const r = await c.stub.reserve(c.who.sub, amount);
-  if (!r.ok) return { res: refused(r) };
+  if (!r.ok) return { res: refused(r, words?.(r)) };
   let done = null;
   const settle = (actual) => {
     if (done) return done;
@@ -131,8 +135,12 @@ export const TESTER_ROUTES = Object.freeze([
   { method: 'GET', match: 'tester/me', run: me },
   { method: 'GET', match: 'tester/profile', run: profileGet },
   { method: 'PUT', match: 'tester/profile', run: profilePut },
+  // Look up (src/lookup.js): free — Wikipedia and Wikimedia only, no reserve(), no Ledger, no KV; LOOKUP_LIMIT per tester.
+  { method: 'GET', match: 'lookup', run: (c) => handleLookup(c.req, c.env, c.url, { key: `t:${c.who.sub}` }) },
+  { method: 'GET', match: 'lookup/img', run: (c) => handleLookup(c.req, c.env, c.url, { key: `t:${c.who.sub}` }) },
   { method: 'POST', match: 'chat', run: chat },
   { method: 'POST', match: 'tts', run: tts },
+  { method: 'POST', match: 'transcribe', run: transcribe },
   { method: 'POST', match: /^x\/openai\/images\/(generations|edits)$/, sample: 'x/openai/images/edits', run: openaiImages },
   { method: 'POST', match: /^x\/meta\/images\/generations$/, sample: 'x/meta/images/generations', run: metaImages },
   { method: 'POST', match: /^x\/gemini\/(v1beta|v1)\/models\/([\w.-]+):generateContent$/, sample: 'x/gemini/v1beta/models/gemini-3-pro-image:generateContent', run: geminiImage },
@@ -172,10 +180,11 @@ async function me(c) {
   if (!a) return signedOut();
   const ready = (id) => Boolean(c.env[c.up.PROVIDERS[providerOf(id)]?.secret]);
   const voices = testerVoices(ready);
+  const dictation = testerStt(ready);
   return json({
     sub: c.who.sub, name: c.who.name, picture: c.who.picture, email: c.who.email,
     models: { chat: TESTER_MODELS.filter(ready), image: TESTER_IMAGE_MODELS.filter(ready), video: TESTER_VIDEO_MODELS.filter(ready), tts: voices },
-    features: { web: ready('anthropic:'), video: ready('gemini:'), veo: ready('gemini:'), helpers: true, profile: true, tts: voices.length > 0 },
+    features: { web: ready('anthropic:'), video: ready('gemini:'), veo: ready('gemini:'), helpers: true, profile: true, tts: voices.length > 0, dictation: dictation.length > 0 },
     allowance: { day: a.day, month: a.month },
     pool: { paused: a.paused, spotsLeft: a.spotsLeft, ...(a.preview ? { preview: true } : {}) },
   }, 200, allowanceHeader(a));
@@ -375,9 +384,11 @@ async function tts(c) {
       const model = ttsPriceId(voice);
       if (!TESTER_TTS_MODELS.includes(model)) return { res: notTesterModel('That voice isn’t part of the tester set.') };
       if (await ttsThrottled(c)) return { res: fail(429, 'tts_busy', 'Read aloud is busy right now. Try again in a moment.', {}, { 'retry-after': TTS_RATE_RETRY_AFTER }) };
-      // Priced on a ceiling of the reading time (ttsCeilingUnits: symbols and emoji are read as words) and held to it,
-      // so the reservation is a true ceiling for both providers: Gemini's maxOutputTokens is the reserved audio, and
-      // OpenAI speech, which has no output bound, is cut off once it plays past cutoffSeconds.
+      // Priced on a ceiling of the reading time (ttsCeilingUnits: symbols and emoji are read as words) and held to it.
+      // Gemini: maxOutputTokens is the reserved audio, so its bill can't pass the reservation. OpenAI speech has no
+      // output bound: the cut-off (cutoffSeconds) bounds what the tester hears, and the settle bounds what is billed:
+      // a stream stopped before its usage pays no less than the audio it timed, at the reserved token rate (src/tts.js
+      // viaOpenAI); one stopped after it, no less than that usage (the complete bill).
       const o = { model, chars, units: ceiling ?? units, ...(voice.maxOutputTokens ? { maxAudioTokens: voice.maxOutputTokens } : {}) };
       const worst = ttsWorstCase(o);
       if (worst > PER_CALL_RESERVE_CAP) return { res: refused({ scope: 'call' }) };
@@ -388,16 +399,76 @@ async function tts(c) {
         headers: mtr.headers,
         limits: voice.provider === 'gemini' ? { outputTokens: held.audioTokens } : { seconds: held.cutoffSeconds },
         // null: keep the full reservation; {billed: false}: $0; {usage, seconds}: the provider's report; {usage,
-        // stopped}: a stream that broke after the provider reported, settled at no less than the reservation.
+        // stopped}: an OpenAI stream that stopped (cut off, hung up or broke) after the provider reported, settled at
+        // max(reservation, the reported bill); {usage: null, stopped, seconds}: one that stopped before that, after
+        // audio was timed, settled at max(reservation, the timed seconds x 50 tokens/s). ttsActual ignores the seconds
+        // of an OpenAI answer that has usage (it comes only in speech.audio.done, the whole bill).
         async settle(r) {
           let actual = mtr.amount;
           if (r?.billed === false) actual = 0;
           else if (r) {
             try {
-              const reported = ttsActual({ model, usage: r.usage, seconds: r.seconds, chars });
+              // Gemini: the seconds floor (25 tokens/s) is held to the maxOutputTokens it was sent; the reported count rules.
+              const reported = ttsActual({ model, usage: r.usage, seconds: r.seconds, chars, ...(voice.provider === 'gemini' ? { maxAudioTokens: held.audioTokens } : {}) });
               actual = r.stopped ? Math.max(mtr.amount, reported) : reported;
             } catch {
               if (!warnedTtsUsage) { warnedTtsUsage = true; console.warn('tts: no usable usage reported, the full reservation stands', model); }
+            }
+          }
+          const s = await mtr.settle(actual);
+          return s?.allowance ? allowanceHeader(s.allowance) : null;
+        },
+      };
+    },
+  });
+}
+
+// ── POST /api/transcribe (dictation): src/transcribe.js checks the recording and calls the provider; this reserves and
+// settles. OpenAI is reserved on its whole context window plus its output cap (sttWorstCase: $0.0375); the Gemini fallback
+// on its own input bound (the WAV's seconds, else the 3-minute cap, reserved before Gemini's countTokens checks it, so a
+// throttled or refused tester never makes the Worker upload the recording) plus its output bound. Each provider that
+// runs is reserved and settled on its own; a provider's refusal (or a failed count) costs $0.
+// Dictation models a tester may use: priced for testers and with the provider's key on the server.
+const testerStt = (ready) => Object.values(STT_MODELS).filter((m) => TESTER_STT_MODELS.includes(m.priceId) && ready(`${m.provider}:`));
+let warnedSttUsage = false;
+// A per-tester rate limit on paid dictation (LI_LIMIT, keyed stt:<sub>: 20 a minute, the binding's limit). One message
+// is one recording, so a burst past it is a script opening reservations in parallel. Checked once per request: the
+// fallback to the second provider is the same dictation.
+const STT_RATE_RETRY_AFTER = '30';
+// Dictation's reservation doesn't shrink with the clip (OpenAI's is its whole context window), so refused()'s advice
+// ("a lighter model, a shorter clip") can't help: say what it needs (reserve() passes this to refused(), S21). With
+// under $0.01 left, the usual "you've used it" words stand.
+const sttBudgetWords = (worst) => (r) => {
+  const rest = r.allowance?.[r.scope] ? left(r.allowance[r.scope]) : 0;
+  if (!SHORT[r.scope] || rest < 10_000) return undefined;
+  const need = `$${(Math.ceil(worst / 10_000) / 100).toFixed(2)}`;
+  return `Dictation needs about ${need} of the allowance free, and ${cents(rest)} is ${SHORT[r.scope]}.${r.scope === 'day' ? ' It resets at midnight UTC.' : ''}`;
+};
+async function sttThrottled(c) {
+  if (!c.env.LI_LIMIT) return false;
+  try { return !(await c.env.LI_LIMIT.limit({ key: `stt:${c.who.sub}` })).success; } catch { return false; }
+}
+async function transcribe(c) {
+  return handleTranscribe(c.req, c.env, {
+    tester: true,
+    // 503, not noProvider's 401: the dictation client reads any 401 as "sign in again".
+    unavailable: () => fail(503, 'transcribe_unavailable', 'Dictation isn’t available to testers right now.'),
+    async reserve({ model, inputTokens, fallback }) {
+      if (!TESTER_STT_MODELS.includes(model.priceId)) return { res: notTesterModel('That dictation model isn’t part of the tester set.') };
+      if (!fallback && await sttThrottled(c)) return { res: fail(429, 'transcribe_busy', 'Dictation is busy right now. Try again in a moment.', {}, { 'retry-after': STT_RATE_RETRY_AFTER }) };
+      const worst = sttWorstCase({ model: model.priceId, inputTokens, maxOutputTokens: model.maxOutputTokens });
+      if (worst > PER_CALL_RESERVE_CAP) return { res: refused({ scope: 'call' }) };
+      const mtr = await reserve(c, worst, sttBudgetWords(worst));
+      if (mtr.res) return mtr;
+      return {
+        headers: mtr.headers,
+        // null: keep the full reservation; {billed: false}: $0; {usage}: the provider's report.
+        async settle(r) {
+          let actual = mtr.amount;
+          if (r?.billed === false) actual = 0;
+          else if (r) {
+            try { actual = sttActual({ model: model.priceId, usage: r.usage }); } catch {
+              if (!warnedSttUsage) { warnedSttUsage = true; console.warn('transcribe: no usable usage reported, the full reservation stands', model.priceId); }
             }
           }
           const s = await mtr.settle(actual);

@@ -1,0 +1,145 @@
+{
+ "recorded": "2026-10-01T04:24:27.787Z",
+ "url": "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&redirects=1&generator=search&gsrsearch=Nero%27s+Golden+House&gsrnamespace=0&gsrlimit=4&gsrinfo=&gsrprop=&prop=extracts%7Cpageimages%7Cdescription%7Cpageprops%7Cinfo&exintro=1&explaintext=1&exlimit=4&piprop=thumbnail%7Cname%7Coriginal&pithumbsize=330&pilicense=free&ppprop=disambiguation&inprop=url%7Cdisplaytitle&maxage=3600&smaxage=86400",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "s-maxage=86400, max-age=3600, public",
+  "set-cookie-present": true
+ },
+ "body": {
+  "batchcomplete": true,
+  "continue": {
+   "gsroffset": 4,
+   "continue": "gsroffset||"
+  },
+  "query": {
+   "pages": [
+    {
+     "pageid": 6140,
+     "ns": 0,
+     "title": "Claudius",
+     "index": 2,
+     "extract": "Tiberius Claudius Caesar Augustus Germanicus ( KLAW-dee-əs; Classical Latin: [tɪˈbɛri.ʊs ˈkɫau̯di.ʊs ˈkae̯sar au̯ˈɡʊstʊs ɡɛrˈmaːnɪkʊs]; 1 August 10 BC – 13 October AD 54), or simply Claudius, was a Roman emperor, ruling from AD 41 until his death in AD 54. The fourth ruler of the Julio-Claudian dynasty, Claudius was born to Drusus the Elder, the brother of Emperor Tiberius, and Antonia Minor at Lugdunum in Roman Gaul, where his father was stationed as a military legate. He was the first Roman emperor to be born outside Italy.\nAs he had a limp, a stammer, and a tremor due to an illness he suffered when young, Claudius was ostracized by his family and was excluded from public office until his consulship (which was shared with his nephew, Caligula, in AD 37). His infirmity probably saved him from the fate of many other nobles during the purges throughout the reigns of Tiberius and Caligula, as potential enemies did not see him as a serious threat. His survival led to him being declared emperor by the Praetorian Guard after Caligula's assassination, at which point he was the last adult male of his family.\nDespite his lack of experience, Claudius was an able and efficient administrator. He expanded the imperial bureaucracy to include freedmen, and helped restore the empire's finances after the excesses of Caligula's reign. He was also an ambitious builder, constructing new roads, aqueducts, and canals across the Empire. During his reign, the Empire started its successful conquest of Britain. Having a personal interest in law, he presided at public trials, and issued edicts daily. He was seen as vulnerable throughout his reign, particularly by elements of the nobility. Claudius was constantly forced to shore up his position, which resulted in the deaths of many senators. Those events damaged his reputation among the ancient writers, though more recent historians have revised that opinion. Many authors contend that he was murdered by his own wife, Agrippina the Younger. After his death at the age of 63, his grandnephew and legally adopted step-son, Nero, succeeded him as emperor.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/71/Claudius_crop.jpg/330px-Claudius_crop.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 436
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/7/71/Claudius_crop.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 2340,
+      "height": 3092
+     },
+     "pageimage": "Claudius_crop.jpg",
+     "description": "Roman emperor from AD 41 to 54",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-29T18:57:16Z",
+     "lastrevid": 1372322194,
+     "length": 85213,
+     "fullurl": "https://en.wikipedia.org/wiki/Claudius",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=Claudius&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/Claudius",
+     "displaytitle": "Claudius"
+    },
+    {
+     "pageid": 21632,
+     "ns": 0,
+     "title": "Nero",
+     "index": 3,
+     "extract": "Nero (Nero Claudius Caesar Augustus Germanicus, born Lucius Domitius Ahenobarbus; 15 December AD 37 – 9 June AD 68) was Roman emperor from AD 54 until his suicide in AD 68, as the final emperor of the Julio-Claudian dynasty.\nNero was born at Antium in AD 37, the son of Gnaeus Domitius Ahenobarbus and Agrippina the Younger (great-granddaughter of the emperor Augustus). Nero was three when his father died. By the time Nero turned eleven, his mother married Emperor Claudius, who then adopted Nero as his heir. Upon Claudius's death in AD 54, Nero ascended to the throne with the backing of the Praetorian Guard and the Senate. In the early years of his reign, Nero was advised and guided by his mother Agrippina, his tutor Seneca the Younger, and his praetorian prefect Sextus Afranius Burrus, but sought to rule independently and rid himself of restraining influences. The power struggle between Nero and his mother reached its climax when he orchestrated her murder. Roman sources also implicate Nero in the deaths of both his wife Claudia Octavia – supposedly so he could marry Poppaea Sabina – and his stepbrother Britannicus.\nNero's practical contributions to Rome's governance focused on diplomacy, trade, and culture. He ordered the construction of amphitheaters, and promoted athletic games and contests. He made public appearances as an actor, poet, musician, and charioteer, which scandalized his aristocratic contemporaries as these occupations were usually the domain of slaves, public entertainers, and infamous persons. However, the provision of such entertainments made Nero popular among lower-class citizens. The costs involved were borne by local elites either directly or through taxation, and were much resented by the Roman aristocracy.\nDuring Nero's reign, the general Corbulo fought the Roman–Parthian War of 58–63, and made peace with the hostile Parthian Empire. The Roman general Suetonius Paulinus quashed a major revolt in Britain led by queen Boudica. The Bosporan Kingdom was briefly annexed to the empire, and the First Jewish–Roman War began. When the Roman senator Vindex rebelled, with support from the eventual Roman emperor Galba, Nero was declared a public enemy and condemned to death in absentia. He fled Rome, and on 9 June AD 68 committed suicide. His death sparked a brief period of civil war known as the Year of the Four Emperors.\nMost Roman sources offer overwhelmingly negative assessments of his personality and reign. Most contemporary sources describe him as tyrannical, self-indulgent, and debauched. The historian Tacitus claims the Roman people thought him compulsive and corrupt. Suetonius tells that many Romans believed the Great Fire of Rome was instigated by Nero to clear land for his planned  \"Golden House\". Tacitus claims Nero seized Christians as scapegoats for the fire and had them burned alive, seemingly motivated not by public justice, but personal cruelty. Some modern historians question the reliability of ancient sources on Nero's tyrannical acts, considering his popularity among the Roman commoners. In the eastern provinces of the Empire, a popular legend arose that Nero had not died and would return. After his death, at least three leaders of short-lived, failed rebellions presented themselves as \"Nero reborn\" to gain popular support.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/12/Nero_Glyptothek_Munich_321.jpg/330px-Nero_Glyptothek_Munich_321.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 449
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/1/12/Nero_Glyptothek_Munich_321.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 1604,
+      "height": 2183
+     },
+     "pageimage": "Nero_Glyptothek_Munich_321.jpg",
+     "description": "Roman emperor from AD 54 to 68",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-29T19:24:06Z",
+     "lastrevid": 1376831423,
+     "length": 93673,
+     "fullurl": "https://en.wikipedia.org/wiki/Nero",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=Nero&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/Nero",
+     "displaytitle": "Nero"
+    },
+    {
+     "pageid": 225521,
+     "ns": 0,
+     "title": "Domus Aurea",
+     "index": 1,
+     "extract": "The Domus Aurea (Latin, \"Golden House\") was a vast landscaped complex built by the Emperor Nero largely on the Oppian Hill in the heart of ancient Rome after the great fire in 64 AD had destroyed a large part of the city.\nIt replaced and extended his Domus Transitoria that he had built as his first palace complex on the site.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/03/Domus_Aurea_pianta_generale.png/330px-Domus_Aurea_pianta_generale.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 229
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/0/03/Domus_Aurea_pianta_generale.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 2601,
+      "height": 1801
+     },
+     "pageimage": "Domus_Aurea_pianta_generale.png",
+     "description": "Roman palace",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-29T18:58:30Z",
+     "lastrevid": 1374210112,
+     "length": 37988,
+     "fullurl": "https://en.wikipedia.org/wiki/Domus_Aurea",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=Domus_Aurea&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/Domus_Aurea",
+     "displaytitle": "Domus Aurea"
+    },
+    {
+     "pageid": 60762655,
+     "ns": 0,
+     "title": "Palace Tomb",
+     "index": 4,
+     "extract": "The Palace Tomb is a Nabataean tomb in the Petra Archaeological Park. It is situated among the Royal Tombs, a line of prominent monumental facades on the east cliffs flanking the valley in which the city lies. At 49 meters wide and 46 meters tall, its rock-hewn façade is one of the largest in Petra. The tomb's name is derived from its supposed resemblance to a Roman palace design popularized by Nero's Golden House, as well as its wide and richly decorated structure... The descriptive name is based on its appearance today, rather than historical evidence for its use by royalty or occupation as a palace. The title “Palace Tomb” is recorded in the earliest catalog of tombs in Petra (no. 765).",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/63/Palace_Tomb%2C_Petra.jpg/330px-Palace_Tomb%2C_Petra.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 245
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/6/63/Palace_Tomb%2C_Petra.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 2809,
+      "height": 2088
+     },
+     "pageimage": "Palace_Tomb,_Petra.jpg",
+     "description": "Tomb in Jordan",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-29T19:45:14Z",
+     "lastrevid": 1357205781,
+     "length": 6533,
+     "fullurl": "https://en.wikipedia.org/wiki/Palace_Tomb",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=Palace_Tomb&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/Palace_Tomb",
+     "displaytitle": "Palace Tomb"
+    }
+   ]
+  }
+ }
+}

@@ -488,8 +488,25 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 .send[data-state='stop'] .i-stop { display: block; }
 .send[data-state='stop'] { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--line-2); }
 .send[data-state='stop']::after { content: ''; position: absolute; inset: 6px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); animation: turn 0.9s linear infinite; pointer-events: none; }
-#micBtn.listening { color: var(--c-video); background: color-mix(in srgb, var(--c-video) 14%, transparent); }
-#micBtn.listening svg { animation: pulse 1.2s ease-in-out infinite; }
+/* dictation (public/dictate.js, painted by app.js paintMic): data-state idle | listening (Web Speech, live text) |
+   recording (a stop square, the elapsed time, a ring that follows the voice) | transcribing (an orbiting arc) | error;
+   .armed = quick launch's "Tap to talk". #micBtn's id beats the .composer-row .icon-btn sizes in both stylesheets. */
+#micBtn { position: relative; --level: 0; }
+#micBtn .i-stop { display: none; fill: currentColor; stroke: none; }
+#micBtn .mic-time { display: none; font: 500 11px/1 var(--mono); font-variant-numeric: tabular-nums; }
+#micBtn:is([data-state='listening'], [data-state='recording']) { color: var(--c-video); background: color-mix(in srgb, var(--c-video) 14%, transparent); }
+#micBtn[data-state='listening'] svg { animation: pulse 1.2s ease-in-out infinite; }
+#micBtn[data-state='recording'] { width: auto; min-width: 44px; padding: 0 12px 0 10px; gap: 6px; grid-auto-flow: column; border-radius: 999px; }
+#micBtn[data-state='recording'] .i-mic { display: none; }
+#micBtn[data-state='recording'] :is(.i-stop, .mic-time) { display: block; }
+#micBtn[data-state='recording'] .i-stop { width: 14px; height: 14px; }
+#micBtn[data-state='recording']::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: 0 0 0 calc(var(--level) * 6px) color-mix(in srgb, var(--c-video) 28%, transparent); transition: box-shadow 90ms linear; }
+#micBtn[data-warn] .mic-time { color: var(--c-video); font-weight: 700; } /* the last 10 s of the 2-minute cap */
+#micBtn[data-state='transcribing'] svg { opacity: 0.45; }
+#micBtn[data-state='transcribing']::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--c-video); animation: turn 0.9s linear infinite; pointer-events: none; }
+#micBtn[data-state='error'] { color: var(--c-video); }
+#micBtn.armed::after { content: ''; position: absolute; inset: -2px; border-radius: 50%; pointer-events: none; box-shadow: 0 0 0 2px var(--c-video); animation: pulse 1.4s ease-in-out infinite; }
+@media (pointer: coarse) { #micBtn { min-width: 44px; min-height: 44px; } } /* a 44px target on touch, in every state */
 
 /* options strip: one line, never wraps; edges fade only while it overflows (.fade-l/.fade-r from syncOptFade) */
 .options { --fl: 0px; --fr: 0px; display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; padding: 2px 12px 10px; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--fl), #000 calc(100% - var(--fr)), transparent); mask-image: linear-gradient(90deg, transparent, #000 var(--fl), #000 calc(100% - var(--fr)), transparent); }
@@ -533,6 +550,11 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 .modes .mode:focus-visible, .options .chip:focus-visible, .options select:focus-visible { outline-offset: -2px; }
 .opt-sep { width: 1px; height: 14px; background: var(--line-2); flex: none; margin: 0 2px; }
 .opt-note { flex: none; font: 400 11px/1 var(--mono); color: var(--ink-3); white-space: nowrap; padding-right: 0; }
+/* Runway (public/runway.js): the "Use Runway Gen-4.5?" suggestion and the Powered by Runway link in the Video strip */
+.rw-hint-slot:empty { display: none; }
+.rw-hint-slot { display: contents; }
+.chip.rw-hint { border-style: dashed; }
+.opt-note .rw-powered { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 
 .attachments { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px 0; }
 .attachments:empty { display: none; }
@@ -1006,3 +1028,82 @@ a.chip { text-decoration: none; display: inline-flex; align-items: center; }
   .read-aloud .chip { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; padding-inline: 14px; }
   .actions .mini[data-act='speak-stop'] { min-width: 44px; min-height: 44px; }
 }
+/* ── look up (lookup.js): a short Wikipedia summary and a free Commons image for words selected in a finished answer.
+   A fixed card at z 35: above .dock (30), under the scrim (40), drawers (50), grain (60), viewer (70) and toast (80).
+   lookup.js writes --lk-x/--lk-y/--lk-max and data-state/data-side/data-kind (the entry's kind → --accent via the
+   [data-kind] rules near the top of this file); [hidden] hides it when closed. Images arrive as same-origin blobs. ── */
+.lookup {
+  --lk-paper: #f3eee3; /* the Paper theme's --bg, fixed in both themes so transparent plans and maps keep their dark linework */
+  position: fixed; left: 0; top: 0; z-index: 35;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; align-items: start;
+  width: 360px; max-width: calc(100vw - 32px); max-height: var(--lk-max, 60vh);
+  overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent;
+  padding: 14px 16px 6px;
+  border: 1px solid var(--line-2); border-radius: 18px; background: var(--bg-3); color: var(--ink);
+  box-shadow: var(--shadow), inset 0 1px 0 color-mix(in srgb, var(--accent) 16%, transparent);
+  font: 400 14px/1.55 var(--sans); text-align: left;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation;
+  transform: translate3d(var(--lk-x, 16px), var(--lk-y, 16px), 0);
+  opacity: 0; translate: 0 var(--lk-from, -6px); pointer-events: none; /* never an invisible box that swallows taps */
+  transition: opacity 0.16s var(--ease), translate 0.22s var(--ease);
+}
+.lookup.show { opacity: 1; translate: 0 0; pointer-events: auto; }
+.lookup.is-moving { opacity: 0; pointer-events: none; transition-duration: 0.08s; }
+.lookup[data-side='above'] { --lk-from: 6px; }
+.lk-back { grid-column: 1 / -1; grid-row: 1; justify-self: start; margin: -6px 0 4px -9px; }
+.lk-back ~ .lk-thumb { grid-row: 2 / span 3; } /* "← Meanings" takes the first row */
+.lk-eyebrow { grid-column: 1; display: flex; align-items: center; gap: 7px; min-width: 0; margin: 0 0 4px; font: 500 10px/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+.lk-eyebrow::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.lookup[aria-busy='true'] .lk-eyebrow::before { animation: breathe 1.6s ease-in-out infinite; }
+.lk-eyebrow span { overflow: hidden; text-overflow: ellipsis; }
+.lk-title { grid-column: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 0 0 6px; font: italic 400 23px/1.12 var(--serif); letter-spacing: -0.01em; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+a.lk-title:hover { text-decoration: underline 1px var(--accent); text-underline-offset: 3px; }
+.lk-title.is-term { color: var(--ink-2); }
+.lk-text { grid-column: 1; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; margin: 0; color: var(--ink-2); text-wrap: pretty; overflow-wrap: break-word; cursor: pointer; }
+.lookup.is-open .lk-text, .lookup:focus-within .lk-text { display: block; -webkit-line-clamp: unset; }
+.lk-thumb { grid-column: 2; grid-row: 1 / span 3; width: 84px; height: 84px; margin-top: 2px; padding: 0; border-radius: 10px; overflow: hidden; background: var(--surface-2); outline: 1px solid var(--line); outline-offset: -1px; }
+.lk-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 30%; opacity: 0; transition: opacity 0.2s; }
+.lk-thumb[data-mat] { background: var(--lk-paper); }
+.lk-thumb[data-mat] img { object-fit: contain; padding: 5px; }
+.lk-thumb.skel { outline: 0; }
+.lk-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lookup.is-open .lk-thumb { display: none; }
+.lk-figure { grid-column: 1 / -1; margin: 12px 0 0; }
+.lk-figure img { display: block; width: 100%; height: auto; max-height: min(42vh, 320px); object-fit: contain; border-radius: 12px; background: var(--bg-2); opacity: 0; transition: opacity 0.2s; }
+.lk-figure[data-mat] img { background: var(--lk-paper); padding: 6px; }
+.lk-figure figcaption { margin-top: 6px; font: 400 10px/1.4 var(--mono); letter-spacing: 0.04em; color: var(--ink-3); }
+.lk-figure figcaption a { color: var(--ink-2); text-underline-offset: 3px; text-decoration-color: var(--line-2); }
+.lookup img.ok { opacity: 1; }
+.lk-skel { grid-column: 1; padding-top: 4px; }
+.lk-skel .skel-line:first-child { width: 92%; }
+.lk-skel .skel-line:last-child { width: 64%; }
+.lk-alts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; margin: 8px 0 0; font: 400 11px/1.6 var(--mono); color: var(--ink-3); }
+.lk-alts button { font: inherit; color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; padding: 2px 0; }
+.lk-alts button:hover { color: var(--accent); }
+.lk-note { grid-column: 1 / -1; margin: 2px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
+.lk-note.bad::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--c-video); vertical-align: 1px; }
+.lk-choices { grid-column: 1 / -1; list-style: none; margin: 6px -8px 0; padding: 0; }
+.lk-choices button { display: grid; gap: 1px; width: 100%; min-height: 44px; padding: 7px 8px; border-radius: 10px; text-align: left; transition: background 0.2s; }
+.lk-choices button:hover { background: var(--surface-2); }
+.lk-choices button:focus-visible { outline-offset: -2px; }
+.lk-choices b { font: 500 15px/1.3 var(--sans); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lk-choices span { font: 400 11px/1.4 var(--mono); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lk-acts { grid-column: 1 / -1; display: flex; align-items: center; gap: 2px; margin: 10px -8px 0; padding-top: 4px; border-top: 1px solid var(--line); }
+.lk-acts .grow { flex: 1; }
+.lookup a.mini { text-decoration: none; }
+.lk-ask, .lk-ask:hover { color: var(--accent); }
+.lookup .mini:disabled { opacity: 0.45; cursor: default; background: none; }
+.lookup .lk-x { width: 34px; height: 34px; border-radius: 10px; } /* beats studio.css .icon-btn 42px; never .subtle (36px at 0,2,0) */
+.lookup .lk-x svg { width: 16px; height: 16px; }
+.lk-foot { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 2px 0 0; padding: 2px 0 4px; font: 400 9.5px/1.5 var(--mono); color: var(--ink-3); }
+.lk-foot a { color: var(--ink-2); text-underline-offset: 3px; text-decoration-color: var(--line-2); }
+.lk-foot a:hover { color: var(--ink); }
+.lookup[data-state='pill'] { display: flex; width: auto; max-width: min(320px, calc(100vw - 32px)); padding: 0; border-radius: 99px; overflow: hidden; }
+.lk-pill { display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 40px; padding: 0 16px 0 12px; font: 500 11.5px/1 var(--mono); letter-spacing: 0.04em; color: var(--ink); transition: background 0.2s; }
+.lk-pill:hover { background: var(--surface-2); }
+.lk-pill:focus-visible { outline-offset: -2px; border-radius: 99px; }
+.lk-pill svg { flex: none; width: 16px; height: 16px; color: var(--accent); }
+.lk-pill i { font-style: normal; color: var(--ink-3); max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lookup[data-side='dock'] .lk-thumb { display: none; }
+.lookup[data-side='dock'] .lk-text { -webkit-line-clamp: 2; }
+::highlight(atelier-lookup) { background-color: color-mix(in srgb, var(--accent) 24%, transparent); }

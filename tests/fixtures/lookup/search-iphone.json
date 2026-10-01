@@ -1,0 +1,145 @@
+{
+ "recorded": "2026-10-01T04:24:19.552Z",
+ "url": "https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&redirects=1&generator=search&gsrsearch=iPhone+history&gsrnamespace=0&gsrlimit=4&gsrinfo=&gsrprop=&prop=extracts%7Cpageimages%7Cdescription%7Cpageprops%7Cinfo&exintro=1&explaintext=1&exlimit=4&piprop=thumbnail%7Cname%7Coriginal&pithumbsize=330&pilicense=free&ppprop=disambiguation&inprop=url%7Cdisplaytitle&maxage=3600&smaxage=86400",
+ "status": 200,
+ "headers": {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "s-maxage=86400, max-age=3600, public",
+  "set-cookie-present": true
+ },
+ "body": {
+  "batchcomplete": true,
+  "continue": {
+   "gsroffset": 4,
+   "continue": "gsroffset||"
+  },
+  "query": {
+   "pages": [
+    {
+     "pageid": 8841749,
+     "ns": 0,
+     "title": "IPhone",
+     "index": 2,
+     "extract": "The iPhone is a line of smartphones developed and marketed by Apple that run iOS, the company's own mobile operating system. The first-generation iPhone was announced by then–Apple CEO and co-founder Steve Jobs on January 9, 2007, at Macworld 2007, and first launched in June 2007. Since then, Apple has annually released new iPhone models and iOS versions; the current lineup consists of the iPhone 17, the lower-end iPhone 17e, the lighter and thinner iPhone Air, the more feature-rich iPhone 18 Pro and Pro Max, and the foldable iPhone Duo. As of July 2025, more than three billion iPhones have been sold. Apple has been the largest vendor of mobile phones since 2023.\nThe original iPhone was the first mobile phone to use multi-touch technology. Throughout its history, the iPhone has gained larger, higher-resolution Retina displays, video-recording functionality, waterproofing, and many accessibility features. Up to the iPhone 8 and 8 Plus, iPhones had a single button on the front panel, with the iPhone 5s and later integrating a Touch ID fingerprint sensor. Since the iPhone X, models have switched to a nearly bezel-less front screen design with Face ID facial recognition in place of Touch ID for authentication, and increased use of gestures in place of the home button for navigation.\nThe iPhone, which operates using Apple's proprietary iOS operating system, is one of the two major smartphone platforms in the world, alongside Android. The first-generation iPhone was described by Steve Jobs as a \"revolution\" for the mobile phone industry. The iPhone has been credited with popularizing the slate smartphone form factor, and with creating a large market for smartphone apps, or \"app economy\", laying the foundation for the mobile-device market boom. In addition to the apps that come pre-installed on iOS, there are nearly two million apps available for download from Apple's mobile distribution marketplace, the App Store, as of August 2024.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/6e/IPhone_18_Pro_Vector.svg/330px-IPhone_18_Pro_Vector.svg.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 678
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/6/6e/IPhone_18_Pro_Vector.svg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 276,
+      "height": 567
+     },
+     "pageimage": "IPhone_18_Pro_Vector.svg",
+     "description": "Line of smartphones by Apple",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-30T19:43:13Z",
+     "lastrevid": 1377302941,
+     "length": 173725,
+     "fullurl": "https://en.wikipedia.org/wiki/IPhone",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=IPhone&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/IPhone",
+     "displaytitle": "iPhone"
+    },
+    {
+     "pageid": 13678080,
+     "ns": 0,
+     "title": "History of the iPhone",
+     "index": 1,
+     "extract": "The history of the iPhone by Apple Inc. began in the early 2000s. The first iPhone was unveiled at Macworld 2007 and released later that year. By the end of 2009, iPhone models had been released in all major markets.\nApple has continued to release new iPhone models annually, with the iPhone 17 introduced in 2025, and the iPhone 18 Pro and 18 Pro Max introduced in 2026.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c2/Steve_Jobs_presents_iPhone.jpg/330px-Steve_Jobs_presents_iPhone.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 221
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/c/c2/Steve_Jobs_presents_iPhone.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 1936,
+      "height": 1296
+     },
+     "pageimage": "Steve_Jobs_presents_iPhone.jpg",
+     "description": "",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-30T16:33:04Z",
+     "lastrevid": 1375888127,
+     "length": 82346,
+     "fullurl": "https://en.wikipedia.org/wiki/History_of_the_iPhone",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=History_of_the_iPhone&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/History_of_the_iPhone",
+     "displaytitle": "History of the iPhone"
+    },
+    {
+     "pageid": 23241092,
+     "ns": 0,
+     "title": "List of iPhone models",
+     "index": 3,
+     "extract": "The iPhone is a line of smartphones developed by Apple that use the iOS operating system. Introduced by then-CEO Steve Jobs on January 9, 2007, the iPhone revolutionized the mobile phone industry with its multi-touch interface and lack of physical keyboard. Over the years, Apple has released numerous models, each iteration bringing changes in hardware, software, performance, and design.\nAs of September 2026, the most recent iPhone models are the iPhone 18 Pro, iPhone 18 Pro Max and iPhone Duo announced on September 9, 2026.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/83/IPhones_6%2C_7%2C_8%2C_SE2_black_-_back_camera_view.jpg/330px-IPhones_6%2C_7%2C_8%2C_SE2_black_-_back_camera_view.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 381
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/8/83/IPhones_6%2C_7%2C_8%2C_SE2_black_-_back_camera_view.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 1512,
+      "height": 1744
+     },
+     "pageimage": "IPhones_6,_7,_8,_SE2_black_-_back_camera_view.jpg",
+     "description": "",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-30T19:43:13Z",
+     "lastrevid": 1377138205,
+     "length": 187203,
+     "fullurl": "https://en.wikipedia.org/wiki/List_of_iPhone_models",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=List_of_iPhone_models&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/List_of_iPhone_models",
+     "displaytitle": "List of iPhone models"
+    },
+    {
+     "pageid": 42259842,
+     "ns": 0,
+     "title": "IPhone 6",
+     "index": 4,
+     "extract": "The iPhone 6 and iPhone 6 Plus are smartphones that were developed and marketed by Apple. They are the eighth generation of the iPhone, succeeding the iPhone 5, iPhone 5c and iPhone 5s, and were released on September 19, 2014. The iPhone 6 and 6 Plus respectively include larger 4.7-inch and 5.5-inch displays, a faster processor, upgraded cameras, improved LTE and Wi-Fi connectivity and support for a near-field communications-based mobile payments offering. The iPhone 6 and iPhone 6 Plus were replaced as the flagship devices of the iPhone series by the iPhone 6s and iPhone 6s Plus on September 9, 2015.\nThe iPhone 6 and 6 Plus received positive reviews, with critics regarding their redesign, specifications, camera, price point, and battery life as improvements over previous iPhone models. However, aspects of their design were criticized, including plastic strips on the rear of the device for its antenna that disrupted the otherwise metal exterior, and the screen resolution of the standard-sized iPhone 6 being lower than other devices in its class. The iPhone 6 sold extremely well, becoming the best-selling iPhone model and the most successful smartphone to date. The iPhone 6 and 6 Plus supported iOS 8, 9, 10, 11 and 12 before being dropped by iOS 13.\nThe phones have been the subject of several hardware issues, including being susceptible to bending under hard pressure, and as a byproduct of this lack of rigidity, the touchscreen's internal hardware being susceptible to losing its connection to the phone's logic board. Additionally, some iPhone 6 Plus models were the subject of camera issues, including some with malfunctioning optical image stabilization or other defects on rear cameras.\nThe iPhone 6 and 6 Plus were moved to the mid-range spot in Apple's iPhone lineup when the iPhone 6S and 6S Plus were released in September 2015. The iPhone 6 and 6 Plus were discontinued in most markets on September 7, 2016, when Apple announced the iPhone 7 and iPhone 7 Plus. Their spot as the entry-level iPhone was taken by the first-generation iPhone SE, released on March 31, 2016. The iPhone 6 was relaunched with 32 GB of storage in 2017 as a midrange/budget iPhone.",
+     "thumbnail": {
+      "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0f/IPhone_6_Space_Gray.svg/330px-IPhone_6_Space_Gray.svg.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+      "width": 330,
+      "height": 664
+     },
+     "original": {
+      "source": "https://upload.wikimedia.org/wikipedia/commons/0/0f/IPhone_6_Space_Gray.svg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+      "width": 298,
+      "height": 600
+     },
+     "pageimage": "IPhone_6_Space_Gray.svg",
+     "description": "2014 smartphone by Apple",
+     "descriptionsource": "local",
+     "contentmodel": "wikitext",
+     "pagelanguage": "en",
+     "pagelanguagehtmlcode": "en",
+     "pagelanguagedir": "ltr",
+     "touched": "2026-09-30T19:43:13Z",
+     "lastrevid": 1374251583,
+     "length": 72096,
+     "fullurl": "https://en.wikipedia.org/wiki/IPhone_6",
+     "editurl": "https://en.wikipedia.org/w/index.php?title=IPhone_6&action=edit",
+     "canonicalurl": "https://en.wikipedia.org/wiki/IPhone_6",
+     "displaytitle": "iPhone 6"
+    }
+   ]
+  }
+ }
+}
