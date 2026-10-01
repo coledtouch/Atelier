@@ -388,10 +388,10 @@ async function viaOpenAI(key, v, m, cacheKey) {
   if (!up.body) { await m.settle(null); return unavailable(); }
   const plain = /^(audio\/|application\/octet-stream)/i.test(up.headers.get('content-type') || '');
   const parser = plain ? NO_USAGE : openaiUsage();
-  let complete = false, settled = null;
-  // meter: onEnd(usage) runs once, after a complete stream (complete = true) or with null when it was cut off.
-  const tap = { push: (b) => parser.push(b), result: () => { complete = true; return parser.result(); } };
-  const metered = meter(up.body, tap, async (usage) => { settled = await m.settle(complete ? { usage } : null); });
+  let settled = null;
+  // meter: onEnd(usage, complete) runs once. Only a complete stream settles from its usage; a cut-off one keeps the
+  // full reservation (meter reads the parser either way).
+  const metered = meter(up.body, parser, async (usage, complete) => { settled = await m.settle(complete ? { usage } : null); });
   const audio = metered.pipeThrough(plain ? capBytes(TTS_LIMITS.maxAudioBytes) : sseToAudio(TTS_LIMITS.maxAudioBytes));
   if (!cacheKey) return audioResponse(audio, 'audio/mpeg', v.voiceId, m.headers);
   const bytes = await readCapped(audio, TTS_LIMITS.maxAudioBytes); // a stream error throws: the reservation stands
