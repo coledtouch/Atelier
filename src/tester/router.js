@@ -307,9 +307,16 @@ async function chat(c) {
   const mtr = await reserve(c, p.worst);
   if (mtr.res) return mtr.res;
   const headers = { ...mtr.headers, ...(p.model !== requested ? { 'x-tester-model': p.model } : {}) };
-  const settleUsage = (usage) => {
+  // A complete answer settles at its reported cost. A stopped or failed one settles at no less than the reservation,
+  // and at more when the provider had already reported a bigger bill (the Ledger still caps it at OVERRUN x).
+  const settleUsage = (usage, complete = true) => {
     let actual = mtr.amount;
-    if (usage) try { actual = chatActual({ model: p.model, usage }); } catch {}
+    if (usage) {
+      try {
+        const reported = chatActual({ model: p.model, usage });
+        actual = complete ? reported : Math.max(mtr.amount, reported);
+      } catch {}
+    }
     return mtr.settle(actual);
   };
   const body = { model: p.model, messages: shaped.messages, stream: true, max_tokens: p.maxTokens };
