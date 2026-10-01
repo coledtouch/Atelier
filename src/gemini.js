@@ -29,6 +29,8 @@ export function normalizeVideoMime(type, fileName = '') {
 
 export const isGeminiFileUri = (u) => typeof u === 'string' && /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/files\/[\w-]{1,80}$/.test(u);
 export const isFileName = (n) => typeof n === 'string' && /^files\/[\w-]{1,80}$/.test(n);
+// files/<id> for a Files API URI (the name a tester's ownership is recorded under), else ''.
+export const fileNameOf = (uri) => (isGeminiFileUri(uri) ? `files/${uri.slice(uri.lastIndexOf('/') + 1)}` : '');
 
 // A resumable upload URL from Google's start call: https, Google's own origin (no port, no credentials), the files upload
 // path and a non-empty upload_id. Anything else is refused before the Worker sends a byte.
@@ -38,6 +40,10 @@ export function isUploadSession(s) {
   try { u = new URL(s); } catch { return false; }
   return u.origin === GEMINI_BASE && !u.username && !u.password && u.pathname === '/upload/v1beta/files' && Boolean(u.searchParams.get('upload_id'));
 }
+// The upload_id of a valid session (what a tester's ownership of an upload is recorded under), else ''.
+export const uploadIdOf = (s) => (isUploadSession(s) ? new URL(s).searchParams.get('upload_id') : '');
+// The refusal for a clip over the cap (1 GB for the owner, 200 MB for LinkedIn testers).
+const tooBig = (max) => `That video is over ${max >= 1073741824 ? `${max / 1073741824} GB` : `${Math.round(max / 1048576)} MB`} — Atelier will send frames instead.`;
 
 // Is there a video_file part anywhere in the conversation? (Such bodies must take the native Gemini route.)
 export const hasVideoParts = (messages) => Array.isArray(messages) && messages.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === 'video_file'));
@@ -141,10 +147,10 @@ function toFileRef(f, key) {
 
 // ── Files API (plain objects in, plain objects out; failures throw GeminiError) ──
 
-// Starts a resumable upload → {session, chunk}. meta: {name, mime, size} from the browser.
-export async function geminiUploadStart(env, { name, mime, size } = {}) {
+// Starts a resumable upload → {session, chunk}. meta: {name, mime, size} from the browser; maxBytes: the clip cap.
+export async function geminiUploadStart(env, { name, mime, size } = {}, maxBytes = CLIP_MAX_BYTES) {
   if (!Number.isSafeInteger(size) || size < 1) throw new GeminiError('Bad video size', 400);
-  if (size > CLIP_MAX_BYTES) throw new GeminiError('That video is over 1 GB — Atelier will send frames instead.', 413);
+  if (size > maxBytes) throw new GeminiError(tooBig(maxBytes), 413);
   const type = normalizeVideoMime(mime, name);
   if (!GEMINI_VIDEO_MIMES.has(type)) throw new GeminiError('Gemini can’t take this video type — Atelier will send frames instead.', 415);
   const key = keyOf(env);
@@ -170,10 +176,10 @@ export async function geminiUploadStart(env, { name, mime, size } = {}) {
 
 // Stateless checks for one chunk → [message, status] or null. The route runs them on the declared length before
 // reading the body; geminiUploadChunk runs them again on the real byte count.
-export function chunkProblem(offset, total, len) {
+export function chunkProblem(offset, total, len, maxBytes = CLIP_MAX_BYTES) {
   if (!Number.isSafeInteger(len) || len < 1 || len > CHUNK_MAX) return ['A chunk must be 1 byte to 32 MB.', 413];
   if (!Number.isSafeInteger(total) || total < 1) return ['Bad total size', 400];
-  if (total > CLIP_MAX_BYTES) return ['That video is over 1 GB — Atelier will send frames instead.', 413];
+  if (total > maxBytes) return [tooBig(maxBytes), 413];
   if (!Number.isSafeInteger(offset) || offset < 0 || offset % GRANULARITY_DEFAULT) return ['Bad chunk offset', 400];
   if (offset + len > total) return ['The chunk runs past the end of the file.', 400];
   if (offset + len < total && len % GRANULARITY_DEFAULT) return ['Only the last chunk may be shorter than a whole 8 MB block.', 400];
@@ -181,10 +187,10 @@ export function chunkProblem(offset, total, len) {
 }
 
 // Sends bytes [offset, offset+len) of a `total`-byte upload. Not last → {received}; last (finalizes) → {done, file}.
-export async function geminiUploadChunk(env, session, { offset, total, bytes } = {}) {
+export async function geminiUploadChunk(env, session, { offset, total, bytes } = {}, maxBytes = CLIP_MAX_BYTES) {
   if (!isUploadSession(session)) throw new GeminiError('Bad upload session', 400);
   const len = bytes?.byteLength;
-  const bad = chunkProblem(offset, total, len);
+  const bad = chunkProblem(offset, total, len, maxBytes);
   if (bad) throw new GeminiError(...bad);
   const key = keyOf(env);
   const final = offset + len === total;
@@ -277,8 +283,15 @@ async function readBody(req, len, cap) {
   return len == null ? out.subarray(0, n) : n === len ? out : null;
 }
 
-export async function handleVideoApi(req, env, path, params = new URLSearchParams()) {
+// tester (LinkedIn testers only, addendum A2): {maxBytes, owns(kind, id), record(kind, id)}, async hooks backed by the
+// Ledger. 'upload' ids are upload_ids, 'file' ids are files/<id> names. Every chunk, query, cancel, file get and delete
+// must name the tester's own upload or file (else 403 tester_owner); started and finished uploads are recorded.
+const NOT_YOURS = { error: 'That video belongs to another session — attach it again.', code: 'tester_owner' };
+export async function handleVideoApi(req, env, path, params = new URLSearchParams(), tester = null) {
   const route = String(path || '').replace(/^\/?(api\/)?video\//, '');
+  const maxBytes = tester?.maxBytes || CLIP_MAX_BYTES;
+  const mine = async (kind, id) => !tester || (Boolean(id) && await tester.owns(kind, id));
+  const keep = async (out) => { if (tester && out?.done && out.file?.name) await tester.record('file', out.file.name); return json(out); };
   try {
     // POST video/upload/start {name, mime, size} → {session, chunk}
     if (route === 'upload/start' && req.method === 'POST') {
@@ -290,32 +303,43 @@ export async function handleVideoApi(req, env, path, params = new URLSearchParam
       let body = null;
       try { body = JSON.parse(new TextDecoder().decode(raw)); } catch {}
       if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'Bad JSON body' }, 400);
-      return json(await geminiUploadStart(env, body));
+      const out = await geminiUploadStart(env, body, maxBytes);
+      if (tester) await tester.record('upload', uploadIdOf(out.session));
+      return json(out);
     }
     // PUT video/upload/chunk?offset=&total=  (x-upload-session header, raw bytes) → {received} | {done, file}
     if (route === 'upload/chunk' && req.method === 'PUT') {
       const session = req.headers.get('x-upload-session') || '';
       if (!isUploadSession(session)) return json({ error: 'Bad upload session' }, 400);
+      if (!(await mine('upload', uploadIdOf(session)))) return json(NOT_YOURS, 403);
       const offset = intParam(params.get('offset')), total = intParam(params.get('total'));
       const len = declaredLength(req);
       if (Number.isNaN(len)) return json({ error: 'Bad content-length' }, 400);
-      const bad = len == null ? null : chunkProblem(offset, total, len); // undeclared length: checked after reading
+      const bad = len == null ? null : chunkProblem(offset, total, len, maxBytes); // undeclared length: checked after reading
       if (bad) return json({ error: bad[0] }, bad[1]);
       const bytes = await readBody(req, len, CHUNK_MAX);
       if (!bytes) return len == null ? json({ error: 'A chunk must be 1 byte to 32 MB.' }, 413) : json({ error: 'The chunk doesn’t match its content-length.' }, 400);
-      return json(await geminiUploadChunk(env, session, { offset, total, bytes }));
+      return keep(await geminiUploadChunk(env, session, { offset, total, bytes }, maxBytes));
     }
     // POST video/upload/query?total=  (x-upload-session header) → {received} | {done, file}
     if (route === 'upload/query' && req.method === 'POST') {
-      const total = intParam(params.get('total'));
-      return json(await geminiUploadQuery(env, req.headers.get('x-upload-session') || '', Number.isSafeInteger(total) ? total : 0));
+      const total = intParam(params.get('total')), session = req.headers.get('x-upload-session') || '';
+      if (tester && !isUploadSession(session)) return json({ error: 'Bad upload session' }, 400);
+      if (!(await mine('upload', uploadIdOf(session)))) return json(NOT_YOURS, 403);
+      return keep(await geminiUploadQuery(env, session, Number.isSafeInteger(total) ? total : 0));
     }
     // POST video/upload/cancel (x-upload-session header) → {ok:true}
-    if (route === 'upload/cancel' && req.method === 'POST') return json(await geminiUploadCancel(env, req.headers.get('x-upload-session') || ''));
+    if (route === 'upload/cancel' && req.method === 'POST') {
+      const session = req.headers.get('x-upload-session') || '';
+      if (tester && !isUploadSession(session)) return json({ error: 'Bad upload session' }, 400);
+      if (!(await mine('upload', uploadIdOf(session)))) return json(NOT_YOURS, 403);
+      return json(await geminiUploadCancel(env, session));
+    }
     // GET | DELETE video/file?name=files/<id>
     if (route === 'file' && (req.method === 'GET' || req.method === 'DELETE')) {
       const name = params.get('name') || '';
       if (!isFileName(name)) return json({ error: 'Bad file name' }, 400);
+      if (!(await mine('file', name))) return json(NOT_YOURS, 403);
       return json(req.method === 'GET' ? await geminiFileGet(env, name) : await geminiFileDelete(env, name));
     }
     return json({ error: 'Not found' }, 404);
@@ -467,7 +491,8 @@ function guarded(src, key) {
 // POST /api/chat for a body with a video_file part and a gemini: model. key: the resolved Gemini key.
 // Streams OpenAI-style SSE; errors before streaming come back as JSON with the upstream status (409 video_file_gone
 // when the clip expired). If Google rejects thinkingConfig, the request is retried once without it.
-export async function geminiNativeChat(body, key) {
+// opts.tap(stream) → stream sees Google's own SSE bytes before conversion (the tester meter reads usageMetadata there).
+export async function geminiNativeChat(body, key, opts = {}) {
   const model = String(body?.model || '');
   if (!model.startsWith('gemini:')) return json({ error: VIDEO_NEEDS_GEMINI }, 400);
   const id = model.slice(7);
@@ -501,5 +526,8 @@ export async function geminiNativeChat(body, key) {
     return new Response(scrub(text, key) || JSON.stringify({ error: `Gemini request failed (${upstream.status})` }), { status: upstream.status, headers: JSON_HEADERS });
   }
   if (!upstream.body) return json({ error: 'Gemini sent an empty response' }, 502);
-  return new Response(guarded(upstream.body, key).pipeThrough(geminiSseToOpenAI()), { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' } });
+  // The tap reads Google's raw body inside the guard, so an upstream read error reaches it as a failure (a cut-off stream
+  // keeps the full tester reservation) before guarded() turns it into an error line for the client.
+  const src = guarded(opts.tap ? opts.tap(upstream.body) : upstream.body, key);
+  return new Response(src.pipeThrough(geminiSseToOpenAI()), { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' } });
 }

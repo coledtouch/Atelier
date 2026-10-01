@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PRICES_CHECKED, MARGIN, PRICES, PER_CALL_RESERVE_CAP, WEB_SEARCH_RESULT_TOKENS, GEMINI_VIDEO_TOKENS_PER_SECOND,
-  TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, TESTER_EXCLUDED,
+  TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, TESTER_EXCLUDED, WEB_CALL_RESERVE_CAP, VEO_CALL_RESERVE_CAP,
   chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, gptImageOutputTokens,
   priceOf, isFree, PriceError,
 } from '../src/tester/prices.js';
@@ -10,10 +10,12 @@ import {
 const throwsCode = (fn, code) => assert.throws(fn, (e) => e instanceof PriceError && e.code === code, `expected PriceError ${code}`);
 const AFTER_PROMO = '2027-01-02T12:00:00Z';
 
-test('header constants: checked date, margin, per-call cap', () => {
+test('header constants: checked date, margin, per-call caps', () => {
   assert.equal(PRICES_CHECKED, '2026-09-30');
   assert.equal(MARGIN, 1.25);
   assert.equal(PER_CALL_RESERVE_CAP, 250_000);
+  assert.equal(WEB_CALL_RESERVE_CAP, 500_000);
+  assert.equal(VEO_CALL_RESERVE_CAP, 1_000_000);
 });
 
 test('the table is deeply frozen', () => {
@@ -54,8 +56,14 @@ test('every TESTER_* model has a price of the right kind and a source', () => {
 test('the app\'s paid models are listed for testers; fallback-only targets and Veo standard are not', () => {
   for (const id of ['anthropic:claude-opus-5-5', 'anthropic:claude-sonnet-5-5', 'anthropic:claude-fable-5-1', 'openai:gpt-6-luna',
     'openai:gpt-6-astra', 'openai:gpt-6.1-sol', 'gemini:gemini-3.8-flash', 'gemini:gemini-3.1-pro-preview', 'gemini:gemini-3.5-flash-lite',
-    'zai:glm-5.3', 'zai:glm-5.3-flash', 'zai:glm-4.7-flash', 'deepseek:deepseek-flash', 'deepseek:deepseek-v4-pro', 'meta:muse-spark-1.3']) {
+    'zai:glm-5.3', 'zai:glm-5.3-flash', 'deepseek:deepseek-flash', 'deepseek:deepseek-v4-pro', 'meta:muse-spark-1.3']) {
     assert.ok(TESTER_MODELS.includes(id), id);
+  }
+  // Addendum A7b: no free model for testers (NVIDIA, Z.ai's free tier, FLUX, Cosmos, the motion still).
+  for (const list of [TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS]) for (const id of list) assert.ok(!isFree(id), `${id} is free`);
+  for (const id of ['zai:glm-4.7-flash', 'moonshotai/kimi-k3', 'black-forest-labs/flux.1-dev', 'nvidia/cosmos3-nano', 'atelier/motion-still']) {
+    assert.ok(![...TESTER_MODELS, ...TESTER_IMAGE_MODELS, ...TESTER_VIDEO_MODELS].includes(id), id);
+    assert.match(TESTER_EXCLUDED[id], /free/);
   }
   for (const id of ['anthropic:claude-opus-5', 'anthropic:claude-opus-4-8', 'anthropic:claude-sonnet-5']) {
     assert.ok(!TESTER_MODELS.includes(id), id);
@@ -121,6 +129,10 @@ test('Anthropic: fallback attempt is reserved on top of the primary, and max_tok
   const at = (m) => chatWorstCase({ model: 'anthropic:claude-sonnet-5-5', inputTokens: 100, maxTokens: m });
   assert.equal(at(1), at(1024));
   assert.ok(at(1025) > at(1024));
+  // fallbacks:false (tester web calls) reserves the primary attempt only.
+  const solo = chatWorstCase({ model: 'anthropic:claude-opus-5-5', inputTokens: 5_000, maxTokens: 2_000, fallbacks: false, margin: false });
+  assert.equal(solo, 5_000 * 5 + 2_000 * 20);
+  assert.equal(chatWorstCase({ model: 'openai:gpt-6-luna', inputTokens: 5, maxTokens: 5, fallbacks: false }), chatWorstCase({ model: 'openai:gpt-6-luna', inputTokens: 5, maxTokens: 5 }));
 });
 
 test('web search: fee plus result tokens on Claude; ignored for providers that cannot search', () => {

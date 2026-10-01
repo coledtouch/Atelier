@@ -69,18 +69,16 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
 .sheet-body { min-height: 360px; }
 .field-group h4 { font-size: 11px; }
 .field small { line-height: 1.6; }
-.onboard .sheet-body { padding: 32px; gap: 12px; }
-.onboard .onboard-art { height: 64px; margin: 0; }
-.onboard-art img { display: block; width: 64px; height: 64px; border-radius: 16px; }
-.onboard-title { font-size: 52px; }
-.onboard-copy { font-size: 14px; color: var(--ink-2); line-height: 1.7; margin: 0 0 8px; max-width: 44ch; }
+.onboard .sheet-body { padding: 32px 32px 26px; gap: 12px; }
+.onboard-copy { font-size: 14px; color: var(--ink-2); line-height: 1.6; margin: 0 0 2px; max-width: 34ch; text-wrap: balance; }
 .onboard .field { margin-bottom: 2px; }
 .onboard .field > span { font-size: 12px; }
 .onboard .field small { display: inline; margin-left: 6px; }
-.onboard .onboard-actions { justify-content: stretch; }
 .onboard .btn-primary { width: 100%; min-height: 46px; }
-.onboard .legal-links { margin: 4px 0 0; text-align: center; }
+.onboard .legal-links { margin: 2px 0 0; text-align: center; }
 .onboard input { font-size: 16px; }
+/* who is signed in: body.tester (LinkedIn tester) hides owner surfaces; body.owner (passcode) shows owner-only panels */
+body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs-owner { display: none !important; }
 .file-chip { position: relative; }
 .file-chip input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .file-chip:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -144,6 +142,7 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
   .lib-filter { gap: 14px 4px; }
   .lib-filter .chip { padding: 0 10px; }
   .drawer-head .lib-from-canva { padding: 0 10px; margin-right: 4px; }
+  .tp-limits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 /* phones: stacked tabs (icon over label, equal widths); drop hint text */
 @media (max-width: 640px) {
@@ -198,6 +197,13 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
   .viewer:has(.viewer-actions:empty) .viewer-body { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
   body:has(.viewer:not([hidden]) .viewer-actions:not(:empty)) .toast { bottom: calc(72px + env(safe-area-inset-bottom)); } /* sit above the viewer's bottom toolbar (Send to Canva toasts last a while) */
   .developing .status { font-size: 11px; gap: 7px; padding: 7px 10px; } /* fits a 2-up tile at 360 */
+  body.tester #settings .settings-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); } /* three tabs (no Connections) on one row */
+  .opt-note.keep { display: inline; } /* the only thing in the strip: why there's nothing to pick */
+  /* Testers roster: photo · who · button on one row, spend under the name */
+  .tp-tester { grid-template-columns: 40px minmax(0, 1fr) auto; row-gap: 4px; }
+  .tp-tester .tp-spend { grid-area: 2 / 2; flex-direction: row; gap: 12px; align-items: baseline; }
+  .tp-tester > .chip { grid-area: 1 / 3 / span 2; }
+  .tp-refused :is(.chip, .tp-tag) { margin-left: 52px; } /* under the name, past the photo */
 }
 @media (max-width: 480px) {
   .top { gap: 6px; padding-inline: max(10px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-right)); }
@@ -219,9 +225,13 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
   .composer-row .icon-btn { width: 36px; }
   .options { --opt-h: 36px; }
   .opt-val { max-width: 174px; }
-  .onboard .sheet-body { padding: 24px; }
-  .onboard-title { font-size: 44px; }
+  .onboard .sheet-body { padding: 26px 22px 20px; gap: 10px; }
+  .ob-brand { font-size: 30px; gap: 10px; }
+  .ob-mark { width: 30px; height: 30px; border-radius: 8px; }
   .onboard .field small { display: block; margin-left: 0; }
+  .allowance { gap: 6px; font-size: 10px; letter-spacing: 0.01em; }
+  .al-bar { width: 26px; }
+  .ta-meters { padding: 12px; }
 }
 @media (pointer: coarse) {
   .tile-key { display: none; }
@@ -234,7 +244,7 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
     content: ''; position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: max(100%, 44px); height: max(100%, 44px);
   }
   /* iOS zooms the page when a focused text control is under 16px */
-  :is(.field input:not([type='range'], [type='checkbox'], [type='radio'], [type='file']), .field textarea, .onboard input, .you-card input, .you-card textarea, .ac-fields input, .ac-fields textarea, .tok-dialog input, .search, #meLearned, #meStyle) { font-size: 16px; }
+  :is(.field input:not([type='range'], [type='checkbox'], [type='radio'], [type='file']), .field textarea, .onboard input, .you-card input, .you-card textarea, .ac-fields input, .ac-fields textarea, .tok-dialog input, .search, #meLearned, #meStyle, .tp-add input) { font-size: 16px; }
   .error-acts .mini { min-height: 44px; }
   .icon-btn { width: 44px; height: 44px; } /* header, drawer [data-close], #viewerClose, thread .del, settings close */
   .top-right { gap: 0; } /* the 44px boxes already space the icons; keeps the 481–640 header (with #newBtn) inside its padding */
@@ -263,6 +273,9 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
   .cv-bar .search, .cv-acct { min-height: 44px; font-size: 16px; }
   .cv-more-row .chip, .cvc-acts .chip { min-height: 44px; }
   .cvc-fmt span { padding: 13px 10px; font-size: 14px; }
+  .tp-subs .acct { height: 36px; padding: 0 12px 0 14px; font-size: 13px; } /* same as #connList chips: the HIT-44 ::after on .acct button sticks out */
+  .tp-subs .acct button { width: 32px; height: 32px; margin-right: -9px; }
+  .tester-welcome .btn-primary { min-height: 48px; }
 }
 @media (hover: none) {
   /* body sets -webkit-tap-highlight-color: transparent, so give taps their own feedback */
@@ -293,7 +306,9 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
   .drawer-head { margin-bottom: 6px; }
   .drawer-head h3 { font-size: 26px; }
   .drawer-description { display: none; }
-  .onboard .onboard-art { display: none; }
+  .onboard-copy, .ob-by { display: none; } /* landscape phones: brand, headline, LinkedIn button and spots stay */
+  .onboard .sheet-body { padding-block: 18px 14px; gap: 8px; }
+  .onboard-title { font-size: 34px; }
   .sheet-body { min-height: 0; } /* studio's 360px floor would push the onboarding form past its dialog */
   #settings { height: calc(100dvh - 16px); max-height: none; }
   #settings .sheet-head { padding-block: 4px 0; } /* head/foot trimmed so ≥180px of the middle stays visible at 360px tall, even with 44px touch chips */
@@ -317,8 +332,9 @@ html.kb-open .cv-grid { padding-bottom: calc(12px + var(--kb, 0px)); }
 html.kb-open .you-scroll { padding-bottom: calc(20px + var(--kb, 0px)); }
 html.kb-tight .top { opacity: 0; visibility: hidden; } /* <460px visible: rows go to the conversation */
 html.kb-open :is(#onboard, dialog.tok-dialog) { top: var(--vv-top, 0px); bottom: var(--kb, 0px); max-height: calc(var(--vvh, 100dvh) - 16px); }
-html.kb-open #onboardForm { max-height: calc(var(--vvh, 100dvh) - 16px); }
-html.kb-tight .onboard .onboard-art { display: none; } /* iOS twin of the max-height:500 rule (its layout viewport doesn't shrink) */
+html.kb-open #onboard .sheet-body { max-height: calc(var(--vvh, 100dvh) - 16px); }
+html.kb-tight :is(.onboard-copy, .ob-by, .ob-brand) { display: none; } /* iOS twin of the max-height:500 rule (its layout viewport doesn't shrink) */
+html.kb-tight .allowance { display: none; } /* <460px visible: the composer keeps the rows */
 html.kb-tight #settings .settings-nav { display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-block: 2px 6px; } /* one row of tabs while typing: at 360x400 the middle grows 169 → 221px */
 html.kb-tight #settings .settings-nav .chip { flex: 1 0 auto; padding-inline: 10px; } /* all four tabs fit at 360px */
 @media (prefers-reduced-motion: reduce) {

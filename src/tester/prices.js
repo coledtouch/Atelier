@@ -56,6 +56,10 @@ export const MARGIN = 1.25;
 
 /** Spec §6: one call never reserves more than $0.25. Default budget for maxTokensWithin. */
 export const PER_CALL_RESERVE_CAP = 250_000;
+/** Addendum A7b: a chat call with Claude web search may reserve up to $0.50 (fallbacks off, max_uses 3, 2 or 1). */
+export const WEB_CALL_RESERVE_CAP = 500_000;
+/** Addendum A7b: one Veo video never reserves more than $1.00 (and must fit the tester's day, month and pool). */
+export const VEO_CALL_RESERVE_CAP = 1_000_000;
 
 /** Anthropic web search fee: $10 per 1,000 searches (failed searches are not billed). */
 export const WEB_SEARCH_USD = 0.01;
@@ -267,15 +271,19 @@ const deepFreeze = (o) => {
 /** The price table (USD), keyed by the exact ids Atelier uses (provider prefix as in app.js; bare ids are NVIDIA). */
 export const PRICES = deepFreeze(TABLE);
 
-const keysOf = (kind) => Object.freeze(Object.keys(PRICES).filter((k) => PRICES[k].kind === kind && PRICES[k].tester !== false));
-/** Chat models a tester may request (priced, including the free ones). */
+// Addendum A7b: testers get metered models only. Free entries (the owner's NVIDIA quota, Z.ai's free tier, the FLUX
+// motion still) cost $0, so the Ledger could not bound them.
+const FREE_WHY = 'free ($0) model: testers use metered models only (addendum A7b)';
+const testerOk = (e) => e.tester !== false && !e.free;
+const keysOf = (kind) => Object.freeze(Object.keys(PRICES).filter((k) => PRICES[k].kind === kind && testerOk(PRICES[k])));
+/** Chat models a tester may request (paid and priced; never a free model). */
 export const TESTER_MODELS = keysOf('chat');
 /** Image models a tester may use. */
 export const TESTER_IMAGE_MODELS = keysOf('image');
 /** Video models a tester may use. */
 export const TESTER_VIDEO_MODELS = keysOf('video');
 /** Priced models that testers still cannot use, with the reason. */
-export const TESTER_EXCLUDED = deepFreeze(Object.fromEntries(Object.entries(PRICES).filter(([, e]) => e.tester === false).map(([k, e]) => [k, e.why])));
+export const TESTER_EXCLUDED = deepFreeze(Object.fromEntries(Object.entries(PRICES).filter(([, e]) => !testerOk(e)).map(([k, e]) => [k, e.why || FREE_WHY])));
 
 /** The table entry for a model id, or null. */
 export const priceOf = (model) => (typeof model === 'string' && Object.hasOwn(PRICES, model) ? PRICES[model] : null);
@@ -380,6 +388,7 @@ function worstArgs(o) {
  * @param {number} [o.videoSeconds] seconds of attached Gemini video (native path); other models refuse it
  * @param {number} [o.images]       attached images, priced at the model's per-image ceiling
  * @param {'high'} [o.imageDetail]  'high' only if the server forces detail:"high" (gpt-6-astra: 3,000 instead of 36,000)
+ * @param {boolean} [o.fallbacks=true]  false when the call runs without Anthropic's server-side fallback (A7b web calls)
  * @param {boolean} [o.margin=true]
  */
 export function chatWorstCase(o = {}) {
@@ -387,7 +396,7 @@ export function chatWorstCase(o = {}) {
   const a = worstArgs(o);
   if (e.free) return 0;
   let pico = attemptWorst(o.model, a);
-  if (e.fallbacks?.length) pico += maxBig(...e.fallbacks.map((f) => attemptWorst(f, a)));
+  if (e.fallbacks?.length && o.fallbacks !== false) pico += maxBig(...e.fallbacks.map((f) => attemptWorst(f, a)));
   return toMicros(pico, o.margin !== false);
 }
 

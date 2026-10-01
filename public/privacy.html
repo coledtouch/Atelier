@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Privacy Policy · Atelier</title>
-  <meta name="description" content="How Atelier collects, uses, stores, shares and deletes data, including data from Google APIs (Gmail)." />
+  <meta name="description" content="How Atelier collects, uses, stores, shares and deletes data, including LinkedIn tester sign-in and data from Google APIs (Gmail)." />
   <link rel="icon" href="/icons/atelier-v2-32.png" type="image/png" sizes="32x32" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -23,7 +23,7 @@
   </div>
 
   <h2>1. Who can use Atelier</h2>
-  <p>Atelier is a private application. Access is protected by an owner-set passcode; there is no public sign-up. It is not directed at children under 13, and we do not knowingly collect data from them.</p>
+  <p>Atelier is a private application. The owner signs in with a passcode. A limited number of invited testers (currently 25 spots) can sign in with their LinkedIn account; there is no other sign-up. It is not directed at children under 13, and we do not knowingly collect data from them.</p>
 
   <h2>2. Data we access and collect</h2>
   <h3>Information you provide</h3>
@@ -31,6 +31,16 @@
     <li><b>Prompts and conversations</b> — the questions, instructions, text and images you enter.</li>
     <li><b>Profile and memory</b> — optional information you add in the “You” panel (name, a description of yourself, writing samples, a style guide, and remembered facts), plus facts Atelier notes from your conversations, which you can view and delete.</li>
     <li><b>Imported history</b> — if you choose to import a ChatGPT/Claude data export or Claude Code session files, Atelier reads the messages <i>you</i> wrote in them to build your profile. The files are read in your browser and are not uploaded or stored.</li>
+  </ul>
+  <h3 id="testers">If you sign in as a LinkedIn tester</h3>
+  <ul>
+    <li><b>LinkedIn sign-in</b> — Atelier asks LinkedIn only for your basic profile and email address (the <code>openid profile email</code> permissions) and keeps your LinkedIn member ID, name, email address and profile photo link. It never asks to post on your behalf. The LinkedIn access token is used once at sign-in and is not stored.</li>
+    <li><b>Usage ledger</b> — for each request, how much it cost and when, so your daily and monthly allowance can be enforced. The ledger holds amounts and dates, not prompts or answers. <b>No prompts or outputs are stored on our servers.</b></li>
+    <li><b>Your profile, style and memory</b> — what you keep in the “You” panel (name, a description of yourself, writing samples, a style guide, learned facts and remembered items) is stored on the server in your tester record so Atelier can use it in your answers.</li>
+    <li><b>Your threads</b> — conversations and generated media stay in your browser on your device.</li>
+    <li><b>Prompts</b> — what you send goes to the AI provider of the model chosen for that request, only to produce the answer (see <a href="#sharing">Sharing</a>).</li>
+    <li><b>Video files</b> — a video you attach for analysis may be uploaded to Google’s Gemini Files API, which holds it for up to 48 hours and then deletes it.</li>
+    <li><b>Sign-in cookies</b> — two strictly necessary cookies: <code>__Host-atelier_tester</code> keeps you signed in for up to 30 days, and <code>__Host-atelier_li</code> lasts at most 10 minutes and is used only to finish the LinkedIn sign-in round trip. Neither is used for tracking.</li>
   </ul>
   <h3>Connected accounts (only if you connect them)</h3>
   <ul>
@@ -40,7 +50,7 @@
   </ul>
   <h3>Technical data</h3>
   <ul>
-    <li>Our host, Cloudflare, processes standard request data (such as IP address and request logs) to operate and secure the service. We use IP addresses to block repeated wrong-passcode attempts. We do not use analytics, advertising or tracking cookies.</li>
+    <li>Our host, Cloudflare, processes standard request data (such as IP address and request logs) to operate and secure the service. We use IP addresses to block repeated wrong-passcode attempts and to limit repeated sign-in attempts. We do not use analytics, advertising or tracking cookies; the only cookies are the tester sign-in cookies described above.</li>
   </ul>
 
   <h2 id="google">3. Google user data (Gmail)</h2>
@@ -74,6 +84,7 @@
     <li>To answer your requests and perform the actions you ask for (chat, code, images, video, ideas, apps, and account tasks).</li>
     <li>To personalize answers using your profile, memory and writing style.</li>
     <li>To keep the service secure and working (for example, rate-limiting passcode attempts and diagnosing errors).</li>
+    <li>For testers: to enforce each tester’s spending allowance and the shared monthly tester budget.</li>
   </ul>
   <p>We do not use your data for advertising, profiling for third parties, or selling.</p>
 
@@ -82,8 +93,10 @@
   <table>
     <thead><tr><th>Processor</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>Cloudflare</td><td>Hosting, network security, and storage of your profile, memory and connection tokens.</td></tr>
-      <tr><td>Anthropic (Claude), OpenAI, Google (Gemini, Veo) and NVIDIA</td><td>AI models that generate responses, images and video. Only the content needed for the request is sent, via their business APIs, which do not use API data to train their models by default.</td></tr>
+      <tr><td>Cloudflare</td><td>Hosting, network security, and storage of your profile, memory, connection tokens and — for testers — the tester record and usage ledger.</td></tr>
+      <tr><td>LinkedIn</td><td>Tester sign-in only: confirms who you are and shares your basic profile and email address with Atelier.</td></tr>
+      <tr><td>Anthropic (Claude), OpenAI, Google (Gemini, Veo) and NVIDIA</td><td>AI models that generate responses, images and video. Only the content needed for the request is sent, via their business APIs, which do not use API data to train their models by default. Testers never use NVIDIA models.</td></tr>
+      <tr><td>Z.ai, DeepSeek and Meta</td><td>Further AI models you can choose. Only the content needed for the request is sent, under each provider’s own API data terms.</td></tr>
       <tr><td>Gmail, Slack, GitHub, Stripe, Cloudflare, Railway</td><td>Only when you connect them, to read or act on your own account at your request.</td></tr>
     </tbody>
   </table>
@@ -91,21 +104,24 @@
 
   <h2>6. Where data is stored and for how long</h2>
   <ul>
-    <li><b>In your browser:</b> conversations, generated media and settings — kept until you delete them (Settings → Erase everything, or delete individual threads).</li>
+    <li><b>In your browser:</b> conversations, generated media and settings — kept until you delete them (Settings → Your data → Clear this device, or delete individual threads).</li>
     <li><b>Cloudflare (server):</b> your profile/memory (so it syncs between your devices) and connection tokens — kept until you delete or disconnect them.</li>
+    <li><b>Tester records:</b> your LinkedIn ID, name, email and photo link, your usage ledger and your profile, style and memory are deleted together 90 days after you last use Atelier, or sooner on request.</li>
+    <li><b>Gemini Files API:</b> videos uploaded for analysis are deleted by Google within 48 hours.</li>
     <li><b>AI providers:</b> may retain request data briefly under their own API policies for abuse monitoring; they do not use it for advertising.</li>
     <li><b>Operational logs:</b> short-lived request logs kept by Cloudflare for reliability and security.</li>
   </ul>
 
   <h2>7. Security</h2>
-  <p>Traffic is encrypted with HTTPS. API keys and account tokens are stored as encrypted server-side secrets and never sent to your browser. Access requires the owner’s passcode, with automatic lockout after repeated wrong attempts. Actions that send, post, pay or change something require your explicit approval.</p>
+  <p>Traffic is encrypted with HTTPS. API keys and account tokens are stored as encrypted server-side secrets and never sent to your browser. Access requires the owner’s passcode, with automatic lockout after repeated wrong attempts, or a LinkedIn tester sign-in; tester sessions are stored only as a one-way hash, and testers can never reach the owner’s accounts, tools or profile. Actions that send, post, pay or change something require your explicit approval.</p>
 
   <h2>8. Your choices and deletion</h2>
   <ul>
-    <li><b>Delete conversations and media:</b> delete threads in the app, or use Settings → Erase everything.</li>
+    <li><b>Delete conversations and media:</b> delete threads in the app, or use Settings → Your data → Clear this device.</li>
     <li><b>Delete profile and memory:</b> edit or remove entries in the “You” panel.</li>
     <li><b>Disconnect Gmail:</b> Settings → Connections → Disconnect (this deletes the stored token), and/or revoke access at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</li>
     <li><b>Disconnect other services:</b> revoke the token in that service’s settings; Atelier then loses access immediately.</li>
+    <li><b>Testers:</b> sign out in Settings → Access. Your tester record, usage ledger and profile are deleted 90 days after your last use; to delete them sooner, email <a href="mailto:cole@ciprari.ai">cole@ciprari.ai</a>. You can also remove Atelier from your LinkedIn account’s permitted services.</li>
     <li><b>Request deletion of everything:</b> email <a href="mailto:cole@ciprari.ai">cole@ciprari.ai</a> and we will delete server-side data within 30 days.</li>
   </ul>
 

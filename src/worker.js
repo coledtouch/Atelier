@@ -7,7 +7,10 @@ import { hasVideoPart, geminiNativeChat, handleVideoApi, VIDEO_NEEDS_GEMINI } fr
 import { toolList, runTool, GOOGLE_SCOPES, saveGoogleAccount, removeGoogleAccount, addTokenAccount, removeTokenAccount, googleTokenFor,
   CANVA_ID, CANVA_MAX_IMAGE, CanvaError, canvaConfigured, canvaAuthUrl, canvaTakeState, canvaCompleteAuth, removeCanvaAccount, canvaSendImage,
   canvaListDesigns, canvaDesignFormats, canvaImport, canvaFetchFile } from './tools.js';
+import { identify, handleLinkedIn, signedOut, fail } from './tester/auth.js';
+import { testerRouter, testerAdmin } from './tester/router.js';
 export { Relay } from './relay.js';
+export { Ledger } from './tester/ledger.js';
 
 const NVIDIA = {
   chat: 'https://integrate.api.nvidia.com/v1',
@@ -214,6 +217,9 @@ async function handlePassthrough(req, env, provider, sub, search) {
   return forward(`${cfg.base}/${sub}${qs}`, init);
 }
 
+// What the tester router borrows from the owner's proxy (passed in, so tester code never imports worker.js).
+const UPSTREAM = { forward, shapeChatBody, CHAT_UPSTREAM, PROVIDERS, PASSTHRU };
+
 // Brute-force guard: 10 wrong passcodes from one IP locks it out for 15 minutes.
 const LOCK_LIMIT = 10;
 const LOCK_SECONDS = 900;
@@ -235,6 +241,20 @@ async function handleApi(req, env, url) {
   if (path === 'health') {
     const server = Object.fromEntries(Object.entries(PROVIDERS).map(([n, p]) => [n, Boolean(env[p.secret] && env.APP_PASSCODE)]));
     return json({ ok: true, serverKey: server.nvidia, server });
+  }
+
+  // ── LinkedIn testers (docs/superpowers/specs/2026-09-30-atelier-tester-access-*.md) ──
+  // Sign-in routes are public. Then: passcode → owner (wins over a tester cookie); a live tester cookie → the tester
+  // router, which allows only its own list (deny by default); otherwise everything below behaves as it always has.
+  if (path.startsWith('li/')) return handleLinkedIn(req, env, url, path);
+  const who = await identify(req, env, passOk);
+  if (who.kind === 'tester') return testerRouter(req, env, url, path, who, UPSTREAM);
+  if (who.stale && !req.headers.get('x-app-pass')) return signedOut(); // an ended tester session, not a passcode problem
+  if (path.startsWith('tester/')) return fail(401, 'tester_signin', 'Sign in with LinkedIn to use the tester routes.');
+  // GET /api/testers, POST /api/testers/{revoke,restore,config} → the owner's Testers panel. Passcode only.
+  if (path === 'testers' || path.startsWith('testers/')) {
+    if (!passOk(req, env)) return json({ error: 'Enter your passcode.' }, 401);
+    return testerAdmin(req, env, path);
   }
 
   // GET/PUT /api/me → the synced "You" profile (bio, writing style, memory). Passcode only.

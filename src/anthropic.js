@@ -7,6 +7,8 @@ import Anthropic from '@anthropic-ai/sdk';
 // Models that accept the server-side refusal fallback ("default" routes by refusal category).
 const FALLBACK_MODELS = new Set(['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+// LinkedIn testers may ask for up to "high" (addendum A3); max_tokens still bounds what a call can cost.
+const TESTER_EFFORT = { low: 'low', medium: 'medium', high: 'high', xhigh: 'high', max: 'high' };
 
 function toClaudeContent(content) {
   if (typeof content === 'string') return content;
@@ -52,28 +54,33 @@ function toClaudeMessages(messages) {
   return out;
 }
 
-function buildParams(body) {
+// tester (LinkedIn testers only): {maxTokens, webUses, fallbacks} as the tester router priced them.
+function buildParams(body, tester = null) {
   const model = body.model.replace(/^anthropic:/, '');
   const system = body.messages
     .filter((m) => m.role === 'system')
     .map((m) => (typeof m.content === 'string' ? m.content : ''))
     .join('\n\n');
 
-  const params = { model, max_tokens: Math.min(Math.max(body.max_tokens || 16000, 1024), 64000), messages: toClaudeMessages(body.messages) };
+  let maxTokens = Math.min(Math.max(body.max_tokens || 16000, 1024), 64000);
+  if (tester) maxTokens = Math.min(maxTokens, Math.max(tester.maxTokens || 0, 1024)); // the reserve was priced at this cap
+  const params = { model, max_tokens: maxTokens, messages: toClaudeMessages(body.messages) };
   if (system) params.system = system;
-  if (Array.isArray(body.tools) && body.tools.length) {
+  if (!tester && Array.isArray(body.tools) && body.tools.length) {
     params.tools = body.tools.map((t) => ({ name: t.function.name, description: t.function.description, input_schema: t.function.parameters }));
   }
   // Current models take adaptive thinking + effort; Haiku 4.5 predates both.
   if (!/haiku/.test(model)) {
     params.thinking = { type: 'adaptive', display: 'summarized' };
-    params.output_config = { effort: EFFORTS.has(body.reasoning_effort) ? body.reasoning_effort : 'medium' };
+    const effort = EFFORTS.has(body.reasoning_effort) ? body.reasoning_effort : 'medium';
+    params.output_config = { effort: tester ? TESTER_EFFORT[effort] : effort };
   }
-  // Live web search for time-sensitive questions (Anthropic-hosted server tool).
-  if (body.web_search) params.tools = [...(params.tools || []), { type: 'web_search_20260209', name: 'web_search', max_uses: 5 }];
+  // Live web search for time-sensitive questions (Anthropic-hosted server tool). Testers: the max_uses that was priced.
+  const uses = tester ? tester.webUses || 0 : 5;
+  if (body.web_search && uses > 0) params.tools = [...(params.tools || []), { type: 'web_search_20260209', name: 'web_search', max_uses: uses }];
   // Cache the stable prefix (system prompt + earlier turns) so follow-ups start faster and cost less.
   params.cache_control = { type: 'ephemeral' };
-  if (FALLBACK_MODELS.has(model)) {
+  if (FALLBACK_MODELS.has(model) && (!tester || tester.fallbacks !== false)) {
     params.betas = ['server-side-fallback-2026-07-01'];
     params.fallbacks = 'default';
   }
@@ -87,13 +94,18 @@ const errorResponse = (err) => new Response(JSON.stringify({ error: err.error?.e
 });
 
 // workspaceId: needed only for org-level keys that aren't scoped to a workspace.
-export async function claudeChat(body, apiKey, workspaceId) {
+// tester (LinkedIn testers only): {maxTokens, webUses, fallbacks, onUsage}. One round only (no pause_turn continuation);
+// onUsage(list of final.usage) runs once when the answer completes, onUsage(null) when it fails or is cancelled.
+export async function claudeChat(body, apiKey, workspaceId, tester = null) {
   const client = new Anthropic({
     apiKey,
     maxRetries: 1,
     ...(workspaceId ? { defaultHeaders: { 'anthropic-workspace-id': workspaceId } } : {}),
   });
-  let params = buildParams(body);
+  let params = buildParams(body, tester);
+  const rounds = tester ? 1 : 4, usage = [];
+  let reported = false;
+  const report = (list) => { if (reported || !tester?.onUsage) return undefined; reported = true; return Promise.resolve().then(() => tester.onUsage(list)).catch(() => {}); };
   // Pull the first event before answering so auth/model errors surface as real HTTP statuses.
   const open = async (p) => {
     const stream = client.beta.messages.stream(p);
@@ -133,25 +145,29 @@ export async function claudeChat(body, apiKey, workspaceId) {
       };
       try {
         // A long server-side search can pause the turn; continue it (up to 3 times) so the answer completes.
-        for (let round = 0; round < 4; round++) {
+        for (let round = 0; round < rounds; round++) {
           if (round > 0) cur = await open(params);
           if (!cur.first.done) handle(cur.first.value);
           for (let r = await cur.iter.next(); !r.done; r = await cur.iter.next()) handle(r.value);
           const final = await cur.stream.finalMessage();
-          if (final.stop_reason === 'pause_turn' && round < 3) {
+          usage.push(final.usage);
+          if (final.stop_reason === 'pause_turn' && round < rounds - 1) {
             params = { ...params, messages: [...params.messages, { role: 'assistant', content: final.content }] };
             continue;
           }
           delta({ anthropic_content: final.content }, final.stop_reason === 'tool_use' ? 'tool_calls' : 'stop');
           break;
         }
+        await report(usage);
       } catch (err) {
         send({ error: { message: err.error?.error?.message || err.message || 'Claude stream failed' } });
+        await report(null);
       }
       ctrl.enqueue(enc.encode('data: [DONE]\n\n'));
       ctrl.close();
     },
     cancel() {
+      report(null);
       cur?.stream.abort();
     },
   });

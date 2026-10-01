@@ -1,8 +1,8 @@
 // Offline shell only. API requests and generated media are never cached here.
-const VERSION = 'atelier-v49';
+const VERSION = 'atelier-v50';
 // index.html loads these three with ?v=<n> (a test keeps it equal to VERSION), so a fresh page never runs stale cached code.
 const V = VERSION.slice('atelier-v'.length);
-const SHELL = ['/', '/index.html', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`, '/data-safety.js', '/video.js',
+const SHELL = ['/', '/index.html', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`, '/data-safety.js', '/video.js', '/tester.js',
   '/manifest.webmanifest', '/vendor/marked.js', '/vendor/purify.js', '/vendor/highlight.js',
   '/vendor/fflate.js', '/icons/atelier-v2-32.png', '/icons/atelier-v2-180.png', '/icons/atelier-v2-192.png', '/icons/atelier-v2-512.png', '/icons/atelier-v2-maskable-512.png', '/icons/atelier-mark-96.png',
   '/privacy', '/tos', '/legal.css'];

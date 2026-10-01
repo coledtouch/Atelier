@@ -39,6 +39,38 @@ npx wrangler secret put GEMINI_API_KEY
 Connected accounts use more secrets (GITHUB_TOKEN, STRIPE_API_KEY, CLOUDFLARE_API_TOKEN, RAILWAY_API_TOKEN,
 SLACK_USER_TOKEN, GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET, CANVA_CLIENT_ID + CANVA_CLIENT_SECRET) — see Settings → Connections.
 
+### LinkedIn testers
+Up to 25 people can sign in with LinkedIn and use paid models under a hard spending ceiling. The passcode path is
+unchanged: a request with the passcode is always the owner, even if it also carries a tester cookie.
+Design: `docs/superpowers/specs/2026-09-30-atelier-tester-access-design.md` plus the addendum (the addendum wins).
+
+- **Sign-in:** `GET /api/li/start` → LinkedIn OpenID Connect (`openid profile email` only, never `w_member_social`) →
+  `GET /api/li/callback` → `/?tester=welcome|full|revoked|paused|denied|error`. The session is a random token in the
+  `__Host-atelier_tester` cookie (HttpOnly, Secure, SameSite=Strict, 30 days); only its SHA-256 is stored. The LinkedIn
+  access token is used once for userinfo and never kept. `POST /api/li/logout` ends the session. `GET /api/li/spots`
+  → `{spotsLeft, cap, paused}` (public, cached 60 s).
+- **Deny by default:** a tester request goes only through `src/tester/router.js` (`TESTER_ROUTES`): `GET /api/tester/me`,
+  `GET/PUT /api/tester/profile` (their own "You", ≤ 300 KB, kept in the Ledger), `POST /api/chat`, OpenAI / Meta / Nano
+  Banana images, Veo (lite and fast; one video, ≤ 8 s, ≤ $1.00) with polls and downloads of their own jobs only, and
+  `/api/video/*` for their own uploads (≤ 200 MB). Everything else answers `403 {code:"owner_only"}`. Non-GET tester
+  requests must come from `https://atelier.ciprari.ai` (or `http://127.0.0.1:8787`). No NVIDIA and no free models.
+- **The meter (`src/tester/ledger.js`, Durable Object `Ledger`, SQLite):** every metered call reserves its worst case
+  (`src/tester/prices.js`: chat ≤ $0.25 per call, ≤ $0.50 with web search) before the provider is called, then settles to
+  the provider's reported usage (`src/tester/usage.js`), never above the reservation. Unfinished reservations settle at
+  the full amount after 15 minutes. Limits: $1/day and $10/month per tester, $100/month for all testers together. Every
+  metered response carries `x-tester-allowance: {"dayLeft","monthLeft","poolLeft"}` (micro-dollars). Refusals are
+  `402 tester_budget {scope, resetsAt}`, `503 tester_paused`, `403 tester_model | tester_owner | tester_origin`,
+  `413 tester_too_large` or `401 tester_signin`; when the server swaps the model (web search too big for Opus → Sonnet 5.5,
+  a long video on 3.1 Pro → 3.8 Flash) the response says so in `x-tester-model`.
+- **Owner controls (passcode):** `GET /api/testers` (config, pool, last refused sub, roster with today/month spend),
+  `POST /api/testers/revoke {sub}`, `/restore {sub}`, `/config {cap?, paused?, day_limit?, month_limit?, pool_limit?, preview_subs?}`
+  (limits in micro-dollars; the pool can't go above $1,000). A fresh Ledger starts **paused**; while paused only subs in
+  `preview_subs` can sign in and spend (still within their limits). Tester records (profile included) are deleted 90 days
+  after last use.
+- **Setup:** add `https://atelier.ciprari.ai/api/li/callback` and `http://127.0.0.1:8787/api/li/callback` to the LinkedIn
+  app's authorized redirect URLs, and set `npx wrangler secret put LINKEDIN_CLIENT_ID` / `LINKEDIN_CLIENT_SECRET`.
+  The first deploy adds the `Ledger` class (migration `v2`).
+
 ### Canva
 Canva uses OAuth 2.0 with PKCE. Each connected Canva account's refresh token is kept in KV (`canva_accounts`), and access
 tokens are cached separately (`canva_access:<id>`). Canva refresh tokens are single-use: each refresh stores the

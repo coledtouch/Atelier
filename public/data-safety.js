@@ -5,6 +5,13 @@ const record = value => value && typeof value === 'object' && !Array.isArray(val
 const text = value => typeof value === 'string';
 const validDate = value => Number.isFinite(value) && value >= 0 && value <= 8640000000000000;
 const safeId = value => text(value) && /^[\w-]{1,120}$/.test(value);
+// Error kinds app.js renders (errorBox); 'budget' and 'signin' are LinkedIn tester refusals (402/403/413/503, 401).
+export const ERROR_KINDS = Object.freeze(['offline', 'passcode', 'key', 'rate', 'model', 'busy', 'filtered', 'stopped', 'interrupted', 'budget', 'signin', 'error']);
+// What stopped a tester request (e.budget): its scope, when a day/month/pool allowance resets (ms), and short: true when
+// money was still left in that scope (the request was just bigger than what remained).
+const BUDGET_SCOPES = new Set(['day', 'month', 'pool', 'call', 'paused', 'model', 'owner', 'large', 'origin']);
+const validBudget = b => record(b) && BUDGET_SCOPES.has(b.scope) && (b.resetsAt == null || validDate(b.resetsAt)) && (b.short == null || b.short === true)
+  && Object.keys(b).every(k => k === 'scope' || k === 'resetsAt' || k === 'short');
 export function safeMediaUrl(value) {
   if (!text(value)) return false;
   if (/^data:(image\/(png|jpe?g|webp|gif|avif)|video\/(mp4|webm));base64,[a-z\d+/=\s]+$/i.test(value)) return true;
@@ -28,6 +35,7 @@ export function validateBackup(data) {
       assert(record(e) && safeId(e.id) && KINDS.has(e.kind) && text(e.prompt) && validDate(e.createdAt));
       for (const key of ['text', 'think', 'enhanced', 'error', 'from']) if (e[key] != null) assert(text(e[key]));
       if (e.errorKind != null) assert(text(e.errorKind) && /^[a-z]{1,20}$/.test(e.errorKind)); // rendered as a data attribute
+      if (e.budget != null) assert(validBudget(e.budget));
       if (e.params != null) assert(record(e.params));
       if (e.meta != null) assert(record(e.meta) && (e.meta.model == null || text(e.meta.model)));
       if (e.images != null) assert(Array.isArray(e.images) && e.images.every(safeMediaUrl));

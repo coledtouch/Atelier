@@ -15,7 +15,7 @@
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Atelier" />
   <meta property="og:title" content="Atelier — Come make something yours." />
-  <meta property="og:description" content="A personal AI studio for answers, code, images, video, ideas and apps. 25 LinkedIn tester spots — paid models included. Built by Cole Ciprari." />
+  <meta property="og:description" content="25 LinkedIn tester spots. Paid models included. Built by Cole Ciprari." />
   <meta property="og:url" content="https://atelier.ciprari.ai/" />
   <meta property="og:image" content="https://atelier.ciprari.ai/og/atelier-share.png" />
   <meta property="og:image:width" content="1200" />
@@ -28,8 +28,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=49" />
-  <link rel="stylesheet" href="/studio.css?v=49" />
+  <link rel="stylesheet" href="/app.css?v=50" />
+  <link rel="stylesheet" href="/studio.css?v=50" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -90,6 +90,7 @@
 
   <footer class="dock" id="dock">
     <div class="dock-inner">
+      <p class="allowance" id="allowance" hidden></p>
       <div class="composer" id="composer">
         <nav class="modes" id="modes" role="tablist" aria-label="Mode">
           <span class="mode-ink" id="modeInk" aria-hidden="true"></span>
@@ -177,7 +178,7 @@
 
       <section class="you-card">
         <h4>Import your history</h4>
-        <p class="hint">Atelier reads what <i>you</i> wrote and distills who you are and how you write. Files are read in this browser; only your own messages are sent (to Gemini) for analysis.</p>
+        <p class="hint">Atelier reads what <i>you</i> wrote and distills who you are and how you write. Files are read in this browser; only your own messages are sent to an AI model for analysis.</p>
         <div class="row-actions" style="margin-top:10px">
           <label class="chip file-chip">ChatGPT export<input type="file" id="impChatgpt" accept=".zip,.json" aria-label="Import ChatGPT history" /></label>
           <label class="chip file-chip">Claude export<input type="file" id="impClaude" accept=".zip,.json" aria-label="Import Claude history" /></label>
@@ -201,7 +202,7 @@
       </header>
       <nav class="settings-nav" aria-label="Settings sections">
         <button type="button" class="chip on" data-settings="general" aria-pressed="true">General</button>
-        <button type="button" class="chip" data-settings="connections" aria-pressed="false">Connections</button>
+        <button type="button" class="chip owner-only" data-settings="connections" aria-pressed="false">Connections</button>
         <button type="button" class="chip" data-settings="models" aria-pressed="false">Models</button>
         <button type="button" class="chip" data-settings="data" aria-pressed="false">Your data</button>
       </nav>
@@ -209,24 +210,32 @@
       <div class="sheet-scroll" id="settingsScroll">
         <section class="field-group">
           <h4>Access</h4>
-          <label class="field">
-            <span>Studio passcode <small>Saved on this device so you can come back to your work.</small></span>
-            <div class="key-row">
-              <input type="password" name="passcode" id="passcodeField" autocomplete="current-password" spellcheck="false" enterkeyhint="done" />
-              <button type="button" class="chip" id="testPassBtn">Test</button>
-            </div>
-          </label>
-          <p class="hint" id="passResult" role="status"></p>
+          <div class="owner-only">
+            <label class="field">
+              <span>Studio passcode <small>Saved on this device so you can come back to your work.</small></span>
+              <div class="key-row">
+                <input type="password" name="passcode" id="passcodeField" autocomplete="current-password" spellcheck="false" enterkeyhint="done" />
+                <button type="button" class="chip" id="testPassBtn">Test</button>
+              </div>
+            </label>
+            <p class="hint" id="passResult" role="status"></p>
+          </div>
+          <div class="tester-only tester-access" id="testerAccess"></div>
         </section>
 
-        <section class="field-group">
+        <section class="field-group needs-owner">
+          <h4>Testers</h4>
+          <div class="testers" id="testersPanel"></div>
+        </section>
+
+        <section class="field-group owner-only">
           <h4>Available providers</h4>
           <p class="prov-status" id="provStatus"></p>
           <button type="button" class="chip" id="diagBtn" style="margin-top:10px">Check provider keys</button>
           <div class="prov-status" id="diagOut" aria-live="polite" style="margin-top:10px"></div>
         </section>
 
-        <section class="field-group">
+        <section class="field-group owner-only">
           <h4>Connections</h4>
           <ul class="conn-list" id="connList"></ul>
           <p class="hint">Connect your tools to work across your accounts. Atelier asks for approval before sending or changing anything.</p>
@@ -240,13 +249,14 @@
 
         <section class="field-group">
           <h4>Models</h4>
-          <div class="model-grid" id="modelFields"></div>
+          <p class="hint tester-only tester-models" id="testerModels"></p>
+          <div class="model-grid owner-only" id="modelFields"></div>
           <label class="field">
             <span>Creativity <small id="tempVal"></small></span>
             <input type="range" name="temperature" min="0" max="1.2" step="0.05" />
           </label>
           <datalist id="modelList"></datalist>
-          <button type="button" class="chip" id="refreshModels">Load my model catalog</button>
+          <button type="button" class="chip owner-only" id="refreshModels">Load my model catalog</button>
         </section>
 
         <section class="field-group">
@@ -275,22 +285,27 @@
     </form>
   </dialog>
 
-  <!-- Onboarding -->
-  <dialog class="sheet onboard" id="onboard" aria-labelledby="onboardTitle" aria-describedby="onboardMsg">
-    <form method="dialog" class="sheet-body" id="onboardForm">
-      <div class="onboard-art" aria-hidden="true"><img src="/icons/atelier-v2-192.png" alt="" width="64" height="64" /></div>
-      <p class="eyebrow">Welcome to your studio</p>
-      <h2 class="onboard-title" id="onboardTitle">A space for<br /><em>what comes next.</em></h2>
-      <p class="onboard-copy">Your personal studio for thinking, writing and creating. Enter your passcode to make yourself at home.</p>
-      <label class="field"><span>Studio passcode</span><input type="password" name="passcode" id="onboardPass" placeholder="Enter your passcode" enterkeyhint="go" autocomplete="current-password" spellcheck="false" required /></label>
-      <label class="field"><span>First name <small>Optional — make the studio feel like you.</small></span><input name="name" placeholder="Your first name" autocomplete="given-name" maxlength="60" /></label>
-      <p class="hint" id="onboardMsg" role="status"></p>
-      <div class="onboard-actions">
-        <span></span>
-        <button class="btn-primary" id="onboardGo">Open the studio</button>
-      </div>
+  <!-- Sign-in: mirrors the LinkedIn promo (brand/atelier-linkedin-promo-4x5.webp). Testers sign in with LinkedIn; the owner's passcode stays one tap away. -->
+  <dialog class="sheet onboard" id="onboard" aria-labelledby="onboardTitle" aria-describedby="onboardLead">
+    <div class="sheet-body">
+      <p class="ob-brand"><span class="ob-mark" aria-hidden="true"></span>Atelier</p>
+      <h2 class="onboard-title" id="onboardTitle">Come make<br /><em>something yours.</em></h2>
+      <p class="onboard-copy" id="onboardLead">A personal AI studio for answers, code, images, video, ideas and apps.</p>
+      <p class="ob-note" id="signinNote" role="alert" hidden></p>
+      <a class="li-btn" id="liBtn" href="/api/li/start"><svg class="li-in" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zm1.78 13.02H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/></svg><span>Sign in with LinkedIn</span></a>
+      <p class="ob-spots" id="spotsLine"><b>25 tester spots.</b> Paid models included.</p>
+      <details class="ob-owner" id="ownerEntry">
+        <summary>Studio owner? Use your passcode</summary>
+        <form method="dialog" class="ob-form" id="onboardForm">
+          <label class="field"><span>Studio passcode</span><input type="password" name="passcode" id="onboardPass" placeholder="Enter your passcode" enterkeyhint="go" autocomplete="current-password" spellcheck="false" required /></label>
+          <label class="field"><span>First name <small>Optional — make the studio feel like you.</small></span><input name="name" placeholder="Your first name" autocomplete="given-name" maxlength="60" /></label>
+          <p class="hint" id="onboardMsg" role="status"></p>
+          <button class="btn-primary" id="onboardGo">Open the studio</button>
+        </form>
+      </details>
       <p class="legal-links"><a href="/privacy" target="_blank">Privacy Policy</a> · <a href="/tos" target="_blank">Terms of Service</a></p>
-    </form>
+      <p class="ob-by">Built by Cole Ciprari</p>
+    </div>
   </dialog>
 
   <!-- Viewer -->
@@ -308,6 +323,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=49" type="module"></script>
+  <script src="/app.js?v=50" type="module"></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateBackup, prepareImport, safeMediaUrl, recoverThread } from '../public/data-safety.js';
+import { readFile } from 'node:fs/promises';
+import { validateBackup, prepareImport, safeMediaUrl, recoverThread, ERROR_KINDS } from '../public/data-safety.js';
 const fixture = () => ({ app: 'atelier', v: 1, threads: [{ id: 'thread-1', title: 'Example', createdAt: 1, updatedAt: 2,
   entries: [{ id: 'entry-1', kind: 'ask', prompt: 'Hello', createdAt: 1, text: 'World' }] }] });
 test('accepts existing v1 thread backups', () => assert.equal(validateBackup(fixture()).length, 1));
@@ -42,6 +43,25 @@ test('rejects markup in the persisted error kind and drops transient timers on i
   const bad = fixture(); Object.assign(bad.threads[0].entries[0], { error: 'boom', errorKind: '"><img src=x onerror=alert(1)>' }); assert.throws(() => validateBackup(bad));
   const good = fixture(); Object.assign(good.threads[0].entries[0], { error: 'boom', errorKind: 'rate', startedAt: 5 });
   const [t] = prepareImport(good, () => 'copy-1'); assert.equal(t.entries[0].errorKind, 'rate'); assert.equal('startedAt' in t.entries[0], false);
+});
+// LinkedIn tester refusals: errorKind 'budget' / 'signin', and e.budget = {scope, resetsAt} for the card's reset line.
+test('accepts tester budget errors and keeps them through import', () => {
+  const data = fixture(); Object.assign(data.threads[0].entries[0], { text: '', error: 'Today’s tester allowance is used up.', errorKind: 'budget', budget: { scope: 'day', resetsAt: 1790000000000 } });
+  assert.equal(validateBackup(data).length, 1);
+  const [t] = prepareImport(data, () => 'copy-1'); assert.deepEqual(t.entries[0].budget, { scope: 'day', resetsAt: 1790000000000 });
+  const plain = fixture(); Object.assign(plain.threads[0].entries[0], { error: 'Sign in again', errorKind: 'signin', budget: { scope: 'paused' } }); assert.equal(validateBackup(plain).length, 1);
+  const cleared = fixture(); cleared.threads[0].entries[0].budget = null; assert.equal(validateBackup(cleared).length, 1); // a retried entry
+  const short = fixture(); short.threads[0].entries[0].budget = { scope: 'day', resetsAt: 1790000000000, short: true }; assert.equal(validateBackup(short).length, 1); // money was left
+  for (const bad of [{ scope: 'week' }, { scope: 'day', resetsAt: 'tomorrow' }, { scope: 'day', resetsAt: -1 }, { scope: 'day', extra: '<b>' }, { scope: 'day', short: 'yes' }, 'day', []]) {
+    const d = fixture(); d.threads[0].entries[0].budget = bad; assert.throws(() => validateBackup(d), undefined, JSON.stringify(bad));
+  }
+});
+test('every error kind app.js can render is a known, attribute-safe kind', async () => {
+  for (const k of ERROR_KINDS) assert.match(k, /^[a-z]{1,20}$/);
+  assert.ok(ERROR_KINDS.includes('budget') && ERROR_KINDS.includes('signin'));
+  const src = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const titles = src.match(/const ERROR_TITLE = \{([^}]*)\}/)[1];
+  assert.deepEqual([...titles.matchAll(/(\w+):\s*'/g)].map((m) => m[1]).sort(), [...ERROR_KINDS].sort());
 });
 // Video entries: poster + frames as small image data URLs, a Gemini file reference, never the video itself.
 const IMG = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';

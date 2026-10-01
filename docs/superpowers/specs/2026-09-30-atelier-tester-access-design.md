@@ -172,7 +172,7 @@ Money is stored in integer **micro-dollars**. The day key is the UTC `YYYY-MM-DD
   - the pool month (same test);
   - or the pool is paused.
   - Otherwise it writes a reservation and returns its id.
-- **`settle(id, actual)`** moves the reservation to spent, recording the minimum of the actual cost and the reserved amount. Settle never charges more than the reservation, because the reservation is a true worst case.
+- **`settle(id, actual)`** moves the reservation to spent, recording the provider-reported actual cost, bounded at 4× the reservation (amended after review: estimates such as the bytes/3 token rule can be beaten on purpose, so an overrun is recorded in the day, month and pool totals and refuses the next reserve, instead of being absorbed).
 - **`expireStale()`**, run on an alarm every 10 minutes, turns any reservation older than 15 minutes into a settle at the full reserved amount. That covers aborted streams and crashes.
 
 **Worst case (reserve):**
@@ -253,7 +253,7 @@ Uses node:test in the existing style, with `worker.fetch` plus fakes. A small in
 2. **Shaping:** tool, web_search, n, oversized max_tokens and unknown model are stripped or rejected. Gemini `tools` are rejected. Veo is rejected.
 3. **Ledger:**
    - Reserve is refused at each limit (day, month, pool, paused).
-   - Settle never charges above the reservation.
+   - Settle records the reported actual, bounded at 4× the reservation.
    - Stale reservations expire at the full amount.
    - Concurrent reserves never exceed the pool (interleaved calls).
    - Cap admission: the 26th person is refused, a revoked tester is refused, and a restored tester is admitted.

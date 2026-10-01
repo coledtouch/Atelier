@@ -16,8 +16,11 @@
   // Profile + memory sync ("You" panel), guarded by APP_PASSCODE.
   "kv_namespaces": [{ "binding": "ATELIER_KV", "id": "069567aa1d9a426588b90757d49c6c71" }],
   // Remote browser relay: one Durable Object holds the extension's WebSocket.
-  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "Relay" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }],
+  // Ledger: LinkedIn tester roster, sessions and spend meter (one "main" instance, SQLite; starts paused).
+  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "Relay" }, { "name": "LEDGER", "class_name": "Ledger" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }, { "tag": "v2", "new_sqlite_classes": ["Ledger"] }],
+  // Per-IP throttle on the public LinkedIn sign-in routes (/api/li/start, /api/li/callback), ahead of the Ledger.
+  "ratelimits": [{ "name": "LI_LIMIT", "namespace_id": "4711", "simple": { "limit": 20, "period": 60 } }],
   // Canva app client ID (public - it appears in the sign-in URL). CANVA_CLIENT_SECRET is a Worker secret.
   "vars": { "CANVA_CLIENT_ID": "OC-AaD0HxvGYkj2" },
   // Workers Logs keep our own console output, but not the automatic per-request invocation logs: those record full

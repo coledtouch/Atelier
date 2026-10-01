@@ -6,6 +6,7 @@
 // Lists are in preference order: "Auto" uses the first model whose provider has a key, and the rest
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 import { prepareImport, recoverThread } from './data-safety.js';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js';
 import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js';
 
 const PREMIUM_MODELS = {
@@ -97,7 +98,7 @@ const PROVIDER_NAMES = { nvidia: 'NVIDIA', anthropic: 'Anthropic', openai: 'Open
 const ASPECTS = { '1:1': [1024, 1024], '4:5': [896, 1152], '3:2': [1216, 832], '16:9': [1344, 768], '9:16': [768, 1344] };
 const KLEIN_SIZES = { '1:1': [1024, 1024], '4:5': [944, 1104], '3:2': [1248, 832], '16:9': [1392, 752], '9:16': [752, 1392] };
 const IMAGE_MODELS = [
-  { id: 'openai:gpt-image-2.5-flare', label: 'GPT Image 2.5', edit: true, run: (p, o, sig) => openaiImage(p, o, sig) },
+  { id: 'openai:gpt-image-2.5-flare', editId: 'openai:gpt-image-2.5-sunburst', label: 'GPT Image 2.5', edit: true, run: (p, o, sig) => openaiImage(p, o, sig) },
   { id: 'gemini:gemini-3-pro-image', label: 'Nano Banana Pro', edit: true, run: (p, o, sig) => geminiImage('gemini-3-pro-image', p, o, sig) },
   { id: 'gemini:gemini-3.1-flash-image', label: 'Nano Banana 2 · fast', edit: true, run: (p, o, sig) => geminiImage('gemini-3.1-flash-image', p, o, sig) },
   { id: 'meta:muse-image-1.0', label: 'Muse Image (Meta)', run: (p, o, sig) => metaImage(p, o, sig) },
@@ -187,6 +188,7 @@ const S = {
   ctrl: null,
   attachments: [],
   video: null, // the composer's video (session-only: File, blob: URL, clip upload) — see attachVideo
+  tester: null, // a LinkedIn tester (GET /api/tester/me, see setTester); null for the owner and signed-out visitors
   settings: mergeDeep(structuredClone(DEFAULT_SETTINGS), migrateSettings(LS.get('settings', {}))),
   opts: mergeDeep({
     ask: { model: '', think: false, voice: false, web: false },
@@ -200,16 +202,32 @@ const S = {
 
 // Last known provider list (refreshed from /api/health at boot) so startup never waits on the network.
 let server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, ...LS.get('server', {}) };
+// A tester device starts in tester mode from its last /api/tester/me (boot checks it again). The owner passcode always wins.
+if (!S.settings.passcode) S.tester = normalizeMe(LS.get('tester', null));
+let testerAllow = allowedIds(S.tester); // model ids the tester may use (from the Worker's TESTER_* lists)
+const feat = (k) => !S.tester || S.tester.features[k] !== false;
 function providerReady(provider) {
+  if (S.tester) return Boolean(server[provider]) && [...testerAllow].some((id) => providerOf(id) === provider);
   return Boolean(server[provider] && S.settings.passcode);
 }
-const modelReady = (id) => providerReady(providerOf(id));
+// Testers: only the models on their list (never NVIDIA), so menus and fallback chains never end on one they can't use.
+const modelReady = (id) => (S.tester ? Boolean(server[providerOf(id)]) && testerAllow.has(id) : providerReady(providerOf(id)));
+// Least room under the $0.25 tester per-call cap (their worst case adds a dearer fallback or output rate): a tester's
+// Auto tries them last, so long Code/Build/Deep-think requests start on a model that fits. A pinned one is still used.
+const TESTER_DEMOTE = new Set(['anthropic:claude-opus-5-5', 'anthropic:claude-fable-5-1', 'openai:gpt-6-astra']);
+function roleModels(role) {
+  const list = CHAT_MODELS[ROLE_LIST[role] || role] || [];
+  return S.tester ? [...list.filter(([id]) => !TESTER_DEMOTE.has(id)), ...list.filter(([id]) => TESTER_DEMOTE.has(id))] : list;
+}
 // The model a role uses right now: the pinned one if usable, else the first usable in its list.
 function modelFor(role) {
   const pinned = S.settings.models[role];
   if (pinned && modelReady(pinned)) return pinned;
-  const list = CHAT_MODELS[ROLE_LIST[role]] || [];
-  return (list.find(([id]) => modelReady(id)) || list.find(([id]) => providerOf(id) === 'nvidia') || list[0])[0];
+  const list = roleModels(role);
+  const ready = list.find(([id]) => modelReady(id));
+  if (ready) return ready[0];
+  if (S.tester) return S.tester.models.chat.find(modelReady) || list[0][0];
+  return (list.find(([id]) => providerOf(id) === 'nvidia') || list[0])[0];
 }
 // Effort hint for providers that support it (Claude / OpenAI / Gemini); NVIDIA ignores it.
 const EFFORT = { agent: 'medium', web: 'low', ask: 'low', smart: 'low', reason: 'high', code: 'high', write: 'medium', vision: 'low', watch: 'low', ideas: 'medium', build: 'high', fast: 'low' };
@@ -327,15 +345,17 @@ function apiHeaders(extra = {}) {
   if (S.settings.passcode) h['x-app-pass'] = S.settings.passcode;
   return h;
 }
+// extra: {code, scope, resetsAt} from Atelier's own {error, code} refusals (tester limits, model_no_images, …).
 class ApiError extends Error {
-  constructor(status, msg) { super(msg); this.status = status; }
+  constructor(status, msg, extra) { super(msg); this.status = status; if (extra) Object.assign(this, extra); }
 }
 async function toApiError(r) {
-  let detail = '';
+  noteAllowance(r);
+  let detail = '', j = null;
   try {
     const t = await r.text();
     try {
-      let j = JSON.parse(t);
+      j = JSON.parse(t);
       if (Array.isArray(j)) j = j[0] || {}; // Gemini wraps errors in an array
       detail = j.detail || j.error?.message || j.error || j.message || j.title || t;
       if (typeof detail !== 'string') detail = JSON.stringify(detail);
@@ -344,11 +364,14 @@ async function toApiError(r) {
   detail = String(detail).slice(0, 400);
   // Firewalls and gateways sometimes answer with a whole HTML page — don't dump markup into the chat.
   if (/^\s*<(!doctype|html|head|body)/i.test(detail)) detail = 'The provider answered with an error page instead of a response.';
+  const code = typeof j?.code === 'string' && /^[a-z_]{1,40}$/.test(j.code) ? j.code : undefined;
+  // Tester refusals are already worded for people (and never mention a passcode): keep them as they are.
+  if (isTesterCode(code) || code === 'model_no_images') return new ApiError(r.status, detail || `Request failed (${r.status}).`, { code, scope: typeof j.scope === 'string' ? j.scope : undefined, resetsAt: j.resetsAt });
   if (r.status === 401 && /passcode|key on the server/i.test(detail)) return new ApiError(401, detail);
   if (/^error code: \d+$/i.test(detail.trim())) detail = '';
   const lead = {
-    401: 'The provider rejected the server’s API key — run “Check provider keys” in Settings.',
-    403: 'This key isn’t allowed to use that model.',
+    401: S.tester ? 'That model isn’t available right now — try another.' : 'The provider rejected the server’s API key — run “Check provider keys” in Settings.',
+    403: S.tester ? 'That model isn’t available right now — try another.' : 'This key isn’t allowed to use that model.',
     404: 'That model isn’t available (it may have been retired). Try another in the options below.',
     422: 'The model didn’t accept those parameters.',
     429: 'Rate limited — give it a few seconds.',
@@ -357,7 +380,7 @@ async function toApiError(r) {
     504: 'The model timed out — it was busy or cold-starting. Try again in a moment.',
     503: 'The model is warming up or overloaded — try again shortly.',
   }[r.status] || `Request failed (${r.status}).`;
-  return new ApiError(r.status, detail && !lead.includes(detail) ? `${lead} ${detail}` : lead);
+  return new ApiError(r.status, detail && !lead.includes(detail) ? `${lead} ${detail}` : lead, code && { code });
 }
 
 // Streams a chat completion, falling back through the role's model chain when a model is retired,
@@ -366,8 +389,10 @@ async function toApiError(r) {
 const accountProblem = (err) => err.status === 401 || err.status === 403 || err.status === 402
   || ((err.status === 400 || err.status === 429) && /workspace|api key|credit|billing|quota|balance|permission|not enabled|organization/i.test(err.message));
 // Friendly error kinds. New entries store e.errorKind; older/restored entries only have e.error, so text is classified too.
-function errorKind(msg = '', status) {
+function errorKind(msg = '', status, code) {
   const m = String(msg || '');
+  if (code === 'tester_signin') return 'signin';
+  if (isTesterCode(code)) return 'budget'; // tester limits: never a dead provider, never the passcode screen
   if (m === 'Stopped.') return 'stopped';
   if (/interrupted/i.test(m)) return 'interrupted'; // renderThread + data-safety recoverThread/prepareImport messages
   if (/passcode/i.test(m)) return 'passcode';
@@ -379,20 +404,38 @@ function errorKind(msg = '', status) {
   if (/safety|filtered|rephras/i.test(m)) return 'filtered';
   return 'error';
 }
-const ERROR_TITLE = { offline: 'Couldn’t reach the studio', passcode: 'Passcode needed', key: 'A provider key needs attention', rate: 'Too many requests', model: 'That model isn’t available', busy: 'The model is busy', filtered: 'Try rephrasing', stopped: 'Stopped', interrupted: 'Interrupted', error: 'Couldn’t finish' };
-function errorTitle(kind, msg = '') {
+const ERROR_TITLE = { offline: 'Couldn’t reach the studio', passcode: 'Passcode needed', key: 'A provider key needs attention', rate: 'Too many requests', model: 'That model isn’t available', busy: 'The model is busy', filtered: 'Try rephrasing', stopped: 'Stopped', interrupted: 'Interrupted', budget: 'Over the tester allowance', signin: 'Sign in again', error: 'Couldn’t finish' };
+// The 'budget' card's title by what stopped it (e.budget.scope, from the 402/403/413/503 code).
+const BUDGET_TITLE = { day: 'Today’s allowance is used up', month: 'This month’s allowance is used up', pool: 'The tester budget is used up this month', call: 'Too much for one request', paused: 'Tester access is paused', model: 'Not in the tester plan', owner: 'Not part of tester mode', large: 'That request is too large', origin: 'Request blocked' };
+// A day/month/pool refusal while at least a cent is still left: this request was bigger than what remains (short).
+const SHORT_TITLE = { day: 'Not enough left today for this request', month: 'Not enough left this month for this request', pool: 'Not enough left in the tester budget for this request' };
+const RESET_SCOPES = ['day', 'month', 'pool'];
+function budgetOf(err) {
+  const scope = err.code === 'tester_budget' ? (BUDGET_TITLE[err.scope] && err.scope !== 'paused' ? err.scope : 'call')
+    : { tester_paused: 'paused', tester_model: 'model', tester_owner: 'owner', owner_only: 'owner', tester_too_large: 'large', tester_origin: 'origin' }[err.code] || 'call';
+  const resetsAt = RESET_SCOPES.includes(scope) ? parseResetsAt(err.resetsAt, scope) : null;
+  const short = RESET_SCOPES.includes(scope) && Boolean(S.tester) && (leftOf(S.tester)[scope] ?? 0) >= 10_000; // the pill already has the refusal's figures
+  return { scope, ...(resetsAt ? { resetsAt } : {}), ...(short ? { short: true } : {}) };
+}
+function errorTitle(kind, msg = '', budget) {
+  if (kind === 'budget') return (budget?.short && SHORT_TITLE[budget.scope]) || BUDGET_TITLE[budget?.scope] || ERROR_TITLE.budget;
+  if (kind === 'key' && S.tester) return 'That model isn’t available'; // testers have no provider keys to check
   if (kind === 'offline') return /dropped/i.test(msg) ? 'The connection dropped' : navigator.onLine ? ERROR_TITLE.offline : 'You’re offline';
   if (kind === 'passcode' && /too many/i.test(msg)) return 'Too many passcode tries';
   return ERROR_TITLE[kind] || ERROR_TITLE.error;
 }
 const deadProviders = new Map(); // provider → reason, for this session
 // Gemini can take a video as the clip: it has a key and hasn't failed on an account problem this session.
-const geminiUsable = () => providerReady('gemini') && !deadProviders.has('gemini');
+const geminiUsable = () => providerReady('gemini') && !deadProviders.has('gemini') && feat('video');
+// Testers send whole clips only up to 200 MB / 3 min (addendum A2); past that the model gets frames, as with any long clip.
+const clipWhy = (v) => clipReason(v) || (S.tester ? testerClipReason(v) : null);
+const clipOk = (v) => clipWhy(v) === null;
 async function streamChat(opts) {
-  const chain = [opts.model, ...(CHAT_MODELS[ROLE_LIST[opts.role] || opts.role] || []).map(([id]) => id).filter(modelReady)]
-    .filter((v, i, a) => v && a.indexOf(v) === i && !deadProviders.has(providerOf(v)));
-  if (!chain.length && opts.model) chain.push(opts.model);
-  let lastErr, stale = false;
+  const chain = [opts.model, ...roleModels(opts.role).map(([id]) => id).filter(modelReady)]
+    .filter((v, i, a) => v && a.indexOf(v) === i && !deadProviders.has(providerOf(v)) && (!S.tester || modelReady(v)));
+  if (!chain.length && opts.model && !S.tester) chain.push(opts.model);
+  if (!chain.length && S.tester) throw new ApiError(403, 'None of the models in your tester plan can do this one.', { code: 'tester_model' });
+  let lastErr, stale = false, served = null;
   models: for (const model of chain) {
     if (lastErr && deadProviders.has(providerOf(model))) continue;
     // messages may be built per model (a video goes to Gemini as the clip, to everyone else as frames); null skips it.
@@ -403,8 +446,8 @@ async function streamChat(opts) {
       let got = false, shown = false;
       if (stale) { stale = false; opts.onRestart(); }
       try {
-        await streamChatOnce({ ...opts, model, messages, extra: typeof opts.extra === 'function' ? opts.extra(model) : opts.extra, onDelta: (d) => { got = true; if (d.content || d.tool_calls || d.anthropic_content) shown = true; opts.onDelta(d); } });
-        opts.onModel?.(model);
+        await streamChatOnce({ ...opts, model, messages, extra: typeof opts.extra === 'function' ? opts.extra(model) : opts.extra, onDelta: (d) => { got = true; if (d.content || d.tool_calls || d.anthropic_content) shown = true; opts.onDelta(d); }, onServed: (m) => { served = m; } });
+        opts.onModel?.(served || model);
         return model;
       } catch (err0) {
         let err = err0;
@@ -414,6 +457,10 @@ async function streamChat(opts) {
         // A caller that can clear a failed attempt (onRestart) still moves on after thinking-only output (e.g. Gemini
         // ran out of tokens while thinking); everyone else stops once anything streamed.
         if ((opts.onRestart ? shown : got) || err.name === 'AbortError') throw err;
+        // Day/month/pool/paused/sign-in limits are the same on every model: no fallback, no dead provider. A per-call
+        // refusal ('call': too big for one tester request on THIS model) isn't: a cheaper model in the chain may fit.
+        const callCap = err.code === 'tester_budget' && err.scope === 'call';
+        if (isTesterCode(err.code) && !callCap) throw err;
         stale = got;
         if (network) {
           if (!navigator.onLine) throw err; // offline fails every model the same way
@@ -422,6 +469,8 @@ async function streamChat(opts) {
           continue models;
         }
         if (!opts.role) throw err;
+        if (callCap) { toast(`Too much for ${modelLabel(model)} in one tester request — switching`); continue models; } // a cheaper model may fit
+        if (err.code === 'model_no_images') continue models; // this model can't price or read images: the next one may
         const retired = err.status === 404 || err.status === 410 || (err.status === 400 && /not found|deprecat|end of life|does not exist|unknown model/i.test(err.message));
         if ((err.status === 405 || err.status === 408 || err.status === 429 || err.status >= 500) && !accountProblem(err)) {
           toast(err.status === 408 ? `${modelLabel(model)} is slow — switching` : `${modelLabel(model)} is busy — switching`);
@@ -466,7 +515,7 @@ async function streamChatOnce(opts) {
   }
 }
 
-async function streamChatRaw({ model, messages, temperature, max_tokens = 4096, signal, onDelta, extra = {}, role }) {
+async function streamChatRaw({ model, messages, temperature, max_tokens = 4096, signal, onDelta, extra = {}, role, onServed, onNote }) {
   const effort = providerOf(model) === 'nvidia' ? null : EFFORT[role];
   const r = await fetch('/api/chat', {
     method: 'POST', signal,
@@ -474,6 +523,12 @@ async function streamChatRaw({ model, messages, temperature, max_tokens = 4096, 
     body: JSON.stringify({ model, messages, temperature: temperature ?? S.settings.temperature, top_p: 0.95, max_tokens, stream: true, ...(effort ? { reasoning_effort: effort } : {}), ...extra }),
   });
   if (!r.ok) throw await toApiError(r);
+  noteAllowance(r);
+  // The tester router may answer on another model to stay within the per-call cap (addendum A7b): say so on the meta line.
+  const servedBy = S.tester && r.headers.get('x-tester-model'), why = S.tester && r.headers.get('x-tester-note');
+  const swapped = servedBy && /^[\w.:/-]{1,120}$/.test(servedBy) && servedBy !== model;
+  if (swapped) onServed?.(servedBy);
+  if (why || swapped) onNote?.(why ? why.slice(0, 120) : 'switched to fit the tester cap');
   const ctype = r.headers.get('content-type') || '';
   if (!ctype.includes('event-stream')) {
     const j = await r.json();
@@ -550,19 +605,23 @@ async function genai(modelId, body, { signal, onTick, fn } = {}) {
 async function xfetch(path, { method = 'POST', body, signal } = {}) {
   const r = await fetch(`/api/x/${path}`, { method, signal, headers: apiHeaders(), body: body ? JSON.stringify(body) : undefined });
   if (!r.ok) throw await toApiError(r);
+  noteAllowance(r);
   return r;
 }
 const blobToDataUrl = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
 const splitDataUrl = (u) => { const m = u.match(/^data:([^;]+);base64,(.+)$/); return m ? { mime: m[1], data: m[2] } : null; };
 
-const imageModel = (id) => IMAGE_MODELS.find((m) => m.id === id && modelReady(m.id)) || IMAGE_MODELS.find((m) => modelReady(m.id)) || IMAGE_MODELS.find((m) => !m.run);
-const videoModel = (id) => VIDEO_MODELS.find((m) => m.id === id && modelReady(m.id)) || VIDEO_MODELS.find((m) => modelReady(m.id)) || VIDEO_MODELS.find((m) => m.local);
+// null only for a tester whose plan has no image (or video) model: there is no free fallback for testers.
+const imageModel = (id) => IMAGE_MODELS.find((m) => m.id === id && modelReady(m.id)) || IMAGE_MODELS.find((m) => modelReady(m.id)) || (S.tester ? null : IMAGE_MODELS.find((m) => !m.run));
+const videoModel = (id) => VIDEO_MODELS.find((m) => m.id === id && modelReady(m.id)) || VIDEO_MODELS.find((m) => modelReady(m.id)) || (S.tester ? null : VIDEO_MODELS.find((m) => m.local));
+const canEdit = (m) => m.edit && modelReady(m.id) && (!m.editId || modelReady(m.editId));
 
 const OPENAI_SIZES = { '1:1': '1024x1024', '4:5': '1024x1280', '3:2': '1536x1024', '16:9': '1792x1008', '9:16': '1008x1792' };
 async function openaiImage(prompt, o, signal) {
   const edit = Boolean(o.image);
-  const body = { model: edit ? 'gpt-image-2.5-sunburst' : 'gpt-image-2.5-flare', prompt, n: 1, quality: 'high', output_format: 'jpeg' };
-  if (edit) Object.assign(body, { images: [{ image_url: o.image }], input_fidelity: 'high' });
+  // Testers: medium quality and always an explicit size, so the request can be priced (spec §6, addendum A7b).
+  const body = { model: edit ? 'gpt-image-2.5-sunburst' : 'gpt-image-2.5-flare', prompt, n: 1, quality: S.tester ? 'medium' : 'high', output_format: 'jpeg' };
+  if (edit) Object.assign(body, { images: [{ image_url: o.image }], input_fidelity: 'high' }, S.tester ? { size: OPENAI_SIZES[o.aspect] || '1024x1024' } : {});
   else body.size = OPENAI_SIZES[o.aspect] || '1024x1024';
   const j = await (await xfetch(`openai/images/${edit ? 'edits' : 'generations'}`, { body, signal })).json();
   const out = (j.data || []).map((d) => ({ src: d.b64_json ? `data:image/jpeg;base64,${d.b64_json}` : d.url })).filter((m) => m.src);
@@ -690,6 +749,8 @@ You can only act or look things up through tools that are actually attached to t
 
 // What this app can reach, so the model never claims it "can't connect".
 function capabilities() {
+  if (S.tester) return `## What Atelier can reach
+This is a LinkedIn tester account. Atelier's connected-account tools (Gmail, Calendar, Drive, Canva, Slack, GitHub, Stripe, Cloudflare, Railway) and browser control are not available to testers, so no account or browser tools are attached to any request. If the user asks about their accounts, inbox or open web pages, say in one line that the tester version of Atelier can't reach them, then offer the best thing you can do instead (for example, they can paste the text).`;
   const sv = TOOLS.services || {};
   const NAMES = { gcal: 'google calendar', gdrive: 'google drive' };
   const accts = (k) => (['gmail', 'gcal', 'gdrive'].includes(k) ? sv.gmailAccounts : k === 'github' ? sv.githubAccounts?.map((a) => a.label) : k === 'cloudflare' ? sv.cloudflareAccounts?.map((a) => a.label) : k === 'canva' ? sv.canvaAccounts?.map((a) => a.label) : null);
@@ -982,6 +1043,7 @@ function paintEntry(li, e) {
     out.insertAdjacentHTML('beforeend', errorBox(e));
     acts.innerHTML = (e.kind === 'ask' || e.kind === 'code') && e.text ? btn('copy', ICON.copy, 'Copy') : '';
   } else if (e.cut === 'stopped' && !e.pending) out.insertAdjacentHTML('beforeend', '<p class="cut-note">Stopped early</p>');
+  else if (e.cut === 'cap' && !e.pending) out.insertAdjacentHTML('beforeend', '<p class="cut-note">Stopped at the tester length limit — ask it to continue</p>');
   li.setAttribute('aria-busy', e.pending ? 'true' : 'false');
   if (e.pending) syncLoops(out);
 }
@@ -991,9 +1053,11 @@ function errorBox(e) {
   // Only known kinds: errorKind is persisted and can arrive from an imported backup (never trust it into markup).
   const kind = typeof e.errorKind === 'string' && Object.hasOwn(ERROR_TITLE, e.errorKind) ? e.errorKind : errorKind(e.error);
   const soft = kind === 'stopped' || kind === 'interrupted';
-  const extra = kind === 'passcode' ? btn('settings', '', 'Enter passcode') : kind === 'key' ? btn('settings', '', 'Settings') : kind === 'filtered' ? btn('edit-prompt', ICON.pen, 'Edit prompt') : '';
+  const extra = kind === 'passcode' ? btn('settings', '', 'Enter passcode') : kind === 'key' && !S.tester ? btn('settings', '', 'Settings') : kind === 'filtered' ? btn('edit-prompt', ICON.pen, 'Edit prompt')
+    : kind === 'budget' && S.tester ? btn('allowance', '', 'See allowance') : kind === 'signin' && !S.tester ? btn('signin', '', 'Sign in') : '';
   const detail = kind === 'stopped' ? '' : `<p class="error-detail">${esc(e.error)}</p>`;
-  return `<div class="error-box${soft ? ' soft' : ''}" data-error="${esc(kind)}"><p class="error-title">${esc(errorTitle(kind, e.error))}</p>${detail}<div class="error-acts">${btn('retry', ICON.retry, soft ? 'Run again' : 'Try again')}${extra}</div></div>`;
+  const reset = kind === 'budget' && Number.isFinite(e.budget?.resetsAt) ? `<p class="error-reset">${e.budget.resetsAt > Date.now() ? `Resets ${esc(resetIn(e.budget.resetsAt))}` : 'It has reset — try again'} <span>· ${esc(new Date(e.budget.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }))}</span></p>` : '';
+  return `<div class="error-box${soft ? ' soft' : ''}" data-error="${esc(kind)}"><p class="error-title">${esc(errorTitle(kind, e.error, e.budget))}</p>${detail}${reset}<div class="error-acts">${btn('retry', ICON.retry, soft ? 'Run again' : 'Try again')}${extra}</div></div>`;
 }
 // The ONE 'working' line: spinner (.status::before) + sheen label + elapsed time kept current by tickAll().
 const elapsedLabel = (t0) => { const s = Math.round((Date.now() - t0) / 1000); return s < 3 ? '' : s < 60 ? `· ${s}s` : `· ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -1067,7 +1131,7 @@ async function submit(textArg, modeArg, extra = {}) {
   if (video && mode !== 'ask' && mode !== 'code') { mode = 'ask'; setMode('ask'); toast('Sent to Ask — videos are answered there'); }
 
   // One request, several deliverables ("answer this, make an image and a video") → parallel tasks.
-  if (mode === 'ask' && !images.length && !video && !extra.entry && MULTI_HINT.test(text) && MULTI_JOIN.test(text)) {
+  if (mode === 'ask' && !images.length && !video && !extra.entry && feat('helpers') && MULTI_HINT.test(text) && MULTI_JOIN.test(text)) {
     if (textArg == null) { $('#input').value = ''; autosize(); }
     const ctrl = new AbortController(); running.add(ctrl); setBusy();
     const tasks = await planTasks(text, ctrl.signal).catch(() => null).finally(() => { running.delete(ctrl); setBusy(); hideToast(); });
@@ -1146,7 +1210,7 @@ async function run(e) {
   const thread = S.thread;
   if (thread) liveThreads.set(thread.id, thread);
   const signal = ctrl.signal;
-  e.pending = true; e.error = null; e.errorKind = null; e.cut = null;
+  e.pending = true; e.error = null; e.errorKind = null; e.cut = null; delete e.budget;
   const t0 = e.startedAt = Date.now();
   repaint(e); // a retry otherwise keeps its old error card until the first token
   try {
@@ -1163,14 +1227,16 @@ async function run(e) {
     } else {
       console.error(err);
       e.error = /failed to fetch|networkerror|\bload failed/i.test(err.message || '') ? 'Couldn’t reach Atelier — the connection dropped. Tap Try again.' : err.message || String(err);
-      e.errorKind = errorKind(e.error, err.status);
+      e.errorKind = errorKind(e.error, err.status, err.code);
+      if (isTesterCode(err.code)) e.budget = budgetOf(err);
       if (err.status === 401) updateKeyState(false);
-      if (err.status === 401 && /passcode/i.test(e.error)) { S.settings.passcode = ''; saveSettings(); DB.kvSet('passcode', '').catch(() => {}); signinReason = 'rejected'; openOnboard('rejected'); }
+      if (err.code === 'tester_signin') testerSignedOut('expired');
+      else if (err.status === 401 && /passcode/i.test(e.error)) { S.settings.passcode = ''; saveSettings(); syncRole(); DB.kvSet('passcode', '').catch(() => {}); signinReason = 'rejected'; openOnboard('rejected'); }
     }
   } finally {
     e.pending = false;
     if (thread && !thread.entries.some(entry => entry.pending)) liveThreads.delete(thread.id);
-    $('#activityStatus').textContent = e.error ? `${errorTitle(e.errorKind || errorKind(e.error), e.error)}.` : e.cut === 'stopped' ? 'Stopped early.' : 'Your response is ready.';
+    $('#activityStatus').textContent = e.error ? `${errorTitle(e.errorKind || errorKind(e.error), e.error, e.budget)}.` : e.cut === 'stopped' ? 'Stopped early.' : 'Your response is ready.';
     delete e.stage; delete e.chars; delete e.status; delete e.startedAt;
     for (const st of e.steps || []) {
       if (st.status === 'awaiting') { st.status = 'declined'; approvals.delete(st.id); }
@@ -1184,6 +1250,7 @@ async function run(e) {
     if (thread && thread === S.thread) { persist(true); renderOptions(); }
     if (thread?.entries.length === 1 && !e.error) nameThread(e, thread);
     if (!e.error && !e.group) learnFrom(e);
+    if (S.tester) refreshTesterSoon(); // reservations settle after the stream: show the settled numbers
   }
 }
 
@@ -1212,7 +1279,7 @@ async function runChat(e, signal, thread = S.thread) {
   const pinned = e.params?.model && modelReady(e.params.model) ? e.params.model : null;
   // Follow-ups stay smart if the previous Ask in this thread escalated.
   const prevAsk = [...thread.entries.slice(0, thread.entries.indexOf(e))].reverse().find((x) => x.kind === 'ask');
-  const web = e.kind === 'ask' && !pinned && !voice && !hasImg && providerReady('anthropic') && (e.params?.web || FRESH_HINT.test(e.prompt));
+  const web = e.kind === 'ask' && !pinned && !voice && !hasImg && providerReady('anthropic') && feat('web') && (e.params?.web || FRESH_HINT.test(e.prompt));
   const escalate = e.kind === 'ask' && !pinned && !think && !voice && !hasImg && !web && (needsBrains(e.prompt) || (prevAsk?.meta?.escalated && e.prompt.length < 200));
   const role = hasImg ? 'vision' : web ? 'web' : think ? 'reason' : voice ? 'write' : escalate ? 'smart' : e.kind;
   const model = hasImg ? modelFor('vision') : pinned || modelFor(role);
@@ -1228,6 +1295,7 @@ async function runChat(e, signal, thread = S.thread) {
     role,
     extra: (m) => ({ ...(web && providerOf(m) === 'anthropic' ? { web_search: true } : {}), ...(think && /nemotron|gemma|qwen/i.test(m) ? { chat_template_kwargs: { enable_thinking: true } } : {}) }),
     onModel: (m) => { e.meta.model = m; },
+    onNote: (note) => { e.meta.note = [e.meta.note, note].filter(Boolean).join(' · '); },
     temperature: e.kind === 'code' ? Math.min(S.settings.temperature, 0.3) : undefined,
     onDelta: ({ content, reasoning, status }) => { e.text += content; e.think += reasoning; if (status) e.status = status; repaint(e); },
   });
@@ -1258,8 +1326,9 @@ async function runWatch(e, src, signal, thread = S.thread) {
     const plans = new Map();
     const withVideo = (x, plan) => [...videoParts(v, plan), { type: 'text', text: x.prompt }];
     const messagesFor = (m) => {
-      const plan = planFor(v, providerOf(m), clip);
+      let plan = planFor(v, providerOf(m), clip);
       if (!plan) return null;
+      if (S.tester && plan.kind === 'frames' && plan.cap > MAX_IMAGES) plan = framesPlan(v, MAX_IMAGES);
       plans.set(m, plan);
       let replayed = false;
       const history = historyFor(e, ['ask', 'code'], followUp ? (x) => { if (x !== src) return null; replayed = true; return withVideo(x, plan); } : undefined, thread);
@@ -1301,8 +1370,8 @@ async function ensureClip(src, e, signal, thread) {
   let job = clipJobs.get(src.id);
   if (job && (job.state === 'failed' || (job.state === 'active' && !fileValid(job.file)))) job = null;
   const local = videoFiles.get(src.id);
-  if (!job && local && clipEligible(v)) clipJobs.set(src.id, (job = startClip(local.file, { apiHeaders, name: v.name, mime: v.mime, onChange: clipChanged })));
-  if (!job) return { file: null, why: v.file ? 'expired' : clipReason(v) };
+  if (!job && local && clipOk(v)) clipJobs.set(src.id, (job = startClip(local.file, { apiHeaders, name: v.name, mime: v.mime, onChange: clipChanged })));
+  if (!job) return { file: null, why: v.file ? 'expired' : clipWhy(v) };
   const show = (j) => { e.status = j.state === 'uploading' ? `Uploading clip · ${Math.round(j.progress * 100)}%` : j.state === 'processing' ? 'Gemini is preparing the clip' : ''; repaint(e); };
   const stop = () => job.abort();
   const watchers = clipWatch.get(job) || new Set();
@@ -1325,7 +1394,7 @@ async function ensureClip(src, e, signal, thread) {
 // ───────────────────────── accounts agent ─────────────────────────
 let TOOLS = { services: {}, list: [] };
 async function loadTools() {
-  if (!S.settings.passcode || !server.nvidia) return;
+  if (!S.settings.passcode || S.tester || !server.nvidia) return;
   try {
     const r = await fetch('/api/tools', { headers: apiHeaders() });
     if (r.ok) { const hadCanva = canvaOn(); TOOLS = await r.json(); if (canvaOn() !== hadCanva) syncCanvaActs(); renderOptions(); syncAttachBtn(); }
@@ -1370,7 +1439,7 @@ async function refreshRemote(force = false) {
   REMOTE.checked = Date.now();
   return REMOTE.online;
 }
-const browserAvailable = () => EXT.ready || REMOTE.online;
+const browserAvailable = () => !S.tester && (EXT.ready || REMOTE.online);
 
 // Runs a browser command here (extension in this browser) or on the user's computer (relay).
 async function extCall(cmd, args = {}, timeout = 60000, approved = false) {
@@ -1430,7 +1499,7 @@ const BROWSER_TOOLS = [
   'x-write': write, 'x-label': label, 'x-service': 'browser',
 }));
 const BROWSER_HINT = /\b(browser|tab|tabs|web ?page|website|site|open|go to|visit|click|log ?in|sign ?in|fill (in|out)|form|search (the )?web|google)\b|https?:\/\//i;
-const agentTools = () => [...TOOLS.list, ...(browserAvailable() ? BROWSER_TOOLS : [])];
+const agentTools = () => (S.tester ? [] : [...TOOLS.list, ...(browserAvailable() ? BROWSER_TOOLS : [])]);
 const wantsAgent = (e) => agentTools().length > 0 && (e.params?.tools || AGENT_HINT.test(e.prompt) || (browserAvailable() && BROWSER_HINT.test(e.prompt)));
 
 const approvals = new Map(); // step id → resolve(boolean)
@@ -1547,7 +1616,7 @@ function renderSteps(e) {
 }
 
 async function enhance(e, kind, signal) {
-  if (!e.params?.enhance) return e.prompt;
+  if (!e.params?.enhance || !feat('helpers')) return e.prompt;
   e.stage = 'Refining prompt'; repaint(e);
   try {
     const raw = await completeChat({
@@ -1562,8 +1631,10 @@ async function enhance(e, kind, signal) {
 
 async function runImage(e, signal) {
   const cfg = imageModel(e.params.model);
+  if (!cfg) throw new ApiError(403, 'Images aren’t part of your tester plan right now.', { code: 'tester_model' });
   if (e.images?.length) {
-    const editor = cfg.edit ? cfg : IMAGE_MODELS.find((m) => m.edit && modelReady(m.id));
+    const editor = canEdit(cfg) ? cfg : IMAGE_MODELS.find(canEdit);
+    if (!editor && S.tester) throw new ApiError(403, 'Photo edits need GPT Image or Nano Banana, and neither is in your tester plan right now.', { code: 'tester_model' });
     return editor ? runPremiumEdit(e, editor, signal) : runEdit(e, signal);
   }
   e.meta = { model: cfg.id, note: e.params.aspect };
@@ -1581,7 +1652,7 @@ async function runImage(e, signal) {
         return m.run ? await m.run(prompt, { aspect: e.params.aspect, seed }, signal)
           : extractMedia(await genai(m.id, m.body(prompt, { ...e.params, seed }), { signal, onTick: (ms) => tick(e, ms) }), 'image');
       } catch (err) {
-        const skippable = accountProblem(err) || err.status === 429 || err.status === 503;
+        const skippable = !isTesterCode(err.code) && (accountProblem(err) || err.status === 429 || err.status === 503);
         if (err.name === 'AbortError' || !skippable || ci >= candidates.length - 1) throw err;
         if (candidates[ci] === m) { ci++; e.meta.model = candidates[ci].id; toast(`${m.label} unavailable — using ${candidates[ci].label}`); repaint(e); }
       }
@@ -1602,7 +1673,8 @@ async function runPremiumEdit(e, cfg, signal) {
   e.media = []; e.expect = 1;
   e.stage = 'Retouching'; repaint(e);
   const img = await shrinkDataUrl(e.images[0], 1536, 1536, 3_000_000);
-  e.media = (await cfg.run(e.prompt, { image: img }, signal)).map((m) => ({ type: 'image', ...m }));
+  const aspect = S.tester ? await loadImg(img).then((i) => cvAspect(i.naturalWidth, i.naturalHeight), () => '1:1') : undefined; // testers: an explicit output size
+  e.media = (await cfg.run(e.prompt, { image: img, aspect }, signal)).map((m) => ({ type: 'image', ...m }));
 }
 
 async function runEdit(e, signal) {
@@ -1629,6 +1701,11 @@ async function runEdit(e, signal) {
 
 async function runVideo(e, signal) {
   let cfg = videoModel(e.params.model);
+  if (!cfg) throw new ApiError(403, 'Video isn’t part of your tester plan right now.', { code: 'tester_model' });
+  if (S.tester && cfg.veo) {
+    const { seconds, resolution } = veoShape(e.params), cost = veoCost(cfg.id, seconds, resolution), room = headroom(leftOf(S.tester), VEO_CAP);
+    if (cost == null || cost > room.amount) throw new ApiError(402, `A ${seconds} s ${resolution} Veo clip reserves ${money(cost ?? 0, { up: true })}; ${money(room.amount)} fits right now.`, { code: 'tester_budget', scope: room.scope });
+  }
   // Skip a doomed call if Cosmos was refused for this key in the last 24h.
   if (cfg.fn && Date.now() - LS.get('cosmosDeniedAt', 0) < 864e5) cfg = VIDEO_MODELS.find((m) => m.local);
   const still = e.images?.[0] || null;
@@ -1642,7 +1719,7 @@ async function runVideo(e, signal) {
       e.media = [{ type: 'video', src }];
       return;
     } catch (err) {
-      if (err.name === 'AbortError' || !(accountProblem(err) || err.status === 429)) throw err;
+      if (err.name === 'AbortError' || S.tester || !(accountProblem(err) || err.status === 429)) throw err;
       toast('Veo unavailable on this key (billing/quota) — making a motion still instead');
       await runMotionStill(e, prompt, still, signal);
       e.meta.note = `motion still · Veo said: ${err.message.replace(/^Request failed \(\d+\)\.\s*/, '').slice(0, 140)}`;
@@ -1768,6 +1845,7 @@ async function runBuild(e, signal) {
   await streamChat({ model, role: 'build', onModel: (m) => { e.meta.model = m; }, messages, signal, temperature: 0.4, max_tokens: 32000, onDelta: ({ content }) => { e.text += content; repaint(e); } });
   const html = extractHtml(stripThink(e.text));
   if (!html) throw new Error('No HTML came back. Try again, or pick a stronger Build model in Settings.');
+  if (S.tester && !/<\/html>\s*$/i.test(html)) e.cut = 'cap'; // the reply hit the per-call length cap before the file ended
   const title = (html.match(/<title>([^<]*)<\/title>/i)?.[1] || e.prompt).trim().slice(0, 60);
   e.app = { html, title };
   e.text = '';
@@ -1783,6 +1861,7 @@ function extractHtml(s) {
 }
 
 async function nameThread(e, thread) {
+  if (!feat('helpers')) return; // the title stays the prompt's first words
   try {
     const t = helperAnswer(await completeChat({ model: modelFor('fast'), role: 'fast', max_tokens: 800, temperature: 0.3, extra: noThink, messages: [{ role: 'system', content: SYS.title() }, { role: 'user', content: e.prompt }] }), 'title', 8);
     if (t && t.length < 60 && thread && await DB.get(thread.id)) { thread.title = t.replace(/^["'#\s]+|["'.\s]+$/g, ''); await DB.put(thread); }
@@ -1833,12 +1912,14 @@ stream.addEventListener('click', async (ev) => {
     case 'retry':
       if (e.pending || e.canva) return;
       if (!navigator.onLine) return toast('You’re offline — try again once you’re connected', { error: true });
-      Object.assign(e, { text: '', think: '', media: [], ideas: null, app: null, error: null, errorKind: null, cut: null, steps: null, enhanced: null });
+      Object.assign(e, { text: '', think: '', media: [], ideas: null, app: null, error: null, errorKind: null, cut: null, steps: null, enhanced: null, budget: null });
       if (e.params?.seed) delete e.params.seed;
       for (const key of libThumbs.keys()) if (key.includes(`:${e.id}:`)) libThumbs.delete(key); // new media, same entry id: drop stale Library thumbs/posters
       return run(e);
     case 'edit-prompt': setMode(e.kind); $('#input').value = e.prompt; autosize(); return $('#input').focus();
     case 'settings': return openSettings();
+    case 'allowance': openSettings(); return selectSettings('general');
+    case 'signin': return openOnboard('expired');
     case 'view-media': return openViewer({ title: e.prompt, img: e.media[k].src, dl: () => dlMedia(e, k), more: { id: e.id, k } });
     case 'view-video': {
       const v = e.video, local = videoFiles.get(e.id), title = v?.name || e.prompt;
@@ -2007,8 +2088,14 @@ function selectOpt(label, key, options, value) {
 }
 function modelChoices(list, current, fallbackLabel) {
   const opts = [['', `${fallbackLabel}`], ...list.filter(([id]) => modelReady(id))];
-  if (current && !opts.some(([v]) => v === current)) opts.push([current, shortModel(current)]);
+  if (current && !S.tester && !opts.some(([v]) => v === current)) opts.push([current, shortModel(current)]);
   return opts;
+}
+// Tester Veo: what the chosen clip reserves, and which lengths won't fit (addendum A7b).
+function veoNote(vm, fit, o) {
+  if (!fit.secs.length) return `Veo needs ${money(fit.cheapest, { up: true })} a clip · ${money(fit.room)} fits now`;
+  const { seconds, resolution } = veoShape(o), wont = [...[4, 6, 8].filter((x) => !fit.secs.includes(x)).map((x) => `${x} s`), ...(fit.hd ? [] : ['HD'])];
+  return `${money(veoCost(vm.id, seconds, resolution), { up: true })} of ${money(fit.room)}${wont.length ? ` · ${wont.join(', ')} won’t fit` : ''}`;
 }
 function renderOptions() {
   const o = S.opts[S.mode];
@@ -2019,7 +2106,7 @@ function renderOptions() {
       h = selectOpt('', 'model', modelChoices(CHAT_MODELS.ask, o.model, `Auto · ${modelLabel(modelFor('ask'))}`), o.model)
         + `<button class="chip ${o.think ? 'on' : ''}" data-toggle="think" title="Use a reasoning model"><span aria-hidden="true">◐</span> Deep think</button>`
         + `<button class="chip ${o.voice ? 'on' : ''}" data-toggle="voice" title="Write it as me, in my voice"><span aria-hidden="true">✎</span> As me</button>`
-        + (providerReady('anthropic') ? `<button class="chip ${o.web ? 'on' : ''}" data-toggle="web" title="Search the web for up-to-date, cited answers (automatic for news, prices, scores…)"><span aria-hidden="true">◍</span> Web</button>` : '')
+        + (providerReady('anthropic') && feat('web') ? `<button class="chip ${o.web ? 'on' : ''}" data-toggle="web" title="Search the web for up-to-date, cited answers (automatic for news, prices, scores…)"><span aria-hidden="true">◍</span> Web</button>` : '')
         + (agentTools().length ? `<button class="chip ${o.tools ? 'on' : ''}" data-toggle="tools" title="Always let Atelier use your accounts and browser (otherwise it decides from your wording)"><span aria-hidden="true">⚡</span> Accounts</button>` : '')
         + (S.video ? videoOptNote() : `<span class="opt-note">images → ${esc(modelLabel(modelFor('vision')))}</span>`);
       break;
@@ -2028,6 +2115,7 @@ function renderOptions() {
         + (S.video ? videoOptNote() : `<span class="opt-note">HTML blocks get a live Preview</span>`);
       break;
     case 'image':
+      if (!imageModel('')) { h = '<span class="opt-note keep">Images aren’t in your tester plan right now</span>'; break; }
       h = selectOpt('', 'model', [['', `Auto · ${imageModel('').label}`], ...IMAGE_MODELS.filter((m) => modelReady(m.id)).map((m) => [m.id, m.label])], o.model)
         + '<span class="opt-sep"></span>'
         + Object.keys(ASPECTS).map((a) => `<button class="chip ${o.aspect === a ? 'on' : ''}" data-set="aspect" data-v="${a}">${a}</button>`).join('')
@@ -2036,13 +2124,21 @@ function renderOptions() {
         + `<button class="chip ${o.enhance ? 'on' : ''}" data-toggle="enhance" title="Let an LLM enrich your prompt"><span aria-hidden="true">✦</span> Enhance</button>`
         + `<span class="opt-note">attach a photo to edit it</span>`;
       break;
-    case 'video':
+    case 'video': {
+      const vm = videoModel(o.model);
+      if (!vm) { h = '<span class="opt-note keep">Video isn’t in your tester plan right now</span>'; break; }
+      // Testers see only the lengths and resolutions whose worst case fits what's left (and $1 a clip).
+      const fit = S.tester && vm.veo ? veoChoices(vm.id, leftOf(S.tester)) : null;
+      if (fit?.secs.length) { if (o.aspect === '16:9hd' && !fit.hd) o.aspect = '16:9'; if (!fit.secs.includes(+o.secs)) o.secs = fit.secs.at(-1); }
+      const secs = fit ? fit.secs : [4, 6, 8];
       h = selectOpt('', 'model', [['', `Auto · ${videoModel('').label}`], ...VIDEO_MODELS.filter((m) => modelReady(m.id)).map((m) => [m.id, m.label])], o.model)
-        + selectOpt('', 'aspect', [['16:9', '16:9'], ['9:16', '9:16'], ['16:9hd', '16:9 · HD']], o.aspect)
-        + selectOpt('', 'secs', [[4, '4 s'], [6, '6 s'], [8, '8 s']], o.aspect === '16:9hd' ? 8 : o.secs)
+        + selectOpt('', 'aspect', [['16:9', '16:9'], ['9:16', '9:16'], ...(!fit || fit.hd ? [['16:9hd', '16:9 · HD']] : [])], o.aspect)
+        + (secs.length ? selectOpt('', 'secs', secs.map((x) => [x, `${x} s`]), o.aspect === '16:9hd' ? 8 : o.secs) : '')
         + `<button class="chip ${o.enhance ? 'on' : ''}" data-toggle="enhance"><span aria-hidden="true">✦</span> Enhance</button>`
-        + `<span class="opt-note">${esc(videoModel(o.model).note || 'attach an image to animate it')}</span>`;
+        // kept on phones whenever a length or HD was left out of the menus, so the tester sees why (A7b)
+        + `<span class="opt-note${fit && (!fit.hd || fit.secs.length < 3) ? ' keep' : ''}">${esc(fit ? veoNote(vm, fit, o) : vm.note || 'attach an image to animate it')}</span>`;
       break;
+    }
     case 'ideas':
       h = selectOpt('', 'count', [[4, '4 ideas'], [6, '6 ideas'], [9, '9 ideas']], o.count)
         + '<span class="opt-sep"></span>'
@@ -2283,11 +2379,11 @@ async function attachVideo(file) {
   Object.assign(v, { duration: r.duration, width: r.width, height: r.height, progress: 1 });
   if (r.clipOnly) {
     // The browser can't decode it (often iPhone HEVC in desktop Chrome), but Gemini can still watch the file itself.
-    if (clipEligible(v) && (v.clip || geminiUsable())) { Object.assign(v, { status: 'clip-only', clipOnly: true }); maybeStartClip(); }
+    if (clipOk(v) && (v.clip || geminiUsable())) { Object.assign(v, { status: 'clip-only', clipOnly: true }); maybeStartClip(); }
     else { clearComposerVideo(); return toast('This browser can’t play that video (often iPhone HEVC .mov in Chrome). Export it as MP4 (H.264) or open Atelier in Safari.', { error: true }); }
   } else {
     Object.assign(v, { poster: r.poster, frames: r.frames, status: 'ready' });
-    if (v.clip && !clipEligible(v)) { dropClip(v.clip); v.clip = null; } // over 10 min: frames only
+    if (v.clip && !clipOk(v)) { dropClip(v.clip); v.clip = null; } // over 10 min (testers: 3 min): frames only
   }
   renderAttachments();
 }
@@ -2296,7 +2392,7 @@ const clipRoute = (v) => geminiUsable() && (providerOf(modelFor('watch')) === 'g
 // Start the Gemini upload now when the clip path applies (a pinned non-Gemini video model gets frames).
 function maybeStartClip() {
   const v = S.video;
-  if (!v || v.clip || navigator.connection?.saveData || !clipEligible(v) || !clipRoute(v)) return;
+  if (!v || v.clip || navigator.connection?.saveData || !clipOk(v) || !clipRoute(v)) return;
   v.clip = startClip(v.file, { apiHeaders, name: v.name, mime: v.mime, onChange: clipChanged });
 }
 // The Video model pin or the providers changed: stop (or delete) an upload Gemini won't get, start one it now will.
@@ -2323,9 +2419,9 @@ function videoNote(v) {
   if (gemini && j?.state === 'uploading') return `Uploading for Gemini · ${Math.round(j.progress * 100)}%`;
   if (gemini && j?.state === 'processing') return 'Gemini is preparing the clip';
   if (v.status === 'clip-only') return gemini ? 'Can’t preview here · Gemini will watch it' : 'Can’t preview here · Gemini isn’t available';
-  if (gemini && (j?.state === 'active' || clipEligible(v))) return 'Gemini will watch & hear it';
-  const why = gemini ? { 'too-large': ' (over 1 GB)', 'too-long': ' (over 10 min)', type: ' (type not supported by Gemini)' }[clipReason(v)] || '' : '';
-  return `${framesPlan(v, frameCapFor(model)).n} frames · no audio${why}`;
+  if (gemini && (j?.state === 'active' || clipOk(v))) return 'Gemini will watch & hear it';
+  const why = gemini ? { 'too-large': ' (over 1 GB)', 'too-long': ' (over 10 min)', 'tester-large': ' (over 200 MB for testers)', 'tester-long': ' (over 3 min for testers)', type: ' (type not supported by Gemini)' }[clipWhy(v)] || '' : '';
+  return `${framesPlan(v, S.tester ? Math.min(MAX_IMAGES, frameCapFor(model)) : frameCapFor(model)).n} frames · no audio${why}`;
 }
 function videoChip(v) {
   const dur = fmtDur(v.duration);
@@ -3049,12 +3145,16 @@ function openSettings() {
     const tint = { code: 'code', vision: 'image', watch: 'video', ideas: 'ideas', build: 'build' }[k] || 'ask';
     return `<label class="field" style="--accent:var(--c-${tint})"><span><i></i>${l}</span><input name="m_${k}" list="modelList" value="${esc(s.models[k] || '')}" placeholder="Auto · ${esc(modelLabel(modelFor(k)))}" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" enterkeyhint="done" /></label>`;
   }).join('');
-  if (!$('#connList').children.length) $('#connList').innerHTML = `<li class="conn-loading">${statusLine('Checking connections', null)}</li>`;
-  renderConnections();
-  $('#provStatus').innerHTML = ['nvidia', 'anthropic', 'openai', 'gemini', 'zai', 'deepseek', 'meta'].map((p) => {
-    const on = providerReady(p); const why = on ? '' : server[p] ? 'needs passcode' : 'no key on server';
-    return `<span class="${on ? 'ok' : 'bad'}">${PROVIDER_NAMES[p]}${why ? `<small>${why}</small>` : ''}</span>`;
-  }).join('');
+  if (S.tester) renderTesterAccess(); // testers: who, allowance, sign out — no connections, providers or catalog
+  else {
+    if (!$('#connList').children.length) $('#connList').innerHTML = `<li class="conn-loading">${statusLine('Checking connections', null)}</li>`;
+    renderConnections();
+    $('#provStatus').innerHTML = ['nvidia', 'anthropic', 'openai', 'gemini', 'zai', 'deepseek', 'meta'].map((p) => {
+      const on = providerReady(p); const why = on ? '' : server[p] ? 'needs passcode' : 'no key on server';
+      return `<span class="${on ? 'ok' : 'bad'}">${PROVIDER_NAMES[p]}${why ? `<small>${why}</small>` : ''}</span>`;
+    }).join('');
+  }
+  if (S.settings.passcode && !S.tester) loadTesters();
   const dl = $('#modelList');
   if (!dl.children.length) dl.innerHTML = [...new Set(Object.values(CHAT_MODELS).flat().map(([id]) => id))].map((id) => `<option value="${id}">`).join('');
   $('#passResult').textContent = ''; $('#passResult').className = 'hint';
@@ -3068,6 +3168,15 @@ vv?.addEventListener('resize', () => { const f = document.activeElement; if (f?.
 $('#settingsForm').temperature.oninput = (ev) => { $('#tempVal').textContent = ev.target.value; };
 $('#settingsForm').addEventListener('submit', (ev) => {
   if (ev.submitter?.value !== 'save') return;
+  // The owner's Testers fields go with this Save too: limits edited there, and a sub typed into the preview field.
+  const lim = tpEdited(), sub = !S.tester && S.settings.passcode ? $('#tpSub')?.value.trim() : '';
+  if (lim?.error) {
+    ev.preventDefault(); // keep the sheet open on the bad field instead of dropping it
+    selectSettings('general');
+    const m = $('#tpMsg'); m.hidden = false; m.textContent = lim.error;
+    m.scrollIntoView({ block: 'center' });
+    return;
+  }
   const f = ev.target;
   const s = S.settings;
   s.passcode = f.passcode.value.trim();
@@ -3075,9 +3184,11 @@ $('#settingsForm').addEventListener('submit', (ev) => {
   s.temperature = +f.temperature.value;
   s.theme = $('input[name=theme]:checked', f)?.value || 'auto';
   MODEL_ROLES.forEach(([k]) => { s.models[k] = f['m_' + k].value.trim().replace(/^(anthropic|openai|gemini|zai|deepseek|meta):/i, (p) => p.toLowerCase()); });
-  saveSettings(); applyTheme(); renderOptions(); renderWelcome(); checkKey(); loadTools(); pullMe();
+  saveSettings(); syncRole(); applyTheme(); renderOptions(); renderWelcome(); checkKey(); loadTools(); pullMe();
   syncClip(); // the Video model pin decides clip vs frames
-  toast('Saved');
+  if (lim) testersPost('config', lim.body, null).then((ok) => { if (ok) { toast('Saved · tester limits updated'); loadTesters(); } });
+  else toast('Saved');
+  if (sub) tpAddPreview(sub, null);
 });
 // Verifies every stored provider key with its provider (free calls) and shows the exact error.
 $('#diagBtn').onclick = async () => {
@@ -3146,6 +3257,7 @@ $('#wipeBtn').onclick = async () => {
   if (!confirm('Clear Atelier threads, media, profile and saved sign-in on this device? Export your threads first. This cannot be undone. Your synced profile and connected accounts on the server will remain.')) return;
   try {
     clearTimeout(persistTimer); clearTimeout(meTimer);
+    if (S.tester) await fetch('/api/li/logout', { method: 'POST' }).catch(() => {}); // "saved sign-in" includes the tester session
     await DB.clear(); await DB.kvClear();
     // Prevent the legacy migration from restoring erased conversations on reload.
     await new Promise((res, rej) => { const r = indexedDB.deleteDatabase('atelier'); r.onsuccess = res; r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('Close other Atelier tabs and try clearing this device again.')); });
@@ -3276,7 +3388,7 @@ function addTokenAccount(svc) {
 }
 
 // ── Canva: send a generated image into a new Canva design (the Worker uploads it and creates the design) ──
-function canvaOn() { return TOOLS.services?.canva === true; }
+function canvaOn() { return !S.tester && TOOLS.services?.canva === true; }
 // Only ever open Canva's own https pages (sign-in URL, design edit/view links).
 function canvaUrl(u) {
   try { const x = new URL(u); return x.protocol === 'https:' && (x.hostname === 'canva.com' || x.hostname.endsWith('.canva.com')) ? x.href : ''; } catch { return ''; }
@@ -3336,7 +3448,7 @@ async function sendToCanva(btn, src, title) {
 
 // ───────────────────────── key / onboarding ─────────────────────────
 let serverKey = false;
-const hasCredentials = () => Boolean(S.settings.passcode);
+const hasCredentials = () => Boolean(S.settings.passcode || S.tester);
 // The passcode is checked against the profile endpoint — no model call, nothing billed.
 async function checkPasscode(pass) {
   if (!pass) return { ok: false, msg: 'Enter your passcode.' };
@@ -3361,21 +3473,54 @@ function updateKeyState(ok) {
 }
 $('#keyState').onclick = openSettings;
 
-const SIGNIN_REASONS = {
-  new: 'First time on this device — enter your passcode once.',
-  rejected: 'The server didn’t accept the saved passcode (it may have changed). Enter the current one.',
-  cleared: 'This browser cleared Atelier’s saved data (private/incognito tab, or a “clear on exit” setting), so it forgot your passcode.',
+// Shown above the LinkedIn button: why this screen is up (tester results come back as /?tester=…).
+const SIGNIN_NOTES = {
+  cleared: 'This browser cleared Atelier’s saved sign-in (a private window, or a “clear on exit” setting). Sign in again — threads on this device are still here.',
+  expired: 'Your tester session ended. Sign in with LinkedIn again to pick up where you left off.',
+  signedout: 'You’re signed out. The threads you made stay on this device.',
+  full: 'All tester spots are taken right now. Spots open up from time to time — try again later.',
+  revoked: 'Your tester access has ended. Questions? Write to cole@ciprari.ai.',
+  paused: 'Tester access is paused right now. Try again soon.',
+  denied: 'LinkedIn sign-in was cancelled, so nothing was shared.',
+  error: 'LinkedIn sign-in didn’t finish. Try again in a moment.',
+  nocookie: 'LinkedIn said yes, but this browser didn’t keep the sign-in. Allow cookies for atelier.ciprari.ai, then try again.',
 };
+const SIGNIN_REASONS = { rejected: 'The server didn’t accept the saved passcode (it may have changed). Enter the current one.' };
+let onboardReason = '';
 function openOnboard(reason = 'new') {
-  if ($('#onboard').open) return;
+  onboardReason = reason;
+  const note = SIGNIN_NOTES[reason] || '';
+  $('#signinNote').textContent = note; $('#signinNote').hidden = !note;
   $('#onboardMsg').textContent = SIGNIN_REASONS[reason] || ''; $('#onboardMsg').className = 'hint';
-  console.info('[atelier] passcode screen:', reason);
+  if (reason === 'rejected' || LS.get('owner', false)) $('#ownerEntry').open = true; // owner devices keep owner mode
+  loadSpots();
+  if ($('#onboard').open) return;
+  console.info('[atelier] sign-in screen:', reason);
   $('#onboard').showModal();
-  setTimeout(() => $('#onboardPass').focus(), 50);
+  setTimeout(() => ($('#ownerEntry').open ? $('#onboardPass') : $('#liBtn')).focus(), 50);
 }
-// The studio is passcode-only: the dialog can't be dismissed without it.
+// The studio needs a sign-in (LinkedIn tester or owner passcode): the dialog can't be dismissed without one.
 $('#onboard').addEventListener('cancel', (ev) => { if (!hasCredentials()) ev.preventDefault(); });
-$('#onboard').addEventListener('close', () => { if (!S.settings.passcode) setTimeout(() => openOnboard(signinReason), 0); });
+// Chrome closes a modal on a close request without user activation even when 'cancel' is prevented: reopen it as it was.
+$('#onboard').addEventListener('close', () => { if (!hasCredentials()) setTimeout(() => openOnboard(onboardReason || signinReason), 0); });
+$('#ownerEntry').addEventListener('toggle', (ev) => { if (ev.currentTarget.open && $('#onboard').open && !COARSE.matches) $('#onboardPass').focus(); });
+$('#liBtn').addEventListener('click', (ev) => { if (!navigator.onLine) { ev.preventDefault(); toast('You’re offline — connect, then sign in', { error: true }); } });
+// Public and cached for a minute on the Worker: "N of 25 tester spots left" (addendum A7a).
+let spotsAt = 0;
+async function loadSpots() {
+  if (Date.now() - spotsAt < 60_000) return;
+  spotsAt = Date.now();
+  try {
+    const r = await fetch('/api/li/spots', { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+    const j = r.ok ? await r.json() : null;
+    if (!j || typeof j !== 'object') return;
+    const cap = Number.isInteger(j.cap) && j.cap > 0 ? j.cap : 25, left = Number.isInteger(j.spotsLeft) ? Math.max(0, Math.min(j.spotsLeft, cap)) : null;
+    $('#spotsLine').innerHTML = j.paused ? `<b>${cap} tester spots.</b> Opening soon — paid models included.`
+      : left === 0 ? `<b>All ${cap} tester spots are taken.</b> Check back soon.`
+      : left == null ? `<b>${cap} tester spots.</b> Paid models included.`
+      : `<b>${left} of ${cap} tester spots left.</b> Paid models included.`;
+  } catch { spotsAt = 0; }
+}
 let signinReason = 'new';
 // Phone keyboards turn Enter into "Next" — submit straight from the passcode field.
 $('#onboardPass').addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); $('#onboardForm').requestSubmit(); } });
@@ -3392,8 +3537,9 @@ $('#onboardForm').addEventListener('submit', async (ev) => {
   if (!res.ok) { msg.className = 'hint bad'; msg.textContent = res.msg; return; }
   S.settings.passcode = pass;
   if (f.name.value.trim()) S.settings.name = f.name.value.trim();
-  saveSettings(); renderWelcome(); renderOptions(); updateKeyState(true);
-  LS.set('signedIn', Date.now());
+  if (S.tester) setTester(null); // the owner always wins on this device
+  saveSettings(); syncRole(); renderWelcome(); renderOptions(); updateKeyState(true);
+  LS.set('signedIn', Date.now()); LS.set('owner', true); LS.set('outReason', '');
   DB.kvSet('passcode', pass).catch(() => {});
   $('#onboard').close();
   toast('You’re in');
@@ -3401,20 +3547,297 @@ $('#onboardForm').addEventListener('submit', async (ev) => {
   input.focus();
 });
 
+// ───────────────────────── tester mode (LinkedIn) ─────────────────────────
+// Owner = passcode (x-app-pass). Tester = the __Host-atelier_tester cookie set after LinkedIn sign-in. Every model call a
+// tester makes is metered against their day/month allowance and the shared monthly pool (spec 2026-09-30 §8, addendum A3).
+function syncRole() {
+  document.body.classList.toggle('tester', Boolean(S.tester));
+  document.body.classList.toggle('owner', Boolean(S.settings.passcode) && !S.tester);
+}
+function setTester(raw) {
+  const prev = S.tester, t = raw ? normalizeMe(raw) : null;
+  if (t && t.poolLeft == null && prev?.sub === t.sub) t.poolLeft = prev.left?.pool ?? prev.poolLeft ?? null; // keep the last header's pool figure
+  S.tester = t; testerAllow = allowedIds(t);
+  LS.set('tester', t);
+  if ((prev?.sub || '') !== (t?.sub || '')) {
+    // A tester's name never outlives their session: the next person on this device (or nobody) starts without it.
+    if (prev && !S.settings.passcode && S.settings.name) { S.settings.name = ''; saveSettings(); renderWelcome(); }
+    if (t) LS.set('outReason', '');
+    deadProviders.clear(); ME = loadMe(); setSync('');
+    if (!$('#youDrawer').hidden) renderYou();
+    if ($('[data-settings="connections"]').classList.contains('on')) selectSettings('general');
+  }
+  syncRole(); renderAllowance(); updateKeyState(null);
+  if (!$('#options').contains(document.activeElement)) renderOptions(); // never rebuild a select the user has open
+  if ($('#settings').open && t) renderTesterAccess();
+}
+// GET /api/tester/me → 'ok' | 'none' (no tester session) | 'error' (offline or server trouble: keep what we had).
+async function loadTester() {
+  try {
+    const r = await fetch('/api/tester/me', { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+    if (r.ok) { const j = await r.json().catch(() => null); if (!normalizeMe(j)) return 'error'; if (!S.settings.passcode) { setTester(j); noteAllowance(r); } return 'ok'; }
+    return [401, 403, 404].includes(r.status) ? 'none' : 'error';
+  } catch { return 'error'; }
+}
+let testerTimer;
+function refreshTesterSoon() {
+  clearTimeout(testerTimer);
+  testerTimer = setTimeout(() => loadTester().then((st) => { if (st === 'none') testerSignedOut('expired'); }), 2500);
+}
+// Every metered response carries x-tester-allowance: {"dayLeft","monthLeft","poolLeft"} in micro-dollars.
+function noteAllowance(r) {
+  if (!S.tester || !r?.headers) return;
+  const left = parseAllowanceHeader(r.headers.get('x-tester-allowance'));
+  if (!left) return;
+  S.tester.left = { ...left, pool: left.pool ?? S.tester.left?.pool ?? S.tester.poolLeft ?? null };
+  LS.set('tester', S.tester); renderAllowance();
+  if ($('#settings').open) renderTesterAccess();
+}
+// The compact line above the composer (fits 320 px): what's left today and this month.
+function renderAllowance() {
+  const el = $('#allowance');
+  if (!S.tester) { el.hidden = true; el.textContent = ''; return; }
+  const t = S.tester, left = leftOf(t), lim = t.allowance.day.limit;
+  el.hidden = false;
+  const out = left.month <= 0 ? 'month' : left.pool === 0 ? 'pool' : left.day <= 0 ? 'day' : null;
+  if (out) {
+    el.className = 'allowance out';
+    el.innerHTML = `<span class="al-dot" aria-hidden="true"></span><span class="al-text">${{ day: 'Used up today', month: 'Used up this month', pool: 'Tester budget used up' }[out]} · back ${esc(resetIn(nextReset(out)))}</span>`;
+    return;
+  }
+  const p = lim ? Math.min(1, left.day / lim) : 0;
+  el.className = `allowance${p < 0.2 ? ' low' : ''}`;
+  el.innerHTML = `<span class="al-bar" style="--p:${p.toFixed(3)}" aria-hidden="true"><i></i></span><span><b>${money(left.day)}</b> left today</span><span class="al-sep" aria-hidden="true">·</span><span><b>${money(left.month)}</b> this month</span>`;
+}
+function testerSignedOut(reason) {
+  if (!S.tester) return;
+  setTester(null);
+  LS.set('outReason', reason); // the next visit explains this, not "the browser cleared your sign-in"
+
+  for (const d of $$('dialog[open]')) if (d.id !== 'onboard') d.close();
+  closeDrawers(false);
+  openOnboard(reason);
+}
+async function testerSignOut(b) {
+  if (!confirm('Sign out of Atelier on this device? Your threads stay here.')) return;
+  const done = busyBtn(b, 'Signing out…');
+  const r = await fetch('/api/li/logout', { method: 'POST' }).catch(() => null);
+  done();
+  if (!r || (!r.ok && r.status !== 401)) return toast('Couldn’t sign out — check your connection and try again.', { error: true });
+  LS.set('meTester', null);
+  testerSignedOut('signedout');
+}
+const initials = (name) => ((String(name || '').trim().split(/\s+/).slice(0, 2).map((w) => [...w][0] || '').join('')) || '?').toUpperCase();
+function avatar(url, name) {
+  const u = typeof url === 'string' && /^https:\/\/[^\s"'<>]+$/i.test(url) ? url : '';
+  return u ? `<img class="av" src="${esc(u)}" alt="" width="40" height="40" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-ph="${esc(initials(name))}" />` : `<span class="av av-ph" aria-hidden="true">${esc(initials(name))}</span>`;
+}
+// LinkedIn photo links expire: a failed one becomes the person's initials.
+$('#settings').addEventListener('error', (ev) => {
+  const img = ev.target;
+  if (img?.tagName !== 'IMG' || !img.classList.contains('av')) return;
+  const ph = Object.assign(document.createElement('span'), { className: 'av av-ph', textContent: img.dataset.ph || '?' });
+  ph.setAttribute('aria-hidden', 'true'); img.replaceWith(ph);
+}, true);
+function ago(v) {
+  const t = toMs(v); if (!t) return '';
+  const d = Date.now() - t;
+  if (d < 90e3) return 'just now';
+  if (d < 36e5) return `${Math.round(d / 6e4)} min ago`;
+  if (d < 864e5) return `${Math.round(d / 36e5)} h ago`;
+  if (d < 7 * 864e5) { const n = Math.round(d / 864e5); return n === 1 ? 'yesterday' : `${n} days ago`; }
+  return new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+const dayLabel = (v) => { const t = toMs(v); return t ? new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—'; };
+// Settings → Access for a tester: who, the allowance in full, sign out. Settings → Models lists their plan.
+function renderTesterAccess() {
+  const t = S.tester, box = $('#testerAccess');
+  if (!t) { box.innerHTML = ''; $('#testerModels').textContent = ''; return; }
+  const left = leftOf(t), a = t.allowance;
+  const meter = (label, l, limit, scope) => {
+    const p = limit ? Math.min(1, l / limit) : 0;
+    return `<div class="ta-meter${p < 0.2 ? ' low' : ''}"><p class="ta-row"><span>${label}</span><span><b>${money(l)}</b> of ${money(limit, { up: true })} left</span></p><span class="ta-bar" style="--p:${p.toFixed(3)}" aria-hidden="true"><i></i></span><p class="ta-sub">Resets ${esc(resetIn(nextReset(scope)))}</p></div>`;
+  };
+  box.innerHTML = `<div class="ta-id">${avatar(t.picture, t.name)}<p class="ta-who"><b>${esc(t.name || 'LinkedIn tester')}</b><span>${esc(t.email || 'Signed in with LinkedIn')}</span></p><button type="button" class="chip" data-ta="out">Sign out</button></div>
+    <div class="ta-meters">${meter('Today', left.day, a.day.limit, 'day')}${meter('This month', left.month, a.month.limit, 'month')}${left.pool != null ? `<p class="ta-row ta-pool"><span>Shared tester pool</span><span><b>${money(left.pool)}</b> left this month</span></p>` : ''}</div>
+    ${t.pool.preview ? '<p class="hint ta-paused">Preview access: tester sign-in is paused for everyone else.</p>' : t.pool.paused ? '<p class="hint ta-paused">Tester access is paused right now, so new requests are on hold.</p>' : ''}
+    <p class="hint">Each request holds a cautious estimate, then settles to what the provider reports, so the numbers can tick back up after a reply. Threads stay on this device; your You profile is saved to your tester account.</p>`;
+  const names = (list) => [...new Set(list.filter(Boolean))].map(esc).join(', ');
+  const chat = names(t.models.chat.filter(modelReady).map(modelLabel));
+  const imgs = names(t.models.image.map((id) => IMAGE_MODELS.find((m) => m.id === id)?.label));
+  const vids = names(t.models.video.map((id) => VIDEO_MODELS.find((m) => m.id === id)?.label.split(' · ')[0]));
+  $('#testerModels').innerHTML = `<b>In your tester plan</b>${chat ? `<span>Chat · ${chat}</span>` : ''}${imgs ? `<span>Images · ${imgs}</span>` : ''}${vids ? `<span>Video · ${vids}</span>` : ''}<span>Auto picks the best one for each request; the menus above the prompt let you choose.</span>`;
+}
+$('#testerAccess').addEventListener('click', (ev) => { const b = ev.target.closest('[data-ta="out"]'); if (b) testerSignOut(b); });
+function welcomeTester() {
+  const t = S.tester;
+  if (!t) return;
+  const first = (t.name || '').trim().split(/\s+/)[0] || '';
+  if (first && !S.settings.name) { S.settings.name = first.slice(0, 60); saveSettings(); renderWelcome(); }
+  const dlg = document.createElement('dialog');
+  dlg.className = 'tok-dialog tester-welcome';
+  dlg.setAttribute('aria-labelledby', 'twTitle');
+  dlg.innerHTML = `<form method="dialog"><p class="eyebrow">LinkedIn tester</p><h3 id="twTitle">Welcome${first ? `, <em>${esc(first)}</em>` : ''}.</h3><p class="hint">You have <b>${money(t.allowance.day.limit)}</b> a day and <b>${money(t.allowance.month.limit)}</b> a month on paid models — Claude, GPT and Gemini for answers, code, ideas and apps, plus images and Veo video. The line above the prompt shows what’s left.</p><p class="hint">Your threads stay on this device. Your You profile is saved to your tester account.</p><div class="row"><button class="btn-primary" value="ok">Start making</button></div></form>`;
+  document.body.append(dlg);
+  dlg.addEventListener('close', () => { dlg.remove(); if (!COARSE.matches) input.focus({ preventScroll: true }); });
+  dlg.showModal();
+}
+
+// ── owner: Settings → Access → Testers (GET /api/testers, POST /api/testers/{revoke,restore,config}) ──
+const TP = { data: null, seq: 0 };
+async function loadTesters() {
+  const box = $('#testersPanel'), seq = ++TP.seq;
+  if (!S.settings.passcode || S.tester) return;
+  if (!TP.data) { box.setAttribute('aria-busy', 'true'); box.innerHTML = skel('62%', 14) + skel('100%', 6) + skel('48%', 12) + skel('86%', 14) + skel('74%', 14); }
+  try {
+    const r = await fetch('/api/testers', { headers: apiHeaders(), cache: 'no-store', signal: AbortSignal.timeout(15000) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof j.error === 'string' && j.error ? j.error.slice(0, 200) : `Couldn’t load testers (${r.status}).`);
+    if (seq !== TP.seq) return;
+    TP.data = j; paintTesters();
+  } catch (err) {
+    if (seq !== TP.seq) return;
+    box.removeAttribute('aria-busy');
+    box.innerHTML = `<p class="hint bad" role="alert">${esc(err?.name === 'TimeoutError' ? 'The tester list is taking too long — try again.' : netText(err))}</p><button type="button" class="chip" data-tp="reload">Try again</button>`;
+  }
+}
+async function testersPost(path, body, b, label = 'Saving…') {
+  const done = busyBtn(b, label);
+  try {
+    const r = await fetch(`/api/testers/${path}`, { method: 'POST', headers: apiHeaders(), body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof j.error === 'string' && j.error ? j.error.slice(0, 200) : `Couldn’t save that (${r.status}).`);
+    return true;
+  } catch (err) { toast(netText(err), { error: true }); return false; }
+  finally { done(); }
+}
+const tpDollars = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? (Number(v) / 1e6).toFixed(2) : '');
+const tpPaused = (c) => c.paused === true || Number(c.paused) === 1;
+function paintTesters() {
+  const box = $('#testersPanel'), d = TP.data || {}, c = d.config || {}, pool = d.pool || {};
+  box.removeAttribute('aria-busy');
+  const list = (Array.isArray(d.testers) ? d.testers : []).filter((x) => x && isSub(x.sub))
+    .sort((a, b) => Boolean(toMs(a.revoked_at)) - Boolean(toMs(b.revoked_at)) || (toMs(b.last_seen) || 0) - (toMs(a.last_seen) || 0));
+  const active = list.filter((x) => !toMs(x.revoked_at)).length, paused = tpPaused(c);
+  const previews = (Array.isArray(c.preview_subs) ? c.preview_subs : []).filter(isSub);
+  const lr = d.lastRefused && isSub(d.lastRefused.sub) ? d.lastRefused : null;
+  const nameOf = (sub) => list.find((x) => x.sub === sub)?.name || (lr?.sub === sub ? lr.name : '') || '';
+  const limit = Math.max(0, Number(c.pool_limit) || 0), spent = Math.max(0, Number(pool.spent) || 0), reserved = Math.max(0, Number(pool.reserved) || 0);
+  const frac = (x) => (limit ? Math.min(1, x / limit) : 0).toFixed(3);
+  const month = /^\d{4}-\d{2}$/.test(pool.month || '') ? new Date(`${pool.month}-01T12:00:00Z`).toLocaleDateString([], { month: 'long', year: 'numeric', timeZone: 'UTC' }) : 'this month';
+  const row = (x) => {
+    const off = Boolean(toMs(x.revoked_at)), seen = ago(x.last_seen);
+    return `<li class="tp-tester${off ? ' off' : ''}">${avatar(x.picture, x.name)}<p class="tp-who"><b>${esc(x.name || 'LinkedIn member')}</b>${x.email ? `<span>${esc(x.email)}</span>` : ''}<span>joined ${esc(dayLabel(x.joined_at))}${seen ? ` · seen ${esc(seen)}` : ''}${off ? ' · revoked' : ''}</span></p><p class="tp-spend"><span><b>${money(x.day?.spent, { up: true })}</b> today</span><span><b>${money(x.month?.spent, { up: true })}</b> month</span></p><button type="button" class="chip${off ? '' : ' danger'}" data-tp="${off ? 'restore' : 'revoke'}" data-sub="${esc(x.sub)}" data-name="${esc(x.name || 'this tester')}">${off ? 'Restore' : 'Revoke'}</button></li>`;
+  };
+  box.innerHTML = `<div class="tp-pool">
+      <p class="tp-row"><span class="tp-label">Pool · ${esc(month)}</span><span class="tp-num"><b>${money(spent, { up: true })}</b> of ${money(limit)}</span></p>
+      <span class="tp-bar" style="--s:${frac(spent)};--r:${frac(spent + reserved)}" aria-hidden="true"><i class="r"></i><i class="s"></i></span>
+      <p class="hint">${active} of ${Number.isInteger(+c.cap) ? +c.cap : '—'} spots taken${reserved ? ` · ${money(reserved, { up: true })} held for calls in flight` : ''}</p>
+    </div>
+    <div class="tp-block">
+      <p class="tp-label" id="tpAccessLabel">Tester access</p>
+      <div class="seg tp-seg" role="radiogroup" aria-labelledby="tpAccessLabel"><label><input type="radio" name="tpPaused" value="0"${paused ? '' : ' checked'} /><span>Open</span></label><label><input type="radio" name="tpPaused" value="1"${paused ? ' checked' : ''} /><span>Paused</span></label></div>
+      <p class="hint">${paused ? 'Paused: only preview testers can sign in and make calls.' : 'Open: anyone with a free spot can sign in with LinkedIn.'}</p>
+    </div>
+    ${lr ? `<div class="tp-refused">${avatar(lr.picture, lr.name)}<p class="tp-who"><b>${esc(lr.name || 'Someone')}</b><span>refused ${esc(ago(lr.at) || 'recently')}</span><code>${esc(lr.sub)}</code></p>${previews.includes(lr.sub) ? '<span class="tp-tag">In preview</span>' : `<button type="button" class="chip" data-tp="preview-add" data-sub="${esc(lr.sub)}">Add to preview</button>`}</div>` : ''}
+    <div class="tp-block">
+      <p class="tp-label">Preview testers <small>can sign in and spend while access is paused, within their own limits</small></p>
+      <div class="accts tp-subs">${previews.map((x) => acctChip(nameOf(x) ? `${nameOf(x)} · ${x}` : x, `<button type="button" data-tp="preview-del" data-sub="${esc(x)}" aria-label="Remove ${esc(nameOf(x) || x)} from preview">${ICON.x}</button>`)).join('') || '<span class="hint">None yet — sign in once with LinkedIn, then add yourself from “refused” above.</span>'}</div>
+      <div class="key-row tp-add"><input id="tpSub" placeholder="LinkedIn sub" aria-label="LinkedIn sub to add to preview" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="64" enterkeyhint="done" /><button type="button" class="chip" data-tp="preview-add">Add</button></div>
+    </div>
+    <div class="tp-block">
+      <p class="tp-label">Limits</p>
+      <div class="tp-limits">
+        <label class="field"><span>Spots</span><input id="tpCap" inputmode="numeric" autocomplete="off" value="${esc(String(c.cap ?? ''))}" /></label>
+        <label class="field"><span>Per tester / day <small>$</small></span><input id="tpDay" inputmode="decimal" autocomplete="off" value="${tpDollars(c.day_limit)}" /></label>
+        <label class="field"><span>Per tester / month <small>$</small></span><input id="tpMonth" inputmode="decimal" autocomplete="off" value="${tpDollars(c.month_limit)}" /></label>
+        <label class="field"><span>Pool / month <small>$</small></span><input id="tpPool" inputmode="decimal" autocomplete="off" value="${tpDollars(c.pool_limit)}" /></label>
+      </div>
+      <p class="hint tp-hint">Dollar limits apply from the next request. The shared pool can’t go above $1,000 a month.</p>
+      <p class="hint bad" id="tpMsg" role="alert" hidden></p>
+      <button type="button" class="chip" data-tp="limits">Save limits</button>
+    </div>
+    <div class="tp-block">
+      <p class="tp-label tp-roster">Roster <small>${list.length} ${list.length === 1 ? 'person' : 'people'}</small><button type="button" class="chip" data-tp="reload">Refresh</button></p>
+      <ul class="tp-list">${list.map(row).join('') || '<li class="hint">No one has signed in yet.</li>'}</ul>
+    </div>`;
+}
+async function tpAddPreview(sub, b) {
+  const c = TP.data?.config || {}, have = (Array.isArray(c.preview_subs) ? c.preview_subs : []).filter(isSub);
+  if (!isSub(sub)) return toast('Paste a LinkedIn sub — letters, numbers, - and _ only.', { error: true });
+  if (have.includes(sub)) return toast('Already in preview');
+  if (await testersPost('config', { preview_subs: [...have, sub] }, b, 'Adding…')) { toast('Added to preview'); loadTesters(); }
+}
+// The Limits fields as POST /api/testers/config (configBody: {body} | {error}) when any differs from what was loaded, else null.
+function tpEdited() {
+  const ids = ['#tpCap', '#tpDay', '#tpMonth', '#tpPool'];
+  if (S.tester || !TP.data?.config || !$(ids[0]) || ids.every((id) => $(id).value.trim() === $(id).defaultValue)) return null;
+  return configBody({ cap: $('#tpCap').value, day: $('#tpDay').value, month: $('#tpMonth').value, pool: $('#tpPool').value });
+}
+async function tpSaveLimits(b) {
+  const msg = $('#tpMsg'), res = configBody({ cap: $('#tpCap').value, day: $('#tpDay').value, month: $('#tpMonth').value, pool: $('#tpPool').value });
+  msg.hidden = !res.error; msg.textContent = res.error || '';
+  if (res.error) return;
+  if (await testersPost('config', res.body, b)) { toast('Limits saved'); loadTesters(); }
+}
+$('#testersPanel').addEventListener('click', async (ev) => {
+  const b = ev.target.closest('[data-tp]');
+  if (!b || b.disabled) return;
+  const sub = b.dataset.sub;
+  switch (b.dataset.tp) {
+    case 'reload': return loadTesters();
+    case 'limits': return tpSaveLimits(b);
+    case 'preview-add': return tpAddPreview(sub || $('#tpSub').value.trim(), b);
+    case 'preview-del': {
+      const have = (TP.data?.config?.preview_subs || []).filter(isSub);
+      if (await testersPost('config', { preview_subs: have.filter((x) => x !== sub) }, b, 'Removing…')) loadTesters();
+      return;
+    }
+    case 'revoke':
+      if (!confirm(`Revoke ${b.dataset.name}? Their sessions end now and their spot frees up.`)) return;
+      if (await testersPost('revoke', { sub }, b, 'Revoking…')) { toast(`${b.dataset.name} revoked`); loadTesters(); }
+      return;
+    case 'restore':
+      if (await testersPost('restore', { sub }, b, 'Restoring…')) { toast(`${b.dataset.name} restored`); loadTesters(); }
+  }
+});
+$('#testersPanel').addEventListener('change', async (ev) => {
+  if (ev.target.name !== 'tpPaused') return;
+  const c = TP.data?.config || {}, paused = ev.target.value === '1';
+  if (!paused && !confirm('Open tester access? Anyone with a free spot can sign in with LinkedIn and spend within the limits.')) return paintTesters();
+  // Send it the way the Ledger reports it (boolean or 0/1).
+  if (await testersPost('config', { paused: typeof c.paused === 'boolean' ? paused : paused ? 1 : 0 }, null)) { toast(paused ? 'Tester access paused' : 'Tester access is open'); loadTesters(); }
+  else paintTesters();
+});
+// Enter in these fields acts on the field — it must not submit (and close) the Settings form.
+$('#testersPanel').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' || ev.isComposing || ev.target.tagName !== 'INPUT' || ev.target.type === 'radio') return;
+  ev.preventDefault();
+  if (ev.target.id === 'tpSub') $('#testersPanel [data-tp="preview-add"]:not([data-sub])')?.click();
+  else $('#testersPanel [data-tp="limits"]')?.click();
+});
+
 // ───────────────────────── You: profile, voice, memory, imports ─────────────────────────
 const ME_DEFAULT = { bio: '', learned: '', style: '', samples: '', memory: [], sources: {}, updatedAt: 0 };
-let ME = { ...ME_DEFAULT, ...LS.get('me', {}) };
-if (!ME.bio && S.settings.about) ME.bio = S.settings.about; // carry over the old Settings field
+// A tester's You is cached under its own key, and only for the tester it belongs to.
+function loadMe() {
+  if (S.tester) { const saved = LS.get('meTester', null); return { ...ME_DEFAULT, ...(saved?.sub === S.tester.sub ? saved : {}) }; }
+  const me = { ...ME_DEFAULT, ...LS.get('me', {}) };
+  if (!me.bio && S.settings.about) me.bio = S.settings.about; // carry over the old Settings field
+  return me;
+}
+let ME = loadMe();
 
 let meTimer;
 function saveMe() {
   ME.updatedAt = Date.now();
-  LS.set('me', ME);
+  if (S.tester) LS.set('meTester', { ...ME, sub: S.tester.sub }); else LS.set('me', ME);
   clearTimeout(meTimer);
   meTimer = setTimeout(pushMe, 1200);
 }
 function setSync(text, ok) { const el = $('#meSync'); if (el) { el.textContent = text; el.classList.toggle('ok', ok === true); el.classList.toggle('bad', ok === false); } }
 async function pushMe() {
+  if (S.tester) return pushTesterMe();
   if (!S.settings.passcode || !server.nvidia) return setSync('this device only');
   try {
     const r = await fetch('/api/me', { method: 'PUT', headers: apiHeaders(), body: JSON.stringify(ME) });
@@ -3422,6 +3845,7 @@ async function pushMe() {
   } catch { setSync('offline'); }
 }
 async function pullMe() {
+  if (S.tester) return pullTesterMe();
   if (!S.settings.passcode) return;
   try {
     const r = await fetch('/api/me', { headers: apiHeaders() });
@@ -3432,6 +3856,32 @@ async function pullMe() {
     const remote = await r.json();
     if ((remote.updatedAt || 0) > (ME.updatedAt || 0)) { ME = { ...ME_DEFAULT, ...remote }; LS.set('me', ME); if (remote.name) S.settings.name = remote.name; }
     else if ((ME.updatedAt || 0) > (remote.updatedAt || 0)) pushMe();
+    setSync('synced', true);
+  } catch {}
+}
+
+async function pushTesterMe() {
+  if (!feat('profile')) return setSync('this device only');
+  const body = JSON.stringify(profileOut(ME, S.settings.name));
+  try {
+    const r = await fetch('/api/tester/profile', { method: 'PUT', headers: { 'content-type': 'application/json' }, body });
+    if (r.status === 401) return testerSignedOut('expired');
+    setSync(r.ok ? 'synced' : r.status === 413 || body.length > PROFILE_MAX ? 'too large to sync' : 'sync failed', r.ok);
+  } catch { setSync('offline'); }
+}
+async function pullTesterMe() {
+  if (!feat('profile')) return setSync('this device only');
+  try {
+    const r = await fetch('/api/tester/profile', { cache: 'no-store' });
+    if (r.status === 401) return testerSignedOut('expired');
+    if (!r.ok) return;
+    const remote = profileIn(await r.json(), uid), mine = ME;
+    if (remote.updatedAt > (mine.updatedAt || 0)) {
+      ME = { ...ME_DEFAULT, ...remote, sources: { ...(mine.sources || {}), ...remote.sources } };
+      LS.set('meTester', { ...ME, sub: S.tester.sub });
+      if (remote.name) { S.settings.name = remote.name; saveSettings(); renderWelcome(); }
+      if (!$('#youDrawer').hidden) renderYou();
+    } else if ((mine.updatedAt || 0) > remote.updatedAt) pushTesterMe();
     setSync('synced', true);
   } catch {}
 }
@@ -3456,7 +3906,7 @@ const tagged = (raw, tag) => (stripThink(raw).match(new RegExp(`<${tag}>([\\s\\S
 // Background: pick up durable facts about you from what you type.
 let learning = false;
 async function learnFrom(e) {
-  if (learning || !['ask', 'code', 'ideas', 'build'].includes(e.kind) || e.prompt.length < 25) return;
+  if (learning || !feat('helpers') || !['ask', 'code', 'ideas', 'build'].includes(e.kind) || e.prompt.length < 25) return;
   learning = true;
   try {
     const raw = await completeChat({
@@ -3563,7 +4013,7 @@ async function analyzeCorpus(label, items, extra = '') {
     const t = it.text.replace(/\s+/g, ' ').trim().slice(0, 900);
     if (t.length < 15 || t.startsWith('<') || seen.has(t)) continue;
     seen.add(t); picked.push(t); size += t.length;
-    if (size > 280_000) break;
+    if (size > (S.tester ? 150_000 : 280_000)) break;
   }
   if (!picked.length) throw new Error('Found no messages written by you in that source.');
   impStatus(`Reading ${picked.length.toLocaleString()} of your messages…`);
@@ -3768,10 +4218,30 @@ async function refreshServer(tries = 4) {
   if (!S.settings.passcode) {
     const backup = await Promise.race([DB.kvGet('passcode').catch(() => null), sleep(1500).then(() => null)]);
     if (typeof backup === 'string' && backup) { S.settings.passcode = backup; saveSettings(); console.info('[atelier] passcode restored from backup'); }
+    else if (SIGNIN_NOTES[LS.get('outReason', '')]) signinReason = LS.get('outReason', ''); // signed out on purpose, or the session ended
     else if (LS.get('signedIn', 0) || (await Promise.race([DB.all().then((t) => t.length).catch(() => 0), sleep(1500).then(() => 0)]))) signinReason = 'cleared';
   }
-  renderOptions();
-  if (!hasCredentials()) { updateKeyState(null); openOnboard(signinReason); } else { LS.set('signedIn', LS.get('signedIn', 0) || Date.now()); checkKey(); health.then(() => { pullMe(); loadTools(); refreshRemote(true).then(() => renderOptions()); }); }
+  if (S.settings.passcode && S.tester) setTester(null); // the owner always wins on this device
+  syncRole(); renderAllowance(); renderOptions();
+  const testerResult = params.get('tester');
+  if (S.settings.passcode) {
+    LS.set('signedIn', LS.get('signedIn', 0) || Date.now()); checkKey(); health.then(() => { pullMe(); loadTools(); refreshRemote(true).then(() => renderOptions()); });
+    if (testerResult) toast('This device uses the owner passcode — open a private window to try LinkedIn sign-in.', { ms: 9000 });
+  } else {
+    // Tester or signed out. A cached tester starts in tester mode; the Worker's answer settles it either way.
+    const cached = Boolean(S.tester);
+    if (cached) checkKey(); else { updateKeyState(null); openOnboard(SIGNIN_NOTES[testerResult] && testerResult !== 'welcome' ? testerResult : signinReason); }
+    loadTester().then((st) => {
+      if (st === 'ok' && S.tester) {
+        if ($('#onboard').open) $('#onboard').close();
+        updateKeyState(null); health.then(() => pullMe());
+        if (testerResult === 'welcome') welcomeTester();
+      } else if (st === 'none') {
+        if (cached) testerSignedOut('expired');
+        else if (testerResult === 'welcome') openOnboard('nocookie');
+      }
+    });
+  }
   const connected = params.get('connected');
   if (connected) {
     // denied / error don't say which sign-in they came from: use the one this device started last.
