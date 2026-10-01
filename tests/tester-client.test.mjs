@@ -123,7 +123,7 @@ test('tester clip limits: 200 MB and 3 min (addendum A2); frames stand in past t
 });
 
 test('tester codes bypass the fallback chain; model_no_images does not', () => {
-  for (const c of ['tester_budget', 'tester_paused', 'tester_model', 'tester_signin', 'tester_too_large', 'tester_owner', 'tester_origin', 'owner_only']) assert.ok(isTesterCode(c), c);
+  for (const c of ['tester_budget', 'tester_paused', 'tester_model', 'tester_signin', 'tester_too_large', 'tester_owner', 'tester_origin', 'tester_video_not_ready', 'owner_only']) assert.ok(isTesterCode(c), c);
   for (const c of ['model_no_images', 'video_file_gone', undefined, null, 42]) assert.ok(!isTesterCode(c), String(c));
 });
 

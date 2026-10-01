@@ -427,13 +427,13 @@ function errorKind(msg = '', status, code) {
 }
 const ERROR_TITLE = { offline: 'Couldn’t reach the studio', passcode: 'Passcode needed', key: 'A provider key needs attention', rate: 'Too many requests', model: 'That model isn’t available', busy: 'The model is busy', filtered: 'Try rephrasing', stopped: 'Stopped', interrupted: 'Interrupted', budget: 'Over the tester allowance', signin: 'Sign in again', error: 'Couldn’t finish' };
 // The 'budget' card's title by what stopped it (e.budget.scope, from the 402/403/413/503 code).
-const BUDGET_TITLE = { day: 'Today’s allowance is used up', month: 'This month’s allowance is used up', pool: 'The tester budget is used up this month', call: 'Too much for one request', paused: 'Tester access is paused', model: 'Not in the tester plan', owner: 'Not part of tester mode', large: 'That request is too large', origin: 'Request blocked' };
+const BUDGET_TITLE = { day: 'Today’s allowance is used up', month: 'This month’s allowance is used up', pool: 'The tester budget is used up this month', call: 'Too much for one request', paused: 'Tester access is paused', model: 'Not in the tester plan', owner: 'Not part of tester mode', large: 'That request is too large', origin: 'Request blocked', video: 'This clip isn’t ready yet' };
 // A day/month/pool refusal while at least a cent is still left: this request was bigger than what remains (short).
 const SHORT_TITLE = { day: 'Not enough left today for this request', month: 'Not enough left this month for this request', pool: 'Not enough left in the tester budget for this request' };
 const RESET_SCOPES = ['day', 'month', 'pool'];
 function budgetOf(err) {
   const scope = err.code === 'tester_budget' ? (BUDGET_TITLE[err.scope] && err.scope !== 'paused' ? err.scope : 'call')
-    : { tester_paused: 'paused', tester_model: 'model', tester_owner: 'owner', owner_only: 'owner', tester_too_large: 'large', tester_origin: 'origin' }[err.code] || 'call';
+    : { tester_paused: 'paused', tester_model: 'model', tester_owner: 'owner', owner_only: 'owner', tester_too_large: 'large', tester_origin: 'origin', tester_video_not_ready: 'video' }[err.code] || 'call';
   const resetsAt = RESET_SCOPES.includes(scope) ? parseResetsAt(err.resetsAt, scope) : null;
   const short = RESET_SCOPES.includes(scope) && Boolean(S.tester) && (leftOf(S.tester)[scope] ?? 0) >= 10_000; // the pill already has the refusal's figures
   return { scope, ...(resetsAt ? { resetsAt } : {}), ...(short ? { short: true } : {}) };
