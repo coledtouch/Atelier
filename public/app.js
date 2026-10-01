@@ -2244,6 +2244,9 @@ input.addEventListener('keydown', (ev) => {
 // in which case it sends (tasks can run side by side).
 const hasDraft = () => Boolean($('#input').value.trim() || S.attachments.length || S.video);
 $('#sendBtn').onclick = () => (S.busy && !hasDraft() ? stopAll() : submit());
+// Keep focus (and the phone keyboard) in the composer: otherwise the first tap only blurs it, the keyboard drops, the
+// dock jumps and the tap misses Send (Android needed two taps).
+$('#sendBtn').addEventListener('pointerdown', (ev) => { if (document.activeElement === input) ev.preventDefault(); });
 input.addEventListener('input', setBusy);
 
 let clock = null; // 1s interval that keeps every elapsed-time label current while anything runs

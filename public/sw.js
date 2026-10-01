@@ -1,5 +1,5 @@
 // Offline shell only. API requests and generated media are never cached here.
-const VERSION = 'atelier-v51';
+const VERSION = 'atelier-v52';
 // index.html loads these three with ?v=<n> (a test keeps it equal to VERSION), so a fresh page never runs stale cached code.
 const V = VERSION.slice('atelier-v'.length);
 const SHELL = ['/', '/index.html', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`, '/data-safety.js', '/video.js', '/tester.js', '/context.js',
