@@ -2,29 +2,82 @@
 <resources>
     <string name="app_name">Atelier Assist</string>
 
-    <string name="open_in_atelier">Open in Atelier</string>
-    <string name="sheet_handle">Atelier Assist panel. Double-tap to expand or shrink, swipe down to close.</string>
-    <string name="action_close">Close</string>
-    <string name="action_expand">Expand</string>
-    <string name="action_collapse">Shrink</string>
-    <string name="dismiss">Dismiss</string>
-
-    <string name="setup_text">Open Atelier from the side button: make Atelier Assist your digital assistant.</string>
-    <string name="setup_action">Set up</string>
-    <string name="setup_hint">Choose Digital assistant app, then Atelier Assist.</string>
-
-    <string name="mic_blocked">The microphone is off for Atelier Assist.</string>
-    <string name="mic_settings">Settings</string>
-
-    <string name="offline_title">Can’t reach Atelier</string>
-    <string name="offline_body">Check your connection, then try again.</string>
+    <!-- The card -->
+    <string name="close">Close</string>
+    <string name="setup_open">Set up Atelier Assist</string>
+    <string name="type">Type</string>
+    <string name="talk">Talk</string>
+    <string name="edit">Edit</string>
+    <string name="open">Open</string>
+    <string name="send">Send</string>
     <string name="retry">Try again</string>
+    <string name="allow">Allow</string>
+    <string name="settings">Settings</string>
+    <string name="mark_start">Start listening</string>
+    <string name="mark_stop">Stop listening</string>
+    <string name="chip_a11y">Mode: %1$s. Double-tap to change.</string>
+    <string name="mode_a11y">%1$s mode</string>
 
-    <string name="saved">Saved to Downloads/Atelier</string>
-    <string name="save_failed">Couldn’t save that here. Open it in Atelier to download it.</string>
-    <string name="save_busy">Still saving the last file. Try again in a moment.</string>
-    <string name="no_app">No app on this phone can open that link.</string>
-    <string name="no_atelier">Atelier isn’t installed. Opening it in the browser.</string>
-    <string name="crashed">Atelier stopped. Press the side button to open it again.</string>
-    <string name="no_webview">Android System WebView isn’t available right now. Try again in a moment.</string>
+    <!-- Status line (shown in capitals) -->
+    <string name="status_listening">Listening</string>
+    <string name="status_thinking">Thinking</string>
+    <string name="status_opening_in">Opening in %1$s</string>
+    <string name="status_ready">Ready — tap Open</string>
+    <string name="status_typing">Type your request</string>
+    <string name="status_idle">Tap the A to talk</string>
+    <string name="status_permission">Allow the microphone</string>
+    <string name="status_opening">Opening Atelier</string>
+    <string name="status_what">What should it be?</string>
+
+    <string name="hint_listening">Ask anything, or say “make an image of…”</string>
+    <string name="hint_typing">What would you like?</string>
+
+    <!-- Errors: a short title for the status line, then one line of help -->
+    <string name="err_no_match_title">Didn’t catch that</string>
+    <string name="err_no_match">Tap the A and try again.</string>
+    <string name="err_network_title">No connection</string>
+    <string name="err_network">Voice input needs the internet here. Try again, or type instead.</string>
+    <string name="err_busy_title">Mic is busy</string>
+    <string name="err_busy">Another app is using speech right now. Try again in a moment.</string>
+    <string name="err_permission_title">Microphone is off</string>
+    <string name="err_permission">Atelier Assist needs the microphone to hear you.</string>
+    <string name="err_permission_blocked">Turn on the microphone for Atelier Assist in Settings → Permissions.</string>
+    <string name="err_audio_title">Mic problem</string>
+    <string name="err_audio">Couldn’t use the microphone. Try again, or type instead.</string>
+    <string name="err_unavailable_title">No voice input</string>
+    <string name="err_unavailable">This phone has no speech service. Type instead.</string>
+    <string name="err_language_title">Language not available</string>
+    <string name="err_language">Speech isn’t available in your language here yet. Type instead, or try again.</string>
+    <string name="err_other_title">Something went wrong</string>
+    <string name="err_other">Speech stopped unexpectedly. Try again.</string>
+
+    <string name="no_app">No app on this phone can open Atelier.</string>
+    <string name="no_atelier">Atelier isn’t installed here — opening it in the browser.</string>
+    <string name="not_keyed">Opening in the browser — tap Send there.</string>
+    <string name="opening_in_browser">Couldn’t verify the installed Atelier app — opening Atelier in the browser.</string>
+
+    <!-- Setup -->
+    <string name="setup_eyebrow">Set up</string>
+    <string name="setup_title">Send without a tap</string>
+    <string name="setup_body">Paste your private link once, and Atelier sends what you say after its short pause. Without it, Atelier opens with your words in the box and you tap Send.</string>
+    <string name="setup_step1">In Atelier: Settings → General → Quick launch → Android → Atelier Assist.</string>
+    <string name="setup_step2">Turn on Send without a tap, then tap Copy Assist link.</string>
+    <string name="setup_step3">Come back here and tap Paste link. Then delete the link from your keyboard’s clipboard history.</string>
+    <string name="setup_paired">Paired — Atelier sends after its short hold. The first time, Atelier asks you to confirm.</string>
+    <string name="setup_unpaired">Not paired — Atelier fills the box and you tap Send.</string>
+    <string name="paste">Paste link</string>
+    <string name="unpair">Unpair</string>
+    <string name="pair_ok">Paired. The link was cleared from the clipboard, but your keyboard may still keep a copy: open its clipboard history (Samsung Keyboard or Gboard) and delete the Atelier link there.</string>
+    <string name="pair_empty">Your clipboard is empty — copy the link in Atelier first.</string>
+    <string name="pair_not_link">That isn’t a link. Copy the Assist link in Atelier, then tap Paste link.</string>
+    <string name="pair_not_atelier">That link isn’t Atelier’s.</string>
+    <string name="pair_no_key">That link has no private key. In Atelier, turn on Send without a tap, then copy the link again.</string>
+    <string name="unpaired">Unpaired on this phone. The key itself still works until you retire it: in Atelier, Settings → General → Quick launch → Atelier Assist → New link.</string>
+    <string name="side_eyebrow">Side button</string>
+    <string name="side_ready">Atelier Assist is your digital assistant. Press and hold the side button to talk.</string>
+    <string name="side_todo">Make Atelier Assist your digital assistant: Settings → Apps → Choose default apps → Digital assistant app. Then Settings → Advanced features → Side button → Press and hold → Digital assistant.</string>
+    <string name="side_open">Open settings</string>
+    <string name="setup_hint">Choose Digital assistant app, then Atelier Assist.</string>
+    <string name="privacy_note">Only the key is kept, on this phone. Your phone’s speech service turns your voice into text (it may use Google’s servers or your phone maker’s); the words then go to Atelier. Atelier Assist stores neither.</string>
+    <string name="done">Done</string>
 </resources>

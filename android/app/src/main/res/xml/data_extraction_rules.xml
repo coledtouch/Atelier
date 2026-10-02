@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12+: nothing goes to cloud backup or to a new phone (Smart Switch / device transfer). The WebView's
-     storage holds the owner's Atelier sign-in; the owner signs in again on a new phone. -->
+<!-- Android 12+: nothing goes to cloud backup or to a new phone (Smart Switch / device transfer). The preferences hold
+     the pairing key (it lets Atelier send without a tap); the owner pastes a fresh link on a new phone. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="root" path="." />

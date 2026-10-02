@@ -5,77 +5,58 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
-import android.net.Uri
 import android.os.Build
 import androidx.core.net.toUri
 
-/** The one site this app shows, and the rules for leaving it. */
+/**
+ * Where a launch link goes: the installed Atelier app (Chrome's WebAPK) when it can be trusted, else Chrome itself, else
+ * whatever Android picks for https://atelier.ciprari.ai links.
+ *
+ * The launch link can carry the owner's launch key in its fragment, so the key goes only to a package that is really
+ * what it claims to be ([Target.keyed]). A package name alone proves nothing: any sideloaded app can take an
+ * org.chromium.webapk.* name and claim the site's links, and naming a package skips Android's own link resolution.
+ */
 internal object Atelier {
-    const val HOST = "atelier.ciprari.ai"
-    const val ORIGIN = "https://$HOST"
-
-    /** Name of the origin-restricted JS object the page sees (window.AtelierAssist). */
-    const val BRIDGE = "AtelierAssist"
 
     /**
-     * The panel's start page. `start` is launch.js's quick-launch intent (voice | ask); `via=assist` is already read by
-     * launch.js readLaunch (no effect); `panel=assist` is the layout hint for the web app's compact panel mode. Neither
-     * grants anything (any site can link to them). What the page may trust is the window.AtelierAssist object, which the
-     * WebView injects for this origin only.
+     * [pkg]: the package the intent names (null: Android resolves it). [keyed]: the launch key may go there. [app]: it is
+     * the installed Atelier app. [webApk]: an Atelier WebAPK is installed (trusted or not), so "Atelier isn't installed"
+     * would be wrong even when the link goes elsewhere.
      */
-    fun startUrl(start: String): String = "$ORIGIN/?start=$start&via=assist&panel=assist"
-
-    /** https://atelier.ciprari.ai on the default port, without user info. */
-    fun isAtelier(uri: Uri?): Boolean {
-        if (uri == null || !uri.isHierarchical) return false
-        return uri.scheme.equals("https", ignoreCase = true) &&
-            uri.host.equals(HOST, ignoreCase = true) &&
-            (uri.port == -1 || uri.port == 443) &&
-            uri.userInfo == null
-    }
-
-    /** A same-site path from the page ("/", "/?start=ask", …) as a full URL, or null if it isn't one. */
-    fun pathUrl(path: String?): Uri? {
-        val p = path?.trim().orEmpty().ifEmpty { "/" }
-        if (p.length > 2048 || !p.startsWith("/") || p.startsWith("//") || p.contains('\\') || p.any { it.isISOControl() }) return null
-        val uri = (ORIGIN + p).toUri()
-        return if (isAtelier(uri)) uri else null
-    }
-
-    /** Schemes the panel hands to other apps; anything else (intent:, file:, content:, javascript:, data:) is dropped. */
-    private val EXTERNAL = setOf("https", "http", "mailto", "tel", "sms")
-
-    fun externalIntent(uri: Uri): Intent? {
-        val scheme = uri.scheme?.lowercase() ?: return null
-        if (scheme !in EXTERNAL) return null
-        return Intent(Intent.ACTION_VIEW, uri)
-            .addCategory(Intent.CATEGORY_BROWSABLE)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
+    class Target(val pkg: String?, val keyed: Boolean, val app: Boolean, val webApk: Boolean = false)
 
     /**
-     * A VIEW intent for an Atelier URL, aimed at the installed PWA when that can be trusted. Chrome installs the PWA as a
-     * WebAPK (org.chromium.webapk.*) that handles every link in the site's scope. The intent names that package only when
-     * it really is one: the org.chromium.webapk. prefix *and* installed by Google Play (which mints WebAPKs for Chrome) or
-     * by Chrome itself. A name alone proves nothing (any sideloaded app can take it and claim the site's links), and
-     * naming a package skips Android's own link resolution. Otherwise the intent stays implicit and Android resolves the
-     * link itself: a verified app-link handler, else the browser. Package visibility comes from the manifest's <queries>.
+     * 1. A WebAPK (org.chromium.webapk.*) that handles the site's links and was installed by Google Play (which mints
+     *    WebAPKs for Chrome) or by a trusted Chrome: the installed Atelier app. Keyed.
+     * 2. Else a Chrome build that is part of the system image or came from Play: the key lives in Chrome's storage for
+     *    the site (shared with the installed app), so a keyed link still works there. Keyed.
+     * 3. Else an implicit intent that Android resolves (a verified app-link handler, else the default browser). Not
+     *    keyed: the words are only prefilled there.
      *
-     * The flag is false only when no WebAPK-looking handler exists at all (the caller then says it opens in the browser).
+     * Package visibility comes from the manifest's <queries>: VIEW + BROWSABLE + https://atelier.ciprari.ai (every browser
+     * and the WebAPK match it) and the Play Store by name. Without the latter, Android 11+ hides Play from this app and
+     * getInstallSourceInfo() reports a null installer for every Play-minted WebAPK, so the installed app would never be
+     * trusted and every request would open in a Chrome tab.
      */
-    fun appIntent(context: Context, url: Uri): Pair<Intent, Boolean> {
-        val intent = Intent(Intent.ACTION_VIEW, url)
+    fun target(context: Context): Target {
+        val pm = context.packageManager
+        val webApks = webApkHandlers(pm)
+        webApks.firstOrNull { trustedInstaller(pm, installerOf(pm, it)) }?.let { return Target(it, keyed = true, app = true, webApk = true) }
+        CHROMES.firstOrNull { trustedChrome(pm, it) }?.let { return Target(it, keyed = true, app = false, webApk = webApks.isNotEmpty()) }
+        return Target(null, keyed = false, app = false, webApk = webApks.isNotEmpty())
+    }
+
+    fun intent(url: String, target: Target): Intent {
+        val intent = Intent(Intent.ACTION_VIEW, url.toUri())
             .addCategory(Intent.CATEGORY_BROWSABLE)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val pm = context.packageManager
-        val candidates = webApkHandlers(pm)
-        candidates.firstOrNull { trustedInstaller(pm, installerOf(pm, it)) }?.let(intent::setPackage)
-        return intent to candidates.isNotEmpty()
+        target.pkg?.let(intent::setPackage)
+        return intent
     }
 
     /** Packages named like a Chrome WebAPK that handle the site's links (unverified handlers included). */
     private fun webApkHandlers(pm: PackageManager): List<String> {
-        val probe = Intent(Intent.ACTION_VIEW, "$ORIGIN/".toUri()).addCategory(Intent.CATEGORY_BROWSABLE)
+        val probe = Intent(Intent.ACTION_VIEW, "${LaunchLink.ORIGIN}/".toUri()).addCategory(Intent.CATEGORY_BROWSABLE)
         val found: List<ResolveInfo> = try {
             if (Build.VERSION.SDK_INT >= 33) {
                 pm.queryIntentActivities(probe, PackageManager.ResolveInfoFlags.of(0L))
@@ -91,7 +72,7 @@ internal object Atelier {
 
     private const val WEBAPK_PREFIX = "org.chromium.webapk."
     private const val PLAY_STORE = "com.android.vending"
-    private val CHROMES = setOf("com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary")
+    private val CHROMES = listOf("com.android.chrome", "com.chrome.beta", "com.chrome.dev", "com.chrome.canary")
 
     /**
      * Google Play, or a Chrome build that is itself part of the system image or came from Play. (Package names are unique
@@ -99,9 +80,11 @@ internal object Atelier {
      */
     private fun trustedInstaller(pm: PackageManager, installer: String?): Boolean = when {
         installer == PLAY_STORE -> true
-        installer != null && installer in CHROMES -> isSystemApp(pm, installer) || installerOf(pm, installer) == PLAY_STORE
+        installer != null && installer in CHROMES -> trustedChrome(pm, installer)
         else -> false
     }
+
+    private fun trustedChrome(pm: PackageManager, pkg: String): Boolean = enabled(pm, pkg) && (isSystemApp(pm, pkg) || installerOf(pm, pkg) == PLAY_STORE)
 
     private fun installerOf(pm: PackageManager, pkg: String): String? = try {
         if (Build.VERSION.SDK_INT >= 30) {
@@ -116,15 +99,20 @@ internal object Atelier {
         null
     }
 
-    private fun isSystemApp(pm: PackageManager, pkg: String): Boolean = try {
-        val info = if (Build.VERSION.SDK_INT >= 33) {
+    private fun appInfo(pm: PackageManager, pkg: String): ApplicationInfo? = try {
+        if (Build.VERSION.SDK_INT >= 33) {
             pm.getApplicationInfo(pkg, PackageManager.ApplicationInfoFlags.of(0L))
         } else {
             @Suppress("DEPRECATION")
             pm.getApplicationInfo(pkg, 0)
         }
-        info.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
     } catch (_: PackageManager.NameNotFoundException) {
-        false
+        null
     }
+
+    private fun enabled(pm: PackageManager, pkg: String): Boolean = appInfo(pm, pkg)?.enabled == true
+
+    /** Part of the system image (or an update to it). False when the package is unknown or not visible to this app. */
+    fun isSystemApp(pm: PackageManager, pkg: String): Boolean =
+        (appInfo(pm, pkg)?.flags ?: 0) and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
 }

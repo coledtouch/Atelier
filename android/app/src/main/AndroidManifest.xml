@@ -1,31 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Atelier Assist: one translucent bottom-sheet activity that hosts https://atelier.ciprari.ai in a WebView.
+  Atelier Assist 1.1: one translucent activity that shows a small native card over the current app. It listens through
+  Android's speech service, picks Atelier's mode, then opens the installed Atelier app with the request.
 
   - ACTION_ASSIST + DEFAULT makes the app eligible for Settings > Apps > Choose default apps > Digital assistant app
     (AOSP AssistantRoleBehavior: an exported activity resolving ACTION_ASSIST with MATCH_DEFAULT_ONLY is enough). The
     system then launches it for the side-key / power-key long press, the corner swipe and the nav-handle gesture.
-  - MAIN + LAUNCHER is the same sheet, so Samsung's Side button > Double press > Open app gives the same pop-up.
+  - MAIN + LAUNCHER is the same card, so Samsung's Side button > Double press > Open app gives it too.
   - Never shown over the lock screen (no showWhenLocked): AssistActivity asks to unlock first.
-  - No backup / device transfer: the WebView holds the owner's signed-in Atelier session.
-  - configChanges: rotation, size, keyboard and dark mode (uiMode) are handled in place, so the page survives them;
-    AssistActivity.onConfigurationChanged re-reads the theme's colours. Display size (density) and font size (fontScale)
-    are left out on purpose: they recreate the activity, which starts a fresh page in "ask" mode.
+  - No INTERNET permission: the app itself never connects anywhere. Speech recognition runs in the phone's speech
+    service (on-device, or the default recognizer, which uses its own connection), and Atelier opens in its own app.
+  - No backup / device transfer: the only thing stored is the pairing key.
+  - configChanges: rotation, size, keyboard and dark mode are handled in place, so listening isn't cut off. Display size
+    and font size recreate the activity, which then waits for a tap instead of opening the mic by itself.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Dictation in the WebView: RECORD_AUDIO is asked at first use; Chromium also needs MODIFY_AUDIO_SETTINGS. -->
+    <!-- The card listens through SpeechRecognizer; asked at first use. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
-    <!-- "Open in Atelier": find the installed Atelier PWA (a Chrome WebAPK) that handles the site's links. -->
     <queries>
+        <!-- The installed Atelier PWA (a Chrome WebAPK) and Chrome, which handle the site's links. -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" android:host="atelier.ciprari.ai" />
+        </intent>
+        <!-- Google Play, which installs (mints) Chrome WebAPKs: without seeing it, getInstallSourceInfo() reports a null
+             installer for the installed Atelier app, which then can't be trusted with the key. -->
+        <package android:name="com.android.vending" />
+        <!-- The default home app, which may start the card (MAIN/LAUNCHER) and so may let it open Atelier by itself. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+        <!-- Android 11+ package visibility: SpeechRecognizer has to see the phone's speech service. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
 
@@ -41,11 +53,6 @@
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.AtelierAssist.Panel"
         tools:targetApi="36">
-
-        <!-- No WebView usage/crash metrics leave the device for this app. -->
-        <meta-data
-            android:name="android.webkit.WebView.MetricsOptOut"
-            android:value="true" />
 
         <activity
             android:name=".AssistActivity"

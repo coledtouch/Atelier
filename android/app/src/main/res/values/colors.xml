@@ -1,13 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Atelier's palette (public/app.css). Light theme here; values-night holds the warm-black theme. -->
+<!-- Atelier's warm-black palette (public/app.css :root, dark). The card is always dark. The per-mode accents live in
+     Mode.kt (the dark c-ask … c-build tokens) and ModeParityTest checks them against app.css. -->
 <resources>
-    <color name="sheet_bg">#F3EEE3</color>
-    <color name="sheet_surface">#E2DBCB</color>
-    <color name="ink">#1B1A16</color>
-    <color name="ink_2">#5B564C</color>
-    <color name="handle">#471B1A16</color>
-    <color name="accent">#4D7A00</color>
+    <color name="card_bg">#0E0D0B</color>       <!-- app.css bg -->
+    <color name="card_surface">#1E1C17</color>  <!-- app.css bg-3 -->
+    <color name="card_line">#2EECE6D9</color>   <!-- app.css line-2, a touch lighter so the hairline reads over any app -->
+    <color name="ink">#ECE6D9</color>
+    <color name="ink_2">#A8A295</color>
+    <color name="ink_3">#9A9488</color>
+    <color name="accent">#C8F25A</color>        <!-- app.css c-ask -->
+    <color name="warn">#FF6FA8</color>          <!-- app.css c-video, the app's error tone -->
+    <color name="scrim_low">#80000000</color>
 
-    <color name="scrim">#73000000</color>
     <color name="ic_launcher_background">#0E0D0B</color>
 </resources>

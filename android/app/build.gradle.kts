@@ -29,8 +29,8 @@ android {
         applicationId = "ai.ciprari.atelier.assist"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
     }
 
     signingConfigs {
@@ -69,6 +69,16 @@ android {
         includeInBundle = false
     }
 
+    // JVM unit tests (ModeClassifierTest, LaunchLinkTest, ModeParityTest): `testReleaseUnitTest`. The parity test reads
+    // public/launch.js and public/app.css from the repo root (android/..) and is skipped when they aren't there.
+    // LaunchLinkTest also writes launch-vectors.json to the build directory for tools/check-launch-vectors.mjs.
+    testOptions {
+        unitTests.all {
+            it.systemProperty("atelier.repo", rootProject.projectDir.parentFile.absolutePath)
+            it.systemProperty("atelier.vectors", layout.buildDirectory.file("launch-vectors.json").get().asFile.absolutePath)
+        }
+    }
+
     packaging {
         resources {
             excludes += setOf("META-INF/*.version", "META-INF/**/LICENSE*", "kotlin/**", "DebugProbesKt.bin")
@@ -80,5 +90,6 @@ dependencies {
     // core-ktx 1.18.0, not 1.19.x: 1.19 needs compileSdk 37.
     implementation("androidx.core:core-ktx:1.18.0")
     implementation("androidx.activity:activity:1.13.0")
-    implementation("androidx.webkit:webkit:1.17.1")
+    // Tests only (never in the APK).
+    testImplementation("junit:junit:4.13.2")
 }

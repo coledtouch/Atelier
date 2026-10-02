@@ -1,5 +1,12 @@
 # Atelier Assist: web-side panel mode (integration patch, not applied)
 
+> **Superseded by Atelier Assist 1.1.0 (2026-10-01).** 1.1 replaced the WebView sheet with a small native card that
+> opens the installed Atelier app (see `assist-launch-web-patch.md` next to this file). There is no
+> `window.AtelierAssist` bridge any more, so §1–§5g and §6–§9 below no longer apply.
+>
+> **Still worth shipping on its own: §5h**, `FORBID_TAGS: ['form']` in `md()`. It is a security fix for every
+> browser, not just the panel.
+
 > **Status (2026-10-01).** The Android app is built: `android/`, `app-release.apk` 1.0.1 (versionCode 2). Nothing under
 > `public/`, `src/` or `tests/` was touched, because another workflow is editing `public/app.js`.
 >

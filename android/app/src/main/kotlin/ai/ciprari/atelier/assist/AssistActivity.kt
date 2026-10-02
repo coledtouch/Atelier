@@ -2,33 +2,46 @@ package ai.ciprari.atelier.assist
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.KeyguardManager
 import android.app.role.RoleManager
 import android.content.ActivityNotFoundException
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
-import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.text.InputFilter
+import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.MimeTypeMap
-import android.webkit.PermissionRequest
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
+import android.view.accessibility.AccessibilityManager
+import android.view.animation.LinearInterpolator
+import android.view.animation.PathInterpolator
+import android.view.inputmethod.EditorInfo
+import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -38,98 +51,97 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.edit
 import androidx.core.graphics.ColorUtils
-import androidx.core.graphics.Insets
-import androidx.core.graphics.toColorInt
-import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat
-import androidx.webkit.JavaScriptReplyProxy
-import androidx.webkit.WebViewFeature
-import org.json.JSONObject
-import java.util.UUID
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
+import androidx.core.view.isVisible
+import androidx.core.widget.doAfterTextChanged
+import java.io.File
+import java.util.Locale
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * The pop-up: a translucent activity that slides a bottom sheet with Atelier over whatever was on screen.
+ * Atelier Assist: a small card over whatever is on screen. The "A" hovers and pulses while you talk, the words appear
+ * as you say them with a chip for the mode they suggest (Ask, Code, Image, Video, Ideas, Build), and when you stop, the
+ * installed Atelier app opens in that mode with your words (sent after Atelier's own visible, cancellable hold once the
+ * app is paired; otherwise in the box for you to send).
  *
  * Launched by ACTION_ASSIST (the digital-assistant gesture: Samsung's side-key press and hold, the corner swipe) and by
- * the launcher icon (Samsung's side-key double press → Open app). Pressing again while it is open asks the page to
- * listen. It never shows over the lock screen: a locked phone is asked to unlock first, and the panel closes if that is
- * cancelled. ACTION_ASSIST may carry the previous app's assist data: only the keyboard hint is read, the rest is
- * dropped unread.
+ * the launcher icon (Samsung's side-key double press → Open app). Pressing again while it listens finishes the
+ * utterance; pressing again otherwise listens anew. It never shows over the lock screen: a locked phone is asked to
+ * unlock first, and the card closes if that is cancelled. ACTION_ASSIST can carry the previous app's assist data: only
+ * the keyboard hint is read, the rest is dropped unread.
  *
- * Configuration: rotation, size and dark mode are handled in place (the WebView and its page stay); dark mode re-reads
- * the theme's colours in [onConfigurationChanged]. Display size and font size recreate the activity, which then starts
- * a fresh page in "ask" mode (never the microphone by itself).
+ * States: listening → thinking → a 1.2 s "Opening in …" window (any touch on the card holds it, so the chip can change
+ * the mode) → opening. Typing is the same card with a text field. Tap outside, Back or × cancels. The card closes when
+ * it goes out of sight, except on the setup page (the owner may be copying the link in Atelier) and during system
+ * round trips it started (unlock, permission settings, digital-assistant settings).
+ *
+ * Privacy: nothing said or typed is logged or stored; only the pairing key is kept (SharedPreferences, no backup).
  */
-class AssistActivity : ComponentActivity(), PanelHost {
+class AssistActivity : ComponentActivity(), Listener.Events {
+
+    private enum class Phase { SETUP, IDLE, PERMISSION, LISTENING, THINKING, REVIEW, HELD, TYPING, ERROR, OPENING }
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var listener: Listener
+    private val main = Handler(Looper.getMainLooper())
+
     private lateinit var root: FrameLayout
     private lateinit var scrim: View
-    private lateinit var sheet: LinearLayout
-    private lateinit var sheetBackground: GradientDrawable
-    private lateinit var header: FrameLayout
-    private lateinit var handle: View
-    private lateinit var openButton: ImageButton
-    private lateinit var bannerHost: FrameLayout
-    private lateinit var content: FrameLayout
-    private lateinit var progressLine: View
-    private lateinit var sheetCtl: SheetController
-    private var errorView: View? = null
-    private var web: PanelWeb? = null
+    private lateinit var card: TouchCard
+    private lateinit var mainPage: LinearLayout
+    private var setupPage: View? = null
+    private lateinit var mark: MarkView
+    private lateinit var status: TextView
+    private lateinit var words: TextView
+    private lateinit var input: EditText
+    private lateinit var progress: View
+    private lateinit var chooser: HorizontalScrollView
+    private lateinit var chooserRow: LinearLayout
+    private lateinit var chip: TextView
+    private lateinit var secondary: TextView
+    private lateinit var primary: TextView
+    private lateinit var more: ImageButton
 
-    private var invocation = INVOCATION_LAUNCHER
-    private var startMode = "voice"
-    private var unlocked = false
-    private var finishingQuietly = false
-    private var started = false
-
-    /** The page's own background colour, once it has sent one ({type:'theme'}); null: the theme's sheet colour. */
-    private var pageColor: Int? = null
-
-    private var pendingMic: PermissionRequest? = null
+    private var phase = Phase.IDLE
+    private var heard = ""
+    private var guess = ModeClassifier.classify("")
+    private var chosen: Mode? = null
+    private var failure: Listener.Failure? = null
+    private var micBlocked = false
     private var micAskedAt = 0L
     private var micRationaleBefore = false
-    private var micSettingsOpened = false
-    private var fileCallback: ValueCallback<Array<Uri>>? = null
-    private var pageProxy: JavaScriptReplyProxy? = null
-    private var pendingSave: PendingSave? = null
-
-    private class PendingSave(val token: String?, val name: String?, var mime: String?, var armed: Boolean, val at: Long)
+    private var waitingUnlock = false
+    private var awayOnPurpose = false
+    private var leaving = false
+    private var entered = false
 
     /**
-     * Android's answer to the RECORD_AUDIO request. "Blocked" (the Settings banner, and hello's mic:'denied') only when
-     * Android won't ask again: its rationale flag went from true (the owner pressed "Don't allow" once) to false (and
-     * did it again), or the answer came back instantly with no dialog, or it was already blocked and still is. A
-     * dismissed dialog (Back, a tap outside, the side button pressed while it was up) leaves the rationale flag where it
-     * was, so it stays "prompt": Android will show the dialog again.
+     * The card was started by the system (the assistant gesture), the home screen or this app: it may open Atelier by
+     * itself after the 1.2 s. Started by any other app, it waits for the owner's Open tap, so an app can't make it
+     * turn played-back speech into a keyed send.
      */
+    private var ownerLaunch = false
+    private var setupNote: Pair<Int, Boolean>? = null // (message, good)
+    private var barInsets = androidx.core.graphics.Insets.NONE
+    private var imeBottom = 0
+
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        val request = pendingMic
-        pendingMic = null
+        if (leaving) return@registerForActivityResult
         if (granted) {
-            prefs.edit { remove(PREF_MIC_BLOCKED) }
-            request?.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
-            hideBanner(BANNER_MIC)
+            micBlocked = false
+            if (phase == Phase.PERMISSION || phase == Phase.ERROR) listenNow()
             return@registerForActivityResult
         }
-        request?.deny()
+        // "Blocked" only when Android won't ask again: the rationale flag went from true to false (a second "Don't
+        // allow"), or the answer came back at once with no dialog. A dismissed dialog keeps "Allow" (it asks again).
         val rationale = shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
-        val instant = micAskedAt > 0L && SystemClock.elapsedRealtime() - micAskedAt < MIC_INSTANT_MS
-        val blocked = !rationale && (micRationaleBefore || instant || prefs.getBoolean(PREF_MIC_BLOCKED, false))
-        prefs.edit { putBoolean(PREF_MIC_BLOCKED, blocked) }
-        if (blocked) showMicBlocked()
-    }
-
-    private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val callback = fileCallback
-        fileCallback = null
-        callback?.onReceiveValue(pickedUris(result.resultCode, result.data))
+        val instant = SystemClock.elapsedRealtime() - micAskedAt < MIC_INSTANT_MS
+        micBlocked = !rationale && (micRationaleBefore || instant)
+        fail(Listener.Failure.PERMISSION)
     }
 
     // ───────────────────────── lifecycle ─────────────────────────
@@ -137,45 +149,33 @@ class AssistActivity : ComponentActivity(), PanelHost {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT), // light icons over the dimmed app behind
-            // Not SystemBarStyle.auto: auto turns the system's nav-bar contrast scrim back on (a band over the sheet with
-            // 3-button navigation). The icons are kept matched to the sheet by applyBarAppearance().
-            navigationBarStyle = if (sheetIsLight()) SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT) else SystemBarStyle.dark(Color.TRANSPARENT),
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT), // light icons over the scrim at the bottom
         )
-        // androidx re-applies the styles above on every configuration change this activity handles itself, from a hidden
-        // view it added to the decor just now. This one is added after it, so it runs after it and puts ours back.
-        (window.decorView as ViewGroup).addView(object : View(this) {
-            override fun onConfigurationChanged(newConfig: Configuration) = applyBarAppearance()
-        }.apply {
-            visibility = View.GONE
-            setWillNotDraw(true)
-        })
-        applyBarAppearance()
+        window.isNavigationBarContrastEnforced = false
         if (Build.VERSION.SDK_INT >= 34) overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
-        prefs = getSharedPreferences("assist", MODE_PRIVATE)
-        val launch = readLaunch(intent)
-        invocation = launch.invocation
-        // Recreated (display or font size changed): a fresh page, but the microphone never opens by itself for that.
-        val recreated = savedInstanceState != null
+        prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        dropLegacyWebData()
+        listener = Listener(this, this)
         buildUi()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                val w = web
-                if (w != null && w.canGoBack()) w.goBack() else sheetCtl.dismiss()
+                when {
+                    chooser.isVisible -> showChooser(false)
+                    phase == Phase.SETUP && prefs.getBoolean(PREF_SETUP_SEEN, false) -> closeSetup()
+                    else -> leave()
+                }
             }
         })
-        web = try {
-            PanelWeb(this, this, content, sheetColor())
-        } catch (_: RuntimeException) { // Android System WebView missing or mid-update
-            toast(R.string.no_webview)
-            finishQuietly()
-            return
-        }
+        val launch = readLaunch(intent)
+        val recreated = savedInstanceState != null
         whenUnlocked { late ->
-            unlocked = true
-            startMode = if (late || launch.keyboard || recreated) "ask" else "voice"
-            web?.load(Atelier.startUrl(startMode))
-            maybeShowSetup()
+            when {
+                !prefs.getBoolean(PREF_SETUP_SEEN, false) -> openSetup()
+                launch.keyboard -> type("")
+                late || recreated -> setPhase(Phase.IDLE) // the mic never opens by itself long after the press
+                else -> listen()
+            }
         }
     }
 
@@ -183,89 +183,55 @@ class AssistActivity : ComponentActivity(), PanelHost {
         super.onNewIntent(intent)
         val launch = readLaunch(intent)
         setIntent(intent)
-        invocation = launch.invocation
-        sheetCtl.cancelDismiss()
+        if (leaving) return
         whenUnlocked { late ->
-            val mode = if (late || launch.keyboard) "ask" else "voice"
-            when {
-                // The renderer went away while the panel was hidden: this press starts a fresh page.
-                rebuildWeb && web == null -> {
-                    rebuildWeb = false
-                    unlocked = true
-                    replaceWeb(mode)
+            when (phase) {
+                Phase.SETUP -> refreshSetup()
+                // Pressed again while talking: that's the end of it (with nothing said yet: close).
+                Phase.LISTENING -> if (heard.isBlank()) leave() else listener.stop()
+                Phase.THINKING, Phase.OPENING -> Unit
+                else -> when {
+                    launch.keyboard -> type(if (phase == Phase.TYPING) input.text.toString() else "")
+                    late -> setPhase(Phase.IDLE)
+                    else -> listen()
                 }
-                !unlocked -> {
-                    unlocked = true
-                    startMode = mode
-                    web?.load(Atelier.startUrl(mode))
-                }
-                // Pressed again while open: the page decides (Atelier starts listening, with its usual checks).
-                !late -> post(JSONObject().put("type", "listen").put("invocation", invocation).put("keyboard", launch.keyboard))
             }
         }
     }
 
-    // The WebView pauses only when the sheet is out of sight (onStop), not on onPause: the microphone permission dialog
-    // pauses this activity while Atelier's getUserMedia() is waiting, and a page hidden at that moment would drop it.
-    override fun onStart() {
-        super.onStart()
-        started = true
-        // Back in sight after the renderer was reclaimed in the background, without a new launch (onNewIntent normally
-        // comes first and has already rebuilt it). Never before the phone is unlocked.
-        if (rebuildWeb && web == null && !keyguardLocked()) {
-            rebuildWeb = false
-            replaceWeb("ask")
-        }
-        web?.onResume()
-    }
-
     override fun onResume() {
         super.onResume()
-        if (bannerKind == BANNER_SETUP && assistantRoleHeld()) hideBanner(BANNER_SETUP)
-        if (bannerKind == BANNER_MIC && micGranted()) hideBanner(BANNER_MIC)
-        if (micSettingsOpened) {
-            // Back from this app's settings, where "Ask every time" may have been chosen: ask again rather than assume it
-            // is still blocked (a request that comes back instantly marks it blocked again).
-            micSettingsOpened = false
-            if (!micGranted()) prefs.edit { remove(PREF_MIC_BLOCKED) }
+        awayOnPurpose = false
+        when {
+            phase == Phase.SETUP -> refreshSetup()
+            phase == Phase.ERROR && failure == Listener.Failure.PERMISSION && micGranted() -> listenNow()
         }
     }
 
     override fun onStop() {
-        started = false
-        web?.onPause()
-        android.webkit.CookieManager.getInstance().flush()
         super.onStop()
+        if (leaving || isFinishing || phase == Phase.OPENING) return // OPENING: handOff() closes the card itself
+        listener.cancel()
+        cancelCountdown()
+        // Out of sight: an assistant card doesn't wait around. Except the setup page (the owner may be copying the link
+        // in Atelier right now) and round trips this card started (unlock, Settings).
+        if (phase == Phase.SETUP || waitingUnlock || awayOnPurpose) {
+            if (phase == Phase.LISTENING || phase == Phase.THINKING || phase == Phase.REVIEW) setPhase(Phase.IDLE)
+            return
+        }
+        finishQuietly()
     }
 
     override fun onDestroy() {
-        dropWeb()
+        main.removeCallbacksAndMessages(null)
+        listener.destroy()
         super.onDestroy()
     }
 
-    /**
-     * Rotation, size and dark mode don't recreate the activity (the manifest's configChanges). Dark mode turning on or
-     * off, also while the panel waits in the background, must still reach the native parts: the sheet, handle, buttons,
-     * progress line, banner and error screen re-read the theme's colours (or keep the page's own colour, if it sent one),
-     * and the nav-bar icons follow the sheet again.
-     */
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        progressLine.setBackgroundColor(getColor(R.color.accent))
-        applySheetColor()
-        refreshBanner()
-        errorView?.let {
-            content.removeView(it)
-            errorView = null
-            onMainFrameError()
-        }
-        window.decorView.post { applyBarAppearance() }
-    }
-
-    /** Close now, without the system's activity animation (the sheet has already slid away, or we're handing off). */
     private fun finishQuietly() {
-        if (finishingQuietly) return
-        finishingQuietly = true
+        if (isFinishing) return
+        leaving = true
+        listener.cancel()
         finish()
         if (Build.VERSION.SDK_INT < 34) {
             @Suppress("DEPRECATION")
@@ -273,19 +239,54 @@ class AssistActivity : ComponentActivity(), PanelHost {
         }
     }
 
+    /** Slide the card away, then close. */
+    private fun leave() {
+        if (leaving) return
+        leaving = true
+        listener.cancel()
+        cancelCountdown()
+        hideKeyboard()
+        card.animate().alpha(0f).translationY(dp(16).toFloat()).setDuration(150).setInterpolator(EASE).withEndAction {
+            leaving = false
+            finishQuietly()
+        }.start()
+        scrim.animate().alpha(0f).setDuration(150).start()
+    }
+
     // ───────────────────────── launch + lock screen ─────────────────────────
 
-    private class Launch(val invocation: String, val keyboard: Boolean)
+    private class Launch(val keyboard: Boolean)
 
+    /** Call synchronously from onCreate/onNewIntent: the system's record of the caller is only current there. */
     private fun readLaunch(i: Intent?): Launch {
         val assist = i?.action == Intent.ACTION_ASSIST
         val keyboard = assist && runCatching { i!!.getBooleanExtra(Intent.EXTRA_ASSIST_INPUT_HINT_KEYBOARD, false) }.getOrDefault(false)
-        // ACTION_ASSIST can carry the previous app's assist context: never read, kept or passed on.
+        // ACTION_ASSIST can carry the previous app's assist context: never read, kept or passed on. Clearing the extras
+        // also drops any EXTRA_REFERRER the caller wrote itself, so getReferrer() below is the system's own record.
         runCatching { i?.replaceExtras(null as Bundle?) }
-        return Launch(if (assist) INVOCATION_ASSIST else INVOCATION_LAUNCHER, keyboard)
+        runCatching { intent?.replaceExtras(null as Bundle?) }
+        ownerLaunch = launchedByOwner()
+        return Launch(keyboard)
     }
 
-    private fun keyguardLocked(): Boolean = getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
+    /**
+     * The system ("android", System UI: the assistant gesture and side key), the default home app, this app, or another
+     * app that is part of the system image (an OEM side-key handler). Unknown or invisible callers count as other apps.
+     */
+    private fun launchedByOwner(): Boolean {
+        val pkg = runCatching { referrer }.getOrNull()?.takeIf { it.scheme == "android-app" }?.host ?: return false
+        if (pkg == packageName || pkg in SYSTEM_CALLERS) return true
+        val home = runCatching {
+            if (Build.VERSION.SDK_INT >= 33) {
+                packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong()))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY)
+            }
+        }.getOrNull()?.activityInfo?.packageName
+        if (pkg == home) return true
+        return runCatching { Atelier.isSystemApp(packageManager, pkg) }.getOrDefault(false)
+    }
 
     /** Runs [then] once the phone is unlocked; `late` when unlocking took long enough that the mic shouldn't open. */
     private fun whenUnlocked(then: (late: Boolean) -> Unit) {
@@ -294,244 +295,941 @@ class AssistActivity : ComponentActivity(), PanelHost {
             then(false)
             return
         }
+        if (waitingUnlock) return
+        waitingUnlock = true
         val asked = SystemClock.elapsedRealtime()
         km.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
-            override fun onDismissSucceeded() = then(SystemClock.elapsedRealtime() - asked > LATE_UNLOCK_MS)
-            override fun onDismissCancelled() = finishQuietly()
-            override fun onDismissError() = finishQuietly()
+            override fun onDismissSucceeded() {
+                waitingUnlock = false
+                then(SystemClock.elapsedRealtime() - asked > LATE_UNLOCK_MS)
+            }
+
+            override fun onDismissCancelled() {
+                waitingUnlock = false
+                finishQuietly()
+            }
+
+            override fun onDismissError() {
+                waitingUnlock = false
+                finishQuietly()
+            }
         })
     }
+
+    // ───────────────────────── listening ─────────────────────────
+
+    private fun micGranted() = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    private fun locale(): Locale = resources.configuration.locales.takeIf { !it.isEmpty }?.get(0) ?: Locale.getDefault()
+
+    /** Start a new utterance (the owner's mode pick, if any, stays). */
+    private fun listen() {
+        if (leaving) return
+        cancelCountdown()
+        hideKeyboard()
+        showChooser(false)
+        heard = ""
+        guess = ModeClassifier.classify("")
+        if (!listener.available()) return fail(Listener.Failure.UNAVAILABLE)
+        if (!micGranted()) {
+            setPhase(Phase.PERMISSION)
+            micRationaleBefore = shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
+            micAskedAt = SystemClock.elapsedRealtime()
+            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        listenNow()
+    }
+
+    private fun listenNow() {
+        if (leaving) return
+        failure = null
+        setPhase(Phase.LISTENING)
+        listener.start(locale())
+    }
+
+    override fun onListening() {
+        if (phase == Phase.LISTENING) render()
+    }
+
+    override fun onLevel(level: Float) {
+        if (phase == Phase.LISTENING) mark.setLevel(level)
+    }
+
+    override fun onPartial(text: String) {
+        if (phase != Phase.LISTENING && phase != Phase.THINKING) return
+        heard = text
+        guess = ModeClassifier.classify(text)
+        renderWords()
+        renderChip()
+        mark.setAccent(currentMode().accent)
+    }
+
+    override fun onSpeechEnd() {
+        if (phase == Phase.LISTENING) setPhase(Phase.THINKING)
+    }
+
+    override fun onFinal(text: String) {
+        if (phase != Phase.LISTENING && phase != Phase.THINKING) return
+        heard = text
+        guess = ModeClassifier.classify(text)
+        tick()
+        // "Make an image" and nothing else: wait for the owner (Open still works: Atelier opens in that mode). With TalkBack
+        // (touch exploration) the 1.2 s window is too short to hear and change: it waits for Open too.
+        // Started by another app (not the system, home screen or this app): wait for Open too.
+        val emptyCommand = chosen == null && guess.explicit && guess.prompt.isBlank()
+        if (emptyCommand || touchExploring() || !ownerLaunch) setPhase(Phase.HELD) else startCountdown()
+    }
+
+    override fun onFailed(error: Listener.Failure) {
+        if (phase != Phase.LISTENING && phase != Phase.THINKING) return
+        // The speech service says "no permission" although this app has the mic: the service itself can't record.
+        if (error == Listener.Failure.PERMISSION && micGranted()) return fail(Listener.Failure.AUDIO)
+        if (error == Listener.Failure.PERMISSION) micBlocked = !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
+        fail(error)
+    }
+
+    private fun fail(error: Listener.Failure) {
+        listener.cancel()
+        failure = error
+        setPhase(Phase.ERROR)
+    }
+
+    // ───────────────────────── review, typing, hand-off ─────────────────────────
+
+    private val countdown = Runnable { if (phase == Phase.REVIEW) go(heard) }
+
+    private fun startCountdown() {
+        setPhase(Phase.REVIEW)
+        progress.animate().cancel()
+        progress.scaleX = 0f
+        progress.animate().scaleX(1f).setDuration(REVIEW_MS).setInterpolator(LinearInterpolator()).start()
+        main.postDelayed(countdown, REVIEW_MS)
+    }
+
+    private fun cancelCountdown() {
+        main.removeCallbacks(countdown)
+        if (::progress.isInitialized) {
+            progress.animate().cancel()
+            progress.scaleX = 0f
+        }
+    }
+
+    /** Any touch on the card during "Opening in …" holds it there: the owner wants to check or change something. */
+    private fun hold() {
+        if (phase != Phase.REVIEW) return
+        cancelCountdown()
+        setPhase(Phase.HELD)
+    }
+
+    private fun type(prefill: String) {
+        if (leaving) return
+        listener.cancel()
+        cancelCountdown()
+        showChooser(false)
+        setPhase(Phase.TYPING)
+        input.setText(prefill)
+        input.setSelection(input.length())
+        guess = ModeClassifier.classify(prefill)
+        render()
+        input.requestFocus()
+        input.post { WindowCompat.getInsetsController(window, input).show(WindowInsetsCompat.Type.ime()) }
+    }
+
+    private fun hideKeyboard() {
+        if (!::input.isInitialized) return
+        if (input.hasFocus()) input.clearFocus()
+        WindowCompat.getInsetsController(window, input).hide(WindowInsetsCompat.Type.ime())
+    }
+
+    private fun currentMode(): Mode = chosen ?: guess.mode
+
+    private fun touchExploring(): Boolean = getSystemService(AccessibilityManager::class.java)?.isTouchExplorationEnabled == true
+
+    /**
+     * Open Atelier with [text]: in the owner's chosen mode, else the classifier's. The classifier's trimmed prompt is used
+     * when its mode is the one going out ("make an image of a red fox" → "a red fox"); a mode the owner picked instead
+     * gets the whole request.
+     */
+    private fun go(text: String) {
+        if (leaving || phase == Phase.OPENING) return
+        cancelCountdown()
+        val g = ModeClassifier.classify(text)
+        val mode = chosen ?: g.mode
+        val prompt = if (mode == g.mode) g.prompt else ModeClassifier.spoken(text)
+        val target = Atelier.target(this)
+        val saved = prefs.getString(PREF_KEY, null)?.takeIf(LaunchLink::isKey)
+        val url = LaunchLink.build(mode, prompt, if (target.keyed) saved else null)
+        guess = g
+        hideKeyboard()
+        setPhase(Phase.OPENING)
+        tick(confirm = true)
+        main.postDelayed({ handOff(url, target, paired = saved != null) }, OPEN_DELAY_MS)
+    }
+
+    private fun handOff(url: String, target: Atelier.Target, paired: Boolean) {
+        if (isFinishing || leaving) return // closed meanwhile (a tap outside, Back): nothing opens
+        try {
+            startActivity(Atelier.intent(url, target))
+        } catch (_: ActivityNotFoundException) {
+            toast(R.string.no_app)
+            failure = Listener.Failure.OTHER
+            setPhase(Phase.HELD)
+            return
+        } catch (_: SecurityException) {
+            toast(R.string.no_app)
+            setPhase(Phase.HELD)
+            return
+        }
+        if (!target.app) {
+            when {
+                paired && !target.keyed -> toast(R.string.not_keyed)
+                // An Atelier WebAPK is installed but couldn't be verified: the link went to Chrome (or Android's pick).
+                target.webApk -> toast(R.string.opening_in_browser)
+                else -> toast(R.string.no_atelier)
+            }
+        }
+        finishQuietly()
+    }
+
+    private fun tick(confirm: Boolean = false) {
+        val kind = if (confirm && Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.KEYBOARD_TAP
+        card.performHapticFeedback(kind)
+    }
+
+    private fun toast(res: Int) = Toast.makeText(applicationContext, res, Toast.LENGTH_LONG).show()
 
     // ───────────────────────── UI ─────────────────────────
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).roundToInt()
+    private fun color(res: Int) = getColor(res)
 
-    @SuppressLint("ClickableViewAccessibility") // the sheet only swallows stray touches; it has no click action
     private fun buildUi() {
         root = FrameLayout(this)
-
         scrim = View(this).apply {
-            setBackgroundColor(getColor(R.color.scrim))
-            alpha = 0f
-            contentDescription = getString(R.string.action_close)
-            setOnClickListener { sheetCtl.dismiss() }
-        }
-
-        sheetBackground = GradientDrawable().apply {
-            val r = dp(28).toFloat()
-            cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
-        }
-        sheet = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = sheetBackground
-            clipToOutline = true
-            elevation = dp(6).toFloat()
-            // Taps that nothing inside takes must not fall through to the scrim (which closes the sheet).
-            setOnTouchListener { _, _ -> true }
-        }
-
-        header = FrameLayout(this).apply {
-            contentDescription = getString(R.string.sheet_handle)
-            setOnClickListener { sheetCtl.toggle() }
-        }
-        handle = View(this).apply {
-            background = GradientDrawable().apply { cornerRadius = dp(2).toFloat() }
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x00000000, 0x14000000, color(R.color.scrim_low)))
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            setOnClickListener { leave() }
+            alpha = 0f
         }
-        header.addView(handle, FrameLayout.LayoutParams(dp(36), dp(4), Gravity.CENTER_HORIZONTAL or Gravity.TOP).apply { topMargin = dp(10) })
-        openButton = ImageButton(this).apply {
-            setImageResource(R.drawable.ic_open_in_new)
-            background = borderlessRipple()
-            contentDescription = getString(R.string.open_in_atelier)
-            tooltipText = getString(R.string.open_in_atelier)
-            setOnClickListener { openInAtelier(Atelier.pathUrl("/")!!) }
+        card = TouchCard(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor(color(R.color.card_bg))
+                cornerRadius = dp(28).toFloat()
+                setStroke(max(1, dp(1) / 2 + 1), color(R.color.card_line))
+            }
+            elevation = dp(18).toFloat()
+            outlineAmbientShadowColor = Color.BLACK
+            outlineSpotShadowColor = Color.BLACK
+            accessibilityPaneTitle = getString(R.string.app_name)
+            setPadding(dp(16), dp(14), dp(12), dp(14))
+            onTouchDown = { ev ->
+                // A touch on the card that no other window covers is the owner: from now on it may open by itself.
+                if (ev.flags and (MotionEvent.FLAG_WINDOW_IS_OBSCURED or MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED) == 0) ownerLaunch = true
+                hold()
+            }
+            alpha = 0f
         }
-        header.addView(openButton, FrameLayout.LayoutParams(dp(48), dp(44), Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(6) })
 
-        bannerHost = FrameLayout(this).apply { visibility = View.GONE }
+        mainPage = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        card.addView(mainPage, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        content = FrameLayout(this)
-        progressLine = View(this).apply {
-            setBackgroundColor(getColor(R.color.accent))
+        // Top row: the A, the status and words, ×.
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+        }
+        mark = MarkView(this).apply {
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onMarkTap() }
+            setOnLongClickListener { openSetup(); true }
+        }
+        top.addView(mark, LinearLayout.LayoutParams(dp(72), dp(72)).apply { marginStart = -dp(4) })
+
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(10), 0, 0)
+        }
+        status = TextView(this).apply {
+            typeface = Typeface.MONOSPACE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            letterSpacing = 0.14f
+            isAllCaps = true
+            setTextColor(color(R.color.ink_2))
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        words = TextView(this).apply {
+            setTextColor(color(R.color.ink))
+            setLineSpacing(0f, 1.12f)
+            maxLines = 4
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, dp(4), 0, 0)
+        }
+        input = EditText(this).apply {
+            setTextColor(color(R.color.ink))
+            setHintTextColor(color(R.color.ink_3))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+            hint = getString(R.string.hint_typing)
+            // Not MULTI_LINE: Enter is Send. Long text still wraps (horizontally scrolling off).
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+            imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            setHorizontallyScrolling(false)
+            maxLines = 5
+            filters = arrayOf(InputFilter.LengthFilter(LaunchLink.MAX_PROMPT))
+            background = GradientDrawable().apply {
+                setColor(color(R.color.card_surface))
+                cornerRadius = dp(14).toFloat()
+            }
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            isVisible = false
+            doAfterTextChanged {
+                main.removeCallbacks(classifyTyped)
+                main.postDelayed(classifyTyped, TYPE_DEBOUNCE_MS)
+                if (phase == Phase.TYPING) {
+                    primary.isEnabled = !it.isNullOrBlank()
+                    primary.alpha = if (primary.isEnabled) 1f else 0.4f
+                }
+            }
+            setOnEditorActionListener { _, actionId, event ->
+                val enter = event != null && event.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN
+                if (actionId == EditorInfo.IME_ACTION_SEND || enter) {
+                    sendTyped()
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+        col.addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        col.addView(words, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        col.addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+        top.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        top.addView(iconButton(R.drawable.ic_close, R.string.close) { leave() }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        mainPage.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        // The "Opening in …" countdown.
+        progress = View(this).apply {
+            background = GradientDrawable().apply {
+                cornerRadius = dp(1).toFloat()
+                setColor(Mode.ASK.accent)
+            }
             pivotX = 0f
             scaleX = 0f
-            alpha = 0f
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            visibility = View.INVISIBLE
         }
-        content.addView(progressLine, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2), Gravity.TOP))
+        mainPage.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)).apply {
+            topMargin = dp(10)
+            marginStart = dp(4)
+            marginEnd = dp(4)
+        })
 
-        sheet.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)))
-        sheet.addView(bannerHost, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        sheet.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-
-        root.addView(scrim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        root.addView(sheet, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
-        setContentView(root)
-        applySheetColor()
-
-        sheetCtl = SheetController(root, scrim, sheet, header, maxWidth = dp(720), onDismissed = ::finishQuietly)
-        sheetCtl.onExpandedChanged = { expanded ->
-            labelHeaderClick(expanded)
-            post(JSONObject().put("type", "sheet").put("expanded", expanded))
+        // Mode chooser: all six, in Atelier's order.
+        chooserRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (m in Mode.entries) {
+            chooserRow.addView(modeChip(m), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(6) })
         }
-
-        ViewCompat.addAccessibilityAction(header, getString(R.string.action_close)) { _, _ -> sheetCtl.dismiss(); true }
-        labelHeaderClick(false)
-
-        // The sheet absorbs the bars, cutout and keyboard itself; nothing below it applies them again (returning
-        // CONSUMED instead would stop the WebView's own keyboard handling, see "understand window insets").
-        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
-            sheetCtl.applyInsets(insets)
-            WindowInsetsCompat.Builder(insets)
-                .setInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime(), Insets.NONE)
-                .build()
+        chooser = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(chooserRow)
+            isVisible = false
         }
-    }
+        mainPage.addView(chooser, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
 
-    /** TalkBack says what a double-tap on the header does now: expand, or shrink back. */
-    private fun labelHeaderClick(expanded: Boolean) {
-        val label = getString(if (expanded) R.string.action_collapse else R.string.action_expand)
-        ViewCompat.replaceAccessibilityAction(header, AccessibilityActionCompat.ACTION_CLICK, label, null)
-    }
-
-    private fun borderlessRipple() = TypedValue().let { tv ->
-        theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true)
-        getDrawable(tv.resourceId)
-    }
-
-    // ───────────────────────── sheet colour + system bars ─────────────────────────
-
-    /** The page's own background once it has said so (Settings → theme can differ from the phone's), else the theme's. */
-    private fun sheetColor(): Int = pageColor ?: getColor(R.color.sheet_bg)
-
-    private fun sheetIsLight(): Boolean = ColorUtils.calculateLuminance(sheetColor()) > 0.5
-
-    /**
-     * Sheet, WebView backdrop, handle and ↗ in the sheet's colour: the theme's own (values/, values-night/), or, once the
-     * page has sent its background, the light or dark set that reads on it (the same values as those two files).
-     */
-    private fun applySheetColor() {
-        val color = sheetColor()
-        val light = sheetIsLight()
-        val themed = pageColor == null
-        sheetBackground.setColor(color)
-        web?.view?.setBackgroundColor(color)
-        val handleColor = if (themed) getColor(R.color.handle) else if (light) 0x471B1A16 else 0x52ECE6D9
-        val inkColor = if (themed) getColor(R.color.ink_2) else if (light) 0xFF5B564C.toInt() else 0xFFA8A295.toInt()
-        (handle.background as? GradientDrawable)?.setColor(handleColor)
-        openButton.imageTintList = ColorStateList.valueOf(inkColor)
-        applyBarAppearance()
-    }
-
-    /**
-     * Nav-bar icons that read on the sheet behind them, light status-bar icons over the scrim, and no system contrast
-     * scrim behind the nav bar (with 3-button navigation it would be a band across the sheet). Called after androidx's
-     * own re-run on every handled configuration change (see onCreate). The status bar's contrast scrim is already off
-     * (theme, and the non-auto status style).
-     */
-    private fun applyBarAppearance() {
-        WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightNavigationBars = sheetIsLight()
-            isAppearanceLightStatusBars = false
-        }
-        window.isNavigationBarContrastEnforced = false
-    }
-
-    /** {type:'theme', bg} from the page. */
-    private fun applyPageColor(hex: String) {
-        if (!Regex("^#[0-9a-fA-F]{6}$").matches(hex)) return
-        pageColor = hex.toColorInt()
-        applySheetColor()
-    }
-
-    // ───────────────────────── banners: setup + microphone ─────────────────────────
-
-    private var bannerKind = 0
-
-    private fun maybeShowSetup() {
-        if (invocation != INVOCATION_LAUNCHER || prefs.getBoolean(PREF_SETUP_DISMISSED, false) || assistantRoleHeld()) return
-        showSetupBanner()
-    }
-
-    private fun showSetupBanner() {
-        showBanner(BANNER_SETUP, getString(R.string.setup_text), getString(R.string.setup_action), ::openAssistantSettings) {
-            prefs.edit { putBoolean(PREF_SETUP_DISMISSED, true) }
-        }
-    }
-
-    private fun showMicBlocked() {
-        showBanner(BANNER_MIC, getString(R.string.mic_blocked), getString(R.string.mic_settings), ::openAppSettings, null)
-    }
-
-    /** The banner that is showing, rebuilt in the current theme's colours. */
-    private fun refreshBanner() {
-        when (bannerKind) {
-            BANNER_SETUP -> showSetupBanner()
-            BANNER_MIC -> showMicBlocked()
-        }
-    }
-
-    private fun showBanner(kind: Int, text: String, action: String, onAction: () -> Unit, onDismiss: (() -> Unit)?) {
-        bannerHost.removeAllViews()
-        bannerKind = kind
-        val card = LinearLayout(this).apply {
+        // Footer: mode chip … secondary, primary, ⋯
+        val foot = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = GradientDrawable().apply {
-                setColor(getColor(R.color.sheet_surface))
-                cornerRadius = dp(16).toFloat()
-            }
-            setPaddingRelative(dp(16), dp(6), dp(4), dp(6))
         }
-        card.addView(TextView(this).apply {
-            this.text = text
-            setTextColor(getColor(R.color.ink))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        card.addView(TextView(this).apply {
-            this.text = action
-            setTextColor(getColor(R.color.accent))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            minHeight = dp(44)
-            setPaddingRelative(dp(12), 0, dp(12), 0)
-            background = borderlessRipple()
+        chip = TextView(this).apply {
+            typeface = Typeface.MONOSPACE
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+            letterSpacing = 0.12f
+            isAllCaps = true
+            gravity = Gravity.CENTER_VERTICAL
+            minHeight = dp(34)
+            setPadding(dp(12), 0, dp(14), 0)
+            compoundDrawablePadding = dp(7)
             isClickable = true
-            setOnClickListener { onAction() }
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        if (onDismiss != null) {
-            card.addView(ImageButton(this).apply {
-                setImageResource(R.drawable.ic_close)
-                imageTintList = ColorStateList.valueOf(getColor(R.color.ink_2))
-                background = borderlessRipple()
-                contentDescription = getString(R.string.dismiss)
-                setOnClickListener { onDismiss(); hideBanner(kind) }
-            }, LinearLayout.LayoutParams(dp(44), dp(44)))
+            isFocusable = true
+            setOnClickListener { showChooser(!chooser.isVisible) }
+            visibility = View.INVISIBLE
         }
-        bannerHost.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            setMargins(dp(12), 0, dp(12), dp(8))
-        })
-        bannerHost.visibility = View.VISIBLE
+        foot.addView(chip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(4) })
+        foot.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        secondary = ghostButton()
+        foot.addView(secondary, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        primary = pillButton()
+        foot.addView(primary, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(4) })
+        more = iconButton(R.drawable.ic_more_horiz, R.string.setup_open) { openSetup() }
+        foot.addView(more, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(2) })
+        mainPage.addView(foot, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+
+        root.addView(scrim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        root.addView(card, FrameLayout.LayoutParams(dp(360), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+        setContentView(root)
+
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            barInsets = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            layoutCard()
+            WindowInsetsCompat.CONSUMED
+        }
+        root.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+            if (r - l != or - ol || b - t != ob - ot) root.post { layoutCard() }
+        }
+        render()
     }
 
-    private fun hideBanner(kind: Int) {
-        if (bannerKind != kind) return
-        bannerKind = 0
-        bannerHost.removeAllViews()
-        bannerHost.visibility = View.GONE
+    /** ~92% of the width, at most 420 dp, above the nav bar or the keyboard; slides in the first time. */
+    private fun layoutCard() {
+        if (root.width == 0) return
+        val lp = card.layoutParams as FrameLayout.LayoutParams
+        val avail = root.width - barInsets.left - barInsets.right
+        val width = min((avail * 0.92f).roundToInt(), dp(MAX_CARD_DP))
+        val bottom = max(barInsets.bottom, imeBottom) + dp(14)
+        if (lp.width != width || lp.bottomMargin != bottom || lp.topMargin != barInsets.top + dp(12) ||
+            lp.leftMargin != barInsets.left || lp.rightMargin != barInsets.right
+        ) {
+            lp.width = width
+            lp.bottomMargin = bottom
+            lp.topMargin = barInsets.top + dp(12)
+            lp.leftMargin = barInsets.left
+            lp.rightMargin = barInsets.right
+            card.layoutParams = lp
+        }
+        if (!entered) {
+            entered = true
+            card.translationY = dp(28).toFloat()
+            card.animate().alpha(1f).translationY(0f).setDuration(240).setInterpolator(EASE).start()
+            scrim.animate().alpha(1f).setDuration(240).start()
+        }
+    }
+
+    private fun iconButton(icon: Int, label: Int, onClick: () -> Unit) = ImageButton(this).apply {
+        setImageResource(icon)
+        imageTintList = ColorStateList.valueOf(color(R.color.ink_2))
+        background = ripple(null, dp(20).toFloat())
+        contentDescription = getString(label)
+        tooltipText = getString(label)
+        setOnClickListener { onClick() }
+    }
+
+    private fun ripple(fill: Int?, radius: Float): Drawable {
+        val shape = GradientDrawable().apply {
+            cornerRadius = radius
+            setColor(fill ?: Color.TRANSPARENT)
+        }
+        val mask = GradientDrawable().apply {
+            cornerRadius = radius
+            setColor(Color.WHITE)
+        }
+        val wave = if (fill == null) 0x29ECE6D9 else 0x33000000
+        return RippleDrawable(ColorStateList.valueOf(wave), if (fill == null) null else shape, mask)
+    }
+
+    private fun ghostButton() = TextView(this).apply {
+        setTextColor(color(R.color.ink_2))
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        gravity = Gravity.CENTER
+        minHeight = dp(40)
+        setPadding(dp(12), 0, dp(12), 0)
+        compoundDrawablePadding = dp(6)
+        background = ripple(null, dp(20).toFloat())
+        isClickable = true
+        isFocusable = true
+    }
+
+    private fun pillButton() = TextView(this).apply {
+        setTextColor(color(R.color.card_bg))
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        gravity = Gravity.CENTER
+        minHeight = dp(40)
+        minWidth = dp(72)
+        setPadding(dp(18), 0, dp(18), 0)
+        isClickable = true
+        isFocusable = true
+    }
+
+    private fun setButton(b: TextView, label: Int?, icon: Int? = null, onClick: (() -> Unit)? = null) {
+        if (label == null) {
+            b.isVisible = false
+            b.setOnClickListener(null)
+            return
+        }
+        b.isVisible = true
+        b.isEnabled = true
+        b.alpha = 1f
+        b.text = getString(label)
+        val d = icon?.let { getDrawable(it)?.mutate()?.apply { setTint(color(R.color.ink_2)) } }
+        b.setCompoundDrawablesRelativeWithIntrinsicBounds(d, null, null, null)
+        b.setOnClickListener { onClick?.invoke() }
+    }
+
+    private fun modeChip(m: Mode) = TextView(this).apply {
+        text = m.label
+        tag = m
+        typeface = Typeface.MONOSPACE
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+        letterSpacing = 0.12f
+        isAllCaps = true
+        gravity = Gravity.CENTER
+        minHeight = dp(36)
+        setPadding(dp(14), 0, dp(14), 0)
+        contentDescription = getString(R.string.mode_a11y, m.label)
+        isClickable = true
+        isFocusable = true
+        setOnClickListener {
+            chosen = m
+            showChooser(false)
+            mark.setAccent(m.accent)
+            render()
+        }
+    }
+
+    private fun chipBackground(accent: Int, strong: Boolean, filled: Boolean = false): Drawable {
+        val shape = GradientDrawable().apply {
+            cornerRadius = dp(18).toFloat()
+            when {
+                filled -> setColor(accent)
+                strong -> {
+                    setColor(ColorUtils.setAlphaComponent(accent, 0x24))
+                    setStroke(dp(1), ColorUtils.setAlphaComponent(accent, 0x73))
+                }
+                else -> {
+                    setColor(Color.TRANSPARENT)
+                    setStroke(dp(1), color(R.color.card_line))
+                }
+            }
+        }
+        val mask = GradientDrawable().apply {
+            cornerRadius = dp(18).toFloat()
+            setColor(Color.WHITE)
+        }
+        return RippleDrawable(ColorStateList.valueOf(0x29ECE6D9), shape, mask)
+    }
+
+    private fun dot(color: Int): Drawable = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(color)
+        setSize(dp(7), dp(7))
+    }
+
+    private fun showChooser(show: Boolean) {
+        if (!::chooser.isInitialized) return
+        if (show) renderChooser()
+        chooser.isVisible = show
+    }
+
+    private val classifyTyped = Runnable {
+        if (phase != Phase.TYPING) return@Runnable
+        guess = ModeClassifier.classify(input.text.toString())
+        renderChip()
+        mark.setAccent(currentMode().accent)
+    }
+
+    private fun sendTyped() {
+        val text = input.text.toString()
+        if (text.isBlank()) return
+        heard = text
+        go(text)
+    }
+
+    private fun onMarkTap() {
+        when (phase) {
+            Phase.LISTENING -> if (heard.isBlank()) {
+                listener.cancel()
+                setPhase(Phase.IDLE)
+            } else {
+                listener.stop()
+            }
+            Phase.THINKING, Phase.OPENING, Phase.PERMISSION -> Unit
+            Phase.SETUP -> Unit
+            else -> listen()
+        }
+    }
+
+    // ───────────────────────── render ─────────────────────────
+
+    private fun setPhase(p: Phase) {
+        if (p != Phase.REVIEW) main.removeCallbacks(countdown)
+        if (phase != p && p != Phase.HELD && p != Phase.TYPING) showChooser(false)
+        phase = p
+        render()
+    }
+
+    private fun render() {
+        if (!::more.isInitialized) return
+        val inSetup = phase == Phase.SETUP
+        mainPage.isVisible = !inSetup
+        setupPage?.isVisible = inSetup
+        if (inSetup) return
+
+        val mode = currentMode()
+        mark.look = when (phase) {
+            Phase.LISTENING -> MarkView.Look.LISTENING
+            Phase.THINKING -> MarkView.Look.THINKING
+            Phase.OPENING -> MarkView.Look.OPENING
+            Phase.ERROR -> MarkView.Look.ERROR
+            Phase.PERMISSION -> MarkView.Look.STILL
+            else -> MarkView.Look.IDLE
+        }
+        mark.setAccent(if (phase == Phase.ERROR) color(R.color.ink_3) else mode.accent)
+        mark.contentDescription = getString(if (phase == Phase.LISTENING) R.string.mark_stop else R.string.mark_start)
+
+        status.text = when (phase) {
+            Phase.LISTENING -> getString(R.string.status_listening)
+            Phase.THINKING -> getString(R.string.status_thinking)
+            Phase.REVIEW -> getString(R.string.status_opening_in, mode.label)
+            Phase.HELD -> getString(if (chosen == null && guess.explicit && guess.prompt.isBlank()) R.string.status_what else R.string.status_ready)
+            Phase.TYPING -> getString(R.string.status_typing)
+            Phase.IDLE -> getString(R.string.status_idle)
+            Phase.PERMISSION -> getString(R.string.status_permission)
+            Phase.OPENING -> getString(R.string.status_opening)
+            Phase.ERROR -> getString(errorTitle(failure))
+            Phase.SETUP -> ""
+        }
+        status.setTextColor(color(if (phase == Phase.ERROR) R.color.warn else R.color.ink_2))
+        // Never read out while the mic is open (a screen reader speaking into it would be transcribed).
+        status.accessibilityLiveRegion = if (phase == Phase.LISTENING || phase == Phase.THINKING) View.ACCESSIBILITY_LIVE_REGION_NONE else View.ACCESSIBILITY_LIVE_REGION_POLITE
+
+        val typing = phase == Phase.TYPING
+        input.isVisible = typing
+        words.isVisible = !typing
+        renderWords()
+
+        progress.visibility = if (phase == Phase.REVIEW) View.VISIBLE else View.INVISIBLE
+        (progress.background as? GradientDrawable)?.setColor(mode.accent)
+        renderChip()
+        renderButtons()
+        more.isVisible = phase != Phase.OPENING
+        if (chooser.isVisible) renderChooser()
+    }
+
+    private fun renderWords() {
+        when {
+            phase == Phase.ERROR -> {
+                words.text = getString(errorBody(failure))
+                words.typeface = Typeface.DEFAULT
+                words.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                words.setTextColor(color(R.color.ink))
+            }
+            heard.isBlank() -> {
+                words.text = getString(R.string.hint_listening)
+                words.typeface = Typeface.create(Typeface.SERIF, Typeface.ITALIC)
+                words.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                words.setTextColor(color(R.color.ink_3))
+            }
+            else -> {
+                words.text = tail(heard)
+                words.typeface = Typeface.DEFAULT
+                words.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                words.setTextColor(color(R.color.ink))
+            }
+        }
+    }
+
+    /** The newest words: a long utterance shows its end (multi-line TextViews can't ellipsize at the start). */
+    private fun tail(s: String): String {
+        val t = s.trim()
+        if (t.length <= TAIL_CHARS) return t
+        val cut = t.substring(t.length - TAIL_CHARS)
+        val space = cut.indexOf(' ')
+        return "…" + if (space in 1..24) cut.substring(space + 1) else cut
+    }
+
+    private fun renderChip() {
+        val text = if (phase == Phase.TYPING) input.text.toString() else heard
+        val show = phase !in setOf(Phase.ERROR, Phase.PERMISSION, Phase.IDLE) && (chosen != null || text.isNotBlank())
+        chip.visibility = if (show) View.VISIBLE else View.INVISIBLE
+        if (!show) return
+        val mode = currentMode()
+        val strong = chosen != null || guess.sure
+        chip.text = mode.label
+        chip.setTextColor(if (strong) mode.accent else color(R.color.ink_2))
+        chip.background = chipBackground(mode.accent, strong)
+        chip.setCompoundDrawablesRelativeWithIntrinsicBounds(dot(if (strong) mode.accent else color(R.color.ink_3)), null, null, null)
+        chip.contentDescription = getString(R.string.chip_a11y, mode.label)
+    }
+
+    private fun renderChooser() {
+        val current = currentMode()
+        for (i in 0 until chooserRow.childCount) {
+            val v = chooserRow.getChildAt(i) as TextView
+            val m = v.tag as Mode
+            val on = m == current
+            v.setTextColor(if (on) color(R.color.card_bg) else m.accent)
+            v.background = chipBackground(m.accent, strong = true, filled = on)
+            v.isSelected = on
+        }
+    }
+
+    private fun renderButtons() {
+        val mode = currentMode()
+        primary.background = ripple(mode.accent, dp(20).toFloat())
+        when (phase) {
+            Phase.IDLE -> {
+                setButton(secondary, R.string.type, R.drawable.ic_keyboard) { type("") }
+                setButton(primary, R.string.talk) { listen() }
+            }
+            Phase.PERMISSION -> {
+                setButton(secondary, R.string.type, R.drawable.ic_keyboard) { type("") }
+                setButton(primary, null)
+            }
+            Phase.LISTENING -> {
+                setButton(secondary, R.string.type, R.drawable.ic_keyboard) { type(heard) }
+                setButton(primary, null)
+            }
+            Phase.THINKING, Phase.OPENING, Phase.SETUP -> {
+                setButton(secondary, null)
+                setButton(primary, null)
+            }
+            Phase.REVIEW, Phase.HELD -> {
+                setButton(secondary, R.string.edit, R.drawable.ic_keyboard) { type(heard) }
+                setButton(primary, R.string.open) { go(heard) }
+            }
+            Phase.TYPING -> {
+                setButton(secondary, R.string.talk, R.drawable.ic_mic) { listen() }
+                setButton(primary, R.string.send) { sendTyped() }
+                primary.isEnabled = input.text.isNotBlank()
+                primary.alpha = if (primary.isEnabled) 1f else 0.4f
+            }
+            Phase.ERROR -> {
+                val f = failure
+                when {
+                    f == Listener.Failure.UNAVAILABLE || f == Listener.Failure.LANGUAGE -> {
+                        setButton(secondary, if (f == Listener.Failure.LANGUAGE) R.string.retry else null) { listen() }
+                        setButton(primary, R.string.type) { type(heard) }
+                    }
+                    f == Listener.Failure.PERMISSION -> {
+                        setButton(secondary, R.string.type, R.drawable.ic_keyboard) { type("") }
+                        if (micBlocked) setButton(primary, R.string.settings) { openAppSettings() } else setButton(primary, R.string.allow) { listen() }
+                    }
+                    else -> {
+                        setButton(secondary, R.string.type, R.drawable.ic_keyboard) { type(heard) }
+                        setButton(primary, R.string.retry) { listen() }
+                    }
+                }
+            }
+        }
+        if (phase == Phase.TYPING) primary.alpha = if (primary.isEnabled) 1f else 0.4f
+    }
+
+    private fun errorTitle(f: Listener.Failure?): Int = when (f) {
+        Listener.Failure.NO_MATCH -> R.string.err_no_match_title
+        Listener.Failure.NETWORK -> R.string.err_network_title
+        Listener.Failure.BUSY -> R.string.err_busy_title
+        Listener.Failure.PERMISSION -> R.string.err_permission_title
+        Listener.Failure.AUDIO -> R.string.err_audio_title
+        Listener.Failure.UNAVAILABLE -> R.string.err_unavailable_title
+        Listener.Failure.LANGUAGE -> R.string.err_language_title
+        else -> R.string.err_other_title
+    }
+
+    private fun errorBody(f: Listener.Failure?): Int = when (f) {
+        Listener.Failure.NO_MATCH -> R.string.err_no_match
+        Listener.Failure.NETWORK -> R.string.err_network
+        Listener.Failure.BUSY -> R.string.err_busy
+        Listener.Failure.PERMISSION -> if (micBlocked) R.string.err_permission_blocked else R.string.err_permission
+        Listener.Failure.AUDIO -> R.string.err_audio
+        Listener.Failure.UNAVAILABLE -> R.string.err_unavailable
+        Listener.Failure.LANGUAGE -> R.string.err_language
+        else -> R.string.err_other
+    }
+
+    // ───────────────────────── setup: pairing + side button ─────────────────────────
+
+    private fun openSetup() {
+        if (leaving) return
+        listener.cancel()
+        cancelCountdown()
+        hideKeyboard()
+        showChooser(false)
+        setupNote = null
+        setPhase(Phase.SETUP)
+        refreshSetup()
+    }
+
+    /** Back to the card, and listen: the setup page has been seen (first run shows it once). */
+    private fun closeSetup() {
+        prefs.edit { putBoolean(PREF_SETUP_SEEN, true) }
+        setupPage?.let { card.removeView(it) }
+        setupPage = null
+        setupNote = null
+        listen()
+    }
+
+    private fun refreshSetup() {
+        if (phase != Phase.SETUP) return
+        setupPage?.let { card.removeView(it) }
+        setupPage = buildSetup().also { card.addView(it, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)) }
+        render()
+    }
+
+    private fun buildSetup(): View {
+        val paired = LaunchLink.isKey(prefs.getString(PREF_KEY, null))
+        val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), 0, dp(4), dp(2))
+        }
+        scroll.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        head.addView(eyebrow(R.string.setup_eyebrow), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(iconButton(R.drawable.ic_close, R.string.close) { closeSetup() }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        col.addView(head)
+
+        col.addView(text(getString(R.string.setup_title), 24f, R.color.ink, Typeface.SERIF).apply { setPadding(0, 0, 0, dp(6)) })
+        col.addView(text(getString(R.string.setup_body), 14f, R.color.ink_2))
+        listOf(R.string.setup_step1, R.string.setup_step2, R.string.setup_step3).forEachIndexed { i, res ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, dp(8), 0, 0)
+            }
+            row.addView(text("${i + 1}", 12f, R.color.accent, Typeface.MONOSPACE).apply { setPadding(0, dp(2), dp(10), 0) })
+            row.addView(text(getString(res), 14f, R.color.ink), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            col.addView(row)
+        }
+
+        col.addView(text(getString(if (paired) R.string.setup_paired else R.string.setup_unpaired), 13f, if (paired) R.color.accent else R.color.ink_2).apply {
+            setCompoundDrawablesRelativeWithIntrinsicBounds(dot(color(if (paired) R.color.accent else R.color.ink_3)), null, null, null)
+            compoundDrawablePadding = dp(8)
+            setPadding(0, dp(14), 0, 0)
+        })
+        setupNote?.let { (msg, good) ->
+            col.addView(text(getString(msg), 13f, if (good) R.color.ink else R.color.warn).apply {
+                setPadding(0, dp(6), 0, 0)
+                accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            })
+        }
+        val acts = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(12), 0, 0)
+        }
+        acts.addView(pillButton().apply {
+            text = getString(R.string.paste)
+            background = ripple(Mode.ASK.accent, dp(20).toFloat())
+            setOnClickListener { pasteLink() }
+        })
+        if (paired) {
+            acts.addView(ghostButton().apply {
+                text = getString(R.string.unpair)
+                setOnClickListener { unpair() }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(6) })
+        }
+        col.addView(acts)
+
+        col.addView(divider())
+        col.addView(eyebrow(R.string.side_eyebrow).apply { setPadding(0, 0, 0, dp(6)) })
+        val held = assistantRoleHeld()
+        col.addView(text(getString(if (held) R.string.side_ready else R.string.side_todo), 14f, if (held) R.color.ink else R.color.ink_2))
+        if (!held) {
+            col.addView(ghostButton().apply {
+                text = getString(R.string.side_open)
+                setTextColor(color(R.color.accent))
+                setOnClickListener { openAssistantSettings() }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dp(6)
+                marginStart = -dp(12)
+            })
+        }
+
+        col.addView(divider())
+        col.addView(text(getString(R.string.privacy_note), 12f, R.color.ink_3))
+        val done = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            setPadding(0, dp(12), 0, 0)
+        }
+        done.addView(pillButton().apply {
+            text = getString(R.string.done)
+            background = ripple(color(R.color.ink), dp(20).toFloat())
+            setOnClickListener { closeSetup() }
+        })
+        col.addView(done)
+        return scroll
+    }
+
+    private fun eyebrow(res: Int) = text(getString(res), 11f, R.color.ink_2, Typeface.MONOSPACE).apply {
+        letterSpacing = 0.14f
+        isAllCaps = true
+    }
+
+    private fun text(s: String, sp: Float, colorRes: Int, face: Typeface? = null) = TextView(this).apply {
+        text = s
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
+        setTextColor(color(colorRes))
+        setLineSpacing(0f, 1.15f)
+        face?.let { typeface = it }
+    }
+
+    private fun divider() = View(this).apply {
+        setBackgroundColor(color(R.color.card_line))
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, max(1, dp(1) / 2)).apply {
+            topMargin = dp(16)
+            bottomMargin = dp(14)
+        }
+    }
+
+    /**
+     * Reads the clipboard only now, from this tap. Keeps just the 22-character key from a valid Atelier link, then clears
+     * the clipboard (the link is a secret: it can send to Atelier without a tap). Neither the link nor the key is logged.
+     */
+    private fun pasteLink() {
+        val cm = getSystemService(ClipboardManager::class.java)
+        val clip = try {
+            cm?.primaryClip
+        } catch (_: SecurityException) {
+            null
+        }
+        val item = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+        val result = LaunchLink.parsePairing(item?.text)
+        setupNote = when (result) {
+            is LaunchLink.Pairing.Ok -> {
+                prefs.edit { putString(PREF_KEY, result.key) }
+                try {
+                    cm?.clearPrimaryClip()
+                } catch (_: RuntimeException) {
+                }
+                R.string.pair_ok to true
+            }
+            LaunchLink.Pairing.Empty -> R.string.pair_empty to false
+            LaunchLink.Pairing.NotLink -> R.string.pair_not_link to false
+            LaunchLink.Pairing.NotAtelier -> R.string.pair_not_atelier to false
+            LaunchLink.Pairing.NoKey -> R.string.pair_no_key to false
+        }
+        refreshSetup()
+    }
+
+    private fun unpair() {
+        prefs.edit { remove(PREF_KEY) }
+        setupNote = R.string.unpaired to true
+        refreshSetup()
     }
 
     private fun assistantRoleHeld(): Boolean {
         val rm = getSystemService(RoleManager::class.java) ?: return false
-        return try { rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT) && rm.isRoleHeld(RoleManager.ROLE_ASSISTANT) } catch (_: RuntimeException) { false }
+        return try {
+            rm.isRoleAvailable(RoleManager.ROLE_ASSISTANT) && rm.isRoleHeld(RoleManager.ROLE_ASSISTANT)
+        } catch (_: RuntimeException) {
+            false
+        }
     }
 
     /** The assistant role's own settings page (its "manage" intent), else the default-apps list. */
     private fun openAssistantSettings() {
-        val tried = listOf(Settings.ACTION_VOICE_INPUT_SETTINGS, Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS, Settings.ACTION_SETTINGS)
-        for (action in tried) {
+        for (action in listOf(Settings.ACTION_VOICE_INPUT_SETTINGS, Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS, Settings.ACTION_SETTINGS)) {
             try {
+                awayOnPurpose = true
                 startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 toast(R.string.setup_hint)
                 return
@@ -539,412 +1237,69 @@ class AssistActivity : ComponentActivity(), PanelHost {
             } catch (_: SecurityException) {
             }
         }
+        awayOnPurpose = false
     }
 
     private fun openAppSettings() {
         try {
+            awayOnPurpose = true
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            micSettingsOpened = true
         } catch (_: ActivityNotFoundException) {
+            awayOnPurpose = false
         }
     }
 
-    private fun toast(res: Int) = Toast.makeText(this, res, Toast.LENGTH_LONG).show()
-
-    // ───────────────────────── leaving the panel ─────────────────────────
-
-    /** "Open in Atelier": the installed PWA, at [url]; the panel closes. */
-    private fun openInAtelier(url: Uri) {
-        val (intent, app) = Atelier.appIntent(this, url)
-        try {
-            startActivity(intent)
-            if (!app) toast(R.string.no_atelier)
-            finishQuietly()
-        } catch (_: ActivityNotFoundException) {
-            toast(R.string.no_app)
-        }
-    }
-
-    override fun openExternal(uri: Uri) {
-        val intent = if (Atelier.isAtelier(uri)) Atelier.appIntent(this, uri).first else Atelier.externalIntent(uri)
-        if (intent == null) return // a scheme we don't hand out (intent:, file:, javascript:, …)
-        try {
-            startActivity(intent)
-        } catch (_: ActivityNotFoundException) {
-            toast(R.string.no_app)
-        }
-    }
-
-    // ───────────────────────── PanelHost: page loading ─────────────────────────
-
-    override fun onProgress(percent: Int) {
-        progressLine.animate().cancel()
-        if (percent >= 100) {
-            progressLine.animate().scaleX(1f).alpha(0f).setDuration(220).start()
-        } else {
-            progressLine.alpha = 1f
-            progressLine.animate().scaleX(percent.coerceAtLeast(8) / 100f).setDuration(160).start()
-        }
-    }
-
-    override fun onMainFrameError() {
-        if (errorView != null) return
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setBackgroundColor(getColor(R.color.sheet_bg))
-            setPadding(dp(32), dp(32), dp(32), dp(32))
-            isClickable = true
-        }
-        box.addView(TextView(this).apply {
-            setText(R.string.offline_title)
-            setTextColor(getColor(R.color.ink))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
-            gravity = Gravity.CENTER
-        })
-        box.addView(TextView(this).apply {
-            setText(R.string.offline_body)
-            setTextColor(getColor(R.color.ink_2))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            gravity = Gravity.CENTER
-            setPadding(0, dp(8), 0, dp(20))
-        })
-        box.addView(TextView(this).apply {
-            setText(R.string.retry)
-            setTextColor(getColor(R.color.accent))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            minHeight = dp(48)
-            setPadding(dp(24), 0, dp(24), 0)
-            background = borderlessRipple()
-            isClickable = true
-            setOnClickListener {
-                content.removeView(errorView)
-                errorView = null
-                web?.load(Atelier.startUrl("ask"))
-            }
-        })
-        errorView = box
-        content.addView(box, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-    }
-
-    override fun onPageVisible() {
-        errorView?.let { content.removeView(it) }
-        errorView = null
-    }
-
-    // ───────────────────────── PanelHost: renderer loss ─────────────────────────
-
-    private var rebuildWeb = false // the renderer went away while the panel was out of sight
-    private var rendererCrashes = 0
-    private var lastCrashAt = 0L
+    // ───────────────────────── 1.0.x leftovers ─────────────────────────
 
     /**
-     * The WebView can't be used again after its renderer went away, so it is dropped at once. Out of sight (Android
-     * reclaims hidden renderers under memory pressure, and this activity can wait in the background for hours) nothing
-     * is reloaded and nothing is said: the next time the panel shows, it starts a fresh page. In sight, it is replaced
-     * right away; only crashes count, and three within a minute close the panel with a message.
+     * Atelier Assist 1.0.x showed Atelier in a WebView, which kept its own Atelier sign-in (cookies, localStorage) in
+     * this app's private storage. 1.1 has no WebView, so that sign-in is dead weight holding a credential: it is deleted
+     * once, off the main thread, along with 1.0's preferences. (The installed Atelier app keeps its own sign-in.)
      */
-    override fun onRendererGone(crashed: Boolean) {
-        dropWeb()
-        if (isFinishing) return
-        if (!started) {
-            rebuildWeb = true
-            return
+    private fun dropLegacyWebData() {
+        if (prefs.getBoolean(PREF_LEGACY_CLEARED, false)) return
+        prefs.edit {
+            putBoolean(PREF_LEGACY_CLEARED, true)
+            remove("micBlocked")
+            remove("setupDismissed")
         }
-        if (crashed) {
-            val now = SystemClock.elapsedRealtime()
-            if (now - lastCrashAt > CRASH_WINDOW_MS) rendererCrashes = 0
-            lastCrashAt = now
-            if (++rendererCrashes > 2) {
-                toast(R.string.crashed)
-                finishQuietly()
-                return
-            }
+        val dataDir = File(applicationInfo.dataDir)
+        val dirs = listOf(File(dataDir, "app_webview"), File(dataDir, "app_textures"), File(cacheDir, "WebView"), File(cacheDir, "org.chromium.android_webview"))
+        Thread {
+            for (d in dirs) runCatching { if (d.exists()) d.deleteRecursively() }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /** The card: any touch-down on it holds the countdown first, and touches it doesn't use never reach the scrim. */
+    @SuppressLint("ClickableViewAccessibility", "ViewConstructor")
+    private class TouchCard(context: Context) : LinearLayout(context) {
+        var onTouchDown: ((MotionEvent) -> Unit)? = null
+
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) onTouchDown?.invoke(ev)
+            return super.dispatchTouchEvent(ev)
         }
-        replaceWeb("ask")
-    }
 
-    /** A new WebView at the start page. */
-    private fun replaceWeb(start: String) {
-        errorView?.let { content.removeView(it) }
-        errorView = null
-        startMode = start
-        web = try {
-            PanelWeb(this, this, content, sheetColor()).also { it.load(Atelier.startUrl(start)) }
-        } catch (_: RuntimeException) {
-            toast(R.string.no_webview)
-            finishQuietly()
-            null
-        }
-    }
-
-    /** Everything tied to the current WebView, released (its page and renderer are gone or going). */
-    private fun dropWeb() {
-        pageProxy = null
-        pendingSave = null
-        pendingMic?.let { runCatching { it.deny() } }
-        pendingMic = null
-        fileCallback?.let { runCatching { it.onReceiveValue(null) } }
-        fileCallback = null
-        web?.destroy()
-        web = null
-    }
-
-    // ───────────────────────── PanelHost: microphone ─────────────────────────
-
-    private fun micGranted() = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-
-    private fun micState(): String = when {
-        micGranted() -> "granted"
-        prefs.getBoolean(PREF_MIC_BLOCKED, false) && !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) -> "denied"
-        else -> "prompt"
-    }
-
-    /** Atelier asked for the microphone (getUserMedia): grant audio only, asking Android first if needed. */
-    override fun requestMic(request: PermissionRequest) {
-        if (micGranted()) {
-            request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
-            return
-        }
-        pendingMic?.deny()
-        pendingMic = request
-        micRationaleBefore = shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
-        micAskedAt = SystemClock.elapsedRealtime()
-        micPermission.launch(Manifest.permission.RECORD_AUDIO)
-    }
-
-    override fun cancelMic(request: PermissionRequest) {
-        if (pendingMic === request) pendingMic = null
-    }
-
-    // ───────────────────────── PanelHost: files ─────────────────────────
-
-    override fun showFileChooser(callback: ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams): Boolean {
-        fileCallback?.onReceiveValue(null)
-        fileCallback = callback
-        val intent = Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE)
-        val types = params.acceptTypes.orEmpty()
-            .flatMap { it.split(',') }
-            .map { it.trim().lowercase() }
-            .filter { it.isNotEmpty() }
-            .mapNotNull { if (it.startsWith('.')) MimeTypeMap.getSingleton().getMimeTypeFromExtension(it.drop(1)) ?: if (it == ".json") "application/json" else null else it }
-            .filter { '/' in it }
-            .distinct()
-        when (types.size) {
-            0 -> intent.type = "*/*"
-            1 -> intent.type = types[0]
-            else -> {
-                intent.type = "*/*"
-                intent.putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
-            }
-        }
-        if (params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-        return try {
-            filePicker.launch(intent)
-            true
-        } catch (_: ActivityNotFoundException) {
-            fileCallback = null
-            callback.onReceiveValue(null)
-            true
-        }
-    }
-
-    private fun pickedUris(resultCode: Int, data: Intent?): Array<Uri>? {
-        if (resultCode != Activity.RESULT_OK || data == null) return null
-        val out = mutableListOf<Uri>()
-        data.clipData?.let { clip -> for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let(out::add) }
-        if (out.isEmpty()) data.data?.let(out::add)
-        return out.distinct().toTypedArray().takeIf { it.isNotEmpty() }
-    }
-
-    // ───────────────────────── PanelHost: downloads ─────────────────────────
-
-    private var tapSpentAt = -1L // the tap that already paid for a download
-    private var lastDownloadAt = Long.MIN_VALUE / 2
-    private var savesRunning = 0 // writes queued or running on SAVER (main thread only)
-
-    /**
-     * A download started in the page, through WebView's DownloadListener, which can't tell which frame asked. A generated
-     * app in a Build preview (a sandboxed iframe with allow-downloads) could start downloads in a loop without a tap,
-     * filling Downloads/Atelier or throwing the owner out to the browser again and again. So a download is taken only
-     * while Atelier itself is the page, only within [DOWNLOAD_TAP_MS] of a real tap on it (each tap pays for one
-     * download), only when no other save is under way, and not more often than every [DOWNLOAD_GAP_MS]; anything else
-     * is dropped.
-     *
-     * data: URLs are decoded off the main thread. A blob: URL only exists inside the page, so the page is asked (by
-     * token) to read it and send the bytes over the bridge; https downloads go to the browser.
-     */
-    override fun onDownload(url: String, mimeType: String?) {
-        val w = web ?: return
-        val now = SystemClock.elapsedRealtime()
-        val tap = w.lastTapAt
-        if (tap <= 0L || tap == tapSpentAt || now - tap > DOWNLOAD_TAP_MS) return
-        if (!Atelier.isAtelier(w.view.url?.toUri())) return
-        tapSpentAt = tap
-        if (saveBusy(now) || now - lastDownloadAt < DOWNLOAD_GAP_MS) {
-            toast(R.string.save_busy)
-            return
-        }
-        lastDownloadAt = now
-        when {
-            url.startsWith("data:", ignoreCase = true) ->
-                saveLater { Downloads.decodeDataUrl(url)?.let { (mime, bytes) -> Payload(bytes, mime, null) } }
-            url.startsWith("blob:", ignoreCase = true) -> {
-                if (!w.binaryBridge || !url.startsWith("blob:${Atelier.ORIGIN}/")) {
-                    toast(R.string.save_failed)
-                    return
-                }
-                val token = UUID.randomUUID().toString()
-                pendingSave = PendingSave(token, null, mimeType, armed = false, at = now)
-                w.evaluate(blobReader(url, token))
-            }
-            else -> openExternal(url.toUri())
-        }
-    }
-
-    /** A save is being written, or its bytes are still on their way from the page. */
-    private fun saveBusy(now: Long): Boolean = savesRunning > 0 || pendingSave?.let { now - it.at <= PENDING_SAVE_BUSY_MS } == true
-
-    private fun blobReader(url: String, token: String): String {
-        val u = JSONObject.quote(url)
-        val t = JSONObject.quote(token)
-        return """(async () => { const A = window.${Atelier.BRIDGE}; if (!A) return;
-            try { const b = await (await fetch($u)).blob(); if (b.size > ${Downloads.MAX_BYTES}) throw 0;
-              A.postMessage(JSON.stringify({ type: 'save-begin', token: $t, mime: b.type, size: b.size }));
-              A.postMessage(await b.arrayBuffer());
-            } catch (e) { A.postMessage(JSON.stringify({ type: 'save-failed', token: $t })); } })();""".trimIndent()
-    }
-
-    override fun onBridgeBytes(bytes: ByteArray) {
-        val save = pendingSave ?: return
-        pendingSave = null
-        if (!save.armed || SystemClock.elapsedRealtime() - save.at > SAVE_WINDOW_MS) return
-        saveLater { Payload(bytes, save.mime, save.name) }
-    }
-
-    private class Payload(val bytes: ByteArray, val mime: String?, val name: String?)
-
-    /** Builds (data: URLs decode here) and writes the file on [SAVER], one at a time, off the main thread. */
-    private fun saveLater(payload: () -> Payload?) {
-        savesRunning++
-        val app = applicationContext
-        SAVER.execute {
-            val saved = try {
-                val p = payload()
-                val target = p?.let { Downloads.resolve(it.name, it.mime) }
-                p != null && target != null && p.bytes.size <= Downloads.MAX_BYTES &&
-                    Downloads.save(app, p.bytes, target.second, target.first) != null
-            } catch (_: Exception) {
-                false
-            } catch (_: OutOfMemoryError) {
-                false
-            }
-            runOnUiThread {
-                savesRunning--
-                Toast.makeText(app, if (saved) R.string.saved else R.string.save_failed, Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    // ───────────────────────── PanelHost: the page bridge (window.AtelierAssist) ─────────────────────────
-
-    private fun post(message: JSONObject) {
-        val proxy = pageProxy ?: return
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
-        try { proxy.postMessage(message.toString()) } catch (_: Exception) { pageProxy = null }
-    }
-
-    private fun hello() = JSONObject()
-        .put("type", "hello")
-        .put("v", 1)
-        .put("app", "atelier-assist")
-        .put("version", appVersion())
-        .put("invocation", invocation)
-        .put("start", startMode)
-        .put("mic", micState())
-        .put("expanded", sheetCtl.expanded)
-        .put("save", web?.binaryBridge == true)
-
-    private fun appVersion(): String = try {
-        packageManager.getPackageInfo(packageName, 0).versionName ?: ""
-    } catch (_: PackageManager.NameNotFoundException) {
-        ""
-    }
-
-    /**
-     * Messages from Atelier's top frame (origin-checked by PanelWeb). Each is a JSON object with a "type":
-     *   ready                → reply {type:'hello', …}; the page may then receive {type:'listen'} and {type:'sheet'}
-     *   close                → slide the sheet away
-     *   open-app {path}      → open the installed Atelier app at that same-site path, then close
-     *   expand / collapse    → sheet height
-     *   theme {bg:'#rrggbb'} → match the sheet to the page's own background
-     *   mic-settings         → this app's Android settings (microphone blocked)
-     *   save-begin {mime, size, name?, token?} + one ArrayBuffer message → save to Downloads/Atelier
-     *
-     * The page's own saves (no token) come only from Atelier's top frame, so they need no tap; they are written one at
-     * a time, and refused while [MAX_QUEUED_SAVES] are already waiting.
-     */
-    override fun onBridgeMessage(message: JSONObject, reply: JavaScriptReplyProxy) {
-        when (message.optString("type")) {
-            "ready" -> {
-                pageProxy = reply
-                post(hello())
-            }
-            "close" -> sheetCtl.dismiss()
-            "open-app" -> Atelier.pathUrl(message.optString("path", "/"))?.let(::openInAtelier)
-            "expand" -> sheetCtl.setExpanded(true)
-            "collapse" -> sheetCtl.setExpanded(false)
-            "theme" -> applyPageColor(message.optString("bg"))
-            "mic-settings" -> openAppSettings()
-            "save-begin" -> {
-                val size = message.optLong("size", -1)
-                val token = message.optString("token").ifEmpty { null }
-                val current = pendingSave
-                // With a token: the answer to our own blob read (onDownload), which must match the one we asked for.
-                // Without: the page saving one of its own files (assist-panel-integration.md).
-                val ours = token != null && token == current?.token
-                val askedMime = current?.mime
-                if (token != null && !ours) return
-                if (size <= 0 || size > Downloads.MAX_BYTES || (!ours && savesRunning >= MAX_QUEUED_SAVES)) {
-                    toast(R.string.save_failed)
-                    if (ours) pendingSave = null
-                    return
-                }
-                val now = SystemClock.elapsedRealtime()
-                pendingSave = if (ours) {
-                    PendingSave(token, null, message.optString("mime").ifEmpty { askedMime }, armed = true, at = now)
-                } else {
-                    PendingSave(null, message.optString("name").take(120), message.optString("mime"), armed = true, at = now)
-                }
-            }
-            "save-failed" -> {
-                if (pendingSave?.token != null && pendingSave?.token == message.optString("token")) {
-                    pendingSave = null
-                    toast(R.string.save_failed)
-                }
-            }
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            super.onTouchEvent(event)
+            return true
         }
     }
 
     private companion object {
-        const val INVOCATION_ASSIST = "assist"
-        const val INVOCATION_LAUNCHER = "launcher"
-        const val PREF_MIC_BLOCKED = "micBlocked"
-        const val PREF_SETUP_DISMISSED = "setupDismissed"
-        const val BANNER_SETUP = 1
-        const val BANNER_MIC = 2
+        /** Always present, and their names can't be taken by another app. */
+        val SYSTEM_CALLERS = setOf("android", "com.android.systemui")
+        const val PREFS = "assist"
+        const val PREF_KEY = "launchKey"
+        const val PREF_SETUP_SEEN = "setupSeen"
+        const val PREF_LEGACY_CLEARED = "legacyWebDataCleared"
         const val LATE_UNLOCK_MS = 5_000L
-        const val SAVE_WINDOW_MS = 60_000L
-        const val PENDING_SAVE_BUSY_MS = 15_000L
-        const val DOWNLOAD_TAP_MS = 10_000L
-        const val DOWNLOAD_GAP_MS = 2_000L
-        const val MAX_QUEUED_SAVES = 4
         const val MIC_INSTANT_MS = 600L
-        const val CRASH_WINDOW_MS = 60_000L
-
-        /** One writer for the whole process: saves never run in parallel and outlive the activity that started them. */
-        val SAVER: ExecutorService = Executors.newSingleThreadExecutor()
+        const val REVIEW_MS = 1_200L
+        const val OPEN_DELAY_MS = 140L
+        const val TYPE_DEBOUNCE_MS = 120L
+        const val MAX_CARD_DP = 420
+        const val TAIL_CHARS = 150
+        val EASE = PathInterpolator(0.2f, 0f, 0f, 1f)
     }
 }
