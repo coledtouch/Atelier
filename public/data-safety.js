@@ -1,4 +1,4 @@
-import { validVideo } from './video.js?v=59';
+import { validVideo } from './video.js?v=60';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
