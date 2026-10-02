@@ -234,7 +234,7 @@ test('runChat: "live web" only once Claude actually searched; offered but unused
   assert.equal(other.meta.note, '');
   // streamChatRaw passes the Worker's web_searches count through as `searches`
   assert.match(APP, /const searches = Number\.isInteger\(d\.web_searches\) && d\.web_searches > 0 \? d\.web_searches : 0;/);
-  assert.match(APP, /\|\| searches\) onDelta\(\{ content, reasoning, tool_calls: d\.tool_calls, anthropic_content: d\.anthropic_content, status: d\.status, searches \}\);/);
+  assert.match(APP, /\|\| searches \|\| finish\) onDelta\(\{ content, reasoning, tool_calls: d\.tool_calls, anthropic_content: d\.anthropic_content, status: d\.status, searches, finish \}\);/);
 });
 
 // ── runAgent: page loads the model picks wait for the OK; on a marked turn every tool does ──

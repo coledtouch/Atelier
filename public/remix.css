@@ -1,0 +1,152 @@
+/* ───────────────────────── Video Remix ─────────────────────────
+   The review of an edit, set like a contact sheet in the darkroom: numbered beats, mono timecodes, the plan's title in
+   the serif. Video pink (--c-video) marks new footage and the live state; ivory is kept source; the plan's accent
+   (lime) only appears on cards. Phone first (343–430 px columns), 44 px tap targets, tokens from app.css. */
+
+.rx-entry { --accent: var(--c-video); }
+.rx-entry .out { display: flex; flex-direction: column; gap: 14px; }
+
+/* planning */
+.rx-pending { width: min(100%, 360px); border-radius: var(--r-md); border: 1px solid var(--line); display: grid; place-items: center; padding: 16px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--c-video) 9%, var(--bg-2)), var(--bg-2) 60%); }
+.rx-status .shimmer { color: var(--ink-2); }
+
+/* story view */
+.rx-story { display: flex; flex-direction: column; gap: 10px; }
+.rx-title { margin: 0; font: 400 clamp(26px, 7vw, 34px)/1.05 var(--serif); color: var(--ink); letter-spacing: -0.01em; }
+.rx-summary { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--ink-2); max-width: 60ch; }
+.rx-beats { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.rx-beat { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); align-items: start; }
+.rx-thumb { appearance: none; padding: 0; width: 56px; height: 70px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line-2); background: var(--bg-3); cursor: zoom-in; display: block; }
+.rx-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rx-thumb-ph { display: block; width: 100%; height: 100%; background: repeating-linear-gradient(135deg, var(--bg-3) 0 6px, var(--bg-2) 6px 12px); }
+.rx-beat.rx-source .rx-thumb { border-color: color-mix(in srgb, var(--ink) 30%, transparent); }
+.rx-beat.rx-card .rx-thumb { border-color: color-mix(in srgb, var(--c-ask) 45%, transparent); }
+.rx-beat.rx-shot .rx-thumb { border-color: color-mix(in srgb, var(--c-video) 60%, transparent); }
+.rx-beat-text { min-width: 0; }
+.rx-beat-title { margin: 0; font-size: 14.5px; line-height: 1.35; color: var(--ink); overflow-wrap: anywhere; }
+.rx-n { font: 500 11px/1 var(--mono); color: var(--ink-3); margin-right: 8px; letter-spacing: 0.06em; }
+.rx-beat-sub { margin: 3px 0 0; font: 400 11.5px/1.45 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+/* issues */
+.rx-issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rx-issue { margin: 6px 0 0; font-size: 13px; line-height: 1.45; color: var(--ink-2); padding-left: 16px; position: relative; }
+.rx-issue::before { content: ''; position: absolute; left: 0; top: 0.5em; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
+.rx-issue.warn::before { background: var(--c-ideas); }
+.rx-issue.block::before, .rx-issue.asset::before { background: var(--c-video); }
+.rx-issue.block, .rx-issue.asset { color: var(--ink); }
+.rx-issue.cost::before { background: var(--c-ask); }
+.rx-fixes { font-size: 12.5px; color: var(--ink-3); }
+.rx-fixes summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font: 500 11px/1 var(--mono); letter-spacing: 0.06em; }
+.rx-fixes ul { margin: 0; padding-left: 18px; }
+
+/* shots */
+.rx-shot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.rx-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 10px 4px 4px; border-radius: 99px; font: 500 11.5px/1.3 var(--mono);
+  color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--line); }
+.rx-chip:not(:has(img)) { padding-left: 10px; }
+.rx-chip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.rx-chip:has(img)::before { display: none; }
+.rx-chip.rx-filming::before, .rx-chip.rx-starting::before, .rx-chip.rx-downloading::before { background: var(--c-video); animation: rxPulse 1.4s ease-in-out infinite; }
+.rx-chip.rx-ready { color: var(--ink); border-color: color-mix(in srgb, var(--c-video) 45%, transparent); }
+.rx-chip.rx-ready::before { background: var(--c-video); }
+.rx-chip.rx-failed, .rx-chip.rx-unknown, .rx-chip.rx-expired, .rx-chip.rx-missing { color: var(--ink); }
+.rx-poster { width: 24px; height: 30px; border-radius: 6px; object-fit: cover; }
+@keyframes rxPulse { 50% { opacity: 0.35; } }
+
+/* screenshots and callouts */
+.rx-asset, .rx-callout { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px; border-radius: var(--r-md); border: 1px dashed var(--line-2); background: var(--surface); }
+.rx-asset p, .rx-callout p { flex: 1 1 200px; margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); }
+.rx-asset img { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin-left: 6px; }
+.rx-callout.bad { border-color: color-mix(in srgb, var(--c-video) 45%, var(--line-2)); background: color-mix(in srgb, var(--c-video) 6%, transparent); }
+
+/* the cost card */
+.rx-cost { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: var(--r-lg); border: 1px solid var(--line-2); background: var(--bg-2); box-shadow: var(--shadow); }
+.rx-cost-head { margin: 0 0 2px; font: 500 10px/1 var(--mono); letter-spacing: 0.18em; text-transform: uppercase; color: var(--c-video); }
+.rx-lines { list-style: none; margin: 0; padding: 0; font: 400 12px/1.5 var(--mono); color: var(--ink-2); }
+.rx-price { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink); font-variant-numeric: tabular-nums; }
+.rx-note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }
+.rx-sync { margin: 0; font: 400 12px/1.5 var(--mono); color: var(--ink-2); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rx-sync.off { color: var(--ink); }
+.rx-sync.off::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--c-video); }
+.rx-cost-acts, .rx-done-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.rx-primary { appearance: none; min-height: 44px; padding: 0 18px; border-radius: 12px; border: 0; background: var(--c-video); color: var(--on-accent); font: 600 14.5px/1 var(--sans); cursor: pointer; transition: transform 0.2s var(--ease), opacity 0.2s; }
+.rx-primary:hover:not(:disabled) { transform: translateY(-1px); }
+.rx-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.rx-entry .chip, .rx-opts .chip, .rx-sheet .chip { min-height: 44px; padding: 0 14px; border-radius: 12px; }
+.chip.ghost { background: transparent; border-style: dashed; }
+/* Not sticky on phones: at 390 px the card (~320 px) over the story left about 250 px between it and the composer. It
+   sits at the end of the review, where Approve follows the beats and their warnings. */
+
+/* filming, cutting, done */
+.rx-film { margin: 0; }
+.rx-cutting { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--r-md); background: color-mix(in srgb, var(--c-video) 8%, var(--bg-2)); border: 1px solid color-mix(in srgb, var(--c-video) 30%, var(--line)); }
+.rx-cutting .status { flex: 1 1 auto; font-variant-numeric: tabular-nums; }
+.rx-cut { margin: 0; width: min(100%, 420px); border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--line-2); background: #000; }
+.rx-cut video { display: block; width: 100%; height: 100%; object-fit: contain; }
+
+/* composer strip */
+.rx-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rx-opts .chip.on, .rx-choice .chip.on { color: var(--c-video); border-color: color-mix(in srgb, var(--c-video) 45%, transparent); background: color-mix(in srgb, var(--c-video) 12%, transparent); }
+.rx-opts .opt-note { white-space: normal; line-height: 1.4; }
+/* In the composer options strip the remix chips are ordinary strip items: one horizontally scrolling row at the
+   strip's own chip height (studio.css --opt-h: 34–36 px), never a stack that eats a phone's composer. */
+.options > .rx-opts { display: contents; }
+.options .rx-opts .chip { min-height: 0; height: var(--opt-h, 28px); padding: 0 11px; border-radius: 99px; }
+.options .rx-opts .opt-note { white-space: nowrap; }
+.thread-dots i.rx-live { animation: rxPulse 1.4s ease-in-out infinite; }
+
+/* Fine-tune sheet: full screen on phones */
+dialog.rx-sheet { width: min(720px, calc(100vw - 24px)); }
+.rx-sheet-body { gap: 12px; padding: 18px 16px; }
+.rx-sheet .sheet-head h2 { font-family: var(--serif); font-size: 34px; }
+.rx-strip { position: relative; padding-bottom: 10px; }
+.rx-blocks { display: flex; gap: 2px; height: 28px; overflow-x: auto; }
+.rx-blk { flex-basis: 0; min-width: 24px; border-radius: 4px; background: color-mix(in srgb, var(--ink) 78%, transparent); }
+.rx-blk.rx-card { background: var(--c-ask); }
+.rx-blk.rx-shot { background: var(--c-video); }
+.rx-ticks { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; }
+.rx-tick { position: absolute; top: 0; height: 4px; border-radius: 2px; background: var(--c-code); min-width: 3px; }
+.rx-tick.rx-cover { background: repeating-linear-gradient(135deg, var(--ink-3) 0 3px, transparent 3px 6px); }
+.rx-rows { display: flex; flex-direction: column; }
+.rx-row { border-top: 1px solid var(--line); }
+.rx-row > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font: 500 12px/1 var(--mono); letter-spacing: 0.06em; color: var(--ink-2); list-style: none; }
+.rx-row > summary::-webkit-details-marker { display: none; }
+.rx-row > summary::before { content: ''; width: 8px; height: 8px; border-radius: 2px; margin-right: 10px; background: color-mix(in srgb, var(--ink) 78%, transparent); }
+.rx-row.rx-card > summary::before { background: var(--c-ask); }
+.rx-row.rx-shot > summary::before { background: var(--c-video); }
+.rx-row[open] > summary { color: var(--ink); }
+.rx-row-body { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 14px; }
+.rx-f { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.rx-f > span:first-child { flex: 0 0 100%; font: 500 10px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.rx-f input[type='text'], .rx-f textarea, .rx-f select, .rx-layer input[type='text'], .rx-layer select, .rx-line select {
+  min-height: 44px; flex: 1 1 180px; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; color: var(--ink); font: 400 14.5px/1.4 var(--sans); }
+.rx-f textarea { resize: vertical; }
+.rx-step { display: inline-flex; align-items: center; gap: 4px; }
+.rx-step input { width: 84px; min-height: 44px; text-align: center; background: var(--bg); border: 1px solid var(--line); border-radius: 11px; color: var(--ink); font: 400 14px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.rx-step .chip { min-width: 44px; justify-content: center; font-size: 16px; }
+.rx-check { flex-wrap: nowrap; min-height: 44px; }
+.rx-check input { width: 20px; height: 20px; accent-color: var(--c-video); }
+.rx-layer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 11px; background: var(--surface); }
+.rx-layer p { flex: 0 0 100%; margin: 0; font: 400 11.5px/1.4 var(--mono); color: var(--ink-3); overflow-wrap: anywhere; }
+.rx-line { flex-wrap: nowrap; }
+.rx-line select { flex: 0 0 132px; }
+.rx-sheet .sheet-foot { position: sticky; bottom: 0; background: var(--bg-2); padding-bottom: 4px; }
+@media (max-width: 640px) {
+  dialog.rx-sheet { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; border: 0; }
+  .rx-sheet-body { max-height: 100dvh; height: 100%; }
+  .rx-beat { grid-template-columns: 48px minmax(0, 1fr); }
+  .rx-thumb { width: 48px; height: 60px; }
+}
+
+
+/* An empty Remix send: the composer nudges sideways (app.js deps.shake). */
+#input.shake { animation: rx-shake 0.32s ease-in-out; }
+@keyframes rx-shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  #input.shake { animation: none; }
+  .rx-chip::before, .thread-dots i.rx-live { animation: none !important; }
+  .rx-primary { transition: none; }
+  .rx-primary:hover:not(:disabled) { transform: none; }
+}

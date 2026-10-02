@@ -4,6 +4,8 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../public/sw.js', import.meta.url), 'utf8');
 const VERSION = source.match(/const VERSION = '([^']+)'/)[1]; // bumped on every deploy
+// Cached on first use, never at install (the Video Remix engine and Mediabunny): read from the source like VERSION.
+const LAZY = JSON.parse(source.match(/const LAZY = (\[[^\]]*\]);/)[1].replace(/'/g, '"'));
 function setup({ offline = false, hit = new Response('cached'), keys = [] } = {}) {
   const handlers = {}, deleted = [], fetched = [], cached = [], waited = [];
   const cache = { match: async () => hit, put: async (key, response) => cached.push(key), addAll: async list => cached.push(...list) };
@@ -35,7 +37,7 @@ test('online navigation prefers the current server response', async () => {
 test('index.html asks for exactly the versioned shell files the worker precaches', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const versioned = [...html.matchAll(/(?:href|src)="(\/[\w.-]+\?v=[^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(versioned.sort(), ['/app.css', '/app.js', '/studio.css'].map((p) => `${p}?v=${VERSION.slice('atelier-v'.length)}`));
+  assert.deepEqual(versioned.sort(), ['/app.css', '/app.js', '/remix.css', '/studio.css'].map((p) => `${p}?v=${VERSION.slice('atelier-v'.length)}`));
   const s = setup(); let done;
   s.handlers.install({ waitUntil: (p) => done = p }); await done;
   for (const u of versioned) assert.ok(s.cached.includes(u), `${u} is precached`);
@@ -69,7 +71,8 @@ test('every module the app loads is imported and precached at ?v=<VERSION number
     // from './x.js', import './x.js' and import('./x.js'), wherever they sit (a multi-line import can't slip past)
     for (const [, path, q = ''] of src.matchAll(/\b(?:from|import)\s*\(?\s*['"]\.\/([\w./-]+\.m?js)(\?[^'"]*)?['"]/g)) {
       assert.equal(q, v, `${f} imports ./${path}${q}: it must be ./${path}${v}`);
-      assert.ok(s.cached.includes(`/${path}${v}`), `/${path}${v} (imported by ${f}) is precached`);
+      if (LAZY.includes(`/${path}`)) assert.ok(!s.cached.includes(`/${path}${v}`), `/${path} is LAZY: cached on first use, not at install`);
+      else assert.ok(s.cached.includes(`/${path}${v}`), `/${path}${v} (imported by ${f}) is precached`);
       todo.push(path);
     }
   }
@@ -86,4 +89,22 @@ test('the manifest is fetched network-first (cache only offline); other shell fi
   const off = setup({ offline: true });
   assert.equal(await (await off.dispatch('/manifest.webmanifest', { destination: 'manifest' })).text(), 'cached');
   await Promise.all(off.waited);
+});
+
+// Video Remix: the render engine and the vendored Mediabunny (689 KB) are never precached, but once fetched they are
+// served from the cache like the shell (so a cut works offline after the first one).
+test('LAZY files are not in the install list, and are cached on first use', async () => {
+  assert.deepEqual(LAZY, ['/remix-render.js', '/vendor/mediabunny.js']);
+  const s = setup(); let done;
+  s.handlers.install({ waitUntil: (p) => done = p }); await done;
+  for (const p of LAZY) assert.ok(!s.cached.some((u) => String(u).split('?')[0] === p), `${p} isn't precached`);
+  const v = `?v=${VERSION.slice('atelier-v'.length)}`;
+  const miss = setup({ hit: null });
+  assert.equal(await (await miss.dispatch(`/remix-render.js${v}`)).text(), 'network');
+  assert.equal(await (await miss.dispatch('/vendor/mediabunny.js')).text(), 'network');
+  await Promise.all(miss.waited);
+  assert.equal(miss.cached.length, 2, 'both responses were put in the cache');
+  const hit = setup();
+  assert.equal(await (await hit.dispatch('/vendor/mediabunny.js')).text(), 'cached', 'then cache-first');
+  assert.equal(setup().dispatch('/vendor/mediabunny.LICENSE.txt'), undefined, 'the licence text is a plain static file');
 });

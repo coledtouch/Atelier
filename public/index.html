@@ -28,8 +28,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=60" />
-  <link rel="stylesheet" href="/studio.css?v=60" />
+  <link rel="stylesheet" href="/app.css?v=61" />
+  <link rel="stylesheet" href="/studio.css?v=61" />
+  <link rel="stylesheet" href="/remix.css?v=61" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -239,6 +240,8 @@
           <p class="prov-status" id="provStatus"></p>
           <button type="button" class="chip" id="diagBtn" style="margin-top:10px">Check provider keys</button>
           <button type="button" class="chip" id="kbDebugBtn" aria-pressed="false" title="Live keyboard numbers in a corner, for this session only (same as ?kbdebug=1)" style="margin-top:10px">Keyboard readout</button>
+          <h4 style="margin-top:18px">Labs</h4>
+          <button type="button" class="chip" id="labsRemixBtn" aria-pressed="true" title="Attach a clip in Video mode: Gemini plans an edit, you approve any cost, Atelier cuts it on this device">Remix videos in Video mode</button>
           <div class="prov-status" id="diagOut" aria-live="polite" style="margin-top:10px"></div>
         </section>
 
@@ -479,6 +482,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=60" type="module"></script>
+  <script src="/app.js?v=61" type="module"></script>
 </body>
 </html>

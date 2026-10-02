@@ -7,17 +7,19 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=60';
-import * as Sync from './sync.js?v=60';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=60';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=60';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=60';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=60';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=60';
-import { initLookup } from './lookup.js?v=60';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=60';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=60';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=60';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=61';
+import * as Sync from './sync.js?v=61';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=61';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=61';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=61';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=61';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=61';
+import { initLookup } from './lookup.js?v=61';
+import { createRemix } from './remix-app.js?v=61';
+import { sendMode, looksLikeQuestion } from './remix.js?v=61';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=61';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=61';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=61';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -189,6 +191,7 @@ const DEFAULT_SETTINGS = {
   keys: { anthropic: '', openai: '', gemini: '' },
   models: { agent: '', ask: '', smart: '', reason: '', code: '', write: '', vision: '', watch: '', ideas: '', build: '', fast: '' },
   readAloud: { voice: 'atelier', speed: 1 }, // Settings → Read aloud (public/readaloud.js); not opts.ask.voice, the "As me" chip
+  labs: { remix: true }, // Settings → Labs (owner): Video mode + an attached clip → Video Remix (public/remix-app.js)
 };
 // Settings saved by an older build may point at retired models; reset those roles.
 function migrateSettings(saved) {
@@ -229,6 +232,10 @@ const lsHas = (k) => { try { return localStorage.getItem('atelier.' + k) !== nul
 const testerTrace = lsHas('tester') || lsHas('meTester') || ['signedout', 'expired', 'revoked'].includes(LS.get('outReason', ''));
 let testerAllow = allowedIds(S.tester); // model ids the tester may use (from the Worker's TESTER_* lists)
 const feat = (k) => !S.tester || S.tester.features[k] !== false;
+// Video Remix (Labs): the owner's Settings toggle (on by default); a tester only with an explicit features.remix === true
+// (feat() treats unknown keys as on, so it isn't used here). Until the Phase 6 server work, testers never get it.
+const remixOn = () => Boolean(remix) && (S.tester ? S.tester.features?.remix === true : S.settings.labs?.remix !== false);
+let remix = null; // createRemix(...) just before boot()
 function providerReady(provider) {
   if (S.tester) return Boolean(server[provider]) && [...testerAllow].some((id) => providerOf(id) === provider);
   return Boolean(server[provider] && S.settings.passcode);
@@ -311,6 +318,8 @@ const rawDB = (() => {
     clear: () => tx('readwrite', (s) => s.clear()),
     kvGet: (k) => tx('readonly', (s) => s.get(k), 'kv'),
     kvSet: (k, v) => tx('readwrite', (s) => s.put(v, k), 'kv'),
+    kvDel: (k) => tx('readwrite', (s) => s.delete(k), 'kv'),
+    kvKeys: () => tx('readonly', (s) => s.getAllKeys(), 'kv'),
     kvClear: () => tx('readwrite', s => s.clear(), 'kv'),
   };
 })();
@@ -617,7 +626,7 @@ async function streamChatRaw({ model, messages, temperature, max_tokens = 4096, 
   if (!ctype.includes('event-stream')) {
     const j = await r.json();
     const m = j.choices?.[0]?.message || {};
-    onDelta({ content: m.content || '', reasoning: m.reasoning_content || m.reasoning || '', tool_calls: m.tool_calls?.map((t, index) => ({ index, ...t })) });
+    onDelta({ content: m.content || '', reasoning: m.reasoning_content || m.reasoning || '', tool_calls: m.tool_calls?.map((t, index) => ({ index, ...t })), finish: j.choices?.[0]?.finish_reason || null });
     return;
   }
   const reader = r.body.getReader();
@@ -638,11 +647,12 @@ async function streamChatRaw({ model, messages, temperature, max_tokens = 4096, 
         const j = JSON.parse(data);
         if (j.error) throw new ApiError(500, j.error.message || String(j.error));
         const d = j.choices?.[0]?.delta || {};
+        const finish = j.choices?.[0]?.finish_reason || null;
         const content = d.content || '';
         const reasoning = d.reasoning_content || d.reasoning || '';
         // web_searches: Claude started that many server-side web searches (src/anthropic.js) — what makes a turn "live web".
         const searches = Number.isInteger(d.web_searches) && d.web_searches > 0 ? d.web_searches : 0;
-        if (content || reasoning || d.tool_calls || d.anthropic_content || d.status || searches) onDelta({ content, reasoning, tool_calls: d.tool_calls, anthropic_content: d.anthropic_content, status: d.status, searches });
+        if (content || reasoning || d.tool_calls || d.anthropic_content || d.status || searches || finish) onDelta({ content, reasoning, tool_calls: d.tool_calls, anthropic_content: d.anthropic_content, status: d.status, searches, finish });
       } catch (e) { if (e instanceof ApiError) throw e; }
     }
   }
@@ -1088,6 +1098,7 @@ function paintEntry(li, e) {
   const acts = $('.actions', li);
   acts.innerHTML = '';
   const meta = e.meta?.model ? `<div class="meta-line"><span><b>${esc(shortModel(e.meta.model))}</b></span>${e.meta.ms ? `<span>${(e.meta.ms / 1000).toFixed(1)}s</span>` : ''}${e.meta.note ? `<span>${esc(e.meta.note)}</span>` : ''}</div>` : '';
+  if (e.remix && remix) return remix.paint(li, e, meta); // keyed paint; status text only otherwise (never the 33 ms repaint)
 
   if (e.kind === 'ask' || e.kind === 'code') {
     const { think, text } = splitThink(e.text || '');
@@ -1331,18 +1342,27 @@ async function submit(textArg, modeArg, extra = {}) {
   if (video?.status === 'reading') { toast('Still reading the video — one moment'); return; }
   const images = video ? [] : extra.images ?? S.attachments.map((a) => a.src);
   if (!text && !images.length && !video) { input.focus(); return; }
+  const route = video ? sendMode(mode, true, remixOn()) : mode; // 'remix' only in Video mode with Labs → Remix on
+  if (!text && route === 'remix') { await remix.composer.gate('', video, S.thread); return; } // shake + "Tell Atelier what to change"
   if (!text && video) text = 'What happens in this video?';
   if (!text && mode === 'video') text = 'Animate this image';
   if (!text) text = 'What’s in this image?';
   if (!hasCredentials()) { openOnboard(signinReason); return; }
   if (!navigator.onLine) { toast('You’re offline — connect, then send again', { error: true }); return; }
+  if (route === 'remix' && (await remix.composer.gate(text, video, S.thread)) !== 'ok') return; // can't decode → held
+  // Video mode, no attachment, in a thread with a remix: Revise or New clip must be chosen (never a silent paid Veo clip).
+  if (!video && mode === 'video' && remixOn() && !images.length && !extra.entry && textArg == null) {
+    const c = remix.composer.textChoice(text, S.thread);
+    if (c === 'hold') return;
+    if (c?.revise) { if (remix.revise(c.entry, text)) { input.value = ''; autosize(); } return; } // refused (still filming): the text stays
+  }
   // Text that came from a link or a share ('link' | 'share'), even after edits: the turn is marked, and never reaches the
   // accounts agent (runChat) — anyone can write a link or POST a share, and its words could steer the tools. A button
   // sending text made from a marked entry (an idea's Expand, Look up's ask on its words…) passes that mark (extra.untrusted).
   const untrusted = textArg == null ? composerFrom : extra.untrusted || '';
   if (textArg == null) setMark(''); // the composer's text goes out with this turn (Stop on a task split gives it back)
   launchSubmitted(textArg == null); // quick launch: the hold, the armed ring, the source note and the saved draft (H4)
-  if (video && mode !== 'ask' && mode !== 'code') { mode = 'ask'; setMode('ask'); toast('Sent to Ask — videos are answered there'); }
+  if (video && route === 'ask' && mode !== 'ask') { mode = 'ask'; setMode('ask'); toast('Sent to Ask — videos are answered there'); }
 
   // One request, several deliverables ("answer this, make an image and a video") → parallel tasks.
   if (mode === 'ask' && !images.length && !video && !extra.entry && !extra.images && !extra.launch && feat('helpers') && MULTI_HINT.test(text) && MULTI_JOIN.test(text)) {
@@ -1356,6 +1376,7 @@ async function submit(textArg, modeArg, extra = {}) {
   if (!S.thread) S.thread = newThread();
   const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(untrusted && { untrusted }), ...(extra.via === 'assist' && { via: 'assist' }), ...extra.entry };
   delete e.images_;
+  if (route === 'remix') e.remix = remix.newRemix(video, text); // kind stays 'video'
   // A typed text follow-up right after a video turn (or its follow-ups) keeps that video in view — on every path: with
   // Accounts or Web on it goes to the agent / web with the video's frames (see followUpRoute in context.js).
   if (!video && !images.length && textArg == null && !extra.entry && (mode === 'ask' || mode === 'code')) {
@@ -1368,6 +1389,7 @@ async function submit(textArg, modeArg, extra = {}) {
   if (textArg == null) { input.value = ''; autosize(); }
   if (video) { // the File, its blob: URL and the clip upload now belong to the entry (session only)
     videoFiles.set(e.id, { file: video.file, url: video.url });
+    if (e.remix) remix.keepSource(e, video.file);
     if (video.clip) clipJobs.set(e.id, video.clip);
     S.video = null; renderOptions();
   }
@@ -1436,7 +1458,7 @@ async function run(e) {
   try {
     if (e.kind === 'ask' || e.kind === 'code') await runChat(e, signal, thread);
     else if (e.kind === 'image') await runImage(e, signal);
-    else if (e.kind === 'video') await runVideo(e, signal);
+    else if (e.kind === 'video') await (e.remix ? remix.plan(e, signal, thread) : runVideo(e, signal));
     else if (e.kind === 'ideas') await runIdeas(e, signal);
     else if (e.kind === 'build') await runBuild(e, signal);
     e.meta = { ...(e.meta || {}), ms: Date.now() - t0 };
@@ -2217,6 +2239,8 @@ stream.addEventListener('click', async (ev) => {
     resolve(act === 'approve');
     return;
   }
+  if (e.remix && remix && act?.startsWith('rx-') && (await remix.onAct(act, b, e, li))) return;
+  if (e.remix && remix && (act === 'retry' || act === 'edit-prompt')) { await remix.onAct(act, b, e, li); return; } // retry → plan or cut again; edit → Fine-tune, never a plain Video prompt
   switch (act) {
     case 'copy':
       return copy(e.kind === 'ideas' ? e.ideas.map((d, i) => `${i + 1}. ${d.title} — ${d.pitch}`).join('\n') : stripThink(e.text));
@@ -2436,6 +2460,12 @@ function renderOptions() {
         + `<span class="opt-note">attach a photo to edit it</span>`;
       break;
     case 'video': {
+      if (S.video) { // a clip in Video mode: Remix (Labs) or, with it off, a plain way over to Ask
+        if (remixOn()) { remix.composer.attached(S.video); h = remix.composer.options(o); } // attached(): once per clip
+        else h = '<button class="chip" data-ask-about>Ask about it</button><span class="opt-note keep">Video mode films new clips</span>';
+        break;
+      }
+      const rxChoice = remixOn() ? remix.composer.choiceChips(S.thread) : ''; // [✂ Revise ‘…’] [✦ New clip] in a thread with a remix
       const vm = videoModel(o.model);
       if (!vm) { h = '<span class="opt-note keep">Video isn’t in your tester plan right now</span>'; break; }
       // Testers see only the lengths and resolutions whose worst case fits what's left (and $1 a clip).
@@ -2456,6 +2486,7 @@ function renderOptions() {
         // kept on phones whenever a length or HD was left out of the menus, so the tester sees why (A7b)
         + (rw ? `<span class="opt-note keep">${esc(runwayOptNote(vm, o.secs))} · ${RUNWAY_POWERED}</span>`
           : `<span class="opt-note${fit && (!fit.hd || fit.secs.length < 3) ? ' keep' : ''}">${esc(fit ? veoNote(vm, fit, o) : vm.note || 'attach an image to animate it')}</span>`);
+      h = rxChoice + h;
       break;
     }
     case 'ideas':
@@ -2477,7 +2508,8 @@ function renderOptions() {
   syncRunwayHint();
   syncOptFade(box);
 }
-const videoOptNote = () => `<span class="opt-note">video → ${esc(modelLabel(modelFor('watch')))}</span>`;
+const videoOptNote = () => `<span class="opt-note">video → ${esc(modelLabel(modelFor('watch')))}</span>`
+  + (remixOn() ? '<button class="chip" data-remix-in-video><span aria-hidden="true">✂</span> Remix in Video</button>' : '');
 // "Use Runway Gen-4.5?": offered while a Video-mode prompt mentions Runway (the AI company, not a catwalk) and another
 // model is picked. Mentioning Runway never switches models by itself (that would spend credits on a guess); a tap does.
 function syncRunwayHint() {
@@ -2531,6 +2563,9 @@ $('#options').addEventListener('click', (ev) => {
     toast(`Video model: ${VIDEO_MODELS.find((m) => m.id === rh.dataset.runwayHint)?.label || 'Runway'}`);
     return;
   }
+  if (remix?.composer.onOption(ev.target)) return; // footage / model / ♪ soundtrack / Revise-or-New chips (it calls renderOptions itself)
+  if (ev.target.closest('[data-ask-about]')) { setMode('ask'); return; }
+  if (ev.target.closest('[data-remix-in-video]')) { setMode('video'); return; }
   const t = ev.target.closest('[data-toggle]');
   const set = ev.target.closest('[data-set]');
   if (t) { S.opts[S.mode][t.dataset.toggle] = !S.opts[S.mode][t.dataset.toggle]; }
@@ -2647,6 +2682,9 @@ input.addEventListener('input', (ev) => {
   else if (markBack(ev)) composerFrom = markWas; // the link / share text came back (Undo, Redo, pasted back): so does its mark
   drafts.edit(); clearTimeout(draftT); draftT = setTimeout(keepDraft, 500);
 });
+// Video Remix: typing a question about the attached clip offers [Ask about it instead] (re-rendered only when that flips).
+let rxAsks = false;
+input.addEventListener('input', () => { if (!S.video || S.mode !== 'video' || !remixOn()) return; const q = looksLikeQuestion(input.value); if (q !== rxAsks) { rxAsks = q; renderOptions(); } });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') keepDraft(); });
 addEventListener('pagehide', keepDraft);
 $('#sendBtn').onclick = () => { if (sendHold) { sendHold.fire(); return; } return S.busy && !hasDraft() ? stopAll() : submit(); };
@@ -2768,9 +2806,10 @@ const ATT_PH = { image: 'Describe the edit…', video: 'Describe the motion…' 
 const chatMode = () => S.mode === 'ask' || S.mode === 'code';
 function syncPlaceholder() {
   const el = input;
-  const hint = S.video ? chatMode() && VIDEO_PH : S.attachments.length && ATT_PH[S.mode];
+  // a clip in Video mode: Remix's prompt, or (Remix off) Ask's — that is where Send takes it (Phase 0)
+  const hint = S.video ? (S.mode === 'video' ? (remixOn() ? remix.composer.placeholder : VIDEO_PH) : chatMode() && VIDEO_PH) : S.attachments.length && ATT_PH[S.mode];
   if (hint) el.placeholder = hint;
-  else if ([...Object.values(ATT_PH), VIDEO_PH].includes(el.placeholder)) el.placeholder = MODES[S.mode].ph; // keeps app-refine's custom placeholder
+  else if ([...Object.values(ATT_PH), VIDEO_PH, remix?.composer.placeholder].includes(el.placeholder)) el.placeholder = MODES[S.mode].ph; // keeps app-refine's custom placeholder
 }
 function attNote(n) {
   if (S.mode === 'image') return n > 1 ? 'Only the first photo is edited' : 'Describe the change — e.g. “make it night”';
@@ -2818,7 +2857,9 @@ async function attachVideo(file, { deferClip = false } = {}) {
   if (file.size > LOCAL_MAX_BYTES) return toast('That video is over 4 GB — too big to read on this device', { error: true });
   const v = S.video = { file, url: URL.createObjectURL(file), name: cleanName(file.name), mime: normalizeVideoMime(file.type, file.name), size: file.size,
     duration: 0, width: 0, height: 0, poster: null, frames: [], status: 'reading', progress: 0, done: 0, total: 0, clip: null, ctrl: new AbortController(), deferClip };
-  if (!chatMode()) { setMode('ask'); toast('Switched to Ask to talk about the video'); }
+  // Video mode keeps the clip (Phase 0): the note says what Send does, and [Ask about it] switches in plain view.
+  if (!chatMode() && S.mode !== 'video') { setMode('ask'); toast('Switched to Ask to talk about the video'); }
+  if (S.mode === 'video' && remixOn()) remix.composer.attached(v); // probeSource + capabilities at attach, before any spend
   renderAttachments(); renderOptions();
   maybeStartClip();
   input.focus();
@@ -2869,6 +2910,8 @@ const clipBusy = (j) => j?.state === 'uploading' || j?.state === 'processing';
 const chipMeter = (v) => (v.status === 'reading' ? v.progress : v.clip?.state === 'uploading' ? v.clip.progress : clipBusy(v.clip) ? 1 : 0);
 function videoNote(v) {
   if (v.status === 'reading') return v.total ? `Reading video · ${v.done} of ${v.total} frames` : 'Reading video';
+  if (S.mode === 'video' && remixOn()) return remix.composer.note(v);
+  if (S.mode === 'video') return 'Video mode films new clips — sending asks about this video in Ask';
   if (!chatMode()) return 'Videos are answered in Ask — sending switches there';
   const j = v.clip, model = modelFor('watch'), gemini = clipRoute(v); // what the AI gets if you send now
   if (gemini && j?.state === 'uploading') return `Uploading for Gemini · ${Math.round(j.progress * 100)}%`;
@@ -3087,6 +3130,10 @@ function setKbDebug(on) {
 }
 { let stored = null; try { stored = sessionStorage.getItem(KB_DEBUG); } catch {} setKbDebug(kbDebugFlag(location.search, stored)); }
 $('#kbDebugBtn')?.addEventListener('click', () => setKbDebug(!kbDebug));
+// Settings → Labs (owner): "Remix videos in Video mode" (on by default; testers never see the owner-only section).
+function syncLabs() { const b = $('#labsRemixBtn'); if (b) { const on = S.settings.labs?.remix !== false; b.setAttribute('aria-pressed', String(on)); b.classList.toggle('on', on); } }
+$('#labsRemixBtn')?.addEventListener('click', () => { S.settings.labs = { ...(S.settings.labs || {}), remix: S.settings.labs?.remix === false }; saveSettings(); syncLabs(); renderOptions(); renderAttachments(); });
+syncLabs();
 syncViewport('load');
 new ResizeObserver(syncDock).observe($('#dock'));
 new ResizeObserver(() => moveInk()).observe(modesNav);
@@ -3179,7 +3226,7 @@ async function renderThreads() {
     if (g !== last) { h += `<li class="thread-group">${g}</li>`; last = g; }
     const kinds = [...new Set(t.entries.map((e) => e.kind))].slice(0, 6);
     h += `<li class="thread ${S.thread?.id === t.id ? 'on' : ''}" data-id="${esc(t.id)}"><button class="thread-open" aria-current="${S.thread?.id === t.id ? 'true' : 'false'}">
-      <span class="thread-dots">${kinds.map((k) => `<i style="--accent:var(--c-${k})"></i>`).join('')}</span>
+      <span class="thread-dots">${kinds.map((k) => `<i style="--accent:var(--c-${k})"></i>`).join('')}${remix?.activeThreads().has(t.id) ? '<i class="rx-live" style="--accent:var(--c-video)" title="Filming"></i>' : ''}</span>
       <span class="thread-body"><span class="thread-title">${esc(t.title || 'Untitled')}</span><span class="thread-sub">${t.entries.length} ${t.entries.length === 1 ? 'entry' : 'entries'} · ${new Date(t.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}${esc(Sync.badge(t))}</span></span></button>
       <button class="icon-btn del" data-del="${esc(t.id)}" aria-label="Delete ${esc(t.title || 'untitled thread')}">${ICON.trash}</button></li>`;
   }
@@ -3192,10 +3239,12 @@ $('#threadList').addEventListener('click', async (ev) => {
     ev.stopPropagation();
     if (S.busy) return toast('Wait for generation to finish before deleting a thread.');
     const id = del.dataset.del;
+    if (remix?.activeThreads().has(id) && !confirm(remix.deleteWarning(id))) return; // a shot still filming (billed)
     if (!confirm(Sync.on() ? await Sync.deleteCopy(id) : 'Delete this thread?')) return;
     const wasOpen = S.thread?.id === id;
     if (wasOpen) { clearTimeout(persistTimer); S.thread = null; } // else startFresh's persist() puts it straight back
     await Sync.deleteThread(id);
+    remix?.forgetThread(id);
     if (wasOpen) startFresh();
     return renderThreads();
   }
@@ -3905,6 +3954,7 @@ $('#wipeBtn').onclick = async () => {
     clearTimeout(persistTimer); clearTimeout(meTimer);
     await reader.clearCache(); // Read aloud clips (Cache Storage 'atelier-tts'); its localStorage keys go with atelier.* below
     if (S.tester) await fetch('/api/li/logout', { method: 'POST' }).catch(() => {}); // "saved sign-in" includes the tester session
+    remix?.wipe(); // stop filming jobs and drop pending remix drafts: nothing writes rx:* after kvClear
     await Sync.forget(); await DB.clear(); await DB.kvClear(); // forget: the sync state goes, nothing is deleted on the server
     // Prevent the legacy migration from restoring erased conversations on reload.
     await new Promise((res, rej) => { const r = indexedDB.deleteDatabase('atelier'); r.onsuccess = res; r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('Close other Atelier tabs and try clearing this device again.')); });
@@ -4894,7 +4944,7 @@ window.addEventListener('online', networkChanged);
 window.addEventListener('offline', networkChanged);
 $('#connectionBanner').hidden = navigator.onLine;
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { persist(true); Sync.flush(); } else Sync.kick('visible'); });
-window.addEventListener('beforeunload', ev => { if (S.busy) { ev.preventDefault(); ev.returnValue = ''; } });
+window.addEventListener('beforeunload', ev => { if (S.busy || remix?.cutting()) { ev.preventDefault(); ev.returnValue = ''; } });
 new ResizeObserver(syncDock).observe($('#dock'));
 setBusy();
 
@@ -5087,6 +5137,23 @@ $('#qlTest')?.addEventListener('click', async () => {
   }
 });
 
+// Video Remix (public/remix-app.js): every app.js function it uses is passed in here.
+async function addRemixEntry(e) { // a revision: same path as submit's tail (push, render, persist, run)
+  if (!S.thread) S.thread = newThread();
+  S.thread.entries.push(e); welcome.classList.add('gone'); stream.append(renderEntry(e)); scrollDown(true); persist(true);
+  await run(e);
+}
+remix = createRemix({
+  S, DB, persist, repaint, toast, esc, btn, ICON, uid, errorBox, ApiError, renderOptions, paintChip,
+  streamChat, completeChat, modelFor, providerOf, ensureClip, videoFiles, clipJobs, apiHeaders, noteAllowance, openViewer, setMode, run, liveThreads,
+  addEntry: (e) => { addRemixEntry(e).catch((err) => console.error(err)); },
+  inputValue: () => input.value, clearInput: () => { input.value = ''; autosize(); }, focusInput: () => input.focus(),
+  shake: () => { input.classList.remove('shake'); void input.offsetWidth; input.classList.add('shake'); },
+  runwayReady: () => Boolean(server.runway && S.settings.passcode && !S.tester),
+  holdSync: (id) => Sync.holdRunLock(id), // no owner-sync push of an entry while it films or cuts
+  entryById: (id) => S.thread?.entries.find((x) => x.id === id) || [...liveThreads.values()].flatMap((t) => t.entries).find((x) => x.id === id) || null,
+  threadIsOpen: (id) => S.thread?.id === id || liveThreads.has(id),
+});
 (async function boot() {
   const params = new URLSearchParams(location.search); // still read below for ?tester= and ?connected=
   // Quick launch: shortcuts (?start=), the iPhone Shortcut (#…&q=), shares (?share=), legacy ?mode= and GET shares.
@@ -5132,6 +5199,7 @@ $('#qlTest')?.addEventListener('click', async () => {
     const t = await Promise.race([DB.get(lastId).catch(() => null), sleep(1500).then(() => null)]);
     if (t && Date.now() - t.updatedAt < 6 * 36e5) { S.thread = recoverThread(t); renderThread(); renderOptions(); requestAnimationFrame(() => scrollDown(true, true)); }
   }
+  remix.boot().catch((err) => console.warn('[atelier] remix resume', err)); // reads rx:ops once, resumes polling, prunes rx:*
 
   if (!S.settings.passcode) {
     const backup = await Promise.race([DB.kvGet('passcode').catch(() => null), sleep(1500).then(() => null)]);

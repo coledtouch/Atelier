@@ -1,4 +1,5 @@
-import { validVideo } from './video.js?v=60';
+import { validVideo } from './video.js?v=61';
+import { validRemix, recoverRemix } from './remix.js?v=61';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -45,6 +46,8 @@ export function validateBackup(data) {
       if (e.group) assert(text(e.from));
       if (e.video != null) assert(validVideo(e.video)); // poster + frames as image data URLs; the video itself is never stored
       if (e.videoOf != null) assert(safeId(e.videoOf));
+      if (e.remix != null) assert(validRemix(e.remix)); // Video Remix: shots, ops, blob keys and posters are checked
+      if (e.remixOf != null) assert(safeId(e.remixOf));
     }
   }
   return data.threads;
@@ -57,17 +60,24 @@ export function prepareImport(data, makeId) {
       const copy = { ...structuredClone(e), id: makeId(), pending: false, steps: [],
         ...(e.pending ? { error: 'This response was interrupted before the backup was made. You can try again.', errorKind: 'interrupted' } : {}) };
       delete copy.startedAt; // transient: only meaningful while a generation is live
+      recoverRemix(copy, { imported: true }); // shots → missing/unknown/failed, approval dropped: nothing imported can spend
       if (!ids.has(e.id)) ids.set(e.id, copy.id);
       return copy;
     });
     // A video follow-up points at its source entry: keep that link on the new IDs (drop it if the source isn't here).
     for (const e of entries) if (e.videoOf != null) { if (ids.has(e.videoOf)) e.videoOf = ids.get(e.videoOf); else delete e.videoOf; }
+    for (const e of entries) if (e.remixOf != null) { if (ids.has(e.remixOf)) e.remixOf = ids.get(e.remixOf); else delete e.remixOf; }
+    // A remix revision names its original: follow the new IDs (a missing original leaves the id: the revision then uses
+    // its own basePlan). srcEntry is left alone — it only ever finds a File on this device.
+    for (const e of entries) if (e.remix?.reviseOf != null && ids.has(e.remix.reviseOf)) e.remix.reviseOf = ids.get(e.remix.reviseOf);
     return { ...structuredClone(t), id, entries };
   });
 }
 export function recoverThread(thread) {
   if (!thread) return thread;
   for (const entry of thread.entries || []) {
+    // Video Remix shots are NOT recovered here: a thread opened from IndexedDB may have been pulled from another device
+    // (its live shots belong there), and this device's own live shots are settled by remix-app's boot() from rx:job.
     if (entry.pending) {
       entry.pending = false;
       entry.recovered = true; // owner thread sync: never pushed over an answer the server already has

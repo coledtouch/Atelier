@@ -6,15 +6,19 @@
 // One step does all three:  node scripts/bump-version.mjs <n>
 //   (the same by hand: sed -i -E "s/atelier-v[0-9]+'/atelier-v<n>'/" public/sw.js && sed -i -E "s/\?v=[0-9]+/?v=<n>/g" public/index.html public/*.js)
 // tests/service-worker.test.mjs fails if they disagree or a module the app loads isn't precached at its ?v= URL.
-const VERSION = 'atelier-v60';
+const VERSION = 'atelier-v61';
 const V = VERSION.slice('atelier-v'.length);
 // Modules are listed at the exact ?v=<n> URLs they are imported by (PATHS drops the query for the fetch guard below).
 const SHELL = ['/', '/index.html', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`,
   `/data-safety.js?v=${V}`, `/sync.js?v=${V}`, `/sync-merge.js?v=${V}`, `/video.js?v=${V}`, `/runway.js?v=${V}`, `/tester.js?v=${V}`, `/context.js?v=${V}`, `/launch.js?v=${V}`, `/lookup.js?v=${V}`, `/readaloud.js?v=${V}`, `/dictate.js?v=${V}`, `/viewport.js?v=${V}`,
+  `/remix.js?v=${V}`, `/remix-cuts.js?v=${V}`, `/remix-shots.js?v=${V}`, `/remix-graph.js?v=${V}`, `/remix-store.js?v=${V}`, `/remix-draw.js?v=${V}`, `/remix-app.js?v=${V}`, `/remix.css?v=${V}`,
   '/manifest.webmanifest', '/vendor/marked.js', '/vendor/purify.js', '/vendor/highlight.js',
   '/vendor/fflate.js', '/icons/atelier-v2-32.png', '/icons/atelier-v2-180.png', '/icons/atelier-v2-192.png', '/icons/atelier-v2-512.png', '/icons/atelier-v2-maskable-512.png', '/icons/atelier-mark-96.png',
   '/privacy', '/tos', '/legal.css'];
-const PATHS = SHELL.map(u => u.split('?')[0]);
+// Cached on first use, not at install: the render engine and Mediabunny (689 KB, 177 KB gzip) only load when a clip is
+// attached in Video mode with Remix on, or a remix is cut.
+const LAZY = ['/remix-render.js', '/vendor/mediabunny.js'];
+const PATHS = [...SHELL.map(u => u.split('?')[0]), ...LAZY];
 // Share target (manifest share_target: POST multipart to /share). The payload waits in its own Cache Storage bucket,
 // which activate() never deletes (it isn't 'atelier-v*'); the page takes it from /?share=<id> (launch.js takeShare)
 // and deletes it. Nothing lands in the URL, history or Worker logs. One pending share at a time; limits apply per File
