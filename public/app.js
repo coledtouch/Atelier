@@ -7,17 +7,17 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=58';
-import * as Sync from './sync.js?v=58';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=58';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=58';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=58';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=58';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=58';
-import { initLookup } from './lookup.js?v=58';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=58';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=58';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=58';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=59';
+import * as Sync from './sync.js?v=59';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=59';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=59';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=59';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=59';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=59';
+import { initLookup } from './lookup.js?v=59';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=59';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=59';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=59';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -1505,6 +1505,8 @@ async function runChat(e, signal, thread = S.thread) {
   // agent, web, watch, or (photos) the turn's own model; followUpRoute (context.js) documents the rules, flags included.
   // Only the Web toggle (not a time-sensitive word alone) takes a video follow-up off the full clip.
   const ctx = hasImg ? null : contextOf(e, thread);
+  // A launch (side button, Shortcut) can send before boot has the connected accounts: wait for them, at most 6 s.
+  if (!toolsLoaded && !S.tester && S.settings.passcode) await Promise.race([(async () => { if (!server.nvidia) await refreshServer(); await loadTools(); })(), sleep(6000)]).catch(() => {});
   const wantWeb = e.kind === 'ask' && !pinned && !voice && !hasImg && providerReady('anthropic') && feat('web') && Boolean(e.params?.web || FRESH_HINT.test(e.prompt));
   // A turn whose text came from a link or a share (e.untrusted, set in submit) never goes to the accounts agent: it is
   // answered as plain chat, and the meta line says how to use the tools on purpose.
@@ -1641,11 +1643,12 @@ async function ensureClip(src, e, signal, thread) {
 
 // ───────────────────────── accounts agent ─────────────────────────
 let TOOLS = { services: {}, list: [] };
+let toolsLoaded = false; // the connected-account list has arrived once (a launch can send before boot fetches it)
 async function loadTools() {
   if (!S.settings.passcode || S.tester || !server.nvidia) return;
   try {
     const r = await fetch('/api/tools', { headers: apiHeaders() });
-    if (r.ok) { const hadCanva = canvaOn(); TOOLS = await r.json(); if (canvaOn() !== hadCanva) syncCanvaActs(); renderOptions(); syncAttachBtn(); }
+    if (r.ok) { const hadCanva = canvaOn(); TOOLS = await r.json(); toolsLoaded = true; if (canvaOn() !== hadCanva) syncCanvaActs(); renderOptions(); syncAttachBtn(); }
   } catch {}
 }
 // Attach only opens a menu when a Google account can supply photos; otherwise it goes straight to the file picker.
@@ -1656,7 +1659,7 @@ function syncAttachBtn() {
     if (!btn.hasAttribute('aria-expanded')) btn.setAttribute('aria-expanded', 'false');
   } else { btn.removeAttribute('aria-haspopup'); btn.removeAttribute('aria-expanded'); }
 }
-const AGENT_HINT = /\b(e-?mails?|inbox|gmail|unread|repl(y|ies)( to)?|respond to|messages?|messaged|texted|mentions?|threads?|slack|dms?|channels?|my boss|coworkers?|team ?mates?|github|repos?|pull requests?|prs?|issues?|commits?|notifications?|stripe|payments?|customers?|invoices?|subscriptions?|refund|revenue|mrr|cloudflare|dns|workers?|zones?|railway|deploy(ment)?s?|redeploy|canva|calendars?|my (schedule|day|week|agenda|docs?|files)|meetings?|appointments?|agenda|free (time|slots?)|invites?|(my|google|in) drive|google (docs?|sheets?|slides)|spreadsheets?)\b/i;
+const AGENT_HINT = /\b(e-?mails?|inbox|gmail|unread|repl(y|ies)( to)?|respond to|messages?|messaged|texted|mentions?|threads?|slack|dms?|channels?|my boss|coworkers?|team ?mates?|github|repos?|pull requests?|prs?|issues?|commits?|notifications?|stripe|payments?|customers?|invoices?|subscriptions?|refund|revenue|mrr|cloudflare|dns|workers?|zones?|railway|deploy(ment)?s?|redeploy|canva|calendars?|my (schedule|day|week|agenda|docs?|files|tasks|to-?dos?|plans?)|to-?do( list)?|what (do|should) i (need to |have to )?do( today| tomorrow| this (morning|afternoon|week))?|what('?s| is)? on (today|tomorrow|my plate)|meetings?|appointments?|agenda|free (time|slots?)|invites?|(my|google|in) drive|google (docs?|sheets?|slides)|spreadsheets?)\b/i;
 // ── Atelier Browser extension bridge (desktop Chrome / Edge) ──
 const EXT = { ready: false, version: null, pending: new Map() };
 window.addEventListener('message', (ev) => {

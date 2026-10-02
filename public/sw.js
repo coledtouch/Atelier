@@ -6,7 +6,7 @@
 // One step does all three:  node scripts/bump-version.mjs <n>
 //   (the same by hand: sed -i -E "s/atelier-v[0-9]+'/atelier-v<n>'/" public/sw.js && sed -i -E "s/\?v=[0-9]+/?v=<n>/g" public/index.html public/*.js)
 // tests/service-worker.test.mjs fails if they disagree or a module the app loads isn't precached at its ?v= URL.
-const VERSION = 'atelier-v58';
+const VERSION = 'atelier-v59';
 const V = VERSION.slice('atelier-v'.length);
 // Modules are listed at the exact ?v=<n> URLs they are imported by (PATHS drops the query for the fetch guard below).
 const SHELL = ['/', '/index.html', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`,
