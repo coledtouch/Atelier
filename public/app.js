@@ -7,19 +7,20 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=61';
-import * as Sync from './sync.js?v=61';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=61';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=61';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=61';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=61';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=61';
-import { initLookup } from './lookup.js?v=61';
-import { createRemix } from './remix-app.js?v=61';
-import { sendMode, looksLikeQuestion } from './remix.js?v=61';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=61';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=61';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=61';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=62';
+import * as Sync from './sync.js?v=62';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=62';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=62';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=62';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=62';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=62';
+import { initLookup } from './lookup.js?v=62';
+import { createRemix } from './remix-app.js?v=62';
+import { sendMode, looksLikeQuestion } from './remix.js?v=62';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=62';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=62';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=62';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=62';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -1097,6 +1098,7 @@ function paintEntry(li, e) {
   const out = $('.out', li);
   const acts = $('.actions', li);
   acts.innerHTML = '';
+  delete li.dataset.ver;
   const meta = e.meta?.model ? `<div class="meta-line"><span><b>${esc(shortModel(e.meta.model))}</b></span>${e.meta.ms ? `<span>${(e.meta.ms / 1000).toFixed(1)}s</span>` : ''}${e.meta.note ? `<span>${esc(e.meta.note)}</span>` : ''}</div>` : '';
   if (e.remix && remix) return remix.paint(li, e, meta); // keyed paint; status text only otherwise (never the 33 ms repaint)
 
@@ -1166,14 +1168,27 @@ function paintEntry(li, e) {
   }
 
   if (e.kind === 'build') {
-    if (e.pending) {
+    const ver = !e.pending && e.app?.html ? buildVersion(e) : null;
+    if (e.pending && e.stage === 'queued') {
+      out.innerHTML = `${meta}<div class="appcard queued"><div class="appbar"><span class="dots"><i></i><i></i><i></i></span><span class="apptitle">queued</span></div>
+        <div class="buildmeter">${statusLine('Queued · will apply after the current build', e)}<button class="mini" data-act="stop-entry" aria-label="Stop this queued change">${ICON.stop}Stop</button></div></div>`;
+    } else if (ver && !ver.newest && !openVersions.has(e.id)) {
+      // An earlier version of an app this thread rebuilt since: one line (Preview / Restore / Show), the newest stays a full card.
+      out.innerHTML = `${meta}<div class="appver" role="group" aria-label="${esc(e.app.title)}, version ${ver.n} of ${ver.of}">
+        <span class="vtag">v${ver.n}</span><span class="vtitle">${esc(e.app.title)}</span>${ver.head ? '<span class="vbase">next change applies here</span>' : '<span class="vold">earlier version</span>'}
+        <span class="vacts"><button class="mini" data-act="app-full" aria-label="Preview v${ver.n}">${ICON.expand}Preview</button>${ver.head ? '' : `<button class="mini" data-act="ver-restore" aria-label="Restore v${ver.n}: apply the next change to it">${ICON.retry}Restore</button>`}<button class="mini" data-act="ver-show" aria-expanded="false" aria-label="Show v${ver.n} in full">Show</button></span></div>`;
+      li.dataset.ver = 'old';
+    } else if (e.pending) {
       const lines = (e.text || '').split('\n');
       const n = e.text ? lines.length : 0;
       out.innerHTML = `${meta}<div class="appcard"><div class="appbar"><span class="dots"><i></i><i></i><i></i></span><span class="apptitle">${n ? `building · ${n} lines` : 'building'}</span></div>
         <div class="buildmeter">${statusLine(e.refineOf ? 'Rebuilding' : 'Building', e)}<span class="bar"><i></i></span></div>
         <pre class="appcode live">${esc(lines.slice(-18).join('\n'))}</pre></div>`;
     } else if (e.app?.html) {
-      out.innerHTML = `${meta}<div class="appcard"><div class="appbar"><span class="dots"><i></i><i></i><i></i></span><span class="apptitle">${esc(e.app.title)}</span>
+      const vtag = ver && ver.of > 1 ? `<span class="vtag" title="Version ${ver.n} of ${ver.of}">v${ver.n}</span>` : '';
+      const baseNote = ver?.of > 1 && !ver.head && ver.newest && ver.headN ? `<div class="vnote">Next change applies to v${ver.headN}<button class="mini" data-act="ver-restore" aria-label="Apply the next change to v${ver.n} instead">Use v${ver.n}</button></div>`
+        : ver && !ver.newest ? `<div class="vnote">Earlier version${ver.head ? ' · next change applies here' : ''}<button class="mini" data-act="ver-restore"${ver.head ? ' hidden' : ''}>${ICON.retry}Restore</button><button class="mini" data-act="ver-show" aria-expanded="true">Collapse</button></div>` : '';
+      out.innerHTML = `${meta}<div class="appcard"><div class="appbar"><span class="dots"><i></i><i></i><i></i></span>${vtag}<span class="apptitle">${esc(e.app.title)}</span>
           <span class="tabs"><button class="on" data-act="app-tab" data-tab="preview">Preview</button><button data-act="app-tab" data-tab="code">Code</button></span></div>
         <iframe class="appframe" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock allow-downloads" title="${esc(e.app.title)}" loading="lazy"></iframe>
         <pre class="appcode" hidden><code class="language-html"></code></pre>
@@ -1183,7 +1198,7 @@ function paintEntry(li, e) {
           <button class="mini" data-act="app-copy">${ICON.copy}Copy code</button>
           <span class="grow"></span>
           <button class="mini" data-act="app-refine" style="color:var(--accent)">${ICON.pen}Refine</button>
-        </div></div>`;
+        </div>${baseNote}</div>`;
       $('iframe', out).srcdoc = guardFocus(e.app.html);
       $('.appcode code', out).textContent = e.app.html;
       acts.innerHTML = btn('retry', ICON.retry, 'Rebuild');
@@ -1202,6 +1217,22 @@ function paintEntry(li, e) {
   if (e.pending) syncLoops(out);
 }
 const btn = (act, icon, label) => `<button class="mini" data-act="${act}">${icon}${label}</button>`;
+// Build versions (builds.js) as the open thread shows them: e's number, its lineage's size, whether it is the newest,
+// whether it is the head (the base of the next refine) and the head's number when the head is another version.
+const openVersions = new Set(); // earlier versions the user expanded (session only)
+function buildVersion(e, thread = S.thread) {
+  if (!thread?.entries.includes(e)) return null;
+  const all = buildVersions(thread.entries), v = all.get(e.id);
+  if (!v) return null;
+  const t = composerTarget(thread.entries), head = t && !t.queued ? t.id : null;
+  const headV = head && all.get(head);
+  return { ...v, head: head === e.id, headN: headV && headV.root === v.root ? headV.n : 0 };
+}
+// Repaint every finished build in the open thread (a new version collapses the older ones; Restore moves the head).
+function repaintBuilds(thread = S.thread, except = null) {
+  if (thread !== S.thread) return;
+  for (const x of thread.entries) if (x.kind === 'build' && x !== except && !x.pending) { const li = entryEl(x); if (li) paintEntry(li, x); }
+}
 
 // ── Read aloud (public/readaloud.js): the Atelier voice through POST /api/tts, the device's own voice offline and as the
 // fallback. One read at a time; toggle()/preview() run straight from the tap (no await before them).
@@ -1399,6 +1430,7 @@ async function submit(textArg, modeArg, extra = {}) {
   stream.append(renderEntry(e));
   scrollDown(true);
   persist(true);
+  if (e.kind === 'build' && S.mode === 'build') renderOptions(); // the Refine chip names what this send is queued behind
   await run(e);
 }
 
@@ -1441,11 +1473,16 @@ const liveThreads = new Map(); // Preserve object identity when switching back d
 const liveRuns = new Map();
 // Session-only, never persisted: entry id → the sent video's {file, url: blob:} and its Gemini ClipJob (see ensureClip).
 const videoFiles = new Map(), clipJobs = new Map();
+// Session-only: entry id → its run's AbortController (Stop on one queued build) and a promise that settles when the run
+// ends (a queued refine waits on it — see runBuild).
+const entryRuns = new Map(), runDone = new Map();
 function stopAll() { running.forEach((c) => c.abort()); }
 
 async function run(e) {
   const ctrl = new AbortController();
   running.add(ctrl);
+  let settle; const done = new Promise((r) => { settle = r; });
+  entryRuns.set(e.id, ctrl); runDone.set(e.id, done);
   setBusy();
   $('#activityStatus').textContent = `Creating your ${MODES[e.kind].label.toLowerCase()} response.`;
   const thread = S.thread;
@@ -1460,7 +1497,7 @@ async function run(e) {
     else if (e.kind === 'image') await runImage(e, signal);
     else if (e.kind === 'video') await (e.remix ? remix.plan(e, signal, thread) : runVideo(e, signal));
     else if (e.kind === 'ideas') await runIdeas(e, signal);
-    else if (e.kind === 'build') await runBuild(e, signal);
+    else if (e.kind === 'build') await runBuild(e, signal, thread);
     e.meta = { ...(e.meta || {}), ms: Date.now() - t0 };
     updateKeyState(true);
   } catch (err) {
@@ -1489,8 +1526,11 @@ async function run(e) {
       else if (st.status === 'running') { interruptStep(st); approvals.delete(st.id); }
     }
     running.delete(ctrl);
+    if (entryRuns.get(e.id) === ctrl) { entryRuns.delete(e.id); runDone.delete(e.id); }
+    settle();
     setBusy();
     repaint(e);
+    if (e.kind === 'build' && thread && thread === S.thread) repaintBuilds(thread, e); // a newer version collapses the older ones
     // Save the thread this entry belongs to, even if the user switched threads meanwhile.
     if (thread) { thread.updatedAt = Date.now(); DB.put(thread).catch(storageError); }
     releaseRun(); Sync.kick('settled');
@@ -2163,19 +2203,39 @@ function parseIdeas(s) {
   return (arr || []).filter((d) => d && d.title).map((d) => ({ title: String(d.title), pitch: String(d.pitch || d.description || ''), first_step: d.first_step ? String(d.first_step) : '', tags: Array.isArray(d.tags) ? d.tags.map(String) : [] }));
 }
 
-async function runBuild(e, signal) {
+// A refine changes the thread's head build (builds.js). Sent while that build is still running, it waits — "Queued" with
+// its own Stop — then refines the result, so quick edits chain on one app instead of branching off an older version.
+// If the build it waited on failed or was stopped, it refines the latest finished app and says so. thread: the one e
+// belongs to (run() passes it; a thread switch mid-wait never mixes in another conversation).
+async function runBuild(e, signal, thread = S.thread) {
   const model = e.params?.model && modelReady(e.params.model) ? e.params.model : modelFor('build');
   e.meta = { model, note: e.params.style.toLowerCase() };
   e.text = '';
-  const prev = e.params.refine ? [...S.thread.entries.slice(0, S.thread.entries.indexOf(e))].reverse().find((x) => x.kind === 'build' && x.app?.html) : null;
+  let plan = { prev: null }, waited = null;
+  if (e.params.refine) {
+    for (;;) {
+      plan = planRefine(thread.entries.slice(0, thread.entries.indexOf(e)), e);
+      if (!plan.wait) break;
+      waited ||= plan.wait;
+      e.stage = 'queued'; repaint(e);
+      await waitForRun(plan.wait, signal);
+    }
+    delete e.stage;
+  }
+  const prev = plan.prev;
   const messages = [{ role: 'system', content: SYS.build(e.params.style) }];
   if (prev) {
     e.refineOf = prev.id;
-    e.meta.note = 'refining ' + prev.app.title;
+    const n = buildVersions(thread.entries).get(prev.id)?.n;
+    const missed = plan.fallback || (waited && waited !== prev && !buildHasApp(waited) ? waited : null);
+    e.meta.note = missed ? `the build before didn’t finish · refining ${prev.app.title}${n ? ` v${n}` : ''} instead` : `refining ${prev.app.title}${n ? ` v${n}` : ''}`;
     messages.push({ role: 'user', content: prev.prompt }, { role: 'assistant', content: '```html\n' + prev.app.html + '\n```' }, { role: 'user', content: `Update the app: ${e.prompt}\nReturn the full updated file.` });
   } else {
+    delete e.refineOf;
+    if (waited) e.meta.note = 'the build before didn’t finish · building fresh';
     messages.push({ role: 'user', content: e.prompt });
   }
+  repaint(e);
   await streamChat({ model, role: 'build', onModel: (m) => { e.meta.model = m; }, messages, signal, temperature: 0.4, max_tokens: 32000, onDelta: ({ content }) => { e.text += content; repaint(e); } });
   const html = extractHtml(stripThink(e.text));
   if (!html) throw new Error('No HTML came back. Try again, or pick a stronger Build model in Settings.');
@@ -2183,6 +2243,19 @@ async function runBuild(e, signal) {
   const title = (html.match(/<title>([^<]*)<\/title>/i)?.[1] || e.prompt).trim().slice(0, 60);
   e.app = { html, title };
   e.text = '';
+}
+// Resolves when x's run ends (or, for a build this tab isn't running, once it stops being pending); rejects on abort.
+function waitForRun(x, signal) {
+  return new Promise((res, rej) => {
+    if (signal.aborted) return rej(new DOMException('Stopped', 'AbortError'));
+    let timer = null;
+    const onAbort = () => { clearTimeout(timer); rej(new DOMException('Stopped', 'AbortError')); };
+    const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', onAbort); res(); };
+    signal.addEventListener('abort', onAbort, { once: true });
+    const p = runDone.get(x.id);
+    if (p) p.then(finish);
+    else { const poll = () => { if (!x.pending) finish(); else timer = setTimeout(poll, 500); }; poll(); }
+  });
 }
 function extractHtml(s) {
   const fence = s.match(/```(?:html)?\s*\n([\s\S]*?)(?:```|$)/i);
@@ -2302,10 +2375,26 @@ stream.addEventListener('click', async (ev) => {
     case 'app-full': return openViewer({ title: e.app.title, html: e.app.html, full: true, dl: () => download(e.app.html, slug(e.app.title) + '.html', 'text/html') });
     case 'app-download': return download(e.app.html, slug(e.app.title) + '.html', 'text/html');
     case 'app-copy': return copy(e.app.html);
-    case 'app-refine':
+    case 'app-refine': // refine THIS version: it becomes the head (Restore) when it isn't already
+      if (composerTarget(S.thread.entries)?.id !== e.id && restoreBase(e)) { persist(true); Sync.kick('edit'); repaintBuilds(); }
       setMode('build'); S.opts.build.refine = true; renderOptions();
-      input.placeholder = `What should change in “${e.app.title}”?`;
       return input.focus();
+    case 'ver-restore': {
+      if (!restoreBase(e)) return;
+      const n = buildVersion(e)?.n;
+      persist(true); Sync.kick('edit'); repaintBuilds();
+      setMode('build'); S.opts.build.refine = true; renderOptions();
+      toast(`Restored v${n || ''} — your next change applies to it. Later versions stay in the thread.`);
+      const line = entryEl(e) && $('[data-act="ver-show"]', entryEl(e));
+      return (line || input).focus({ preventScroll: true });
+    }
+    case 'ver-show': {
+      const open = !openVersions.has(e.id);
+      if (open) openVersions.add(e.id); else openVersions.delete(e.id);
+      paintEntry(li, e);
+      return $('[data-act="ver-show"]', li)?.focus({ preventScroll: true });
+    }
+    case 'stop-entry': return entryRuns.get(e.id)?.abort();
   }
 });
 
@@ -2495,18 +2584,32 @@ function renderOptions() {
         + ['Practical', 'Bold', 'Business', 'Creative', 'Contrarian'].map((f) => `<button class="chip ${o.flavor === f ? 'on' : ''}" data-set="flavor" data-v="${f}">${f}</button>`).join('');
       break;
     case 'build': {
-      const hasApp = S.thread?.entries.some((x) => x.kind === 'build' && x.app);
+      // The app a send would change (builds.js composerTarget): named on the Refine chip and in the placeholder.
+      const t = S.thread ? composerTarget(S.thread.entries) : null;
+      const name = t ? (t.title ? `${t.title.length > 28 ? `${t.title.slice(0, 27)}…` : t.title}${t.queued ? '' : ` v${t.n}`}` : 'the app') : '';
+      const label = !t ? '' : !o.refine ? 'New app' : t.queued ? `Refining ${name} · after the current build` : `Refining ${name}`;
       h = selectOpt('', 'model', modelChoices(CHAT_MODELS.code, o.model, `Auto · ${modelLabel(modelFor('build'))}`), o.model)
         + selectOpt('', 'style', ['Refined', 'Playful', 'Brutalist', 'Glassy', 'Editorial', 'Retro terminal', 'Soft pastel'].map((s) => [s, s]), o.style)
-        + (hasApp ? `<button class="chip ${o.refine ? 'on' : ''}" data-toggle="refine" title="Apply the prompt as a change to the latest app"><span aria-hidden="true">↻</span> Refine last app</button>` : '');
+        + (t ? `<button class="chip refine-chip ${o.refine ? 'on' : ''}" data-toggle="refine" title="${o.refine ? 'On: your prompt changes this app. Tap to build a new app instead' : 'Off: your prompt builds a new app. Tap to change the current app instead'}"><span aria-hidden="true">${o.refine ? '↻' : '+'}</span> ${esc(label)}</button>` : '');
+      buildPlaceholder(t && o.refine ? `Describe a change to ${t.title || 'the app'}…` : '');
       break;
     }
   }
+  if (S.mode !== 'build') buildPlaceholder('');
   box.innerHTML = h;
   $$('button', box).forEach((b) => b.setAttribute('aria-pressed', b.classList.contains('on')));
   if (box.dataset.for !== S.mode) { box.dataset.for = S.mode; box.scrollLeft = 0; }
   syncRunwayHint();
   syncOptFade(box);
+}
+// Build mode with an app in the thread: "Describe a change to <app>…" (refine on). Only ever replaces its own text or
+// the mode's default, so attachment / video hints keep theirs.
+let refinePh = '';
+function buildPlaceholder(ph) {
+  const cur = input.placeholder;
+  if (ph && (cur === MODES.build.ph || cur === refinePh)) input.placeholder = ph;
+  else if (!ph && refinePh && cur === refinePh) input.placeholder = S.mode === 'build' ? MODES.build.ph : MODES[S.mode].ph;
+  refinePh = ph;
 }
 const videoOptNote = () => `<span class="opt-note">video → ${esc(modelLabel(modelFor('watch')))}</span>`
   + (remixOn() ? '<button class="chip" data-remix-in-video><span aria-hidden="true">✂</span> Remix in Video</button>' : '');
