@@ -28,8 +28,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=56" />
-  <link rel="stylesheet" href="/studio.css?v=56" />
+  <link rel="stylesheet" href="/app.css?v=57" />
+  <link rel="stylesheet" href="/studio.css?v=57" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -288,7 +288,7 @@
               <li><b>By voice.</b> “Hey Google, open Atelier” (phone unlocked).</li>
               <li><b>Share sheet.</b> Share a link, text, photo or video and choose Atelier.</li>
             </ol>
-            <p class="hint ql-small">Holding the power button stays with your phone’s assistant — Android gives that only to native apps.</p>
+            <p class="hint ql-small">Holding the power button stays with your phone’s assistant — Android gives that only to native apps, like Atelier Assist below.</p>
             <div class="ql-row">
               <span class="ql-label" id="qlSendLabel">After you speak (Talk to Atelier)</span>
               <div class="seg" role="radiogroup" aria-labelledby="qlSendLabel">
@@ -304,6 +304,18 @@
                 <label><input type="radio" name="qlListen" value="on" /> <span>On</span></label>
               </div>
               <p class="hint">Starts the mic when Atelier opens fresh from its icon, back tap, side button or “Hey Google”. It never sends without you. Signing out turns it off.</p>
+            </div>
+            <div class="ql-row" id="qlAssist" hidden>
+              <span class="ql-label">Atelier Assist</span>
+              <p class="hint">The Atelier Assist app on your side button sends what you say here, in the mode it picks. Pair it once: turn on <b>Send without a tap</b>, tap <b>Copy Assist link</b>, then in Atelier Assist tap ⋯ → <b>Paste link</b>.</p>
+              <span class="ql-label" id="qlAssistSendLabel">Send without a tap</span>
+              <div class="seg" role="radiogroup" aria-labelledby="qlAssistSendLabel">
+                <label><input type="radio" name="qlAssistSend" value="off" /> <span>Off</span></label>
+                <label><input type="radio" name="qlAssistSend" value="on" /> <span>On</span></label>
+              </div>
+              <p class="hint">On adds a private key to the link that only this browser and the installed app accept. The first time, Atelier asks you to confirm. Video waits 4 seconds and shows its price before it starts. Signing out turns it off.</p>
+              <div class="row-actions ql-acts"><button type="button" class="chip" id="qlAssistCopy">Copy Assist link</button><button type="button" class="chip" id="qlAssistReset" hidden>New link</button></div>
+              <input class="ql-link" id="qlAssistLink" type="text" readonly aria-label="Your Atelier Assist link" hidden />
             </div>
             <div class="row-actions ql-acts"><button type="button" class="chip" id="qlTest">Test the mic</button></div>
             <p class="hint" id="qlTestMsg" role="status">When Chrome asks, choose “Allow while visiting the site” so it won’t ask again.</p>
@@ -462,6 +474,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=56" type="module"></script>
+  <script src="/app.js?v=57" type="module"></script>
 </body>
 </html>

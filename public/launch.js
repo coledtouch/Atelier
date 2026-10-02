@@ -6,7 +6,8 @@
 // - URL text (q, title/text/url, shares) is only ever prefilled and labelled, and cleaned first so that what the user
 //   checks is all there is (no invisible characters, no blank padding below the fold). It is sent without a tap only
 //   when the fragment carries this browser's private launch key, the key matches the signed-in role, the user confirmed
-//   that key once, the launch is Ask-only (no /mode prefix) with nothing else in the composer, and no other keyed send
+//   that key once, the launch is a plain request in the link's own mode (start=, any of the six: Atelier Assist names
+//   it; never a voice start or a /mode prefix) with nothing else in the composer, and no other keyed send
 //   ran in the last 15 s. A link that fails any key check only pulses Send; "Ready when you are" is for verified links.
 // - Voice auto-send applies only to an explicit voice launch that starts the mic itself, right after the launch, and
 //   only while the composer is empty, so a ?q= prefill or a restored draft always waits for a tap. The send itself sits
@@ -27,7 +28,10 @@ export const PENDING_TTL = 15 * 60e3;
 export const DRAFT_TTL = 6 * 36e5;
 export const RATE_MS = 15e3; // at most one keyed auto-send per 15 s
 export const MAX_TEXT = 8000;
-export const HOLD_MS = { link: 2500, voice: 1500 };
+export const HOLD_MS = { link: 2500, voice: 1500, video: 4000 };
+// A keyed link holds 2.5 s before it sends; Video, the costly one, 4 s (its toast shows the price: app.js holdNote).
+export const holdMs = (mode) => (mode === 'video' ? HOLD_MS.video : HOLD_MS.link);
+export const MODE_LABELS = Object.freeze({ ask: 'Ask', code: 'Code', image: 'Image', video: 'Video', ideas: 'Ideas', build: 'Build' });
 // A voice launch opens the mic only if the page is visible within this long: a boot that stays in the background (power
 // button, app switch) arms the mic instead of opening it at the next unlock or return through Recents.
 export const VISIBLE_WAIT_MS = 5000;
@@ -65,8 +69,18 @@ export const NOTES = Object.freeze({
   newLink: 'New link copied — paste it into your Shortcut. Old links only fill the box now.',
   newLinkManual: 'New link made — copy it below and paste it into your Shortcut. Old links only fill the box now.',
   confirmTitle: 'Send from your Shortcut without a tap?',
-  confirmHint: 'Prompts from your Ask Atelier Shortcut will send after a short pause. Links without your private key only fill the box.',
+  confirmHint: 'Prompts from your Ask Atelier Shortcut will send after a short pause, in the mode the link names (Ask unless it names another). Links without your private key only fill the box.',
+  // Atelier Assist (android/): only a link with this browser's own key gets these (planLaunch plan.via).
+  assist: 'From Atelier Assist — check it before sending.',
+  confirmTitleAssist: 'Send from Atelier Assist without a tap?',
+  confirmHintAssist: 'What you ask Atelier Assist on this phone will send here after a short pause, in the mode it picked. Links without your private key only fill the box.',
+  assistOn: 'Turn on Send without a tap first, then copy the link.',
+  assistCopied: 'Assist link copied — in Atelier Assist, tap ⋯ → Paste link, then delete it from your keyboard’s clipboard history.',
+  assistCopyBelow: 'Copy the link below, then in Atelier Assist tap ⋯ → Paste link. Delete it from your keyboard’s clipboard history afterwards.',
+  assistNewLink: 'New Assist link copied — paste it into Atelier Assist, then delete it from your keyboard’s clipboard history. The old one only fills the box now.',
 });
+// The hold's toast for a keyed launch: where it is going. (Video's, with its length and price, is app.js holdNote.)
+export const sendingNote = (mode) => (MODE_LABELS[mode] ? `Sending to ${MODE_LABELS[mode]}…` : NOTES.sending);
 export const SHARE_NOTES = Object.freeze({
   failed: 'That share didn’t come through — try sharing it again.',
   lost: 'Atelier was still starting up — share that again.',
@@ -164,7 +178,7 @@ export function readLaunch(search = '', hash = '') {
     key: cap(h.get('k') ?? '', 64),
     share: shareOf(q.get('share')),
     source: q.get('source') ?? '',
-    via: q.get('via') ?? '', // 'assist' from the optional Assist APK: no other effect
+    via: q.get('via') ?? '', // 'assist' from Atelier Assist (android/): only a label, and only with this browser's own key (planLaunch)
     review: false,
     replay: false,
     any: s.length > 1 || hs.length > 1,
@@ -201,8 +215,12 @@ export function keyOk(given, mine) {
   for (let i = 0; i < mine.length; i++) d |= given.charCodeAt(i) ^ mine.charCodeAt(i);
   return d === 0;
 }
+// An Allow is kept as CONFIRM_SCOPE + key. 'v2:' = keyed sends in any of the six modes (v57). A bare key was allowed
+// under the Ask-only dialog (v55/v56): it doesn't count, so the first keyed send after the update asks again.
+export const CONFIRM_SCOPE = 'v2:';
+const confirmedKey = (v) => { const s = str(v); return s.startsWith(CONFIRM_SCOPE) ? s.slice(CONFIRM_SCOPE.length) : ''; };
 export function keyState(store) {
-  return { mine: str(store.get('launchKey', '')), role: str(store.get('launchRole', '')), confirmed: str(store.get('launchKeyOk', '')), lastAutoAt: num(store.get('lastAutoSend', 0)) };
+  return { mine: str(store.get('launchKey', '')), role: str(store.get('launchRole', '')), confirmed: confirmedKey(store.get('launchKeyOk', '')), lastAutoAt: num(store.get('lastAutoSend', 0)) };
 }
 // Within 15 s either side of the last keyed send (a clock set back can't unlock a burst; a far-future stamp can't lock forever).
 export const rateLimited = (lastAutoAt, now) => lastAutoAt > 0 && Math.abs(now - lastAutoAt) < RATE_MS;
@@ -226,7 +244,7 @@ export function forgetLaunch(store) { for (const k of LAUNCH_STORE_KEYS) if (k !
 export function confirmLaunchKey(store, now) {
   const { mine } = keyState(store);
   if (!KEY_RE.test(mine)) return false;
-  store.set('launchKeyOk', mine); store.set('lastAutoSend', now);
+  store.set('launchKeyOk', CONFIRM_SCOPE + mine); store.set('lastAutoSend', now);
   return true;
 }
 export const noteAutoSend = (store, now) => store.set('lastAutoSend', now);
@@ -249,6 +267,11 @@ export function shortcutLink(origin, key = '') {
   const base = `${String(origin).replace(/\/+$/, '')}/?start=ask#`;
   return key ? `${base}send=1&k=${key}&q=` : `${base}send=1&q=`;
 }
+
+// Atelier Assist (android/) pairs with this link once (Settings → Quick launch → Android → Atelier Assist): the app keeps
+// only the key and builds its own /?start=<mode>&via=assist#k=<key>&send=1&q=<words> links (q last). Opened anywhere
+// else, it is a keyed Ask link with nothing to send.
+export const assistLink = (origin, key) => `${String(origin).replace(/\/+$/, '')}/?start=ask&via=assist#send=1&k=${key}&q=`;
 
 // ───────────────────────── pending launch (signed out, LinkedIn round trip) ─────────────────────────
 // Never stores the key or the send flag: only {voice, mode, text, from, share, review, at}. 15-minute life, read once.
@@ -323,7 +346,8 @@ export function draftKeeper({ store, now = () => Date.now(), text = () => '', so
 //   dialogOpen, online, busy, visible, ios, now, composer (current #input text), attachments (count incl. video),
 //   prefs (quickPrefs), keys (keyState) or store (to read both) }.
 // plan: { mode, prefill, share, send: 'none'|'review'|'confirm'|'send', sendWhy, voice: 'start'|'arm'|null, voiceWhy,
-//   autoSend, stash, replay, clean, key: { present, valid, confirmed, limited }, intent (key-free) }.
+//   autoSend, stash, replay, clean, key: { present, valid, confirmed, limited }, via ('assist': a keyed Atelier Assist
+//   link, labelled as such; else ''), intent (key-free) }.
 export function planLaunch(intent, ctx = {}) {
   const c = { signedIn: false, role: '', standalone: false, sr: false, perm: 'prompt', replay: false, dialogOpen: false, online: true,
     busy: false, visible: true, ios: false, now: Date.now(), composer: '', attachments: 0, ...ctx };
@@ -336,26 +360,30 @@ export function planLaunch(intent, ctx = {}) {
   const otherDraft = Boolean(c.attachments) || (Boolean(composer) && composer !== text); // something besides the link text
   const valid = Boolean(intent.key) && keyOk(intent.key, keys.mine) && Boolean(c.role) && keys.role === c.role;
   const key = { present: Boolean(intent.key), valid, confirmed: valid && keys.confirmed === keys.mine, limited: rateLimited(keys.lastAutoAt, c.now) };
+  // via=assist is a label anyone can write: it counts (the note, the entry's label) only with this browser's own key.
+  const assisted = valid && intent.via === 'assist';
   const share = intent.share ? (SHARE_STATUS.includes(intent.share) ? { status: intent.share } : SHARE_ID.test(intent.share) ? { id: intent.share } : null) : null;
   const plan = {
     mode: intent.mode || null,
-    prefill: text ? { text, from: intent.from === 'share' ? 'share' : 'link', label: intent.from === 'share' ? NOTES.shared : NOTES.link } : null,
+    prefill: text ? { text, from: intent.from === 'share' ? 'share' : 'link', label: intent.from === 'share' ? NOTES.shared : assisted ? NOTES.assist : NOTES.link } : null,
     share, send: 'none', sendWhy: '', voice: null, voiceWhy: null, autoSend: false, stash: false, replay, clean: Boolean(intent.any), key,
+    via: assisted ? 'assist' : '',
     // Key-free copy for stashLaunch: a requested send survives only as "review" (pulse Send), never as a send.
     intent: { voice: Boolean(intent.voice), mode: intent.mode || null, text, from: text ? (intent.from === 'share' ? 'share' : 'link') : null, share: intent.share || null, source: intent.source || '', review: Boolean(intent.review || (intent.send && text)) },
   };
 
-  // Keyed send: every gate must pass; anything else only prefills (and pulses Send). Ask only: no other start, and no
-  // "/video …"-style prefix that submit() would turn into another mode (app.js also sends launches with extra.launch,
-  // which skips that prefix and the multi-task split).
+  // Keyed send: every gate must pass; anything else only prefills (and pulses Send). In the link's own mode (start=,
+  // any of the six); never a voice start, and never a "/video …" prefix in the text (app.js sends launches with
+  // extra.launch, which skips that prefix and the multi-task split, so the mode is always the link's). Video holds
+  // longer and shows its price (HOLD_MS.video, app.js holdNote).
   const why = !intent.send && !intent.review ? 'no-send' : !text ? 'no-text' : replay ? 'replay' : !c.signedIn ? 'signed-out'
     : !prefs.linkSend ? 'off' : !intent.key ? 'no-key' : !valid ? 'bad-key'
-    : intent.voice || (intent.mode && intent.mode !== 'ask') || /^\s*\//.test(text) ? 'mode'
+    : intent.voice || /^\s*\//.test(text) ? 'mode'
     : share ? 'share' : otherDraft ? 'draft' : !c.online ? 'offline' : c.busy ? 'busy' : c.dialogOpen ? 'dialog' : !c.visible ? 'hidden'
     : key.limited ? 'rate' : '';
   plan.sendWhy = why || (key.confirmed ? 'ok' : 'unconfirmed');
   plan.send = why === 'no-send' || why === 'no-text' ? 'none' : why ? 'review' : key.confirmed ? 'send' : 'confirm';
-  if (plan.send === 'send' || plan.send === 'confirm') plan.mode = 'ask';
+  if (plan.send === 'send' || plan.send === 'confirm') plan.mode = intent.mode || 'ask'; // the link's own mode
 
   // Signed out: keep the launch for after sign-in (owner passcode, or the LinkedIn round trip). Never twice.
   if (!c.signedIn) {
@@ -490,8 +518,9 @@ const KEYED_HOLD = ['mode', 'share', 'draft', 'offline', 'busy', 'dialog', 'hidd
 //                      the live region, for anything said while the mic is open
 //   armSend() / armMic({ why, autoSend: false })  the pulsing ring (dictate.js: a one-shot "Tap to talk")
 //   micHint(kind)    'blocked' → the platform's mic settings path (dictate.js has its own MIC_HELP copy)
-//   holdThenSend({ ms })  visible, cancellable hold, then submit()
-//   confirmLinkSend()  → Promise<boolean>  the first-use dialog (Allow → true)
+//   holdThenSend({ ms, mode, via })  visible, cancellable hold, then submit() in that mode (via 'assist': labelled)
+//   confirmLinkSend({ via, mode })  → Promise<boolean>  the first-use dialog (Allow → true; Atelier Assist's own wording;
+//     it names the mode this send goes to, and Video's length and price)
 //   startVoice({ autoSend, auto: true }) → boolean | Promise<boolean>  the dictation starter (public/dictate.js via app.js);
 //                      autoSend=false means "listen, then pulse Send"; true means "hold-then-send if the composer was empty"
 //   composerEmpty()  → boolean (text, photos and video)    dialogOpen() → boolean
@@ -528,16 +557,16 @@ export async function applyLaunch(plan, deps = {}) {
 
   if (plan.send === 'send') {
     if (d.store) noteAutoSend(d.store, d.now());
-    call('holdThenSend', { ms: HOLD_MS.link }); did.push('hold');
+    call('holdThenSend', { ms: holdMs(plan.mode), mode: plan.mode, via: plan.via || '' }); did.push('hold');
     return did;
   }
   if (plan.send === 'confirm') {
     const before = d.store ? keyState(d.store).mine : '';
     let ok = false;
-    try { ok = Boolean(await call('confirmLinkSend')); } catch {}
+    try { ok = Boolean(await call('confirmLinkSend', { via: plan.via || '', mode: plan.mode || 'ask' })); } catch {}
     // Allow counts only for the key the link was checked against (a "New link" in another tab voids it).
     if (ok && d.store && keyState(d.store).mine === before && confirmLaunchKey(d.store, d.now())) {
-      call('holdThenSend', { ms: HOLD_MS.link }); did.push('confirmed', 'hold');
+      call('holdThenSend', { ms: holdMs(plan.mode), mode: plan.mode, via: plan.via || '' }); did.push('confirmed', 'hold');
       return did;
     }
     call('armSend'); did.push('declined', 'armSend');

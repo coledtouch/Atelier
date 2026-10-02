@@ -1,7 +1,8 @@
 // Quick launch (public/launch.js): URL parsing, the untrusted-link matrix, the iPhone launch key, the pending launch,
 // drafts, Cache Storage share intake and the applyLaunch adapter driven with fake deps.
 // Every in-scope link can open the installed WebAPK, so the rule under test is: URL text is only prefilled, and only a
-// confirmed per-browser fragment key can send it (Ask-only, empty composer, signed in, online, idle, 1 per 15 s).
+// confirmed per-browser fragment key can send it (in the link's own mode, never a voice start or a /mode prefix; empty
+// composer, signed in, online, idle, 1 per 15 s).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -11,7 +12,7 @@ import {
   cleanText, cap, decodeLoose, joinShared, joinDraft, splitHash, readLaunch, parseLaunch, planLaunch, needsCleanup, cleanLaunchUrl,
   quickPrefs, makeLaunchKey, keyOk, keyState, rateLimited, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, forgetLaunch, confirmLaunchKey,
   noteAutoSend, roleOf, syncLaunchRole, shortcutLink, stashLaunch, peekPendingLaunch, takePendingLaunch, saveDraft, takeDraft,
-  takeShare, sweepShare, detectPlatform, isStandalone, micPermission, whenVisible, createHold, applyLaunch,
+  takeShare, sweepShare, detectPlatform, isStandalone, micPermission, whenVisible, createHold, applyLaunch, CONFIRM_SCOPE,
 } from '../public/launch.js';
 
 // ── fakes ──
@@ -239,12 +240,14 @@ test('the keyed link sends only when every gate passes', () => {
   assert.equal(booted(`/#send=1&k=${KEY}&q=x`, { keys: { mine: KEY, role: 'owner', confirmed: KEY, lastAutoAt: NOW - RATE_MS } }).send, 'send', '15 s later is fine');
   assert.equal(booted(`/#send=1&k=${KEY}&q=x`, { keys: { mine: KEY, role: 'owner', confirmed: KEY, lastAutoAt: NOW + 5000 } }).sendWhy, 'rate', 'a clock set back stays limited');
   assert.equal(booted(`/#send=1&k=${KEY}&q=x`, { keys: { mine: KEY, role: 'owner', confirmed: KEY, lastAutoAt: NOW + 864e5 } }).send, 'send', 'a far-future stamp cannot lock forever');
-  // Ask-only: any other start (including voice) only prefills.
-  for (const m of ['code', 'image', 'video', 'ideas', 'build', 'voice']) {
+  // Any of the six modes sends in that mode (tests/assist-launch.test.mjs); a voice start never sends a link's text.
+  for (const m of ['code', 'image', 'video', 'ideas', 'build']) {
     const p = booted(`/?start=${m}#send=1&k=${KEY}&q=x`);
-    assert.deepEqual([p.send, p.sendWhy], ['review', 'mode'], m);
+    assert.deepEqual([p.send, p.sendWhy, p.mode], ['send', 'ok', m], m);
   }
-  assert.equal(booted(`/?mode=build#send=1&k=${KEY}&q=x`).sendWhy, 'mode', 'legacy ?mode= counts too');
+  const voice = booted(`/?start=voice#send=1&k=${KEY}&q=x`);
+  assert.deepEqual([voice.send, voice.sendWhy], ['review', 'mode']);
+  assert.equal(booted(`/?mode=build#send=1&k=${KEY}&q=x`).mode, 'build', 'legacy ?mode= counts too');
   // Nothing to send.
   assert.equal(booted(`/#send=1&k=${KEY}&q=`).send, 'none');
   assert.equal(booted(`/#send=1&k=${KEY}`).send, 'none');
@@ -444,7 +447,7 @@ test('quickPrefs: device-local defaults (listen off, send on, link send off), ju
   assert.deepEqual(quickPrefs(memStore({ quick: { listen: true, send: false, linkSend: true } })), { listen: true, send: false, linkSend: true });
   assert.deepEqual(quickPrefs(memStore({ quick: { listen: 'yes', send: 0 } })), QUICK_DEFAULTS);
   // planLaunch reads prefs and keys from ctx.store when not given directly.
-  const store = memStore({ quick: { linkSend: true }, launchKey: KEY, launchRole: 'owner', launchKeyOk: KEY });
+  const store = memStore({ quick: { linkSend: true }, launchKey: KEY, launchRole: 'owner', launchKeyOk: CONFIRM_SCOPE + KEY });
   assert.equal(planLaunch(readLaunch('', `#send=1&k=${KEY}&q=x`), { ...owner({ prefs: undefined, keys: undefined }), store, composer: 'x' }).send, 'send');
 });
 
@@ -554,11 +557,11 @@ test('apply: tab / blocked / unsupported voice launches arm or explain', async (
   assert.equal(other.calls.find((c) => c[0] === 'toast')[1], NOTES.typeOther);
 });
 test('apply: a valid confirmed key holds for 2.5 s then sends; the 15 s window starts', async () => {
-  const store = memStore({ launchKey: KEY, launchRole: 'owner', launchKeyOk: KEY });
+  const store = memStore({ launchKey: KEY, launchRole: 'owner', launchKeyOk: CONFIRM_SCOPE + KEY });
   const d = fakeDeps({ store, text: 'x' });
   const p = booted(`/#send=1&k=${KEY}&q=x`, { keys: keyState(store) });
   assert.deepEqual(await applyLaunch(p, d), ['mode:ask', 'prefill:link', 'hold']);
-  assert.deepEqual(d.calls.find((c) => c[0] === 'holdThenSend'), ['holdThenSend', { ms: HOLD_MS.link }]);
+  assert.deepEqual(d.calls.find((c) => c[0] === 'holdThenSend'), ['holdThenSend', { ms: HOLD_MS.link, mode: 'ask', via: '' }]);
   assert.equal(store.get('lastAutoSend'), NOW);
   assert.equal(d.text, 'x', 'not prefilled twice');
   // The same link again right away only prefills.
@@ -571,7 +574,7 @@ test('apply: first use asks; Allow confirms that key and holds, Not now arms Sen
   const p = booted(`/#send=1&k=${KEY}&q=x`, { keys: keyState(store) });
   assert.equal(p.send, 'confirm');
   assert.deepEqual(await applyLaunch(p, yes), ['mode:ask', 'prefill:link', 'confirmed', 'hold']);
-  assert.equal(store.get('launchKeyOk'), KEY); assert.equal(store.get('lastAutoSend'), NOW);
+  assert.equal(store.get('launchKeyOk'), CONFIRM_SCOPE + KEY); assert.equal(store.get('lastAutoSend'), NOW);
   const s2 = memStore({ launchKey: KEY, launchRole: 'owner' });
   const no = fakeDeps({ store: s2, text: 'x', allow: false });
   assert.deepEqual(await applyLaunch(booted(`/#send=1&k=${KEY}&q=x`, { keys: keyState(s2) }), no), ['mode:ask', 'prefill:link', 'declined', 'armSend']);
@@ -732,7 +735,7 @@ test('cleanText keeps real text: emoji sequences, skin tones, keycaps, RGI tag f
   assert.equal(cleanText(cp(0x1F600, 0x200D, 0x200D, 0x1F600)), cp(0x1F600, 0x1F600), 'no joiner runs');
   for (const s of [...keep, 'x' + tag('y') + '\n'.repeat(9) + cp(0x2800).repeat(99) + 'z', ' a ' + cp(0x200B) + '\n\n\n b']) assert.equal(cleanText(cleanText(s)), cleanText(s));
 });
-test('the keyed send is Ask only: a /mode prefix in the text only prefills', () => {
+test('a /mode prefix in keyed text only prefills: the link’s start= picks the mode', () => {
   for (const q of ['%2Fvideo%20a%20dog%20surfing', '%2Fimg%20cat', '%2Fbuild%20an%20app', '%20%20%2Fcode%20x', '%2Fask%20hi']) {
     const p = booted(`/?start=ask#send=1&k=${KEY}&q=${q}`);
     assert.deepEqual([p.send, p.sendWhy], ['review', 'mode'], q);
@@ -753,7 +756,7 @@ test('"Ready when you are — tap Send" only for a verified key that another gat
     const [did, t] = await toasts(`/#send=1&k=${KEY}&q=x`, ctx);
     assert.ok(did.includes('armSend'), label); assert.deepEqual(t, [NOTES.ready], label);
   }
-  const [, mode] = await toasts(`/?start=image#send=1&k=${KEY}&q=x`);
+  const [, mode] = await toasts(`/?start=image#send=1&k=${KEY}&q=%2Fvideo%20x`); // a /mode prefix never sends
   assert.deepEqual(mode, [NOTES.ready]);
   // A replay never claims to be verified, whatever the stash says.
   const store = memStore();
@@ -833,7 +836,7 @@ test('draftKeeper: only text you typed or dictated is kept; an untouched link pr
   r.restored(); assert.equal(r.keep(), true, 'a restored draft was yours');
 });
 test('iPhone Shortcut runs with different words never inherit an earlier run’s text (no draft snowball)', () => {
-  const store = memStore({ launchKey: KEY, launchRole: 'owner', launchKeyOk: KEY, quick: { linkSend: true } });
+  const store = memStore({ launchKey: KEY, launchRole: 'owner', launchKeyOk: CONFIRM_SCOPE + KEY, quick: { linkSend: true } });
   // Each run is a fresh Safari tab: H14's boot order (restore the draft, prefill the link), then planLaunch, then pagehide.
   const run = (said, at, { send = false } = {}) => {
     let composer = '', src = '';

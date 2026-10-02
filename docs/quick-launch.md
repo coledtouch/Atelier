@@ -29,9 +29,13 @@ code is in `public/launch.js` (pure logic), `public/sw.js` (share intake), `src/
   - the per-browser 22-character fragment key;
   - a role match;
   - a first-use confirm;
-  - a visible, cancellable hold (2.5 s for a link, 1.5 s for voice);
+  - a visible, cancellable hold (2.5 s for a link, 4 s for Video with its price, 1.5 s for voice);
   - at most one keyed send every 15 s;
-  - Ask mode only.
+  - in the link's own mode (`start=`, any of the six since v57: Atelier Assist on Android, and Shortcut links that
+    name a mode), never a voice start and never a `/mode` prefix in the text;
+  - a first-use confirm given before v57 (under the Ask-only dialog) doesn't count. An Allow is stored as
+    `v2:<key>` now, so the first keyed send after the update asks again, and the dialog names the mode (and
+    Video's length and price).
 - **Launch text keeps its mark after edits (v56).**
   - The composer remembers that it holds link or share text (`composerFrom`) until the box is emptied, even after the
     note goes at the first keystroke. A draft saved with such text comes back marked.
@@ -90,7 +94,10 @@ iOS, a blocked mic, and a start that failed.
   - The privacy page says so and points to Settings → Quick launch → New link, which revokes the old key.
   - The copy in History stops working after New link, sign-out, a role switch, turning link send off, or Clear this
     device.
-  - A keyed send is still an Ask-only, rate-limited, held and labelled turn. Since v56 it is also marked `untrusted`,
+  - A keyed send is still a rate-limited, held and labelled turn. Since v57 it can be any of the six modes, so a key
+    read from History or History sync can start paid Image or Video work, after the hold (4 s and the price for
+    Video), and only in a browser that holds that confirmed key. Atelier Assist's links land in Chrome's History
+    the same way. Retire a key that may have been seen with **New link**. Since v56 it is also marked `untrusted`,
     so it never reaches account tools.
 - **A stranger's link can start the mic.** Once mic permission is granted, a stranger's link can open the installed
   app listening. Only the user's own words can be sent, behind a visible hold with Cancel, while the Android mic

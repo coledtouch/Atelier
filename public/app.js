@@ -7,17 +7,17 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=56';
-import * as Sync from './sync.js?v=56';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=56';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=56';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=56';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=56';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS } from './launch.js?v=56';
-import { initLookup } from './lookup.js?v=56';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=56';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=56';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=56';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=57';
+import * as Sync from './sync.js?v=57';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=57';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=57';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=57';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=57';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=57';
+import { initLookup } from './lookup.js?v=57';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=57';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=57';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=57';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -1060,6 +1060,7 @@ function renderEntry(e, i = S.thread.entries.indexOf(e)) {
     <div class="rail"><span class="rail-num">${String(i + 1).padStart(2, '0')}</span><span class="rail-kind">${MODES[e.kind].label}</span><span class="rail-time">${time}</span></div>
     <div class="body">
       ${e.group ? `<p class="task-of">task ${esc(e.part)} of ${esc(e.parts)} · <span>${esc(e.from.slice(0, 90))}${e.from.length > 90 ? '…' : ''}</span></p>` : ''}
+      ${e.via === 'assist' ? '<p class="task-of">From Atelier Assist</p>' : ''}
       <h2 class="prompt" title="Click to expand">${esc(e.prompt)}</h2>
       ${e.images?.length ? `<div class="prompt-thumbs">${e.images.map((s) => `<img src="${esc(s)}" alt="attachment" />`).join('')}</div>` : ''}
       ${e.video ? videoThumb(e) : ''}
@@ -1352,7 +1353,7 @@ async function submit(textArg, modeArg, extra = {}) {
   }
 
   if (!S.thread) S.thread = newThread();
-  const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(untrusted && { untrusted }), ...extra.entry };
+  const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(untrusted && { untrusted }), ...(extra.via === 'assist' && { via: 'assist' }), ...extra.entry };
   delete e.images_;
   // A typed text follow-up right after a video turn (or its follow-ups) keeps that video in view — on every path: with
   // Accounts or Web on it goes to the agent / web with the video's frames (see followUpRoute in context.js).
@@ -2578,11 +2579,25 @@ function armSend() { $('#sendBtn').classList.add('armed'); }
 function clearArm() { $$('.armed').forEach((b) => b.classList.remove('armed')); }
 document.addEventListener('click', (ev) => ev.target.closest?.('.armed')?.classList.remove('armed'), true); // any click on an armed button clears it
 let sendHold = null;
+// The keyed hold's toast: where it is going ("Sending to Image…"). Video also says how long and what it will cost, from
+// the same table as the Video options (tester.js veoShape/veoCost: Veo's reserve, price × 1.25). A model with no price
+// there (Runway, local) shows no price rather than a wrong one.
+function holdNote(launchMode) {
+  if (launchMode !== 'video') return sendingNote(launchMode);
+  const o = S.opts.video, vm = videoModel(o.model), { seconds, resolution } = veoShape(o);
+  const cost = vm?.veo ? veoCost(vm.id, seconds, resolution) : null;
+  return `Making a ${seconds} s video${cost != null ? ` · ≈ ${money(cost, { up: true })}` : ''}`;
+}
+// The first-use dialog says what this send will do: its mode, and for Video its length, price and the 4 s hold.
+function confirmWhat(launchMode) {
+  if (launchMode === 'video') return `This one: ${holdNote('video')}, after a 4-second pause you can cancel.`;
+  return `This one goes to ${MODE_LABELS[launchMode] || 'Ask'}, after a short pause you can cancel.`;
+}
 // The visible, cancellable hold before a launch sends by itself: a keyed iPhone link (2.5 s) or Talk after you speak
 // into an empty composer (1.5 s). Cancel, a tap or a key in the prompt, or the page going hidden holds it; Send sends now.
 // It sends what was shown as a plain prompt in the mode it was shown in (submit's extra.launch: no "/video" prefix
 // switch, no multi-task split). A mode switch or the mic opening meanwhile holds it instead.
-function holdThenSend({ ms }) {
+function holdThenSend({ ms, mode: launchMode = '', via = '' }) {
   if (!hasDraft() || sendHold) return;
   const b = $('#sendBtn'), mode = S.mode;
   const onEdit = () => sendHold?.cancel('edit');
@@ -2596,13 +2611,13 @@ function holdThenSend({ ms }) {
   let act = null;
   const dropToast = () => { if (act && $('#toast').contains(act)) hideToast(); };
   sendHold = createHold({ ms,
-    onFire: () => { done(); hideToast(); if (S.mode !== mode || micOn()) { armSend(); toast(NOTES.held); return; } submit(undefined, mode, { launch: true }); },
+    onFire: () => { done(); hideToast(); if (S.mode !== mode || micOn()) { armSend(); toast(NOTES.held); return; } submit(undefined, mode, { launch: true, ...(via && { via }) }); },
     // 'sent': the composer went out some other way (Enter, Send while dictating); 'quiet': sign-out or Clear this device.
     // Either way nothing is held, and a Cancel left on screen would do nothing: take the toast down.
     onCancel: (why) => { done(); if (why === 'sent' || why === 'quiet') dropToast(); else { armSend(); toast(NOTES.held); } } });
   b.classList.add('holding'); b.style.setProperty('--hold', `${ms}ms`);
   input.addEventListener('pointerdown', onEdit); input.addEventListener('keydown', onEdit); document.addEventListener('visibilitychange', onHide);
-  toast(NOTES.sending, { ms: ms + 600, action: { label: 'Cancel', onClick: () => sendHold?.cancel('cancel') } });
+  toast(launchMode ? holdNote(launchMode) : NOTES.sending, { ms: ms + 600, action: { label: 'Cancel', onClick: () => sendHold?.cancel('cancel') } });
   act = $('#toast .toast-act');
 }
 // submit() past its sign-in and offline checks. The composer going out clears the hold, the armed ring, the source note
@@ -4925,13 +4940,13 @@ dictatedSend = () => {
   else armSend();
 };
 // First use of a "Send without a tap" key: show what will be sent, default to Not now.
-function confirmLinkSend() {
+function confirmLinkSend({ via = '', mode: launchMode = 'ask' } = {}) {
   return new Promise((resolve) => {
     const dlg = document.createElement('dialog');
     dlg.className = 'tok-dialog';
     dlg.setAttribute('aria-labelledby', 'qlcTitle');
     const said = input.value.trim();
-    dlg.innerHTML = `<form method="dialog"><h3 id="qlcTitle">${esc(NOTES.confirmTitle)}</h3><p class="hint">${esc(NOTES.confirmHint)}</p>${said ? `<p class="hint"><b>${esc(said.length > 240 ? said.slice(0, 240) + '…' : said)}</b></p>` : ''}<div class="row"><button class="chip" value="no">Not now</button><button class="btn-primary" value="yes">Allow</button></div></form>`;
+    dlg.innerHTML = `<form method="dialog"><h3 id="qlcTitle">${esc(via === 'assist' ? NOTES.confirmTitleAssist : NOTES.confirmTitle)}</h3><p class="hint">${esc(via === 'assist' ? NOTES.confirmHintAssist : NOTES.confirmHint)}</p><p class="hint">${esc(confirmWhat(launchMode))}</p>${said ? `<p class="hint"><b>${esc(said.length > 240 ? said.slice(0, 240) + '…' : said)}</b></p>` : ''}<div class="row"><button class="chip" value="no">Not now</button><button class="btn-primary" value="yes">Allow</button></div></form>`;
     document.body.append(dlg);
     dlg.addEventListener('close', () => { dlg.remove(); resolve(dlg.returnValue === 'yes'); });
     dlg.showModal();
@@ -4996,27 +5011,38 @@ function renderQuickLaunch() {
   $('#qlBuildHint').hidden = Boolean(QUICK_SHORTCUT_URL); // "Build the Shortcut:" when building it is the only way
   $('#qlReset').hidden = !ios || !keyState(LS).mine;
   $('#qlLink').hidden = true; $('#qlLink').value = '';
+  // Android: Atelier Assist (the side-button app). Its Send without a tap is the same setting and key as the iPhone's.
+  if ($('#qlAssist')) {
+    $('#qlAssist').hidden = PLATFORM !== 'android';
+    $$('input[name=qlAssistSend]', f).forEach((r) => (r.checked = r.value === (q.linkSend ? 'on' : 'off')));
+    $('#qlAssistReset').hidden = PLATFORM !== 'android' || !keyState(LS).mine;
+    $('#qlAssistLink').hidden = true; $('#qlAssistLink').value = '';
+  }
 }
 function saveQuickLaunch(f) {
   if (!$('#quickLaunch')) return;
   const val = (n) => $(`input[name=${n}]:checked`, f)?.value;
   const prev = quickPrefs(LS);
-  const next = { send: val('qlSend') ? val('qlSend') === 'send' : prev.send, listen: val('qlListen') ? val('qlListen') === 'on' : prev.listen, linkSend: val('qlLinkSend') ? val('qlLinkSend') === 'on' : prev.linkSend };
+  const link = val(PLATFORM === 'android' && $('#qlAssist') ? 'qlAssistSend' : 'qlLinkSend');
+  const next = { send: val('qlSend') ? val('qlSend') === 'send' : prev.send, listen: val('qlListen') ? val('qlListen') === 'on' : prev.listen, linkSend: link ? link === 'on' : prev.linkSend };
   LS.set('quick', next); // device-local: no SETTINGS_V migration
   if (prev.linkSend && !next.linkSend) forgetLaunchKey(LS); // Off: old Shortcut links only fill the box from now on
 }
 // From the tap (a user gesture): copy, or where the clipboard is refused, show the link to copy by hand.
-async function copyLink(link, ok, manual) {
-  try { await navigator.clipboard.writeText(link); $('#qlLink').hidden = true; $('#qlLink').value = ''; toast(ok, { ms: 9000 }); }
-  catch { const i = $('#qlLink'); i.value = link; i.hidden = false; i.focus(); i.select(); toast(manual, { ms: 9000 }); }
+async function copyLink(link, ok, manual, field = '#qlLink') {
+  try { await navigator.clipboard.writeText(link); $(field).hidden = true; $(field).value = ''; toast(ok, { ms: 9000 }); }
+  catch { const i = $(field); i.value = link; i.hidden = false; i.focus(); i.select(); toast(manual, { ms: 9000 }); }
 }
 $('#qlCopy')?.addEventListener('click', () => {
   const role = roleNow();
   // The key lives in this browser only: anywhere but the iPhone, Copy gives the plain link (it fills the box, Send pulses).
   const on = PLATFORM === 'ios' && $('input[name=qlLinkSend]:checked', $('#settingsForm'))?.value === 'on';
   if (on && !role) return toast('Sign in first — the link only works in a signed-in browser.');
-  LS.set('quick', { ...quickPrefs(LS), linkSend: on }); // copying is the choice: no Save needed for the link to work
-  if (!on) forgetLaunchKey(LS);
+  // Android: this copies the plain link and leaves Atelier Assist's Send without a tap, and its key, alone.
+  if (PLATFORM !== 'android') {
+    LS.set('quick', { ...quickPrefs(LS), linkSend: on }); // copying is the choice: no Save needed for the link to work
+    if (!on) forgetLaunchKey(LS);
+  }
   $('#qlReset').hidden = !on;
   copyLink(shortcutLink(location.origin, on ? ensureLaunchKey(LS, role) : ''), NOTES.linkCopied, NOTES.copyBelow);
 });
@@ -5025,6 +5051,22 @@ $('#qlReset')?.addEventListener('click', () => {
   const role = roleNow(); if (!role || PLATFORM !== 'ios') return;
   LS.set('quick', { ...quickPrefs(LS), linkSend: true });
   copyLink(shortcutLink(location.origin, rotateLaunchKey(LS, role)), NOTES.newLink, NOTES.newLinkManual);
+});
+// Settings → Quick launch → Android → Atelier Assist: the same per-browser key as the iPhone link, in the link the
+// Android app pairs with (it keeps only the key). Copying with Send without a tap on is the choice: no Save needed.
+$('#qlAssistCopy')?.addEventListener('click', () => {
+  const role = roleNow();
+  if (!role) return toast('Sign in first — the link only works in a signed-in browser.');
+  if ($('input[name=qlAssistSend]:checked', $('#settingsForm'))?.value !== 'on') return toast(NOTES.assistOn);
+  LS.set('quick', { ...quickPrefs(LS), linkSend: true });
+  $('#qlAssistReset').hidden = false;
+  copyLink(assistLink(location.origin, ensureLaunchKey(LS, role)), NOTES.assistCopied, NOTES.assistCopyBelow, '#qlAssistLink');
+});
+// New link: a fresh key (paste it into Atelier Assist again; the old pairing only fills the box from now on).
+$('#qlAssistReset')?.addEventListener('click', () => {
+  const role = roleNow(); if (!role || PLATFORM !== 'android') return;
+  LS.set('quick', { ...quickPrefs(LS), linkSend: true });
+  copyLink(assistLink(location.origin, rotateLaunchKey(LS, role)), NOTES.assistNewLink, NOTES.assistCopyBelow, '#qlAssistLink');
 });
 $('#qlTest')?.addEventListener('click', async () => {
   const msg = $('#qlTestMsg');
