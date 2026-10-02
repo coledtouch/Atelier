@@ -14,7 +14,6 @@ import android.os.SystemClock
 import android.view.View
 import kotlin.math.PI
 import kotlin.math.exp
-import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -30,6 +29,9 @@ import kotlin.math.sin
  *   frame loop; the mark and a still glow only.
  *
  * Draws only while attached and visible; the frame loop stops in [Look.ERROR] and [Look.STILL].
+ *
+ * Never clipped: [MarkGeometry] keeps the glow, the ring and the grown A inside the view at any level, bob and density
+ * (1.1.0 let the glow and ring reach the view's edge, so the bob pushed them past it and the pulse was cut flat).
  */
 internal class MarkView(context: Context) : View(context) {
 
@@ -42,7 +44,7 @@ internal class MarkView(context: Context) : View(context) {
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 1.25f * density
+        strokeWidth = MarkGeometry.RING_STROKE_DP * density
     }
     private val shaderMatrix = Matrix()
     private var glowShader: RadialGradient? = null
@@ -149,15 +151,16 @@ internal class MarkView(context: Context) : View(context) {
             }
         }
         val moving = motion && look != Look.ERROR && look != Look.STILL
-        val bob = if (moving) (sin(2 * PI * t / BOB_PERIOD_S).toFloat() * 2.5f * density) else 0f
+        val bob = if (moving) MarkGeometry.bob(sin(2 * PI * t / BOB_PERIOD_S).toFloat(), density) else 0f
 
+        // Everything stays within r of the bobbing centre, and r leaves room for the bob: nothing reaches the edge.
         val cx = width / 2f
         val cy = height / 2f + bob
-        val r = min(width, height) / 2f
+        val r = MarkGeometry.radius(width, height, density)
         val color = currentColor(now)
 
         // Glow.
-        val glowR = r * (0.5f + 0.5f * energy)
+        val glowR = MarkGeometry.glowRadius(r, energy)
         val shader = shaderFor(color)
         shaderMatrix.setScale(glowR, glowR)
         shaderMatrix.postTranslate(cx, cy)
@@ -168,7 +171,7 @@ internal class MarkView(context: Context) : View(context) {
 
         // Ring.
         if (look != Look.ERROR) {
-            val ringR = (r * (0.62f + 0.3f * energy)).coerceAtMost(r - ringPaint.strokeWidth)
+            val ringR = MarkGeometry.ringRadius(r, energy, ringPaint.strokeWidth)
             ringPaint.color = color
             ringPaint.alpha = (255 * (0.12f + 0.3f * (1f - energy))).roundToInt().coerceIn(0, 255)
             canvas.drawCircle(cx, cy, ringR, ringPaint)
@@ -181,9 +184,8 @@ internal class MarkView(context: Context) : View(context) {
             Look.OPENING -> 0.12f * ((now - lookSince) / 260f).coerceIn(0f, 1f)
             else -> 0f
         }
-        val size = MARK_DP * density * (1f + if (motion) grow else 0f)
-        val half = size / 2f
-        mark.setBounds((cx - half).roundToInt(), (cy - half).roundToInt(), (cx + half).roundToInt(), (cy + half).roundToInt())
+        val b = MarkGeometry.markBounds(cx, cy, MarkGeometry.markHalf(density, if (motion) grow else 0f, r))
+        mark.setBounds(b[0], b[1], b[2], b[3])
         mark.alpha = if (look == Look.ERROR) 150 else 255
         mark.draw(canvas)
 
@@ -202,7 +204,6 @@ internal class MarkView(context: Context) : View(context) {
     private fun wave(t: Float, period: Float): Float = 0.5f + 0.5f * sin(2 * PI * t / period).toFloat()
 
     private companion object {
-        const val MARK_DP = 38f
         const val BOB_PERIOD_S = 2.8
         const val COLOR_MS = 250f
     }

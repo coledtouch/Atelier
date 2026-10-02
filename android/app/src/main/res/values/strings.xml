@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Atelier Assist</string>
+    <string name="app_name">Atelier</string>
+
+    <!-- The web app's share target (public/manifest.webmanifest share_target) for the TWA: Chrome POSTs the share to
+         /share, where Atelier's service worker takes it. android-browser-helper reads title, text and files (a shared
+         link arrives as text). -->
+    <string name="share_target" translatable="false">{\"action\":\"/share\",\"method\":\"POST\",\"enctype\":\"multipart/form-data\",\"params\":{\"title\":\"title\",\"text\":\"text\",\"files\":[{\"name\":\"media\",\"accept\":[\"image/*\",\"video/*\"]}]}}</string>
+
+    <!-- Launcher shortcuts (the web app's manifest shortcuts: /?start=voice|ask|image). Short labels ≤ 10 characters. -->
+    <string name="shortcut_talk_short">Talk</string>
+    <string name="shortcut_talk_long">Talk to Atelier</string>
+    <string name="shortcut_ask_short">Ask</string>
+    <string name="shortcut_ask_long">Ask Atelier</string>
+    <string name="shortcut_image_short">Imagine</string>
+    <string name="shortcut_image_long">Imagine an image</string>
 
     <!-- The card -->
     <string name="close">Close</string>
@@ -40,8 +53,8 @@
     <string name="err_busy_title">Mic is busy</string>
     <string name="err_busy">Another app is using speech right now. Try again in a moment.</string>
     <string name="err_permission_title">Microphone is off</string>
-    <string name="err_permission">Atelier Assist needs the microphone to hear you.</string>
-    <string name="err_permission_blocked">Turn on the microphone for Atelier Assist in Settings → Permissions.</string>
+    <string name="err_permission">Atelier needs the microphone to hear you.</string>
+    <string name="err_permission_blocked">Turn on the microphone for Atelier in Settings → Apps → Atelier → Permissions.</string>
     <string name="err_audio_title">Mic problem</string>
     <string name="err_audio">Couldn’t use the microphone. Try again, or type instead.</string>
     <string name="err_unavailable_title">No voice input</string>
@@ -51,10 +64,8 @@
     <string name="err_other_title">Something went wrong</string>
     <string name="err_other">Speech stopped unexpectedly. Try again.</string>
 
-    <string name="no_app">No app on this phone can open Atelier.</string>
-    <string name="no_atelier">Atelier isn’t installed here — opening it in the browser.</string>
-    <string name="not_keyed">Opening in the browser — tap Send there.</string>
-    <string name="opening_in_browser">Couldn’t verify the installed Atelier app — opening Atelier in the browser.</string>
+    <string name="no_app">Couldn’t open Atelier.</string>
+    <string name="not_keyed">Chrome isn’t available, so Atelier opens without your key — tap Send there.</string>
 
     <!-- Setup -->
     <string name="setup_eyebrow">Set up</string>
@@ -74,10 +85,10 @@
     <string name="pair_no_key">That link has no private key. In Atelier, turn on Send without a tap, then copy the link again.</string>
     <string name="unpaired">Unpaired on this phone. The key itself still works until you retire it: in Atelier, Settings → General → Quick launch → Atelier Assist → New link.</string>
     <string name="side_eyebrow">Side button</string>
-    <string name="side_ready">Atelier Assist is your digital assistant. Press and hold the side button to talk.</string>
-    <string name="side_todo">Make Atelier Assist your digital assistant: Settings → Apps → Choose default apps → Digital assistant app. Then Settings → Advanced features → Side button → Press and hold → Digital assistant.</string>
+    <string name="side_ready">Atelier is your digital assistant. Press and hold the side button to talk.</string>
+    <string name="side_todo">Make Atelier your digital assistant: Settings → Apps → Choose default apps → Digital assistant app. Then Settings → Advanced features → Side button → Press and hold → Digital assistant.</string>
     <string name="side_open">Open settings</string>
-    <string name="setup_hint">Choose Digital assistant app, then Atelier Assist.</string>
-    <string name="privacy_note">Only the key is kept, on this phone. Your phone’s speech service turns your voice into text (it may use Google’s servers or your phone maker’s); the words then go to Atelier. Atelier Assist stores neither.</string>
+    <string name="setup_hint">Choose Digital assistant app, then Atelier.</string>
+    <string name="privacy_note">Only the key is kept, on this phone. Your phone’s speech service turns your voice into text (it may use Google’s servers or your phone maker’s); the words then go to Atelier. The Assist card itself stores neither.</string>
     <string name="done">Done</string>
 </resources>

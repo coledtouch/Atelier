@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The web app's own maskable shortcut icon (public/icons/shortcut-image-192.png) as an adaptive icon layer: its symbol
+     sits in the central half, inside the 72 dp of the 108 dp layer that every launcher mask shows. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/shortcut_image_art" />
+</adaptive-icon>

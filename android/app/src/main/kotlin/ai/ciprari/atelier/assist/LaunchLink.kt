@@ -92,6 +92,17 @@ object LaunchLink {
         return sb.toString()
     }
 
+    /**
+     * A URL this app's TWA may open: https://atelier.ciprari.ai (any path, query or fragment), with no userinfo, other
+     * port, longer host or whitespace. Anything else that arrives at the TWA opens Atelier's start page instead.
+     */
+    fun isAtelierUrl(url: String?): Boolean =
+        url != null && url.length <= MAX_URL && url.none { it.isWhitespace() || it.code < 0x20 || it.code == 0x7F } &&
+            ATELIER_PREFIX.containsMatchIn(url)
+
+    /** Far longer than any launch link (8000 prompt characters, up to 12 bytes each when encoded). */
+    private const val MAX_URL = 128 * 1024
+
     // ───────────────────────── pairing ─────────────────────────
 
     sealed interface Pairing {

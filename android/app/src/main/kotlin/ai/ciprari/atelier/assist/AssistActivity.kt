@@ -64,12 +64,13 @@ import kotlin.math.roundToInt
 
 /**
  * Atelier Assist: a small card over whatever is on screen. The "A" hovers and pulses while you talk, the words appear
- * as you say them with a chip for the mode they suggest (Ask, Code, Image, Video, Ideas, Build), and when you stop, the
- * installed Atelier app opens in that mode with your words (sent after Atelier's own visible, cancellable hold once the
+ * as you say them with a chip for the mode they suggest (Ask, Code, Image, Video, Ideas, Build), and when you stop, this
+ * app's own Atelier (its Trusted Web Activity, [AtelierLauncherActivity]) opens in that mode with your words (sent after Atelier's own visible, cancellable hold once the
  * app is paired; otherwise in the box for you to send).
  *
- * Launched by ACTION_ASSIST (the digital-assistant gesture: Samsung's side-key press and hold, the corner swipe) and by
- * the launcher icon (Samsung's side-key double press → Open app). Pressing again while it listens finishes the
+ * Launched by ACTION_ASSIST (the digital-assistant gesture: Samsung's side-key press and hold, the corner swipe). The
+ * launcher icon is the full Atelier app now ([AtelierLauncherActivity]); this card has its own task affinity so the
+ * Atelier it opens lands in the app's normal task, not in this excluded-from-recents one. Pressing again while it listens finishes the
  * utterance; pressing again otherwise listens anew. It never shows over the lock screen: a locked phone is asked to
  * unlock first, and the card closes if that is cancelled. ACTION_ASSIST can carry the previous app's assist data: only
  * the keyboard hint is read, the rest is dropped unread.
@@ -467,10 +468,11 @@ class AssistActivity : ComponentActivity(), Listener.Events {
         main.postDelayed({ handOff(url, target, paired = saved != null) }, OPEN_DELAY_MS)
     }
 
+    /** Opens [url] in this app's own TWA (an explicit intent: no other app can receive it, key or not). */
     private fun handOff(url: String, target: Atelier.Target, paired: Boolean) {
         if (isFinishing || leaving) return // closed meanwhile (a tap outside, Back): nothing opens
         try {
-            startActivity(Atelier.intent(url, target))
+            startActivity(Atelier.intent(this, url))
         } catch (_: ActivityNotFoundException) {
             toast(R.string.no_app)
             failure = Listener.Failure.OTHER
@@ -481,14 +483,8 @@ class AssistActivity : ComponentActivity(), Listener.Events {
             setPhase(Phase.HELD)
             return
         }
-        if (!target.app) {
-            when {
-                paired && !target.keyed -> toast(R.string.not_keyed)
-                // An Atelier WebAPK is installed but couldn't be verified: the link went to Chrome (or Android's pick).
-                target.webApk -> toast(R.string.opening_in_browser)
-                else -> toast(R.string.no_atelier)
-            }
-        }
+        // No trusted Chrome: the TWA opens in another browser, and the key stayed here.
+        if (paired && !target.keyed) toast(R.string.not_keyed)
         finishQuietly()
     }
 
@@ -524,6 +520,11 @@ class AssistActivity : ComponentActivity(), Listener.Events {
             outlineSpotShadowColor = Color.BLACK
             accessibilityPaneTitle = getString(R.string.app_name)
             setPadding(dp(16), dp(14), dp(12), dp(14))
+            // The A's view hangs 4 dp over its slot (MarkGeometry): let it draw into the card's padding. The card's own
+            // rounded background and shadow come from its background drawable and outline, which this doesn't change,
+            // and the overhang stays well inside the card's rounded corners.
+            clipToPadding = false
+            clipChildren = false
             onTouchDown = { ev ->
                 // A touch on the card that no other window covers is the owner: from now on it may open by itself.
                 if (ev.flags and (MotionEvent.FLAG_WINDOW_IS_OBSCURED or MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED) == 0) ownerLaunch = true
@@ -532,13 +533,19 @@ class AssistActivity : ComponentActivity(), Listener.Events {
             alpha = 0f
         }
 
-        mainPage = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        mainPage = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            clipChildren = false
+            clipToPadding = false
+        }
         card.addView(mainPage, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // Top row: the A, the status and words, ×.
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.TOP
+            clipChildren = false
+            clipToPadding = false
         }
         mark = MarkView(this).apply {
             isClickable = true
@@ -546,7 +553,15 @@ class AssistActivity : ComponentActivity(), Listener.Events {
             setOnClickListener { onMarkTap() }
             setOnLongClickListener { openSetup(); true }
         }
-        top.addView(mark, LinearLayout.LayoutParams(dp(72), dp(72)).apply { marginStart = -dp(4) })
+        // An 80 dp view in 1.1.0's 72 dp slot (4 dp overhang all round; 1.1.0 also pulled the slot 4 dp to the start), so
+        // the pulse, glow and ring have room for the bob and the +12% pulse without the card's layout changing.
+        val overhang = dp(MarkGeometry.OVERHANG_DP)
+        top.addView(mark, LinearLayout.LayoutParams(dp(MarkGeometry.VIEW_DP.toInt()), dp(MarkGeometry.VIEW_DP.toInt())).apply {
+            marginStart = -dp(4) - overhang
+            marginEnd = -overhang
+            topMargin = -overhang
+            bottomMargin = -overhang
+        })
 
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

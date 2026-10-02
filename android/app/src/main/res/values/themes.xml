@@ -23,4 +23,18 @@
         <item name="android:textColorHighlight">#5CC8F25A</item>
         <item name="android:textColorHint">@color/ink_3</item>
     </style>
+
+    <!-- The Atelier app (AtelierLauncherActivity, the TWA trampoline): see-through, as android-browser-helper
+         recommends, so it is invisible when it only hands a link to a running TWA. On a cold start it shows its own
+         splash (the A on #0e0d0b) until Chrome takes over with the same splash. -->
+    <style name="Theme.Atelier.Launcher" parent="Base.AtelierAssist">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

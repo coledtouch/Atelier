@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- android-browser-helper's splash hand-off: LauncherActivity writes the splash bitmap here and lends it to Chrome
+     through the FileProvider. Nothing else is shared. -->
+<paths>
+    <files-path name="twa_splash" path="twa_splash/" />
+</paths>

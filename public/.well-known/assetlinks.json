@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "ai.ciprari.atelier.assist",
+      "sha256_cert_fingerprints": [
+        "26:A3:8A:B7:33:62:89:D8:88:58:AF:96:45:34:B0:FD:63:50:B1:66:1D:57:2F:20:83:BF:97:16:C5:6A:AC:CE"
+      ]
+    }
+  }
+]

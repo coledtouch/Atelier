@@ -1,18 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Atelier Assist 1.1: one translucent activity that shows a small native card over the current app. It listens through
-  Android's speech service, picks Atelier's mode, then opens the installed Atelier app with the request.
+  Atelier 2.0: one app with two parts. Same package and signing key as Atelier Assist 1.x, so it installs over it and
+  keeps the digital-assistant role.
+
+  1. AtelierLauncherActivity (the launcher icon): https://atelier.ciprari.ai as a Trusted Web Activity, through Google's
+     android-browser-helper. It also takes the site's links (verified app links: public/.well-known/assetlinks.json),
+     the Talk / Ask / Imagine shortcuts and shares from other apps (the web app's share target). With no browser that
+     can run a TWA it falls back to a Custom Tab.
+  2. AssistActivity (ACTION_ASSIST only): the native card over the current app. It listens through Android's speech
+     service, picks Atelier's mode, then opens the request in part 1 with an explicit intent.
 
   - ACTION_ASSIST + DEFAULT makes the app eligible for Settings > Apps > Choose default apps > Digital assistant app
     (AOSP AssistantRoleBehavior: an exported activity resolving ACTION_ASSIST with MATCH_DEFAULT_ONLY is enough). The
     system then launches it for the side-key / power-key long press, the corner swipe and the nav-handle gesture.
-  - MAIN + LAUNCHER is the same card, so Samsung's Side button > Double press > Open app gives it too.
+  - AssistActivity has its own taskAffinity: it is excluded from recents, and the Atelier it opens must land in the
+    app's normal task, not in the card's.
   - Never shown over the lock screen (no showWhenLocked): AssistActivity asks to unlock first.
-  - No INTERNET permission: the app itself never connects anywhere. Speech recognition runs in the phone's speech
-    service (on-device, or the default recognizer, which uses its own connection), and Atelier opens in its own app.
-  - No backup / device transfer: the only thing stored is the pairing key.
-  - configChanges: rotation, size, keyboard and dark mode are handled in place, so listening isn't cut off. Display size
-    and font size recreate the activity, which then waits for a tap instead of opening the mic by itself.
+  - No INTERNET permission: the app itself never connects anywhere. The TWA's pages load in Chrome, speech recognition
+    runs in the phone's speech service.
+  - No backup / device transfer: the only thing stored is the pairing key (and android-browser-helper's TWA bookkeeping).
+  - configChanges (AssistActivity): rotation, size, keyboard and dark mode are handled in place, so listening isn't cut
+    off. Display size and font size recreate the activity, which then waits for a tap instead of opening the mic.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
@@ -21,16 +29,20 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <queries>
-        <!-- The installed Atelier PWA (a Chrome WebAPK) and Chrome, which handle the site's links. -->
+        <!-- Browsers (android-browser-helper adds VIEW + BROWSABLE + https as well), and which of them offer Custom Tabs
+             and TWAs: the TWA's provider picker and Atelier.chrome() look them up. -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
-            <data android:scheme="https" android:host="atelier.ciprari.ai" />
+            <data android:scheme="https" />
         </intent>
-        <!-- Google Play, which installs (mints) Chrome WebAPKs: without seeing it, getInstallSourceInfo() reports a null
-             installer for the installed Atelier app, which then can't be trusted with the key. -->
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+        <!-- Google Play: without seeing it, getInstallSourceInfo() reports a null installer for a Play-installed Chrome,
+             which then couldn't be trusted with the launch key. -->
         <package android:name="com.android.vending" />
-        <!-- The default home app, which may start the card (MAIN/LAUNCHER) and so may let it open Atelier by itself. -->
+        <!-- The default home app, which may start the card and so may let it open Atelier by itself. -->
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />
@@ -54,10 +66,126 @@
         android:theme="@style/Theme.AtelierAssist.Panel"
         tools:targetApi="36">
 
+        <!-- The Atelier app: a Trusted Web Activity of https://atelier.ciprari.ai. -->
+        <activity
+            android:name=".AtelierLauncherActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Atelier.Launcher">
+            <meta-data
+                android:name="android.support.customtabs.trusted.DEFAULT_URL"
+                android:value="https://atelier.ciprari.ai/?source=pwa" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR"
+                android:resource="@color/card_bg" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR_DARK"
+                android:resource="@color/card_bg" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR"
+                android:resource="@color/card_bg" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR_DARK"
+                android:resource="@color/card_bg" />
+            <meta-data
+                android:name="androix.browser.trusted.NAVIGATION_BAR_DIVIDER_COLOR"
+                android:resource="@color/card_bg" />
+            <meta-data
+                android:name="androix.browser.trusted.NAVIGATION_BAR_DIVIDER_COLOR_DARK"
+                android:resource="@color/card_bg" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.SPLASH_IMAGE_DRAWABLE"
+                android:resource="@drawable/splash_a" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.SPLASH_SCREEN_BACKGROUND_COLOR"
+                android:resource="@color/card_bg" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.SPLASH_SCREEN_FADE_OUT_DURATION"
+                android:value="300" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.FILE_PROVIDER_AUTHORITY"
+                android:value="ai.ciprari.atelier.assist.fileprovider" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.FALLBACK_STRATEGY"
+                android:value="customtabs" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.METADATA_SHARE_TARGET"
+                android:resource="@string/share_target" />
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Atelier links open here (verified against https://atelier.ciprari.ai/.well-known/assetlinks.json). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="atelier.ciprari.ai" />
+            </intent-filter>
+            <!-- Share to Atelier: text and links, images and videos (the web app's share target). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+
+        <!-- android-browser-helper's "Site settings" shortcut (Chrome's permissions and data for the site). It has to
+             be declared: LauncherActivity enables or disables it on every launch. -->
+        <activity
+            android:name="com.google.androidbrowserhelper.trusted.ManageDataLauncherActivity"
+            android:exported="false">
+            <meta-data
+                android:name="android.support.customtabs.trusted.MANAGE_SPACE_URL"
+                android:value="https://atelier.ciprari.ai/" />
+            <intent-filter>
+                <action android:name="android.support.customtabs.action.ACTION_MANAGE_TRUSTED_WEB_ACTIVITY_DATA" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Lends the splash image to Chrome (xml/filepaths: twa_splash/ only). Not exported. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="ai.ciprari.atelier.assist.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/filepaths" />
+        </provider>
+
+        <!-- AppCompat (via android-browser-helper) would start EmojiCompat at launch, which looks up a downloadable emoji
+             font from Google Play services. Nothing here uses it. (androidx.startup is a runtime-only dependency, hence
+             MissingClass.) -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:ignore="MissingClass"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                tools:node="remove" />
+        </provider>
+
+        <!-- The Assist card (side button, press and hold). Not in the launcher any more: the icon is the full app. -->
         <activity
             android:name=".AssistActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:taskAffinity="ai.ciprari.atelier.assist.card"
             android:excludeFromRecents="true"
             android:windowSoftInputMode="adjustResize|stateHidden"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode"
@@ -65,10 +193,6 @@
             <intent-filter>
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
     </application>

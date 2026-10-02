@@ -27,6 +27,20 @@ class LaunchLinkTest {
     }
 
     @Test
+    fun the_twa_opens_only_atelier_urls() {
+        for (ok in listOf("$base", "$base/", "$base/?start=voice", "$base/?start=image&via=assist#k=$key&send=1&q=a%20fox",
+            "HTTPS://Atelier.Ciprari.AI/x", "$base:443/", "$base#q=x", LaunchLink.build(Mode.VIDEO, "a drone shot", key))) {
+            assertTrue(ok, LaunchLink.isAtelierUrl(ok))
+        }
+        for (bad in listOf(null, "", "http://atelier.ciprari.ai/", "https://atelier.ciprari.ai.evil.com/", "https://atelier.ciprari.ai@evil.com/",
+            "https://evil.com/?u=https://atelier.ciprari.ai/", "https://atelier.ciprari.ai:8443/", "https://xatelier.ciprari.ai/",
+            "javascript:alert(1)", "content://ai.ciprari.atelier.assist.fileprovider/twa_splash/x.png", " https://atelier.ciprari.ai/",
+            "https://atelier.ciprari.ai/a b", "https://atelier.ciprari.ai/\n", "https://atelier.ciprari.ai/" + "x".repeat(200_000))) {
+            assertFalse(bad.toString(), LaunchLink.isAtelierUrl(bad))
+        }
+    }
+
+    @Test
     fun empty_prompt_opens_the_mode_without_a_fragment() {
         assertEquals("$base/?start=video&via=assist", LaunchLink.build(Mode.VIDEO, "", key))
         assertEquals("$base/?start=build&via=assist", LaunchLink.build(Mode.BUILD, "  \n\t ", key))

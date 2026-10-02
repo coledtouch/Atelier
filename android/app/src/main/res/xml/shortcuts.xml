@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The web app's manifest shortcuts (public/manifest.webmanifest), opened in Atelier's TWA. Talk first. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="talk"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_talk"
+        android:shortcutShortLabel="@string/shortcut_talk_short"
+        android:shortcutLongLabel="@string/shortcut_talk_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="ai.ciprari.atelier.assist"
+            android:targetClass="ai.ciprari.atelier.assist.AtelierLauncherActivity"
+            android:data="https://atelier.ciprari.ai/?start=voice" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="ask"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_ask"
+        android:shortcutShortLabel="@string/shortcut_ask_short"
+        android:shortcutLongLabel="@string/shortcut_ask_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="ai.ciprari.atelier.assist"
+            android:targetClass="ai.ciprari.atelier.assist.AtelierLauncherActivity"
+            android:data="https://atelier.ciprari.ai/?start=ask" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="image"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_image"
+        android:shortcutShortLabel="@string/shortcut_image_short"
+        android:shortcutLongLabel="@string/shortcut_image_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="ai.ciprari.atelier.assist"
+            android:targetClass="ai.ciprari.atelier.assist.AtelierLauncherActivity"
+            android:data="https://atelier.ciprari.ai/?start=image" />
+    </shortcut>
+</shortcuts>

@@ -1,4 +1,4 @@
-// Builds Atelier Assist's adaptive launcher icon layers from public/icons/atelier-v2-master.png.
+// Builds Atelier's adaptive launcher icon layers and the TWA splash A from public/icons/atelier-v2-master.png.
 //
 //   node android/tools/make-icons.mjs [previewDir]      (run from the repo root; uses the repo's own sharp)
 //
@@ -85,6 +85,18 @@ for (const [name, d] of Object.entries(DENSITIES)) {
   fs.writeFileSync(path.join(dir, 'ic_launcher_foreground.png'), await layer(fg, px, inner));
   fs.writeFileSync(path.join(dir, 'ic_launcher_monochrome.png'), await layer(mono, px, inner));
   console.log(`mipmap-${name}: ${px}px layers, A square ${inner}px`);
+}
+
+// The TWA splash (AtelierLauncherActivity's SPLASH_IMAGE_DRAWABLE, shown on #0e0d0b, scale type CENTER, then handed to
+// Chrome): the same A as the launcher icon, drawn as large as the A in Android 12+'s icon splash (a 108dp adaptive layer
+// shown at 240dp: the 68dp master square becomes ~151dp), so the system splash, this one and Chrome's line up.
+const SPLASH_DP = 152;
+for (const [name, d] of Object.entries(DENSITIES)) {
+  const px = Math.round(SPLASH_DP * d);
+  const dir = path.join(RES, `drawable-${name}`);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'splash_a.png'), await layer(fg, px, px));
+  console.log(`drawable-${name}: ${px}px splash A`);
 }
 
 // Optional preview: the xxxhdpi foreground on the background colour, cut by a circle and a squircle-ish mask.
