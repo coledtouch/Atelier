@@ -28,8 +28,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=55" />
-  <link rel="stylesheet" href="/studio.css?v=55" />
+  <link rel="stylesheet" href="/app.css?v=56" />
+  <link rel="stylesheet" href="/studio.css?v=56" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -70,7 +70,7 @@
     <div class="nav-bottom">
       <button class="nav-item" data-trigger="youBtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Your profile</button>
       <button class="nav-item" data-trigger="settingsBtn"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg>Settings</button>
-      <span class="nav-local">Threads saved on this device</span>
+      <span class="nav-local" id="navLocal">Threads saved on this device</span>
     </div>
   </nav>
 
@@ -84,6 +84,7 @@
       <div class="bento" id="bento"></div>
       <p class="legal-links">Your ideas, all in one place. <a href="/privacy">Privacy</a> · <a href="/tos">Terms</a></p>
     </section>
+    <div id="syncNote" class="sync-note-bar" role="status" hidden></div>
     <ol class="stream" id="stream" aria-label="Conversation"></ol>
     <div class="sr-only" id="activityStatus" role="status" aria-live="polite"></div>
     <div class="sr-only" id="lookupStatus" role="status" aria-live="polite"></div>
@@ -368,13 +369,28 @@
         </section>
         <section class="field-group">
           <h4>Your data</h4>
+          <div class="sync-block" id="syncBlock" hidden>
+            <div class="sync-head">
+              <p class="sync-title">Sync across your devices</p>
+              <label class="sync-switch"><input type="checkbox" id="syncToggle" role="switch" aria-label="Sync threads across your devices" /></label>
+            </div>
+            <p class="hint" id="syncStatus" role="status" aria-live="polite"></p>
+            <p class="hint" id="syncCounts" hidden></p>
+            <div class="row-actions">
+              <button type="button" class="chip" id="syncNow">Sync now</button>
+              <button type="button" class="chip" id="syncTrash">Recently deleted</button>
+              <button type="button" class="chip" id="syncUploadOld" hidden>Upload older threads too</button>
+              <button type="button" class="chip" id="syncForget" hidden>Remove synced threads from this device</button>
+            </div>
+            <p class="hint sync-foot">Threads you make as the owner sync privately through your Atelier server, behind your passcode. Settings, model choices and theme stay on each device. LinkedIn testers’ threads never leave their device.</p>
+          </div>
           <p class="hint" style="margin-bottom:14px">Export your threads and creations for safekeeping. Imports add copies without replacing existing work. Profile, account connections and preferences are not included.</p>
           <div class="row-actions">
             <button type="button" class="chip" id="exportBtn">Export threads</button>
             <label class="chip file-chip">Import backup<input type="file" id="importInput" accept="application/json" aria-label="Import backup" /></label>
             <button type="button" class="chip" id="migrateBtn" hidden>Bring over older conversations</button>
           </div>
-          <div class="danger-zone"><p class="hint"><b>Irreversible</b>Clears threads, media, profile and saved sign-in on this device. Export your threads first.</p><button type="button" class="chip danger" id="wipeBtn">Clear this device</button></div>
+          <div class="danger-zone"><p class="hint"><b>Irreversible</b><span id="wipeHint">Clears threads, media, profile and saved sign-in on this device. Export your threads first.</span></p><button type="button" class="chip danger" id="wipeBtn">Clear this device</button></div>
         </section>
       </div>
 
@@ -408,6 +424,29 @@
     </div>
   </dialog>
 
+  <!-- Owner thread sync (public/sync.js): the one-time question on a browser with tester traces, and Recently deleted -->
+  <dialog class="sheet sync-dialog" id="syncFirst" aria-labelledby="syncFirstTitle" aria-describedby="syncFirstBody">
+    <div class="sheet-body">
+      <h2 id="syncFirstTitle"><em>Sync your threads?</em></h2>
+      <p class="hint" id="syncFirstBody">This browser was also used for LinkedIn tester sign-in, so some of the threads here may not be yours. Choose what to upload. Threads from your other devices download either way.</p>
+      <div class="sync-first-acts">
+        <button type="button" class="btn-primary" id="syncFirstNew" autofocus>Only threads I make from now on</button>
+        <button type="button" class="chip" id="syncFirstAll">Upload all threads</button>
+        <button type="button" class="link-btn" id="syncFirstExport">Export a backup first</button>
+      </div>
+    </div>
+  </dialog>
+  <dialog class="sheet sync-dialog" id="trashDialog" aria-labelledby="trashTitle">
+    <div class="sheet-body">
+      <header class="sheet-head">
+        <h2 id="trashTitle"><em>Recently deleted</em></h2>
+        <button type="button" class="icon-btn" id="trashClose" aria-label="Close Recently deleted"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </header>
+      <p class="hint">You can restore these for 30 days.</p>
+      <ul class="trash-list" id="trashList" aria-live="polite"></ul>
+    </div>
+  </dialog>
+
   <!-- Viewer -->
   <div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-labelledby="viewerTitle" tabindex="-1" hidden>
     <div class="viewer-bar">
@@ -423,6 +462,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=55" type="module"></script>
+  <script src="/app.js?v=56" type="module"></script>
 </body>
 </html>

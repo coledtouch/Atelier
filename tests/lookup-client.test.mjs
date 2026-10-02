@@ -847,7 +847,7 @@ test('announcement: the words #lookupStatus says', () => {
 
 // ── the adapter, end to end on a fake page ──
 function page({ askSends = () => true, prefill = true, mode = 'auto', fetchRoutes } = {}) {
-  const ck = clock(), doc = new FakeDoc(), revoked = [], created = [], toasts = [], asked = [], prefilled = [];
+  const ck = clock(), doc = new FakeDoc(), revoked = [], created = [], toasts = [], asked = [], prefilled = [], from = [];
   const win = {
     document: doc, navigator: { onLine: true, languages: ['en-US'] }, innerWidth: 360, innerHeight: 740, devicePixelRatio: 2, visualViewport: null,
     setTimeout: ck.schedule, clearTimeout: ck.cancel, requestAnimationFrame: (fn) => ck.schedule(fn, 16), listeners: {},
@@ -874,7 +874,7 @@ function page({ askSends = () => true, prefill = true, mode = 'auto', fetchRoute
   ]);
   const api = initLookup({
     doc, win, stage, stream, dock, topBar: top, status, fetch: s.fetch, apiHeaders: () => ({ 'content-type': 'application/json', 'x-app-pass': 'pw' }),
-    mode: () => mode, ready: () => true, ask: (p) => asked.push(p), prefill: prefill ? (p) => prefilled.push(p) : null, askSends, toast: (m) => toasts.push(m),
+    mode: () => mode, ready: () => true, ask: (p, f) => { asked.push(p); from.push(f); }, prefill: prefill ? (p, f) => { prefilled.push(p); from.push(f); } : null, askSends, toast: (m) => toasts.push(m),
     coarse: { matches: true }, languages: ['en-US'],
   });
   const fire = (target, type, props = {}) => {
@@ -884,7 +884,7 @@ function page({ askSends = () => true, prefill = true, mode = 'auto', fetchRoute
     return ev;
   };
   const card = () => doc.getElementById('lookupCard');
-  return { ck, doc, win, api, s, fire, select, card, status, asked, prefilled, toasts, created, revoked, stage, stream, dock, li, prose, words, range };
+  return { ck, doc, win, api, s, fire, select, card, status, asked, prefilled, from, toasts, created, revoked, stage, stream, dock, li, prose, words, range };
 }
 async function openCard(p) {
   p.select('Domus Aurea');
@@ -919,6 +919,7 @@ test('initLookup: Ask about this sends for the owner and pre-fills for testers (
   owner.fire(ask, 'pointerdown', { pointerType: 'touch' });
   owner.fire(owner.card(), 'click', { target: ask });
   assert.deepEqual(owner.asked, ['Tell me more about “Domus Aurea”.']); assert.deepEqual(owner.prefilled, []);
+  assert.deepEqual(owner.from, [{ entryId: 'e7' }], 'the answer the words came from goes with the ask (its link / share mark is carried)');
   assert.equal(owner.api.isOpen(), false); assert.equal(owner.doc.selection, null, 'the selection collapses after Ask');
   const tester = page({ askSends: () => false });
   await openCard(tester);
@@ -926,6 +927,7 @@ test('initLookup: Ask about this sends for the owner and pre-fills for testers (
   tester.fire(tester.card(), 'click', { target: tAsk });
   assert.deepEqual(tester.asked, [], 'a tester’s allowance is never spent without their own tap on Send');
   assert.deepEqual(tester.prefilled, ['Tell me more about “Domus Aurea”.']);
+  assert.deepEqual(tester.from, [{ entryId: 'e7' }]);
   assert.equal(tester.status.textContent, COPY.prefilled);
   const neither = page({ askSends: () => false, prefill: false });
   await openCard(neither);
@@ -1182,7 +1184,7 @@ function appRig({ attachments = [{ src: 'data:image/png;base64,QUJD' }], draft =
   const S = { mode: 'ask', video: null, attachments: [...attachments], thread: null, opts: { ask: {} }, tester: false };
   let id = 0;
   const submit = liftSubmit({
-    S, $: (sel) => (sel === '#input' ? input : { value: '', focus() {} }), navigator: { onLine: true }, hasCredentials: () => true, feat: () => true,
+    S, input, $: (sel) => (sel === '#input' ? input : { value: '', focus() {} }), navigator: { onLine: true }, hasCredentials: () => true, feat: () => true,
     MULTI_HINT: /./, MULTI_JOIN: /./, running: new Set(), planTasks: async () => { calls.planTasks++; return null; },
     renderAttachments: () => { calls.renderAttachments++; }, run: async (e) => { calls.run.push(e); }, newThread: () => ({ entries: [] }),
     uid: () => `e${++id}`, videoSource: () => null, welcome: { classList: { add() {} } }, stream: { append() {} }, renderEntry: () => ({}),
@@ -1191,8 +1193,8 @@ function appRig({ attachments = [{ src: 'data:image/png;base64,QUJD' }], draft =
 }
 test('app.js wiring: the owner’s “Ask about this” sends no photos and leaves the composer’s mode, draft and waiting attachments alone (A3, A7, A8)', { skip: !WIRED && 'public/app.js is not wired to lookup.js yet (lookup-integration.md A1–A8)' }, async () => {
   const init = APP.slice(APP.indexOf('const lookup = initLookup('));
-  assert.match(init.slice(0, 1000), /ask: \(prompt\) => submit\(prompt, 'ask', \{ images: \[\] \}\),/);
-  assert.doesNotMatch(init.slice(0, 1000), /ask: \(prompt\) => \{?\s*setMode/, 'the owner’s ask never switches the composer’s mode under a draft');
+  assert.match(init.slice(0, 1000), /ask: \(prompt, from\) => submit\(prompt, 'ask', \{ images: \[\], untrusted: markOfEntry\(from\) \}\),/);
+  assert.doesNotMatch(init.slice(0, 1000), /ask: \(prompt(?:, from)?\) => \{?\s*setMode/, 'the owner’s ask never switches the composer’s mode under a draft');
   // the Look up ask, with a photo waiting in the composer and words that look like several deliverables
   const r = appRig({ draft: 'half-written message' });
   await r.submit(askPrompt('Tom and Jerry animation, poster and app'), 'ask', { images: [] });

@@ -35,6 +35,7 @@ test('accepts supported media and excludes executable protocols and SVG data', (
 test('restoring an interrupted generation preserves partial work and offers recovery', () => {
   const thread = fixture().threads[0]; thread.entries[0].pending = true; thread.entries[0].stage = 'Composing';
   recoverThread(thread); assert.equal(thread.entries[0].pending, false); assert.equal(thread.entries[0].text, 'World'); assert.match(thread.entries[0].error, /interrupted/); assert.equal(thread.entries[0].stage, undefined);
+  assert.equal(thread.entries[0].recovered, true, 'marked for owner thread sync');
 });
 test('restoring a complete conversation does not modify it', () => {
   const thread = fixture().threads[0]; const copy = structuredClone(thread); recoverThread(thread); assert.deepEqual(thread, copy); assert.equal(recoverThread(null), null);

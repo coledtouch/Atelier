@@ -92,11 +92,13 @@ test('the Look-up cache is disclosed with the lifetimes src/lookup.js gives it, 
   const testers = /<h3 id="testers">([\s\S]*?)<\/ul>/.exec(PRIVACY)?.[1];
   assert.ok(testers, 'the tester section');
   assert.doesNotMatch(testers, /No prompts or outputs are stored on our servers\.<\/b>/, 'no unqualified promise');
-  assert.match(text(testers), /No prompts or outputs are stored on our servers , except that a Look up answer, which repeats the few words you selected, is cached for up to a day \(see “Look-up cache” in section 6\)\./);
+  // Not only Look up: learned facts (learnFrom → PUT /api/tester/profile) are model output kept on the server too.
+  assert.match(text(testers), /No prompts or outputs are stored on our servers , except your profile and memory \(next item, including facts Atelier notes from your conversations\) and a Look up answer, which repeats the few words you selected and is cached for up to a day \(see “Look-up cache” in section 6\)\./);
   assert.match(text(/<li><b>Look up<\/b> — free([\s\S]*?)<\/li>/.exec(testers)?.[1] || ''), /cached briefly at Cloudflare for you alone/);
-  // The addendum records it as the one exception to spec §10.
+  // The addendum records it as an exception to spec §10, next to the profile and memory (A6) — not the only one.
   const a83 = /### A8\.3([\s\S]*?)\n### /.exec(await read('docs/superpowers/specs/2026-09-30-atelier-tester-access-addendum.md'))?.[1] || '';
-  for (const words of ['`caches.default`', '24 h', '1 h', '7 days', '`t:<sub>`', 'one exception to spec §10']) assert.ok(a83.includes(words), `A8.3: ${words}`);
+  for (const words of ['`caches.default`', '24 h', '1 h', '7 days', '`t:<sub>`', 'an exception to spec §10', 'profile and memory']) assert.ok(a83.includes(words), `A8.3: ${words}`);
+  assert.ok(!a83.includes('one exception'), 'A8.3: not "the one exception"');
 });
 
 test('Quick launch’s on-device storage is disclosed with the lifetimes public/launch.js gives it, and dictation covers a mic Atelier opens', async () => {
@@ -107,13 +109,41 @@ test('Quick launch’s on-device storage is disclosed with the lifetimes public/
   const s6 = /<h2>6\. Where data is stored and for how long<\/h2>([\s\S]*?)<h2>/.exec(PRIVACY)?.[1] || '';
   const item = /<li><b>Quick launch \(this device only\):<\/b>([\s\S]*?)<\/li>/.exec(s6)?.[1];
   assert.ok(item, 'a Quick launch item in section 6');
-  for (const words of ['share to Atelier', 'a website sends to it the same way', 'Cache Storage', 'up to 30 minutes', 'one video or 4 photos', 'deleted once opened',
-    'when you sign out', 'Clear this device', 'typed or dictated', 'up to 6 hours', 'up to 15 minutes', 'Quick launch choices', 'Send without a tap', 'the key never does'])
+  // The limits are checked on read (freshMeta, takeDraft, peekPendingLaunch), not timers: say when things are deleted.
+  for (const words of ['share to Atelier', 'a website sends to it the same way', 'Cache Storage', 'can be used for 30 minutes', 'checked when Atelier reads it, not by a timer',
+    'one video or 4 photos', 'deleted once opened, the next time Atelier opens after that', 'when you sign out', 'Clear this device', 'typed or dictated',
+    'can come back for 6 hours', 'can continue for 15 minutes after you sign in', 'deleted when you next sign in or open Atelier signed in',
+    'Quick launch choices', 'Send without a tap', 'the key never does',
+    // the Shortcut's link (key + words) lands in browser History; a share with no service worker reaches the Worker
+    'History (and History sync', 'keeps the key and those words', 'New link',
+    'sent by your browser to Atelier’s server instead', 'discards it without reading or storing it'])
     assert.ok(text(item).includes(words), words);
+  for (const gone of ['up to 30 minutes', 'up to 6 hours', 'up to 15 minutes']) assert.ok(!text(item).includes(gone), `no "${gone}": nothing deletes on a timer`);
   // The mic can open without a tap (Talk to Atelier, listen-on-open): both dictation descriptions say so.
   const voice = /<li><b>Voice dictation<\/b> — on an iPhone([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '';
   assert.match(text(voice), /whether you tap it, or Talk to Atelier or “Start listening when I open Atelier” opens it for you/);
   const row = /<tr><td>OpenAI and Google \(dictation\)<\/td><td>([\s\S]*?)<\/td><\/tr>/.exec(PRIVACY)?.[1] || '';
   assert.doesNotMatch(row, /^When you tap the microphone/, 'not only a tap');
   assert.match(text(row), /Talk to Atelier or “Start listening when I open Atelier” opens the microphone for you/);
+});
+
+test('owner thread sync is disclosed as v1 behaves: media stays on the device, long texts can outlive a delete, Clear this device keeps synced copies', async () => {
+  const MERGE = await read('public/sync-merge.js'), SYNC = await read('public/sync.js');
+  // what the wording below rests on: phase 1 keeps images and videos on the device; strings over INLINE_MAX go to blobs
+  assert.match(MERGE, /export const MEDIA_SYNC = Object\.freeze\(\{ image: false, video: false \}\);/, 'media sync turned on: update the privacy wording');
+  assert.match(MERGE, /inline: 32768, \/\/ strings longer than this/, 'the long-text threshold changed: update "about 32 KB"');
+  assert.match(SYNC, /wipeConfirm: 'Clear Atelier threads[^']*synced threads stay on your Atelier server/);
+  const items = [...PRIVACY.matchAll(/<li><b>The studio owner’s threads:?<\/b>([\s\S]*?)<\/li>/g)].map((m) => text(m[1]));
+  assert.equal(items.length, 2, 'the tester section and section 6');
+  for (const it of items) {
+    assert.doesNotMatch(it, /including generated media/);
+    assert.match(it, /images and videos/);
+    assert.match(it, /LinkedIn testers’ threads are never uploaded/);
+  }
+  assert.match(items[1], /except copies of long texts \(over about 32 KB, such as long answers or pasted documents\)/);
+  const cache = text(/<li><b>Look-up cache \(Cloudflare\):<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
+  assert.doesNotMatch(cache, /is the one exception|the only exception/);
+  assert.match(cache, /Together with your profile and memory \(section 2\) and the studio owner’s own synced threads \(see above\), it is an exception/);
+  const del = text(/<li><b>Delete conversations and media:<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
+  assert.match(del, /Clear this device leaves the synced copies on the owner’s server: delete synced threads from the Threads drawer instead/);
 });

@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check public/app.js && node --check public/data-safety.js && node --check public/sw.js && node --check src/worker.js && node --check public/video.js && node --check public/context.js && node --check public/viewport.js && node --check src/gemini.js && node --check src/tts.js && node --check src/transcribe.js && node --check public/readaloud.js && node --check public/launch.js && node --check public/dictate.js && node --check public/lookup.js && node --check src/lookup.js && node --check src/runway.js && node --check public/runway.js",
+    "check": "node --check public/app.js && node --check public/data-safety.js && node --check public/sw.js && node --check src/worker.js && node --check public/video.js && node --check public/context.js && node --check public/viewport.js && node --check src/gemini.js && node --check src/tts.js && node --check src/transcribe.js && node --check public/readaloud.js && node --check public/launch.js && node --check public/dictate.js && node --check public/lookup.js && node --check src/lookup.js && node --check src/runway.js && node --check public/runway.js && node --check src/sync.js && node --check public/sync-merge.js && node --check public/sync.js",
     "review:ui": "node scripts/review-server.mjs",
     "dev": "wrangler dev",
     "deploy": "node scripts/pack-extension.mjs && wrangler deploy",

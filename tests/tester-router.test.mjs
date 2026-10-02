@@ -58,6 +58,8 @@ const SAMPLES = [...new Set([
   // owner-only shapes under the tester-allowed prefixes
   'x/openai/images/variations', 'x/meta/images/edits', 'x/gemini/v1/models/veo-3.1-lite-generate-preview:predictLongRunning',
   'x/gemini/v1beta/models/gemini-3.8-flash/operations/x', 'x/gemini/v1beta/files/abc123', 'tester/me/x', 'video/upload',
+  // owner thread sync (src/sync.js): every route shape, so the sweeps prove testers get owner_only on each
+  'sync/index', 'sync/status', 'sync/trash', 'sync/thread/abc', `sync/blob/${'a'.repeat(64)}`, 'sync/trash/restore', 'sync/blobs/missing',
   // Runway is owner only (src/runway.js): every route shape must answer a tester 403 owner_only
   'runway/generate/image_to_video', 'runway/generate/text_to_video', 'runway/generate/video_to_video', 'runway/task/00000000-0000-4000-8000-000000000000',
   'runway/output/00000000-0000-4000-8000-000000000000', 'runway/upload', 'runway/account',
@@ -66,8 +68,8 @@ const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 const isPublic = (path) => PUBLIC_PATHS.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p));
 
 test('the sweep really enumerates the owner router (sanity check on the scan)', () => {
-  for (const p of ['me', 'diag', 'models', 'relay/ws', 'relay/pair', 'tools', 'tools/run', 'oauth/google/start', 'oauth/canva/callback', 'canva/send-image', 'canva/file', 'testers', 'chat', 'health']) assert.ok(exact.includes(p), p);
-  for (const p of ['relay/', 'tools', 'oauth/', 'accounts/', 'photos/', 'canva/', 'video/', 'genai/', 'fn/', 'status/', 'li/', 'tester/', 'testers/', 'runway/']) assert.ok(prefixes.includes(p), p);
+  for (const p of ['me', 'diag', 'models', 'relay/ws', 'relay/pair', 'tools', 'tools/run', 'oauth/google/start', 'oauth/canva/callback', 'canva/send-image', 'canva/file', 'testers', 'chat', 'health', 'sync']) assert.ok(exact.includes(p), p);
+  for (const p of ['relay/', 'tools', 'oauth/', 'accounts/', 'photos/', 'canva/', 'video/', 'genai/', 'fn/', 'status/', 'li/', 'tester/', 'testers/', 'runway/', 'sync/']) assert.ok(prefixes.includes(p), p);
   for (const p of ['x/', 'accounts/', 'photos/', 'canva/designs/']) assert.ok(regexLeads.includes(p), p);
   assert.deepEqual(videoRoutes.sort(), ['video/file', 'video/upload/cancel', 'video/upload/chunk', 'video/upload/query', 'video/upload/start']);
   assert.ok(SAMPLES.length > 50);
@@ -138,6 +140,19 @@ test('with a passcode and a tester cookie, every route takes the owner path exac
       assert.notEqual(await codeOf(withCookie), 'owner_only');
     }
   }
+});
+
+test('thread sync with a wrong passcode answers 401 sync_passcode even with a live tester cookie (the client pauses on it)', async () => {
+  const { env, token } = await tester();
+  for (const path of ['sync/index', 'sync/status', 'sync/thread/abc', `sync/blob/${'a'.repeat(64)}`]) {
+    const r = await api(env, path, { method: 'GET' }, { pass: 'rotated', cookie: token });
+    assert.equal(r.status, 401, path);
+    assert.equal(await codeOf(r), 'sync_passcode', path);
+  }
+  const t = await api(env, 'sync/index', { method: 'GET' }, { cookie: token }); // the tester alone: deny by default
+  assert.deepEqual([t.status, await codeOf(t)], [403, 'owner_only']);
+  const ok = await api(env, 'sync/index', { method: 'GET' }, { pass: 'pw', cookie: token }); // the owner: as always
+  assert.notEqual(ok.status, 401);
 });
 
 test('relay/ws is dispatched before identity: the extension socket reaches the Relay with no, a live or an ended tester cookie', async () => {

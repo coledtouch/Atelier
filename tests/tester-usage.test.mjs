@@ -202,3 +202,27 @@ test('claudeChat without a tester is unchanged: up to four pause_turn rounds and
   assert.match(await r.text(), /\[DONE\]/);
   assert.equal(n, 3);
 });
+
+test('claudeChat reports each web search Claude actually runs (web_searches), and nothing for an answer from memory', async () => {
+  const run = async (searches) => {
+    const blocks = [];
+    for (let i = 0; i < searches; i++) blocks.push(
+      ev('content_block_start', { index: blocks.length / 2, content_block: { type: 'server_tool_use', id: `srvtoolu_${i}`, name: 'web_search', input: {} } }),
+      ev('content_block_stop', { index: blocks.length / 2 }));
+    const t = blocks.length / 2;
+    globalThis.fetch = async () => sseOf([
+      ev('message_start', { message: { id: 'm', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 5, output_tokens: 1 } } }),
+      ...blocks,
+      ev('content_block_start', { index: t, content_block: { type: 'text', text: '' } }),
+      ev('content_block_delta', { index: t, delta: { type: 'text_delta', text: 'answer' } }),
+      ev('content_block_stop', { index: t }),
+      ev('message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 3 } }),
+      ev('message_stop', {}),
+    ]);
+    const r = await claudeChat({ model: 'anthropic:claude-opus-5-5', web_search: true, messages: [{ role: 'user', content: 'news?' }] }, 'sk');
+    const deltas = (await r.text()).split('\n').filter((l) => l.startsWith('data: {')).map((l) => JSON.parse(l.slice(6)).choices?.[0]?.delta || {});
+    return { searched: deltas.reduce((n, d) => n + (d.web_searches || 0), 0), status: deltas.filter((d) => d.status).length, text: deltas.map((d) => d.content || '').join('') };
+  };
+  assert.deepEqual(await run(0), { searched: 0, status: 0, text: 'answer' }, 'search offered, not used: no flag, so the client never says "live web"');
+  assert.deepEqual(await run(2), { searched: 2, status: 2, text: 'answer' });
+});

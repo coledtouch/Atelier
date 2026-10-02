@@ -10,6 +10,7 @@ import { toolList, runTool, GOOGLE_SCOPES, saveGoogleAccount, removeGoogleAccoun
 import { identify, handleLinkedIn, signedOut, fail } from './tester/auth.js';
 import { testerRouter, testerAdmin } from './tester/router.js';
 import { handleTts } from './tts.js';
+import { handleSync } from './sync.js';
 import { handleRunway, runwayDiag, RUNWAY_PROVIDER } from './runway.js';
 import { handleLookup } from './lookup.js';
 import { handleTranscribe } from './transcribe.js';
@@ -358,6 +359,12 @@ async function handleApi(req, env, url) {
   // is dispatched before identify(): a tester cookie in the owner's browser can't turn the extension away, and a tester
   // or anonymous caller gets the Relay's own 426 / 401, never a socket.
   if (path === 'relay/ws') return relay().fetch(new Request('https://relay/ws', req));
+  // Thread sync with a wrong passcode is refused as one (401, which pauses the client) even when a tester cookie is
+  // in the same browser: identify() would otherwise hand it to the tester router, whose 403 a sync client might retry
+  // into the lockout. (passcodeGuard above already counted the failure.)
+  if ((path === 'sync' || path.startsWith('sync/')) && req.headers.get('x-app-pass') && !passOk(req, env)) {
+    return json({ error: 'Thread sync needs the server passcode.', code: 'sync_passcode' }, 401);
+  }
   const who = await identify(req, env, passOk);
   if (who.kind === 'tester') return testerRouter(req, env, url, path, who, UPSTREAM);
   if (who.stale && !req.headers.get('x-app-pass')) return signedOut(); // an ended tester session, not a passcode problem
@@ -388,6 +395,13 @@ async function handleApi(req, env, url) {
       await env.ATELIER_KV.put('me', text);
       return json({ ok: true });
     }
+  }
+
+  // /api/sync/* → owner thread sync (private R2 bucket SYNC_BUCKET; src/sync.js). Passcode only: testers were already
+  // answered by the deny-by-default router above. Never add a sync route to TESTER_ROUTES.
+  if (path === 'sync' || path.startsWith('sync/')) {
+    if (!passOk(req, env)) return json({ error: 'Thread sync needs the server passcode.', code: 'sync_passcode' }, 401);
+    return handleSync(req, env, url, path);
   }
 
   // Google OAuth callback (browser redirect — authenticated by the one-time state nonce, not the passcode).
@@ -774,8 +788,14 @@ export default {
     // in control (site data cleared, the first moments after install, a worker that crashed on a huge share) the share is
     // lost: never read, parse or echo it. A body over the zone plan's request limit (100 MB on Free/Pro, 200 MB on
     // Business) never reaches this code: Cloudflare answers it with its own 413 page, and the share is lost all the same
-    // (accepted, quicklaunch-integration §8; the post-deploy curl check uses a small body).
-    if (url.pathname === '/share') return new Response(null, { status: 303, headers: { Location: req.method === 'POST' ? '/?share=lost' : '/', 'Cache-Control': 'no-store' } });
+    // (accepted, docs/quick-launch.md; the post-deploy curl check uses a small body). public/_headers never applies here
+    // (run_worker_first), so this response sets the Worker's security headers itself, like /api.
+    if (url.pathname === '/share') {
+      const h = new Headers({ Location: req.method === 'POST' ? '/?share=lost' : '/', 'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'X-Frame-Options': 'DENY' });
+      if (url.protocol === 'https:') h.set('Strict-Transport-Security', HSTS);
+      return new Response(null, { status: 303, headers: h });
+    }
     return env.ASSETS.fetch(req);
   },
 };

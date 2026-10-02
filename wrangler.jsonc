@@ -29,10 +29,15 @@
     { "name": "LOOKUP_LIMIT", "namespace_id": "4712", "simple": { "limit": 30, "period": 60 } },
     { "name": "WIKI_LIMIT", "namespace_id": "4713", "simple": { "limit": 120, "period": 60 } }
   ],
+  // Owner thread sync: private R2 bucket (threads as JSON docs, media and long text as SHA-256 blobs). Passcode only.
+  // Create it once before deploying (owner approval): npx wrangler r2 bucket create atelier-sync. Never public.
+  "r2_buckets": [{ "binding": "SYNC_BUCKET", "bucket_name": "atelier-sync" }],
+  // SYNC_QUOTA_BYTES: thread-sync blob storage cap (50 GiB); above it new media uploads answer 507, nothing is deleted.
+  // SYNC_DISABLED is a secret kill switch, never a var (wrangler secret put SYNC_DISABLED → every /api/sync route 503).
   // Canva app client ID (public - it appears in the sign-in URL). CANVA_CLIENT_SECRET is a Worker secret.
   // WIKI_CONTACT: the public contact in Atelier's Wikimedia User-Agent (the address on /privacy). LOOKUP_DISABLED "1"
   // turns Look up off (503 lookup_off; the app then hides it for the session).
-  "vars": { "CANVA_CLIENT_ID": "OC-AaD0HxvGYkj2", "WIKI_CONTACT": "cole@ciprari.ai", "LOOKUP_DISABLED": "0" },
+  "vars": { "SYNC_QUOTA_BYTES": "53687091200", "CANVA_CLIENT_ID": "OC-AaD0HxvGYkj2", "WIKI_CONTACT": "cole@ciprari.ai", "LOOKUP_DISABLED": "0" },
   // Workers Logs keep our own console output, but not the automatic per-request invocation logs: those record full
   // request URLs, which can carry OAuth codes and invite codes.
   "observability": { "enabled": true, "logs": { "invocation_logs": false } }

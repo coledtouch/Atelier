@@ -1,4 +1,4 @@
-import { validVideo } from './video.js?v=55';
+import { validVideo } from './video.js?v=56';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -70,6 +70,7 @@ export function recoverThread(thread) {
   for (const entry of thread.entries || []) {
     if (entry.pending) {
       entry.pending = false;
+      entry.recovered = true; // owner thread sync: never pushed over an answer the server already has
       entry.error = 'This response was interrupted when the studio closed. Your partial work is saved; you can try again.';
       delete entry.stage; delete entry.status;
     }

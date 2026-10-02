@@ -138,7 +138,8 @@ export async function claudeChat(body, apiKey, workspaceId, tester = null) {
           for (const [k, v] of Object.entries(ev.usage)) if (v != null) partial[k] = v; // a null counter keeps the earlier count
         }
         if (ev.type === 'content_block_start' && ev.content_block.type === 'server_tool_use') {
-          delta({ status: 'Searching the web' });
+          // web_searches: the client labels a turn "live web" only when Claude actually searched, not when search was offered.
+          delta({ status: 'Searching the web', ...(ev.content_block.name === 'web_search' ? { web_searches: 1 } : {}) });
         } else if (ev.type === 'content_block_start' && ev.content_block.type === 'tool_use') {
           toolIndex++;
           delta({ tool_calls: [{ index: toolIndex, id: ev.content_block.id, type: 'function', function: { name: ev.content_block.name, arguments: '' } }] });

@@ -43,6 +43,7 @@ function holdRig() {
     $: (sel) => ({ '#sendBtn': { classList: { add() {}, remove() {} }, style: { setProperty() {}, removeProperty() {} } }, '#toast': toastEl,
       '#toast .toast-act': toastEl.act, '#composerSrc': { hidden: true } })[sel] ?? null,
     input: { addEventListener() {}, removeEventListener() {} },
+    composerSrc: { hidden: true }, // app.js captures the composer's own note once (a reply can't stand in for it)
     document: { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' },
     toast: (msg, o = {}) => { calls.push(['toast', msg]); toastEl.shown = true; toastEl.msg = msg; toastEl.act = o.action ? { click: () => { vars.hideToast(); o.action.onClick(); } } : null; },
     hideToast: () => { calls.push(['hideToast']); toastEl.shown = false; },

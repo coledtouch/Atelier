@@ -674,7 +674,8 @@ const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Ho
  * Wires Look up into the page. app.js calls it once (it exports nothing, so everything comes in through deps):
  * { stage, stream, dock, topBar, status, apiHeaders, mode, ready, ask, prefill, askSends, toast, coarse, reducedMotion,
  *   debug, languages, doc, win, fetch }.
- * ask(prompt) sends a follow-up; when askSends() is false (testers) prefill(prompt) puts it in the composer instead.
+ * ask(prompt, from) sends a follow-up; when askSends() is false (testers) prefill(prompt, from) puts it in the composer
+ * instead. from: { entryId } — the answer the words were selected in (app.js carries a link / share turn's mark on).
  */
 export function initLookup(deps = {}) {
   const win = deps.win || globalThis.window, doc = deps.doc || win.document;
@@ -920,8 +921,8 @@ export function initLookup(deps = {}) {
   function doAsk() {
     const t = ctl.term;
     if (!t || !canAsk()) return;
-    const prompt = askPrompt(t), send = askSends() !== false;
-    try { (send ? ask : prefill)(prompt); } finally {
+    const prompt = askPrompt(t), send = askSends() !== false, from = { entryId: ctl.snap?.entryId ?? null };
+    try { (send ? ask : prefill)(prompt, from); } finally {
       ctl.close('ask');
       try { doc.getSelection?.()?.collapseToEnd(); } catch {}
       if (!send) say(COPY.prefilled);

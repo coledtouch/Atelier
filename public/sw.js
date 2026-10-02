@@ -6,11 +6,11 @@
 // One step does all three:  node scripts/bump-version.mjs <n>
 //   (the same by hand: sed -i -E "s/atelier-v[0-9]+'/atelier-v<n>'/" public/sw.js && sed -i -E "s/\?v=[0-9]+/?v=<n>/g" public/index.html public/*.js)
 // tests/service-worker.test.mjs fails if they disagree or a module the app loads isn't precached at its ?v= URL.
-const VERSION = 'atelier-v55';
+const VERSION = 'atelier-v56';
 const V = VERSION.slice('atelier-v'.length);
 // Modules are listed at the exact ?v=<n> URLs they are imported by (PATHS drops the query for the fetch guard below).
 const SHELL = ['/', '/index.html', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`,
-  `/data-safety.js?v=${V}`, `/video.js?v=${V}`, `/runway.js?v=${V}`, `/tester.js?v=${V}`, `/context.js?v=${V}`, `/launch.js?v=${V}`, `/lookup.js?v=${V}`, `/readaloud.js?v=${V}`, `/dictate.js?v=${V}`, `/viewport.js?v=${V}`,
+  `/data-safety.js?v=${V}`, `/sync.js?v=${V}`, `/sync-merge.js?v=${V}`, `/video.js?v=${V}`, `/runway.js?v=${V}`, `/tester.js?v=${V}`, `/context.js?v=${V}`, `/launch.js?v=${V}`, `/lookup.js?v=${V}`, `/readaloud.js?v=${V}`, `/dictate.js?v=${V}`, `/viewport.js?v=${V}`,
   '/manifest.webmanifest', '/vendor/marked.js', '/vendor/purify.js', '/vendor/highlight.js',
   '/vendor/fflate.js', '/icons/atelier-v2-32.png', '/icons/atelier-v2-180.png', '/icons/atelier-v2-192.png', '/icons/atelier-v2-512.png', '/icons/atelier-v2-maskable-512.png', '/icons/atelier-mark-96.png',
   '/privacy', '/tos', '/legal.css'];
@@ -22,7 +22,7 @@ const PATHS = SHELL.map(u => u.split('?')[0]);
 // The limits cap what is stored, not what is read: formData() holds the whole body in this worker's memory first. Running
 // out of memory on a huge video kills the worker (no rejection reaches the catch), so the user gets an error page or, if
 // Chrome falls back to the network, the Worker's ?share=lost (or Cloudflare's 413 above the plan's body limit). Not yet
-// tried on a phone: share a ~300 MB and a ~1 GB video before relying on big ones (quicklaunch-integration §8).
+// tried on a phone: share a ~300 MB and a ~1 GB video before relying on big ones (docs/quick-launch.md).
 // Any site can POST here: a page anywhere can auto-submit a multipart form to /share as a top-level navigation, with no
 // tap. The fetch handler's origin test only says the TARGET is this origin (always true for a navigation this worker
 // sees); nothing here knows who started it. So a share is only ever prefilled, labelled "From another app or site" and

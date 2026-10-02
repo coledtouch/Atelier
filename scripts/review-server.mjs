@@ -2,8 +2,25 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
+import { Readable } from 'node:stream';
 const root = resolve('public');
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
+// REVIEW_SYNC=1: the real src/sync.js over one in-memory R2 (tests/fake-r2.mjs), shared by every browser profile on
+// this port; restarting the fixture empties it. workerRequest gives a body with a Content-Length the known length the
+// Workers runtime would (the strict fake, like R2, refuses a stream without one).
+let syncEnv = null;
+async function reviewSync(req, res, url) {
+  const [{ handleSync }, { fakeR2, workerRequest }] = await Promise.all([import('../src/sync.js'), import('../tests/fake-r2.mjs')]);
+  syncEnv ||= { SYNC_BUCKET: fakeR2(), SYNC_QUOTA_BYTES: '53687091200' };
+  const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : Readable.toWeb(req);
+  const headers = Object.entries(req.headers).filter(([, v]) => typeof v === 'string');
+  const r = await handleSync(workerRequest(url.href, { method: req.method, headers, body, ...(body ? { duplex: 'half' } : {}) }), syncEnv, url, url.pathname.slice('/api/'.length));
+  res.statusCode = r.status;
+  r.headers.forEach((v, k) => res.setHeader(k, v));
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (r.body) for await (const chunk of r.body) res.write(chunk);
+  res.end();
+}
 createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   res.setHeader('Cache-Control', 'no-store');
@@ -11,6 +28,10 @@ createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     if (url.pathname === '/api/health') return res.end(JSON.stringify({ server: { nvidia: true, ...(process.env.REVIEW_STT ? { openai: true } : {}) } }));
     if (req.headers['x-app-pass'] !== 'review-only') { res.statusCode = 401; return res.end('{"error":"Wrong passcode"}'); }
+    if (url.pathname === '/api/sync' || url.pathname.startsWith('/api/sync/')) {
+      if (!process.env.REVIEW_SYNC) { res.statusCode = 503; return res.end('{"error":"Sync isn’t set up on the server yet.","code":"sync_unconfigured"}'); }
+      return reviewSync(req, res, url);
+    }
     if (url.pathname === '/api/lookup/img') {
       if (!url.searchParams.get('k')) { res.statusCode = 400; return res.end('{"error":"That isn’t a Look up image.","code":"lookup_query"}'); }
       res.setHeader('Content-Type', 'image/png'); return res.end(await readFile(resolve(root, 'icons/atelier-v2-512.png')));

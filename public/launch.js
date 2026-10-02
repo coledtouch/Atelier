@@ -141,7 +141,8 @@ export function splitHash(hash = '') {
 }
 const shareOf = (s) => (SHARE_STATUS.includes(s) ? s : SHARE_ID.test(s ?? '') ? s : null);
 // readLaunch(search, hash) → the raw intent. No context, no side effects; `send`/`k` are read from the fragment only
-// (never sent to the server, never in Referer or Worker logs). The key itself never leaves this object.
+// (never sent to the server, never in Referer or Worker logs; the browser's History, and History sync, does keep the
+// whole link: docs/quick-launch.md). The key itself never leaves this object.
 export function readLaunch(search = '', hash = '') {
   const s = String(search ?? ''), hs = String(hash ?? '');
   const q = new URLSearchParams(s), { params: h, q: hq } = splitHash(hs);
