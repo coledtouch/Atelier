@@ -31,9 +31,12 @@ export const TRANSIENT = Object.freeze(['pending', 'stage', 'status', 'startedAt
 // Identical to the data: branch of data-safety.js safeMediaUrl (tests/sync-merge.test.mjs checks parity).
 export const MEDIA_RE = /^data:(image\/(png|jpe?g|webp|gif|avif)|video\/(mp4|webm));base64,[a-z\d+/=\s]+$/i;
 const MEDIA_PREFIX = /^data:(image\/(png|jpe?g|webp|gif|avif)|video\/(mp4|webm));base64,/i;
-// Phase gate: which media kinds a device uploads. Phase 1 syncs text only (entries holding media stay on the device);
-// phase 2 flips image, phase 3 video. Pulls hydrate any ref regardless, so devices on different phases interoperate.
-export const MEDIA_SYNC = Object.freeze({ image: false, video: false });
+// Phase gate: which media kinds a device uploads. Phase 1 synced text only (entries holding media stayed on the device);
+// phase 2 turned on images, phase 3 videos. Pulls hydrate any ref regardless, so devices on different phases interoperate.
+export const MEDIA_SYNC = Object.freeze({ image: true, video: true });
+// Held reasons that mean "media that exists only on this device" (Clear this device and the delete confirm say so):
+// the phase gate, a video waiting for Wi-Fi to upload (the client's holdBlobs), one blob over LIMITS.blob.
+export const MEDIA_HELD = Object.freeze(['media', 'wifi', 'blob_too_large']);
 export const TEXT_TYPE = 'text/plain;charset=utf-8';
 const MEDIA_TYPES = Object.freeze(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/avif', 'video/mp4', 'video/webm']);
 export const BLOB_TYPES = Object.freeze([...MEDIA_TYPES, TEXT_TYPE]); // PUT /api/sync/blob Content-Types
@@ -199,11 +202,14 @@ const withoutFile = (d) => (record(d?.video) && own(d.video, 'file') ? { ...d, v
 //   d: stripped entry with every MEDIA_RE string and every well-formed string over INLINE_MAX replaced by a blob ref;
 //   h: sha256(canonical(d)) (the record's f);  g: the same without video.file (the Gemini FileRef rewritten in place);
 //   blobs: unique [{hash, t, n, kind, type, path, bytes()}] (bytes() decodes lazily);  size: canonical(d) UTF-8 bytes;
-//   held: null | 'ref_key' (a literal "$b" key) | 'bad_media' (undecodable base64) | 'too_large' (> LIMITS.entry).
-// memo (optional, the client's in-session cache): get(path, string) → hash | undefined and set(path, string, hash). It
-// is consulted for MEDIA only, and must answer only for exactly that string (the client compares with ===), so a
-// 60 MB clip is decoded and hashed once per session. Long text is hashed in full every time (cheap, and a same-length
-// edit must never reuse the old blob). The phase gate is separate (gateHeld): media is always hashed here.
+//   held: null | 'ref_key' (a literal "$b" key) | 'bad_media' (undecodable base64) | 'too_large' (> LIMITS.entry) |
+//         'blob_too_large' (one media item over LIMITS.blob: it can't go up in one request, so the entry stays here;
+//         found from the base64 length, before anything is decoded).
+// memo (optional, the client's cache): get(path, string) → hash | undefined (or a promise of one) and set(path, string,
+// hash). It is consulted for MEDIA only, and must answer only for exactly that string (the client compares with ===, or
+// by length plus a print of every character), so a 60 MB clip is decoded and hashed once. Long text is hashed in full
+// every time (cheap, and a same-length edit must never reuse the old blob). The phase gate is separate (gateHeld): media
+// is always hashed here.
 export async function dehydrate(entry, { memo = null, hash = sha256hex } = {}) {
   const d = strip(entry);
   const jobs = [], kinds = new Set();
@@ -224,9 +230,10 @@ export async function dehydrate(entry, { memo = null, hash = sha256hex } = {}) {
   visit(null, null, d, '', 0);
   const none = (held) => ({ d: null, h: null, g: null, blobs: [], kinds, held, size: 0 });
   if (refKey) return none('ref_key');
+  for (const j of jobs) if (j.t !== 'text' && base64Length(j.v.slice(j.v.indexOf(',') + 1)) > LIMITS.blob) return none('blob_too_large');
   const blobs = new Map();
   for (const j of jobs) {
-    let h = j.t === 'text' ? undefined : memo?.get(j.path, j.v), n, bytes;
+    let h = j.t === 'text' ? undefined : await memo?.get(j.path, j.v), n, bytes;
     if (j.t === 'text') {
       bytes = () => utf8(j.v);
       n = utf8Length(j.v);
@@ -626,15 +633,18 @@ function finishPlan(local, slots, rec, base, extra) {
 // Plans merging a pulled thread view into the local thread (null when this device doesn't have it).
 //   record: the 't:' record (null for none); locked: Set or (id) → bool (navigator.locks 'atelier-run:<id>');
 //   live: the thread is generating (liveThreads); quarantined(id, h): this exact version was set aside;
-//   hashOf(entry) → {h, g, d} (the memoized dehydrate); uid: the app's id maker.
+//   hashOf(entry) → {h, g, d} (the memoized dehydrate); uid: the app's id maker;
+//   orphans: ids of pending entries no tab is generating (no run lock anywhere — the client only says so where it can
+//   see every tab's locks): an interrupted run's leftover, decided like a recovered entry instead of holding the whole
+//   thread back for good (a tab's run that outlived a delete can save one, and no tab ever settles it).
 // → { defer: null | 'busy' | 'live', slots, prints, prevK, record, title, createdAt, changedAt, push, removeThread,
 //     changed, added, replaced, removed, forks, localTitle }. Nothing is ever deleted because the server lacks it:
 // remote absence never removes a local entry; only gone does, and only when the local copy is unchanged since k.
-export async function planPull({ local = null, record: rec0 = null, remote, now = Date.now(), uid, locked = null, live = false, quarantined = () => false, hashOf = defaultHashOf }) {
+export async function planPull({ local = null, record: rec0 = null, remote, now = Date.now(), uid, locked = null, live = false, quarantined = () => false, hashOf = defaultHashOf, orphans = null }) {
   local = seen(local);
   const base = rec0 || newRecord();
   const rec = { ...base, e: { ...base.e } };
-  delete rec.refetch; delete rec.full; delete rec.deleted; delete rec.lost;
+  delete rec.refetch; delete rec.full; delete rec.deleted; delete rec.lost; delete rec.wait;
   // A new lineage (the server lost this thread and a device re-created it): this device's records describe the old
   // one, so nothing is adopted or removed on their say-so. The caller sends a full view here (never a delta).
   const restarted = reborn(bornOf(base), bornOf(remote));
@@ -644,10 +654,12 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
   const gone = remote.gone || {};
   const decisions = new Map(), inserts = [], how = {}; // how: entryId → which rule decided it (diagnostics)
   let push = false, busy = false;
-  const isBusy = (e) => e.pending === true || isLocked(locked, e.id);
+  const orphan = (e) => e.pending === true && Boolean(orphans?.has?.(e.id)) && !isLocked(locked, e.id);
+  const isBusy = (e) => (e.pending === true && !orphan(e)) || isLocked(locked, e.id);
+  const asSeen = (e) => (e && orphan(e) ? { ...e, recovered: true } : e); // an orphan decides as a recovered entry
   for (const r of remote.entries) {
     if (quarantined(r.id, r.h)) continue;
-    const l = L.get(r.id), k = kOf(base, r.id);
+    const l = asSeen(L.get(r.id)), k = kOf(base, r.id);
     const gR = await viewG(r);
     revive(rec, r.id);
     if (!l) { inserts.push(r); rec.e[r.id] = recordOf(r, gR, k); continue; } // new here, or known but missing: re-add
@@ -658,9 +670,9 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
     decisions.set(r.id, out.slots); rec.e[r.id] = out.k; how[r.id] = out.how;
     if (out.push) push = true;
   }
-  for (const [id, l] of L) {
+  for (const [id, l0] of L) {
     if (!own(gone, id) || R.has(id)) continue;
-    const k = kOf(base, id);
+    const l = asSeen(l0), k = kOf(base, id);
     bury(rec, id, k);
     delete rec.e[id];
     if (isBusy(l)) { busy = true; continue; }
@@ -688,9 +700,11 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
       const dk = !k && own(base.dead, id) ? base.dead[id] : null;
       if (!dk || isBusy(l)) continue;
       const hashed = await hashOf(l);
-      if (l.recovered || hashed.h === dk.f || dk.old?.includes(hashed.h)) { decisions.set(id, []); how[id] = 'dead'; }
+      if (asSeen(l).recovered || hashed.h === dk.f || dk.old?.includes(hashed.h)) { decisions.set(id, []); how[id] = 'dead'; }
     }
-    for (const id of Object.keys(rec.e)) if (!R.has(id) && !L.has(id)) delete rec.e[id];
+    // gone from the server and from here: its record goes, but what this device knew of its versions stays (record.dead),
+    // so a stale tab's copy of one written back later (after the thread came back here) is still recognised as stale
+    for (const id of Object.keys(rec.e)) if (!R.has(id) && !L.has(id)) { bury(rec, id, rec.e[id]); delete rec.e[id]; }
   }
   const slots = buildSlots(local, decisions, inserts);
   const tomb = Boolean(remote.deletedAt) && remote.entries.length === 0;
@@ -724,7 +738,9 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
 // meanwhile replaces nothing on the say-so of an older lineage's revisions).
 // → { id, skip, entries: [{id, base, createdAt, h, d}], blobs, sent: {id: {h, g, base}}, title: {v, base} | null,
 //     createdAt, born, held: [{id, reason}], waiting: [ids], refetch, bytes, dirty }
-export async function planPush({ thread, record: rec0 = null, locked = null, media = MEDIA_SYNC, hashOf = defaultHashOf, skip = null }) {
+// holdBlobs(blobs) → a held reason | null: the client keeps an entry here for now because of its blobs (a large video
+// on mobile data waits for Wi-Fi: 'wifi').
+export async function planPush({ thread, record: rec0 = null, locked = null, media = MEDIA_SYNC, hashOf = defaultHashOf, skip = null, holdBlobs = null }) {
   const base = rec0 || newRecord();
   // A thread without a usable createdAt still syncs: its earliest entry's (the server keeps the minimum anyway).
   const firstAt = Math.min(...(thread.entries || []).map((e) => (validDate(e?.createdAt) ? e.createdAt : Infinity)));
@@ -746,6 +762,9 @@ export async function planPush({ thread, record: rec0 = null, locked = null, med
     const x = await hashOf(e);
     if (x.held) { out.held.push({ id: e.id, reason: x.held }); continue; }
     const k = base.e[e.id];
+    // already on the server as it is (k.f): nothing to send, so nothing to wait for either
+    const hold = holdBlobs && x.blobs.length && !(k && x.h === k.f && !base.lost) ? holdBlobs(x.blobs) : null;
+    if (hold) { out.held.push({ id: e.id, reason: hold, bytes: x.blobs.reduce((n, bl) => n + (bl.n || 0), 0) }); continue; }
     // lost: the server lost this document; every entry goes up again (base 0), except copies k.old marks as stale
     if (k && x.h === k.f && !base.lost) continue;
     // a stale copy of an entry deleted everywhere: never pushed back; a full pull removes it again

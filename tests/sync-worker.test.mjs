@@ -553,7 +553,7 @@ test('a delete that can’t land removes its trash object; status counts live an
   assert.deepEqual(env.SYNC_BUCKET.keys('x/'), []);
   assert.equal((await call(env, 'DELETE', 'thread/t1', { body: { v: 1, seen: { e1: 1 } } })).status, 200);
   const s = await bodyOf(await call(env, 'GET', 'status'));
-  assert.deepEqual({ ...s, at: 0 }, { v: 1, threads: 1, deleted: 1, trash: 1, blobs: 0, bytes: 0, quota: SYNC_OPTIONS.quotaBytes, at: 0 });
+  assert.deepEqual({ ...s, at: 0 }, { v: 1, threads: 1, deleted: 1, trash: 1, blobs: 0, images: 0, videos: 0, bytes: 0, quota: SYNC_OPTIONS.quotaBytes, at: 0 });
 });
 
 test('a pushed new entry revives a deleted thread; edits to deleted entries are dropped', async () => {
@@ -652,4 +652,18 @@ test('wired: the owner reaches the sync routes; without a bucket they answer 503
   assert.equal(await codeOf(off), 'sync_unconfigured');
   const blob = await api(env, `sync/blob/${H(1)}`, { method: 'GET' }, { pass: 'pw' });
   assert.equal(blob.status, 404);
+});
+
+test('status counts images and videos: kept up to date by each upload, and right after a recount', async () => {
+  const env = syncEnv();
+  const blob = async (s, type) => { const bytes = new TextEncoder().encode(s); return putBlob(env, await sha256hex(bytes), bytes, type); };
+  assert.equal((await blob('a picture', 'image/png')).status, 201);
+  assert.equal((await blob('another picture', 'image/webp')).status, 201);
+  assert.equal((await blob('a clip', 'video/mp4')).status, 201);
+  assert.equal((await blob('a long text', 'text/plain;charset=utf-8')).status, 201);
+  const s = await bodyOf(await call(env, 'GET', 'status'));
+  assert.deepEqual([s.blobs, s.images, s.videos], [4, 2, 1]);
+  clock += 61 * 60_000; // the hourly recount reads every blob's type from its customMetadata
+  const r = await bodyOf(await call(env, 'GET', 'status'));
+  assert.deepEqual([r.blobs, r.images, r.videos, r.bytes], [4, 2, 1, 9 + 15 + 6 + 11]);
 });

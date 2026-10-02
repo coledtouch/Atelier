@@ -87,4 +87,4 @@ createServer(async (req, res) => {
     res.setHeader('Content-Type', mime[extname(file)] || 'application/octet-stream');
     res.end(await readFile(file));
   } catch { res.statusCode = 404; res.end('Not found'); }
-}).listen(8791, '127.0.0.1', () => console.log('Isolated review: http://127.0.0.1:8791 — passcode: review-only'));
+}).listen(Number(process.env.REVIEW_PORT) || 8791, '127.0.0.1', () => console.log(`Isolated review: http://127.0.0.1:${Number(process.env.REVIEW_PORT) || 8791} — passcode: review-only`)); // REVIEW_PORT: a second fixture beside :8791

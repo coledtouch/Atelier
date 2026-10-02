@@ -390,10 +390,15 @@
             <p class="hint" id="syncCounts" hidden></p>
             <div class="row-actions">
               <button type="button" class="chip" id="syncNow">Sync now</button>
+              <button type="button" class="chip" id="syncDownloadNow" hidden>Download now</button>
               <button type="button" class="chip" id="syncTrash">Recently deleted</button>
               <button type="button" class="chip" id="syncUploadOld" hidden>Upload older threads too</button>
               <button type="button" class="chip" id="syncForget" hidden>Remove synced threads from this device</button>
             </div>
+            <label class="sync-cell" id="syncCellRow" hidden>
+              <input type="checkbox" id="syncCell" />
+              <span><span class="sync-cell-title">Download videos on mobile data</span><span class="hint">Off: videos over 10 MB upload and download only on Wi-Fi.</span></span>
+            </label>
             <p class="hint sync-foot">Threads you make as the owner sync privately through your Atelier server, behind your passcode. Settings, model choices and theme stay on each device. LinkedIn testers’ threads never leave their device.</p>
           </div>
           <p class="hint" style="margin-bottom:14px">Export your threads and creations for safekeeping. Imports add copies without replacing existing work. Profile, account connections and preferences are not included.</p>

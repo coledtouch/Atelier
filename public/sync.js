@@ -1,5 +1,9 @@
-// Owner thread sync: the browser engine (sync-spec.json client_spec, merge_spec, ui_spec). Phase 1 syncs text threads;
-// entries holding images or videos stay on the device until MEDIA_SYNC (public/sync-merge.js) lets them go.
+// Owner thread sync: the browser engine (sync-spec.json client_spec, merge_spec, ui_spec). Text, images and videos sync
+// (MEDIA_SYNC in public/sync-merge.js); media travels as content-addressed blobs and is turned back into the data: URLs
+// the app keeps. The phone budget: a video over 10 MB waits for Wi-Fi on mobile data or Data Saver (both ways) unless
+// "Download videos on mobile data" is on or Download now is tapped; downloads stop at 85% of this browser's storage or
+// on a QuotaExceededError; a blob over 16 MB is downloaded on its own, after the thread's text is in, into a cache
+// ('bc:') so an interrupted download or a reload never fetches finished blobs again, and only one is in memory at a time.
 //   createSync(deps)   the engine, with every browser dependency injected (tests run it in Node against the real
 //                      src/sync.js over tests/fake-r2.mjs). Exported as createEngine too.
 //   wrapDb / init / verified / pause / kick / flush / on / busy / badge / deleteThread / deleteCopy / pendingCount /
@@ -21,7 +25,14 @@
 //   del:<id>          a delete-everywhere waiting to be sent {seen: {entryId: rev}, at, title, born?, keep?} — keep: the
 //                     entries this device hadn't synced yet; they go up first, so Recently deleted can give them back
 //   hide:<id>         removed locally by a non-user path: never downloaded again
-//   in:<id>/<entry>   a pulled entry waiting for blobs {rev, h, missing, at}
+//   in:<id>/<entry>   a pulled entry waiting for blobs {rev, h, missing: [sha256], refs: [{$b, t, n}], have: [sha256],
+//                     wait, bytes, video, at} — have: its blobs already in the cache; wait: 'wifi' (a large video on
+//                     mobile data), 'storage' (this browser is nearly full), 'later' (a large blob, downloaded after
+//                     everything else, or one whose download failed: after a backoff) or 'missing' (the server lacks
+//                     it: re-read after a backoff)
+//   bc:<sha256>       a downloaded media blob not applied yet {at, blob} (Blob in browsers): resumes after a reload
+//   hm:<id>           media hashes of that thread {entryId: {path: [length, fullPrint, sha256]}}: a large data: URL is
+//                     hashed once, then recognised by its length and a print of every character (no decoding)
 //   q:<id>/<entry>/<h> quarantine: a pulled entry that failed validation {d, reason, at}
 //   b:<sha256>        the server has this blob
 //   bf:<sha256>       the server refused this blob (400/411/413/415) {code, at}: not offered again for a day
@@ -36,9 +47,9 @@
 // or this engine writes it (refreshOpen: a three-way merge that keeps this tab's unsaved change), so a tab never
 // pushes, settles or writes back a copy that is older than what another tab saved.
 import {
-  FORMAT, MEDIA_SYNC, TRANSIENT, syncId, validDate, isRev, sha256hex, utf8, utf8Length, fromBase64, base64Length, jsonClone, dehydrate,
-  hydrate, mediaKinds, gateHeld, refsOf, reborn, bornOf, forkEntry, checkView, checkPulledEntry, newRecord, planPull, planPush, pushBodies,
-  planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder,
+  FORMAT, MEDIA_SYNC, MEDIA_HELD, TRANSIENT, syncId, validDate, isRev, sha256hex, utf8, utf8Length, fromBase64, base64Length, jsonClone, dehydrate,
+  hydrate, mediaKinds, gateHeld, refsOf, refValue, reborn, bornOf, forkEntry, checkView, checkPulledEntry, newRecord, planPull, planPush, pushBodies,
+  planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder, fullPrint, blobKind,
 } from './sync-merge.js?v=59';
 import { validateBackup } from './data-safety.js?v=59';
 
@@ -60,7 +71,21 @@ export const SYNC_CLIENT = Object.freeze({
   blobRefusedMs: DAY, // a blob the server refused (400/411/413/415) isn't offered again for this long
   capRetryMs: HOUR, // the server's thread cap (413 too_many_threads): new threads wait this long before trying again
   uploadsInFlight: 2, replanTries: 3, pushPasses: 3, memoChars: 32 * 1024 * 1024, // the in-session media hash memo
+  // the phone budget (phase 3)
+  cellularMaxBytes: 10 * 1024 * 1024, // a video bigger than this waits for Wi-Fi on mobile data / Data Saver (both ways)
+  bigBlobBytes: 16 * 1024 * 1024, // bigger blobs: downloaded one at a time after the rest, and uploaded one at a time
+  storageMaxShare: 0.85, storageCheckMs: 30_000, // media downloads stop when this browser's storage is this full
+  storagePauseMs: 15 * MIN, // after a QuotaExceededError (or a full estimate), media downloads wait this long
+  printMemoChars: 64 * 1024, // media strings at least this long are remembered by length + print across sessions ('hm:')
+  cacheMaxAgeMs: 7 * DAY, // a downloaded blob no parked entry needs any more is dropped; any blob this old too
+  drainRounds: 50, // thread re-reads per cycle while large downloads are applied one at a time
+  planMediaBytes: 32 * 1024 * 1024, // media one thread read brings in at once; the rest comes through the cache after
+  bigMemoChars: 64 * 1024 * 1024, // long clips the hash memo keeps a copy of (=== instead of a full print on each push)
+  blobRetryMinMs: MIN, blobRetryMaxMs: HOUR, // one media blob whose download failed (or the server lacks): tried again later
 });
+// A debug switch: localStorage atelier.syncCellular = '1' makes this browser count as being on mobile data, so the
+// Wi-Fi rule (and Download now) can be checked on a desktop.
+export const CELLULAR_FLAG = 'atelier.syncCellular';
 export const SYNC_BASE = '/api/sync/';
 const RUN_LOCK = 'atelier-run:', LEADER_LOCK = 'atelier-sync-leader';
 
@@ -95,6 +120,10 @@ export const COPY = Object.freeze({
   trashEmpty: 'Nothing deleted in the last 30 days.', trashOffline: 'Connect to see recently deleted threads.',
   trashFailed: 'Couldn’t load recently deleted threads. Try again.', unreachable: 'Couldn’t reach your server. Try again.',
   mediaHeld: 'Images and videos stay on this device until the next update',
+  deleteWaiting: ' A video in it hasn’t uploaded yet (it’s waiting for Wi-Fi) and will be deleted.',
+  downloadNow: 'Download now',
+  cellular: 'Download videos on mobile data',
+  cellularHint: 'Off: videos over 10 MB upload and download only on Wi-Fi.',
 });
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const shortDate = (ms) => new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -129,6 +158,7 @@ export function statusLine(s, now = Date.now()) {
   const pr = s.progress;
   if (s.state === 'syncing') {
     if (pr?.verb === 'download' && pr.total > 1) return `Downloading ${Math.min(pr.done + 1, pr.total)} of ${pr.total} items`;
+    if (pr?.verb === 'download' && pr.total === 1) return 'Downloading 1 item…';
     if (pr?.verb === 'upload' && pr.total > 1) return `Uploading ${Math.min(pr.done + 1, pr.total)} of ${pr.total} items${pr.left ? ` · ${sizeText(pr.left)} left` : ''}`;
     return pr?.total > 1 ? `Syncing… ${Math.min(pr.done + 1, pr.total)} of ${pr.total} threads` : 'Syncing…';
   }
@@ -139,6 +169,11 @@ export function statusLine(s, now = Date.now()) {
     return waiting ? `Couldn’t reach your server · ${changes} waiting to sync` : 'Couldn’t reach your server — trying again shortly.';
   }
   if (waiting) return `${changes} waiting to sync`;
+  const inb = s.inbound || {};
+  if (s.storageFull && inb.storage) return `Storage almost full on this device · ${plural(inb.storage, 'item')} not downloaded`;
+  const wifi = (inb.wifi || 0) + (s.upWifi || 0);
+  if (wifi) return `Waiting for Wi-Fi · ${plural(wifi, 'video')} (${sizeText((inb.wifiBytes || 0) + (s.upWifiBytes || 0))})`;
+  if (inb.n) return `${plural(inb.n, 'item')} still downloading`;
   if (s.lastOkAt) return `Up to date · synced ${agoText(s.lastOkAt, now)}`;
   return 'Getting ready to sync…';
 }
@@ -148,18 +183,30 @@ export function countsLine(s) {
   const parts = [];
   const stay = (n) => (n === 1 ? 'stays' : 'stay');
   if (s.synced) parts.push(`${plural(s.synced, 'thread')} synced`);
-  if (s.server?.bytes) parts.push(`${sizeText(s.server.bytes)} on your server`);
+  if (s.server?.bytes) {
+    const m = s.server, kinds = Number.isFinite(m.images) && Number.isFinite(m.videos) && (m.images || m.videos) ? ` (${plural(m.images, 'image')}, ${plural(m.videos, 'video')})` : '';
+    parts.push(`${sizeText(m.bytes)} on your server${kinds}`);
+  }
   if (s.waiting) parts.push(`${s.waiting} waiting to sync`);
   if (s.tooLarge) parts.push(`${plural(s.tooLarge, 'thread')} too large to sync ${stay(s.tooLarge)} on this device`);
   if (s.refused) parts.push(`${plural(s.refused, 'thread')} couldn’t be synced and ${stay(s.refused)} on this device`);
   if (s.blobRefused) parts.push(`${plural(s.blobRefused, 'item')} couldn’t be uploaded and ${stay(s.blobRefused)} on this device`);
+  if (s.tooBigMedia) parts.push(`${plural(s.tooBigMedia, 'item')} over 95 MB ${s.tooBigMedia === 1 ? 'is' : 'are'} too large to sync and ${stay(s.tooBigMedia)} on this device`);
+  if (s.inbound?.n) parts.push(`${plural(s.inbound.n, 'item')} not downloaded yet`);
   if (s.threadCap) parts.push('Your server holds the most threads it can sync, so new threads stay on this device');
   if (s.quarantined) parts.push(`${plural(s.quarantined, 'item')} couldn’t be applied and ${s.quarantined === 1 ? 'was' : 'were'} set aside`);
   if (s.heldMedia && !(s.media?.image && s.media?.video)) parts.push(COPY.mediaHeld);
   return parts.join(' · ');
 }
 // Something may exist only on this device (Settings' Danger zone hint keeps "Export your threads first" then).
-export const deviceOnly = (s) => Boolean(s?.on && (s.waiting || s.heldMedia || s.tooLarge || s.refused || s.blobRefused || s.localOnly || s.mode === 'new'));
+export const deviceOnly = (s) => Boolean(s?.on && (s.waiting || s.heldMedia || s.tooLarge || s.refused || s.blobRefused || s.upWifi || s.tooBigMedia || s.localOnly || s.mode === 'new'));
+// The banner above the open thread (#syncNote): its entries still on their way here, or ''.
+export function noteText(n) {
+  if (!n?.n) return '';
+  if (n.downloading) return `Downloading ${plural(n.n, n.videos === n.n ? 'video' : 'item')}…`;
+  const head = `${plural(n.n, 'item')} in this thread ${n.n === 1 ? 'is' : 'are'} still downloading`;
+  return n.wifi ? `${head} · Waiting for Wi-Fi` : n.storage ? `${head} · Storage almost full on this device` : head;
+}
 // The note above a forked entry (renderEntry), or ''.
 export const forkNote = (e) => (e?.forkOf ? (e.recovered ? COPY.forkRecovered : COPY.forkNote) : '');
 // Clear this device's first question, from engine.localReport(): '' when everything here is on the server too.
@@ -349,6 +396,8 @@ export function createSync(deps = {}) {
   const online = deps.online || (() => true), visible = deps.visible || (() => true);
   const toast = deps.toast || noop, dropThumbs = deps.dropThumbs || noop;
   const media = deps.media || MEDIA_SYNC, validate = deps.validate || validateBackup, base = deps.base || SYNC_BASE;
+  const mediaTag = `${media.image ? 1 : 0}${media.video ? 1 : 0}`; // cfg.media: the media kinds this device last synced
+  const B = Object.freeze({ ...SYNC_CLIENT, ...(deps.budget || {}) }); // the phone budget (tests shrink its sizes)
   const idle = deps.idle || ((fn) => timers.setTimeout(fn, 0));
   const warn = (err) => console.warn('[atelier] sync:', err?.message || err);
   const debug = typeof deps.debug === 'function' ? deps.debug : null; // diagnostics: (event, details)
@@ -366,6 +415,60 @@ export function createSync(deps = {}) {
   const quotaHeld = new Set(), capped = new Set(); // threads waiting for server room / under the server's thread cap
   const ctrls = new Set(); // every request in flight (stop() and forget() abort them all)
   const touched = new Set(); // threads whose record or outbox changed: followers re-read them (badges, counts)
+  // ── the phone budget ──
+  const upHeld = new Map(); // threadId → {wifi, wifiBytes, big}: entries kept here (a video waiting for Wi-Fi; one over 95 MB)
+  const allowNow = new Set(); // 'threadId' or 'threadId/entryId': Download now (this session), whatever the network
+  const printMemo = new Map(); // threadId → {m} ('hm:'), least recently used out
+  let storageUntil = 0, storageAt = 0, storageEst = null, downloading = null, cacheSwept = false, bigTurn = Promise.resolve();
+  let heldRemarked = false; // this session re-marked the threads whose media waited (rec.held) once off mobile data
+  // A media blob whose download failed (reset, timeout, 5xx) or that the server lacks (404): not asked for again until
+  // its backoff ends, so one bad blob never costs a download (or a thread read) on every poll. → {n, until, why}
+  const blobBack = new Map();
+  const retryBlobs = () => { for (const [h, x] of [...blobBack]) if (x.why === 'later') blobBack.delete(h); };
+  const blobBackoff = (h) => { const x = blobBack.get(h); return x && x.until > now() ? x.why : null; };
+  function blobFailed(h, why, after = 0) {
+    const n = (blobBack.get(h)?.n || 0) + 1;
+    blobBack.set(h, { n, why, until: now() + Math.max(after || 0, Math.min(B.blobRetryMaxMs, B.blobRetryMinMs * 2 ** (n - 1))) });
+  }
+  const MEDIA_HELD_SET = new Set(MEDIA_HELD);
+  const isQuota = (err) => Boolean(err) && (err.name === 'QuotaExceededError' || /quota/i.test(String(err.message || '')));
+  // On mobile data or Data Saver (navigator.connection), or the debug switch says so.
+  function metered() {
+    try {
+      if (deps.forceCellular?.()) return true;
+      const c = deps.connection?.() || null;
+      return Boolean(c && (c.type === 'cellular' || c.saveData === true));
+    } catch { return false; }
+  }
+  const cellOk = () => Boolean(cfg?.videosOnCellular);
+  const bigVideo = (b) => blobKind(b.t) === 'video' && (Number(b.n) || 0) > B.cellularMaxBytes;
+  // planPush's holdBlobs: a large video doesn't go up over mobile data (the owner's data plan), unless allowed.
+  const holdBlobs = (blobs) => (!cellOk() && blobs.some(bigVideo) && metered() ? 'wifi' : null);
+  const allowed = (tid, eid) => allowNow.has(tid) || allowNow.has(`${tid}/${eid}`);
+  function storageFull() { storageUntil = now() + B.storagePauseMs; emitSoon(); }
+  // Room for n more bytes under storageMaxShare of this browser's quota (navigator.storage.estimate, read at most every
+  // storageCheckMs; what this session downloads since is added: the blob in the cache plus its data: URL).
+  async function storageRoom(n) {
+    if (typeof deps.estimate !== 'function') return true;
+    if (!storageEst || now() - storageAt > B.storageCheckMs) {
+      storageAt = now();
+      try { const e = await deps.estimate(); storageEst = e && Number.isFinite(e.usage) && Number.isFinite(e.quota) && e.quota > 0 ? { usage: e.usage, quota: e.quota } : null; } catch { storageEst = null; }
+    }
+    if (!storageEst) return true;
+    if ((storageEst.usage + n * 2.5) / storageEst.quota <= B.storageMaxShare) { storageEst.usage += n * 2.5; return true; }
+    storageFull();
+    return false;
+  }
+  // Why a media blob can't be downloaded now: 'storage' | 'wifi' | 'later' (large: after the rest, one at a time) | null.
+  async function mediaWait(ref, tid, eid, { later = true } = {}) {
+    if (ref.t === 'text') return null;
+    const back = blobBackoff(ref.$b);
+    if (back) return back;
+    if (storageUntil > now()) return 'storage';
+    if (bigVideo(ref) && !cellOk() && !allowed(tid, eid) && metered()) return 'wifi';
+    if (later && ref.n > B.bigBlobBytes) return 'later';
+    return (await storageRoom(ref.n)) ? null : 'storage';
+  }
   let memoChars = 0, traced = false, testerMarks = null, phase = 'idle', progress = null, lastError = null, retryAt = 0, backoff = 0;
   let quotaFull = false, quotaNeed = 0, capUntil = 0, peerSeen = 0, reconciled = false;
   let server = null, serverAt = 0, lastRows = null, indexEtag = null, listWrites = 0, cycling = null, pendingOpts = null, chain = Promise.resolve();
@@ -596,7 +699,32 @@ export function createSync(deps = {}) {
     }
     for (const [id, n] of heldMedia) if (n && !recs.has(id)) withMedia++;
     for (const n of blobBlocked.values()) blobs += n;
-    return { waiting, synced, tooLarge: big, refused, quarantined: qKeys.size, heldMedia: withMedia, blobRefused: blobs, threadCap: capUntil > now(), localOnly: localOnly.size };
+    const inb = { n: 0, wifi: 0, wifiBytes: 0, storage: 0, later: 0 };
+    for (const v of inbound.values()) {
+      inb.n++;
+      if (v?.wait === 'wifi') { inb.wifi++; inb.wifiBytes += Number(v.bytes) || 0; } else if (v?.wait === 'storage') inb.storage++; else if (v?.wait === 'later') inb.later++;
+    }
+    let upWifi = 0, upWifiBytes = 0, tooBigMedia = 0;
+    for (const x of upHeld.values()) { upWifi += x.wifi; upWifiBytes += x.wifiBytes; tooBigMedia += x.big; }
+    return {
+      waiting, synced, tooLarge: big, refused, quarantined: qKeys.size, heldMedia: withMedia, blobRefused: blobs, threadCap: capUntil > now(), localOnly: localOnly.size,
+      inbound: inb, upWifi, upWifiBytes, tooBigMedia, storageFull: storageUntil > now(),
+    };
+  }
+  // The banner over an open thread: its entries still on their way here. → {n, wifi, storage, videos, bytes, downloading}
+  function noteFor(tid) {
+    const out = { n: 0, wifi: 0, storage: 0, videos: 0, bytes: 0, downloading: false };
+    if (!syncId(tid) || !cfg?.enabled) return out;
+    for (const [k, v] of inbound) {
+      if (!k.startsWith(`${tid}/`)) continue;
+      out.n++;
+      if (v?.wait === 'wifi') out.wifi++; else if (v?.wait === 'storage') out.storage++;
+      if (v?.video) out.videos++;
+      out.bytes += Number(v?.bytes) || 0;
+    }
+    const lv = !leader && leaderView ? leaderView.downloading : downloading;
+    out.downloading = Boolean(out.n && lv?.t === tid);
+    return out;
   }
   // A follower shows what the leader (the tab doing the work) reports: its counts, its pause and its state.
   function status() {
@@ -610,14 +738,16 @@ export function createSync(deps = {}) {
       progress: lv ? lv.progress : progress, lastOkAt: Math.max(cfg?.lastOkAt || 0, lv?.lastOkAt || 0), retryAt,
       ...c, server: lv?.server || server, quotaFull: lv ? Boolean(lv.quotaFull) : quotaFull,
       leader, firstDone: Boolean(cfg?.firstDone), media: { image: Boolean(media.image), video: Boolean(media.video) },
+      cellular: Boolean(cfg?.videosOnCellular), metered: metered(), network: Boolean(deps.connection?.() || deps.forceCellular?.()),
+      downloading: lv ? lv.downloading || null : downloading,
     };
   }
   function emit() {
     const s = status();
     safe(() => onStatus(s));
     if (!leader) { touched.clear(); return; }
-    const { waiting, synced, tooLarge, refused, quarantined, heldMedia: hm, blobRefused: br, threadCap, localOnly: lo } = s;
-    post({ status: { state: s.state === 'paused' || s.state === 'off' ? null : s.state, paused: s.paused, errorKind: s.errorKind, progress: s.progress, lastOkAt: s.lastOkAt, server: s.server, quotaFull: s.quotaFull, counts: { waiting, synced, tooLarge, refused, quarantined, heldMedia: hm, blobRefused: br, threadCap, localOnly: lo } } });
+    const { waiting, synced, tooLarge, refused, quarantined, heldMedia: hm, blobRefused: br, threadCap, localOnly: lo, inbound: ib, upWifi, upWifiBytes, tooBigMedia, storageFull: sf } = s;
+    post({ status: { state: s.state === 'paused' || s.state === 'off' ? null : s.state, paused: s.paused, errorKind: s.errorKind, progress: s.progress, lastOkAt: s.lastOkAt, server: s.server, quotaFull: s.quotaFull, downloading: s.downloading, counts: { waiting, synced, tooLarge, refused, quarantined, heldMedia: hm, blobRefused: br, threadCap, localOnly: lo, inbound: ib, upWifi, upWifiBytes, tooBigMedia, storageFull: sf } } });
     if (touched.size) { post({ touch: [...touched] }); touched.clear(); }
   }
   const emitSoon = () => { if (statusQueued) return; statusQueued = true; queueMicrotask(() => { statusQueued = false; emit(); }); };
@@ -740,6 +870,8 @@ export function createSync(deps = {}) {
       if (Array.isArray(m.dirty)) { for (const id of m.dirty) if (syncId(id)) dirty.set(id, stamp()); schedulePush(); }
       if (m.flush) run({ pull: false, hidden: !visible() });
       if (m.probe) run({ pull: true }); // a follower's passcode was refused: one request with this tab's says whether it's everyone's
+      if (m.download && syncId(m.download.t)) downloadNow(m.download.t, syncId(m.download.e) ? m.download.e : null);
+      if (m.net) netChanged();
       if (typeof m.kick === 'string') { if (PEER_KICKS.has(m.kick)) peerSeen = now(); kick(m.kick); }
       else if (Array.isArray(m.full)) run({ pull: false });
       return;
@@ -763,6 +895,8 @@ export function createSync(deps = {}) {
       if (rec) recs.set(id, rec); else recs.delete(id);
       if (d === undefined) dirty.delete(id); else dirty.set(id, d);
       if (del) deleting.set(id, del); else deleting.delete(id);
+      const ins = await store.entries(`in:${id}/`).catch(() => null);
+      if (ins) { for (const k of [...inbound.keys()]) if (k.startsWith(`${id}/`)) inbound.delete(k); for (const [k, v] of ins) inbound.set(k.slice(3), v); }
     }
   }
   async function followerTouch(ids) {
@@ -816,7 +950,7 @@ export function createSync(deps = {}) {
   // {status, ok, headers, json (the parsed body or {}), bytes (Uint8Array, with bytes: true)}. 401 → pause + Halt;
   // 403 owner_only / tester_* (a tester cookie answered for a wrong passcode) → pause + Halt; 429 → lockout pause +
   // Halt; 503 unconfigured/disabled → hourly pause + Halt; other 5xx → Retry unless allowed.
-  async function api(method, path, { json, body, type, headers = {}, keepalive = false, allow = null, bytes = false, timeout = SYNC_CLIENT.requestTimeoutMs, signal = null } = {}) {
+  async function api(method, path, { json, body, type, headers = {}, keepalive = false, allow = null, bytes = false, blob = false, timeout = SYNC_CLIENT.requestTimeoutMs, signal = null } = {}) {
     if (forgotten) throw new Halt('cleared');
     const p = pausedNow();
     if (p && HARD.has(p.reason)) throw new Halt(p.reason);
@@ -850,9 +984,12 @@ export function createSync(deps = {}) {
       try { r = await Promise.race([fetchImpl(base + path, init), gave]); } catch (err) { throw err instanceof Retry ? err : new Retry(`network: ${err?.message || err}`, 0, true); }
       if (r.status === 401) { await pauseFor('passcode'); throw new Halt('401'); }
       if (r.status === 429) { await pauseFor('lockout', now() + SYNC_CLIENT.lockoutMs); throw new Halt('429'); }
-      let data = null;
+      let data = null, got = null;
       if (bytes && r.ok) {
         try { data = new Uint8Array(await Promise.race([r.arrayBuffer(), gave])); } catch (err) { throw err instanceof Retry ? err : new Retry(`download: ${err?.message || err}`, 0, true); }
+      } else if (blob && r.ok) {
+        // a Blob: the browser may keep a large download on disk instead of in this tab's memory
+        try { got = await Promise.race([r.blob(), gave]); } catch (err) { throw err instanceof Retry ? err : new Retry(`download: ${err?.message || err}`, 0, true); }
       } else if (r.status !== 304 && r.status !== 204) {
         try { data = await Promise.race([r.json(), gave]); } catch (err) { if (err instanceof Retry) throw err; data = null; }
       }
@@ -869,7 +1006,7 @@ export function createSync(deps = {}) {
         throw new Retry(`503 ${j.code || ''}`, Number.isFinite(after) && after > 0 ? after * 1000 : 0);
       }
       if (r.status >= 500 && !allow?.includes(r.status)) throw new Retry(`HTTP ${r.status}`);
-      return { status: r.status, ok: r.ok, headers: r.headers, json: j, bytes: data instanceof Uint8Array ? data : null };
+      return { status: r.status, ok: r.ok, headers: r.headers, json: j, bytes: data instanceof Uint8Array ? data : null, blob: got };
     } finally {
       timers.clearTimeout(timer);
       ctrls.delete(ctl);
@@ -885,7 +1022,7 @@ export function createSync(deps = {}) {
     try {
       const q = await locks?.query?.();
       for (const l of [...(q?.held || []), ...(q?.pending || [])]) if (typeof l?.name === 'string' && l.name.startsWith(RUN_LOCK)) set.add(l.name.slice(RUN_LOCK.length));
-    } catch {}
+    } catch { set.unknown = true; } // the locks couldn't be read: nobody may be called an orphan from this
     return set;
   }
   // The thread as IndexedDB holds it, with the run locks looked at before and after that read (both kept): a lock let
@@ -903,21 +1040,45 @@ export function createSync(deps = {}) {
     for (const id of held.keys()) set.add(id);
     return set;
   }
+  // A push plan's locked: also an entry whose newer server version waits here for its media (Wi-Fi, room, its turn, or
+  // a missing blob's backoff). Sending this device's edit of it would answer the same unresolved conflict on every poll
+  // (planPushResult leaves a parked version alone); it goes up, as a fork if both changed, once that version is in.
+  const pushLockedFor = (tid, locked) => (eid) => Boolean(locked?.has?.(eid)) || parkedWait(inbound.get(`${tid}/${eid}`));
+  // The record a push plans with: a full read that is due only for media still waiting here (rec.wait) isn't asked for
+  // again by every push (that read can bring nothing now; the downloads re-read the thread when its blobs can come), so
+  // a refetch the plan reports is then a new reason of its own.
+  const forPush = (tid, rec) => (rec?.refetch && rec.wait && !rec.full && waitingIn(tid) ? { ...rec, refetch: false } : rec);
 
-  // ── hash memo (media only, this session) ──
+  // ── hash memo (media only) ──
   // A media string hashed once per session. The memo answers only for that exact string (===: the same object in
   // O(1), an identical copy re-read from IndexedDB in one native compare) — never for a sample of it — and long text
-  // is never memoized at all (dehydrate hashes it in full). Bounded by memoChars, least recently used first out.
+  // is never memoized at all (dehydrate hashes it in full). Bounded by memoChars, least recently used first out. A string
+  // over a quarter of that (a long video) goes to its own smaller memo (bigMemoChars, one or two clips): comparing a
+  // re-read copy with === costs a few ms where the print memo below reads every character (about 190 ms per 60 MB clip
+  // on each push of a thread holding it); a clip bigger than that budget is left to the print memo alone.
   const memoKey = (tid, eid, path) => `${tid}\u0001${eid}\u0001${path}`;
+  const bigMemo = new Map();
+  let bigChars = 0;
   function memoGet(tid, eid, path, s) {
-    const k = memoKey(tid, eid, path), x = mediaMemo.get(k);
+    const k = memoKey(tid, eid, path), m = s.length > SYNC_CLIENT.memoChars / 4 ? bigMemo : mediaMemo, x = m.get(k);
     if (!x || x.s !== s) return undefined;
-    mediaMemo.delete(k); mediaMemo.set(k, x);
+    m.delete(k); m.set(k, x);
     return x.h;
   }
   function memoSet(tid, eid, path, s, h) {
-    const k = memoKey(tid, eid, path), x = mediaMemo.get(k);
+    const k = memoKey(tid, eid, path), x = mediaMemo.get(k), y = bigMemo.get(k);
     if (x) { memoChars -= x.s.length; mediaMemo.delete(k); }
+    if (y) { bigChars -= y.s.length; bigMemo.delete(k); }
+    if (s.length > SYNC_CLIENT.memoChars / 4) {
+      if (s.length > B.bigMemoChars) return;
+      bigMemo.set(k, { s, h });
+      bigChars += s.length;
+      for (const [k0, v0] of bigMemo) {
+        if (bigChars <= B.bigMemoChars) break;
+        bigMemo.delete(k0); bigChars -= v0.s.length;
+      }
+      return;
+    }
     mediaMemo.set(k, { s, h });
     memoChars += s.length;
     for (const [k0, v0] of mediaMemo) {
@@ -925,7 +1086,91 @@ export function createSync(deps = {}) {
       mediaMemo.delete(k0); memoChars -= v0.s.length;
     }
   }
-  const hasher = (tid) => (e) => dehydrate(e, { memo: syncId(e?.id) ? { get: (p, s) => memoGet(tid, e.id, p, s), set: (p, s, h) => memoSet(tid, e.id, p, s, h) } : null });
+  // The print memo ('hm:<thread>'): a media string of at least printMemoChars is recognised across sessions by its
+  // length and fullPrint (every character, about 2 ms per MB, no decoding and no 60 MB buffer) — so a thread holding a
+  // video costs no SHA-256 of it on each new turn. Content identity on the wire stays SHA-256: this only says "the same
+  // string this device already hashed at this place in this entry".
+  async function printsOf(tid) {
+    let x = printMemo.get(tid);
+    if (x) { printMemo.delete(tid); printMemo.set(tid, x); return x; }
+    const m = await store.get(`hm:${tid}`).catch(() => null);
+    x = { m: m && typeof m === 'object' && !Array.isArray(m) ? m : {}, last: null };
+    printMemo.set(tid, x);
+    if (printMemo.size > 100) printMemo.delete(printMemo.keys().next().value);
+    return x;
+  }
+  const ownKey = (o, k) => Boolean(o) && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
+  async function printGet(tid, eid, path, s) {
+    if (s.length < B.printMemoChars) return undefined;
+    const x = await printsOf(tid), r = ownKey(x.m, eid) && ownKey(x.m[eid], path) ? x.m[eid][path] : null;
+    if (!Array.isArray(r) || r[0] !== s.length) return undefined;
+    const p = fullPrint(s);
+    x.last = { s, p };
+    return r[1] === p && typeof r[2] === 'string' ? r[2] : undefined;
+  }
+  async function printSet(tid, eid, path, s, h) {
+    if (s.length < B.printMemoChars || forgotten) return;
+    const x = await printsOf(tid);
+    const p = x.last?.s === s ? x.last.p : fullPrint(s);
+    x.last = null;
+    const cur = ownKey(x.m, eid) && x.m[eid] && typeof x.m[eid] === 'object' ? x.m[eid] : {};
+    const r = ownKey(cur, path) ? cur[path] : null;
+    if (Array.isArray(r) && r[0] === s.length && r[1] === p && r[2] === h) return;
+    x.m = { ...x.m, [eid]: { ...cur, [path]: [s.length, p, h] } };
+    if (!forgotten) await store.set(`hm:${tid}`, x.m).catch(warn);
+  }
+  async function dropPrints(tid) { printMemo.delete(tid); await store.del(`hm:${tid}`).catch(() => {}); }
+  const hasher = (tid) => (e) => dehydrate(e, {
+    memo: syncId(e?.id) ? {
+      get: (p, s) => { const h = memoGet(tid, e.id, p, s); return h !== undefined || s.length < B.printMemoChars ? h : printGet(tid, e.id, p, s); },
+      set: (p, s, h) => { memoSet(tid, e.id, p, s, h); return printSet(tid, e.id, p, s, h); },
+    } : null,
+  });
+
+  // ── the download cache ('bc:<sha256>' → {at, blob}) ──
+  // A media blob downloaded for an entry that isn't applied yet (its other blobs are still coming, or it is large and
+  // waits its turn): kept in the sync store (a Blob, which browsers keep on disk), so a re-read, an interrupted cycle or
+  // a reload never downloads it again. Dropped once applied, when no parked entry needs it, or after cacheMaxAgeMs.
+  const cacheValue = (x) => (typeof Blob === 'function' && x instanceof Uint8Array ? new Blob([x]) : x);
+  const sizeOf = (x) => (x == null ? -1 : typeof x.size === 'number' ? x.size : typeof x.byteLength === 'number' ? x.byteLength : -1);
+  async function cacheGet(ref) {
+    const v = await store.get(`bc:${ref.$b}`).catch(() => null);
+    return v && sizeOf(v.blob) === ref.n ? v.blob : null;
+  }
+  async function cacheSet(hash, x) {
+    if (forgotten) return false;
+    try { await store.set(`bc:${hash}`, { at: now(), blob: cacheValue(x) }); return true; } catch (err) {
+      if (isQuota(err)) storageFull(); else warn(err);
+      return false;
+    }
+  }
+  const neededHashes = () => {
+    const need = new Set();
+    for (const v of inbound.values()) for (const h of [...(Array.isArray(v?.missing) ? v.missing : []), ...(Array.isArray(v?.have) ? v.have : [])]) need.add(h);
+    return need;
+  };
+  async function dropCache(hashes) {
+    if (!hashes?.size) return;
+    const need = neededHashes();
+    for (const h of hashes) if (!need.has(h)) await store.del(`bc:${h}`).catch(() => {});
+  }
+  async function sweepCache() {
+    const need = neededHashes();
+    for (const [k, v] of await store.entries('bc:').catch(() => [])) {
+      if (!need.has(k.slice(3)) || !(now() - (v?.at || 0) < B.cacheMaxAgeMs)) await store.del(k).catch(() => {});
+    }
+  }
+  // A blob as the data: URL the app keeps: FileReader in browsers (no base64 of a large video built by hand), with the
+  // type exactly as the ref has it (an entry re-dehydrates to the very same ref).
+  async function toDataUrl(x, t) {
+    if (typeof deps.dataUrl === 'function') return deps.dataUrl(x, t);
+    if (typeof Blob === 'function' && x instanceof Blob && typeof FileReader === 'function') {
+      const url = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(r.error); r.readAsDataURL(x); });
+      return `data:${t};base64,${url.slice(url.indexOf(',') + 1)}`;
+    }
+    const bytes = x instanceof Uint8Array ? x : new Uint8Array(x instanceof ArrayBuffer ? x : await x.arrayBuffer());
+    return refValue({ t }, bytes);
+  }
 
   // ── pulled entries: blobs, validation, quarantine ──
   async function download(ref) {
@@ -937,24 +1182,83 @@ export function createSync(deps = {}) {
     }
     throw new Error('blob checksum mismatch');
   }
+  // A large blob straight into the cache, checked against its SHA-256 (one buffer of it, briefly). → 'ok' | 'missing'
+  // (404) | 'storage' (the cache write was refused). A second mismatch throws (the entry is set aside).
+  async function fetchToCache(ref) {
+    for (let i = 0; i < 2; i++) {
+      const r = await api('GET', `blob/${ref.$b}`, { blob: true, timeout: blobTimeout(ref.n) });
+      if (r.status === 404) return 'missing';
+      if (!r.ok || !r.blob) throw new Retry(`blob ${r.status}`);
+      let ok = sizeOf(r.blob) === ref.n;
+      if (ok) ok = (await sha256hex(new Uint8Array(await r.blob.arrayBuffer()))) === ref.$b;
+      if (ok) return (await cacheSet(ref.$b, r.blob)) ? 'ok' : 'storage';
+    }
+    throw new Error('blob checksum mismatch');
+  }
   // The local copy at the same place in the same entry saves a download — but only once its SHA-256 matches the ref
-  // (the media memo answers for an exact string it already hashed). Anything else: GET blob/<hash>.
-  async function blobFor(tid, eid, ref, path, local) {
+  // (the memos answer for a string they already hashed). Then the download cache; then, for media, the phone budget
+  // (mediaWait): a blob that can't come now leaves the entry parked with the reason. one: this entry's bookkeeping
+  // {wait: Map(hash → reason), refs: Map(hash → ref), got: Map(hash → bytes downloaded now), used: Set (cache hits)};
+  // per: per plan {big: the entry whose large blobs this re-read hydrates} — one entry's per re-read, so two large videos
+  // of different entries are never in memory at once.
+  async function blobFor(tid, eid, ref, path, local, one, per) {
+    one.refs.set(ref.$b, ref);
     const v = local ? valueAt(local, path) : undefined;
     if (typeof v === 'string') {
       if (ref.t === 'text') {
         if (utf8Length(v) === ref.n && (await sha256hex(utf8(v))) === ref.$b) return v;
       } else if (v.startsWith(`data:${ref.t};`)) {
-        if (memoGet(tid, eid, path, v) === ref.$b) return v;
+        if (memoGet(tid, eid, path, v) === ref.$b || (await printGet(tid, eid, path, v)) === ref.$b) return v;
         const payload = v.slice(v.indexOf(',') + 1);
         if (base64Length(payload) === ref.n) {
           let h = null;
           try { h = await sha256hex(fromBase64(payload)); } catch {}
-          if (h === ref.$b) { memoSet(tid, eid, path, v, h); return v; }
+          if (h === ref.$b) { memoSet(tid, eid, path, v, h); await printSet(tid, eid, path, v, h); return v; }
         }
       }
     }
-    return download(ref);
+    if (ref.t === 'text') {
+      if (blobBackoff(ref.$b)) { one.wait.set(ref.$b, 'missing'); return null; }
+      const bytes = await download(ref);
+      if (bytes == null) { one.wait.set(ref.$b, 'missing'); blobFailed(ref.$b, 'missing'); }
+      return bytes;
+    }
+    if (one.got.has(ref.$b)) return one.got.get(ref.$b);
+    // downloaded by an earlier plan of this same pull (the thread changed meanwhile and was planned again)
+    if (per.carry?.has(ref.$b)) {
+      const bytes = per.carry.get(ref.$b);
+      per.bytes += ref.n; per.owner = eid;
+      one.got.set(ref.$b, bytes);
+      return bytes;
+    }
+    const big = ref.n > B.bigBlobBytes;
+    // Memory: one entry's large blobs per re-read (an entry needs all of its own), and about planMediaBytes of media
+    // per re-read in all (a thread of fifty photos isn't held in memory at once): the rest waits its turn ('later').
+    const over = (per.bytes > 0 && per.bytes + ref.n > B.planMediaBytes && per.owner !== eid) || (big && per.big && per.big !== eid);
+    const cached = await cacheGet(ref);
+    if (cached != null) {
+      if (over) { one.wait.set(ref.$b, 'later'); return null; }
+      if (big) per.big = eid;
+      per.bytes += ref.n; per.owner = eid;
+      one.used.add(ref.$b);
+      return toDataUrl(cached, ref.t);
+    }
+    const wait = over ? 'later' : await mediaWait(ref, tid, eid);
+    if (wait) { one.wait.set(ref.$b, wait); return null; }
+    let bytes;
+    // One media download failing (a reset, a timeout, a 5xx) parks its entry for later with a backoff: the thread's
+    // text still applies and the cycle still finishes, instead of the whole thread (and cycle) failing on every poll.
+    try { bytes = await download(ref); } catch (err) {
+      if (!(err instanceof Retry)) throw err;
+      blobFailed(ref.$b, 'later', err.after);
+      one.wait.set(ref.$b, 'later');
+      return null;
+    }
+    if (bytes == null) { one.wait.set(ref.$b, 'missing'); blobFailed(ref.$b, 'missing'); return null; }
+    per.bytes += ref.n; per.owner = eid;
+    one.got.set(ref.$b, bytes);
+    per.carry?.set(ref.$b, bytes);
+    return bytes;
   }
   function validEntry(tid, entry, createdAt) {
     try {
@@ -964,50 +1268,182 @@ export function createSync(deps = {}) {
   }
   async function quarantine(tid, view, reason) {
     const key = `${tid}/${view.id}/${view.h}`;
-    if (!qKeys.has(key)) { qKeys.add(key); await store.set(`q:${key}`, { d: view.d, reason, at: now() }).catch(warn); }
+    if (!qKeys.has(key)) { qKeys.add(key); await store.set(`q:${key}`, { d: view.d ?? null, reason, at: now() }).catch(warn); }
     if (!toldQuarantine) { toldQuarantine = true; toast(COPY.quarantine); }
     emitSoon();
   }
-  async function park(tid, view, missing) {
+  const WAIT_ORDER = ['missing', 'storage', 'wifi', 'later'];
+  const WAITS = new Set(['wifi', 'storage', 'later']); // parked for the phone budget (the blobs are there to fetch)
+  // Parked for something a re-read of the thread can't change now: the phone budget, or blobs the server lacks while
+  // their backoff runs (after it, the thread is read again: another device may have uploaded them meanwhile).
+  const parkedWait = (v) => WAITS.has(v?.wait) || (v?.wait === 'missing' && Array.isArray(v.missing) && v.missing.length > 0 && v.missing.every((h) => blobBackoff(h)));
+  // Every parked entry of this thread waits like that (the index then skips re-reading it).
+  const waitingIn = (tid) => {
+    let any = false;
+    for (const [k, v] of inbound) if (k.startsWith(`${tid}/`)) { if (!parkedWait(v)) return false; any = true; }
+    return any;
+  };
+  async function park(tid, view, missing, one = null) {
     const key = `${tid}/${view.id}`;
-    const v = { rev: view.rev, h: view.h, missing, at: now() };
+    const refs = missing.map((h) => one?.refs.get(h)).filter(Boolean).map((r) => ({ $b: r.$b, t: r.t, n: r.n }));
+    const waits = missing.map((h) => one?.wait.get(h) || 'missing');
+    const media = refs.filter((r) => r.t !== 'text');
+    // have: what already came down for it (now, or earlier into the cache): the cache keeps those while it waits
+    const have = one ? [...new Set([...one.got.keys(), ...one.used])] : [];
+    const v = { rev: view.rev, h: view.h, missing, refs, have, wait: WAIT_ORDER.find((w) => waits.includes(w)) || 'missing', bytes: media.reduce((n, r) => n + r.n, 0), video: media.some((r) => blobKind(r.t) === 'video'), at: now() };
     inbound.set(key, v);
+    touched.add(tid);
     await store.set(`in:${key}`, v).catch(warn);
+    // what already came down for it waits in the cache: a re-read or a reload doesn't fetch it again
+    if (one) for (const [h, bytes] of one.got) await cacheSet(h, bytes);
   }
   async function unpark(tid, eid) {
     const key = `${tid}/${eid}`;
-    if (inbound.delete(key)) await store.del(`in:${key}`).catch(warn);
+    if (inbound.delete(key)) { touched.add(tid); await store.del(`in:${key}`).catch(warn); }
   }
-  // Hydrates every remote slot of a plan → Map(entryId → entry). Invalid entries are quarantined (never applied);
-  // entries whose blobs are missing are parked; network trouble aborts the cycle (Retry/Halt propagate).
-  async function hydrateSlots(tid, local, plan) {
+  // Hydrates every remote slot of a plan → Map(entryId → entry), with .used (download-cache hits, dropped once the plan
+  // is applied). Invalid entries are quarantined (never applied); entries whose blobs can't come now are parked (their
+  // text-only neighbours apply at once); network trouble aborts the cycle (Retry/Halt propagate).
+  async function hydrateSlots(tid, local, plan, carry = null) {
     const out = new Map();
+    out.used = new Set();
     const remote = plan.slots.filter((s) => s.from === 'remote');
     if (!remote.length) return out;
     const byId = new Map((local?.entries || []).map((e) => [e.id, e]));
     const many = remote.filter((s) => refsOf(s.r.d).size).length;
     if (many > 2) { progress = { verb: 'download', done: 0, total: many }; emitSoon(); }
+    const per = { big: null, bytes: 0, owner: null, carry };
     for (const s of remote) {
       halted();
       const why = checkPulledEntry(s.r);
       if (why) { await quarantine(tid, s.r, why); continue; }
-      const learned = [];
+      const learned = [], one = { wait: new Map(), refs: new Map(), got: new Map(), used: new Set() };
       let got;
       try {
-        got = await hydrate(s.r.d, (ref, path) => { learned.push([path, ref]); return blobFor(tid, s.id, ref, path, byId.get(s.id)); });
+        got = await hydrate(s.r.d, (ref, path) => { learned.push([path, ref]); return blobFor(tid, s.id, ref, path, byId.get(s.id), one, per); });
       } catch (err) {
         if (err instanceof Halt || err instanceof Retry) throw err;
         await quarantine(tid, s.r, String(err?.message || err).slice(0, 120));
         continue;
       }
       if (many > 2 && progress?.verb === 'download') { progress.done++; emitSoon(); }
-      if (!got.entry) { await park(tid, s.r, got.missing); continue; }
+      if (!got.entry) { await park(tid, s.r, got.missing, one); continue; }
       if (got.entry.id !== s.id || !validEntry(tid, got.entry, plan.createdAt)) { await quarantine(tid, s.r, 'invalid'); continue; }
-      for (const [path, ref] of learned) { if (ref.t === 'text') continue; const v = valueAt(got.entry, path); if (typeof v === 'string') memoSet(tid, s.id, path, v, ref.$b); }
+      for (const [path, ref] of learned) {
+        if (ref.t === 'text') continue;
+        const v = valueAt(got.entry, path);
+        if (typeof v === 'string') { memoSet(tid, s.id, path, v, ref.$b); await printSet(tid, s.id, path, v, ref.$b); }
+      }
       out.set(s.id, got.entry);
+      for (const h of one.used) out.used.add(h);
       await unpark(tid, s.id);
     }
     return out;
+  }
+  // Parked entries the server no longer holds in that version (replaced, or deleted everywhere) are let go after a full
+  // read of the thread (view: what the server holds now).
+  // A parked version this device turned out to hold already (the plan had nothing to bring for it: converged, and its
+  // record says so) goes too. plan: the plan just applied.
+  async function unparkStale(tid, view, plan) {
+    const has = new Map(view.entries.map((e) => [e.id, e.h])), rec = recs.get(tid);
+    const brought = new Set(plan.slots.filter((x) => x.from === 'remote').map((x) => x.id));
+    for (const [k, v] of [...inbound]) {
+      if (!k.startsWith(`${tid}/`)) continue;
+      const eid = k.slice(tid.length + 1);
+      if (has.get(eid) !== v?.h || (!brought.has(eid) && rec?.e?.[eid]?.f === v?.h)) await unpark(tid, eid);
+    }
+  }
+
+  // ── large downloads (after the rest of a cycle) ──
+  // Parked entries whose blobs may come now, newest first: each one's blobs go into the cache one at a time (a gate
+  // that closes meanwhile — mobile data, a full disk — leaves it parked with the reason), then its thread is read again
+  // whole, which applies it from the cache. One large blob per re-read, so a thread with several is read once per item.
+  async function drainInbound(sum) {
+    if (!inbound.size) { if (!cacheSwept) { cacheSwept = true; await sweepCache(); } return; }
+    const skip = new Set();
+    const open = (v) => Array.isArray(v?.refs) && v.wait !== 'missing';
+    let total = [...inbound.values()].filter(open).length, done = 0;
+    for (let round = 0; round < B.drainRounds; round++) {
+      halted();
+      const list = [...inbound].filter(([k, v]) => !skip.has(k) && open(v)).sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
+      let picked = null;
+      for (const [key, v] of list) {
+        const tid = key.slice(0, key.indexOf('/')), eid = key.slice(tid.length + 1);
+        if (deleting.has(tid) || hidden.has(tid)) { skip.add(key); continue; }
+        let wait = null;
+        for (const ref of v.refs) {
+          if (ref.t === 'text' || (await cacheGet(ref))) continue;
+          wait = await mediaWait(ref, tid, eid, { later: false });
+          if (wait) break;
+        }
+        if (wait) {
+          skip.add(key);
+          if (wait !== v.wait) { const nv = { ...v, wait }; inbound.set(key, nv); touched.add(tid); await store.set(`in:${key}`, nv).catch(warn); }
+          continue;
+        }
+        picked = { key, v, tid, eid };
+        break;
+      }
+      if (!picked) break;
+      const { key, v, tid, eid } = picked;
+      skip.add(key);
+      progress = { verb: 'download', done, total: Math.max(total, done + 1) };
+      let ready = true, netDown = false;
+      const rewait = async (wait) => {
+        const nv = { ...(inbound.get(key) || v), wait };
+        inbound.set(key, nv); touched.add(tid);
+        await store.set(`in:${key}`, nv).catch(warn);
+      };
+      for (const ref of v.refs) {
+        if (ref.t === 'text' || (await cacheGet(ref))) continue;
+        // The gates again right before each transfer: the network (mobile data now?), the disk or a backoff may have
+        // changed since this entry was picked, or since its previous blob.
+        const gate = blobBackoff(ref.$b) || (storageUntil > now() ? 'storage' : null) || (bigVideo(ref) && !cellOk() && !allowed(tid, eid) && metered() ? 'wifi' : null);
+        if (gate) { ready = false; await rewait(gate); break; }
+        downloading = { t: tid, e: eid, video: blobKind(ref.t) === 'video' };
+        emitSoon();
+        let got;
+        try { got = await fetchToCache(ref); } catch (err) {
+          if (err instanceof Halt) throw err;
+          ready = false;
+          if (err instanceof Retry) {
+            // A failed transfer waits its backoff (parked 'later'); the cycle goes on, so it still completes (first sync,
+            // lastOkAt) and the same large download isn't restarted on every poll. Network gone: no more downloads now.
+            blobFailed(ref.$b, 'later', err.after);
+            if (v.wait !== 'later') await rewait('later');
+            netDown = Boolean(err.net);
+            break;
+          }
+          await quarantine(tid, { id: eid, h: v.h, d: null }, 'blob checksum mismatch');
+          await unpark(tid, eid);
+          break;
+        } finally { downloading = null; }
+        if (got !== 'ok') {
+          ready = false;
+          await rewait(got === 'missing' ? 'missing' : 'storage');
+          if (got === 'missing') {
+            // the server lacks it: the thread is read whole again once the backoff ends (another device may upload it)
+            blobFailed(ref.$b, 'missing');
+            const r = recs.get(tid);
+            if (r) await setRec(tid, { ...r, refetch: true, wait: true });
+          }
+          break;
+        }
+      }
+      done++;
+      emitSoon();
+      if (netDown) break;
+      if (!ready) continue;
+      await pullOne(tid, sum, { full: true });
+      // something new to send meanwhile (a turn just settled): it goes first, the downloads continue right after
+      if (dirty.size || deleting.size) { pendingOpts = { pull: false, hidden: false, ...(pendingOpts || {}) }; break; }
+      // applied: more of this thread's large items may be ready now (each re-read applies one), so they get a turn too
+      if (!inbound.has(key)) for (const k of [...skip]) if (k.startsWith(`${tid}/`) && inbound.get(k)?.wait === 'later') { skip.delete(k); total++; }
+    }
+    progress = null;
+    downloading = null;
+    if (!cacheSwept) { cacheSwept = true; await sweepCache(); }
+    emitSoon();
   }
 
   // ── applying a plan to the local thread (never clobbering what changed meanwhile) ──
@@ -1042,7 +1478,14 @@ export function createSync(deps = {}) {
       const prev = recs.get(id)?.e || {};
       rec = { ...rec, e: { ...prev, ...rec.e }, ...(plan.removeThread ? { deleted: rec.deleted || { at: plan.changedAt || now() } } : { refetch: true }) };
       for (const k of [...inbound.keys()]) if (k.startsWith(`${id}/`)) await unpark(id, k.slice(id.length + 1));
+      await dropPrints(id);
     } else if (!plan.before.length && !out.skipped.length && Number.isFinite(out.thread.updatedAt)) rec = { ...rec, at: out.thread.updatedAt }; // a fresh download: exactly the server's
+    // Every entry left out only waits for its media (Wi-Fi, room, its turn as a large download): the index doesn't send
+    // this thread to be read whole again each minute for nothing — the downloads re-read it when its blobs can come.
+    if (!closed) {
+      const { wait: _w, ...r } = rec;
+      rec = out.skipped.length && out.skipped.every((eid) => parkedWait(inbound.get(`${id}/${eid}`))) ? { ...r, wait: true } : r;
+    }
     await setRec(id, rec);
     if (plan.push && !closed) await markDirty(id);
     if (out.replaced.length) safe(() => dropThumbs(out.replaced));
@@ -1103,6 +1546,7 @@ export function createSync(deps = {}) {
       pullFails.delete(id);
     } catch (err) {
       if (err instanceof Halt || (err instanceof Retry && err.net)) throw err;
+      if (isQuota(err)) storageFull(); // the disk is full: media waits (parked 'storage'), so a retry doesn't fetch it all again
       const n = (f?.n || 0) + 1, local = !(err instanceof Retry);
       const wait = err instanceof Retry && err.after ? err.after : Math.min(SYNC_CLIENT.backoffMaxMs, SYNC_CLIENT.backoffMinMs * 2 ** (n - 1));
       pullFails.set(id, { n, until: now() + wait, local });
@@ -1131,7 +1575,8 @@ export function createSync(deps = {}) {
       if (!rec || !(rec.rev > 0 || rec.deleted)) {
         if (del && !(await hasLocal(id))) { await setRec(id, { ...newRecord(), etag, rev, born: born || 0, title: '', deleted: { at: changedAt } }); continue; }
         want.push({ id, changedAt, full: true });
-      } else if (rec.refetch || rec.full || reborn(rec.born, born)) want.push({ id, changedAt, full: true }); // a re-created thread: read it whole
+      } else if (rec.refetch && rec.wait && !rec.full && rev === rec.rev && etag === rec.etag && !reborn(rec.born, born) && waitingIn(id)) continue; // only media waits: drainInbound
+      else if (rec.refetch || rec.full || reborn(rec.born, born)) want.push({ id, changedAt, full: true }); // a re-created thread: read it whole
       else if (rev > rec.rev) want.push({ id, changedAt, full: false });
       else if (etag !== rec.etag) want.push({ id, changedAt, full: true });
     }
@@ -1154,6 +1599,7 @@ export function createSync(deps = {}) {
   async function pullThread(id, sum = {}, { full = false } = {}) {
     halted();
     if (deleting.has(id) || hidden.has(id)) return;
+    const carry = new Map(); // media downloaded by one plan, reused if the thread changed meanwhile and is planned again
     for (let attempt = 0; attempt < SYNC_CLIENT.replanTries; attempt++) {
       const rec = recs.get(id) || null;
       const local = await localThread(id);
@@ -1167,15 +1613,20 @@ export function createSync(deps = {}) {
       if (why) { warn(`skipped thread ${id} (${why})`); return; }
       if (!view.full && reborn(rec?.born, view.born)) { full = true; attempt--; continue; } // re-created meanwhile: a delta means nothing
       const locked = await lockedIds();
+      // Pending entries no tab is generating (every tab's run locks are visible, and none holds one for them): an
+      // interrupted run's leftover. Without the Web Locks API nothing can be told, so every pending entry waits.
+      const orphans = locks?.query && !locked.unknown && !isLive(id) ? new Set((local?.entries || []).filter((e) => e?.pending === true && !locked.has(e.id) && !ownRuns.has(e.id)).map((e) => e.id)) : null;
       const plan = await planPull({
         local, record: rec, remote: view, now: now(), uid, locked, live: liveIn(id, local, locked),
-        quarantined: (eid, h) => qKeys.has(`${id}/${eid}/${h}`), hashOf: hasher(id),
+        quarantined: (eid, h) => qKeys.has(`${id}/${eid}/${h}`), hashOf: hasher(id), orphans,
       });
       if (plan.partial && !view.full) { full = true; attempt--; continue; } // a local copy missing known entries: read it whole
       if (plan.defer) { deferred.add(id); return; }
-      const hydrated = await hydrateSlots(id, local, plan);
+      const hydrated = await hydrateSlots(id, local, plan, carry);
       const out = await applyLocal(id, plan, hydrated);
       if (!out) continue; // the thread changed while this was planned
+      await dropCache(hydrated.used);
+      if (view.full) await unparkStale(id, view, plan);
       deferred.delete(id);
       sum.pulled = (sum.pulled || 0) + 1;
       return;
@@ -1232,6 +1683,7 @@ export function createSync(deps = {}) {
   async function dropLocal(id) {
     const open = getOpen();
     await db.del(id);
+    await dropPrints(id);
     safe(() => onApplied({ threadIds: [id], open: open?.id === id ? { replaced: [], added: [], removed: [], closed: true } : null }));
     post({ changed: [{ t: id, e: [], removed: [], closed: true }] });
   }
@@ -1265,16 +1717,17 @@ export function createSync(deps = {}) {
       if (rec?.deleted) {
         // Deleted everywhere, and back on this device: a stale tab's re-put goes again; new work revives the thread.
         if (await allStale(thread, rec, hashOf)) { await dropLocal(id); await clearDirty(id, s0); return; }
-        const { deleted, ...rest } = rec;
+        const { deleted, wait: _w, ...rest } = rec;
         rec = { ...rest, refetch: true };
         await setRec(id, rec);
       }
-      const plan = await planPush({ thread, record: rec, locked, media, hashOf });
+      const plan = await planPush({ thread, record: forPush(id, rec), locked: pushLockedFor(id, locked), media, hashOf, holdBlobs });
       if (debug) safe(() => debug('push', { id, plan, open: getOpen()?.id === id, thread }));
-      const mediaHeld = plan.held.filter((h) => h.reason === 'media').length;
-      heldMedia.set(id, mediaHeld);
-      if (!(rec?.rev > 0) && (rec?.held || 0) !== mediaHeld && (mediaHeld || rec)) { rec = { ...(rec || newRecord()), held: mediaHeld }; await setRec(id, rec); }
-      if (plan.refetch) { pullAfter.add(id); if (rec && !rec.refetch) { rec = { ...rec, refetch: true }; await setRec(id, rec); } }
+      noteHeld(id, plan);
+      const mediaHeld = heldMedia.get(id) || 0;
+      // held: media only this device has (Clear this device and the drawer badge ask; Wi-Fi coming back re-marks it)
+      if ((rec?.held || 0) !== mediaHeld && (mediaHeld || rec)) { rec = { ...(rec || newRecord()), held: mediaHeld }; await setRec(id, rec); }
+      if (plan.refetch) { pullAfter.add(id); if (rec && (!rec.refetch || rec.wait)) { const { wait: _w, ...r } = rec; rec = { ...r, refetch: true }; await setRec(id, rec); } }
       if (!plan.dirty) { await settle(id, thread, s0); return; }
       if (hiddenFlush && !(await smallEnough(plan))) return; // blob uploads and big deltas wait for a visible session
       await uploadBlobs(plan, id);
@@ -1302,6 +1755,18 @@ export function createSync(deps = {}) {
       if (!replan) { await settle(id, (await localThread(id)) || thread, s0); return; }
     }
   }
+  // What a push plan left on this device because of its media: the counts line, the badge and the Wi-Fi re-mark.
+  function noteHeld(id, plan) {
+    const x = { wifi: 0, wifiBytes: 0, big: 0 };
+    let media = 0;
+    for (const h of plan.held) {
+      if (!MEDIA_HELD_SET.has(h.reason)) continue;
+      media++;
+      if (h.reason === 'wifi') { x.wifi++; x.wifiBytes += Number(h.bytes) || 0; } else if (h.reason === 'blob_too_large') x.big++;
+    }
+    heldMedia.set(id, media);
+    if (x.wifi || x.big) upHeld.set(id, x); else upHeld.delete(id);
+  }
   async function smallEnough(plan) {
     for (const b of plan.blobs) if (!(await store.get(`b:${b.hash}`).catch(() => null))) return false;
     return pushBodies(plan).reduce((n, b) => n + utf8Length(JSON.stringify(b)), 0) <= SYNC_CLIENT.keepaliveMaxBytes;
@@ -1315,7 +1780,7 @@ export function createSync(deps = {}) {
       if (r.ok) { await upgradeCheck(j); return j; }
       if (r.status === 409 && j.code === 'missing_blobs' && Array.isArray(j.missing) && i === 0) {
         for (const h of j.missing) await store.del(`b:${h}`).catch(() => {});
-        const failed = await putBlobs(plan.blobs.filter((b) => j.missing.includes(b.hash)), id);
+        const failed = await putBlobs(plan.blobs.filter((b) => j.missing.includes(b.hash)), id, plan.gate !== false);
         if (failed.size) return 'replan';
         continue;
       }
@@ -1352,10 +1817,11 @@ export function createSync(deps = {}) {
         return true;
       }
       const hydrated = await hydrateSlots(id, thread, p);
-      if (await applyLocal(id, p, hydrated)) return true;
+      if (await applyLocal(id, p, hydrated)) { await dropCache(hydrated.used); return true; }
     }
     // Kept changing while this was planned: a full pull reconciles with what the server now holds.
-    await setRec(id, { ...(recs.get(id) || newRecord()), refetch: true });
+    const { wait: _w, ...r0 } = recs.get(id) || newRecord();
+    await setRec(id, { ...r0, refetch: true });
     pullAfter.add(id);
     return false;
   }
@@ -1378,13 +1844,22 @@ export function createSync(deps = {}) {
         for (const h of r.json.missing || []) missing.add(h);
       }
       for (const b of unknown) if (!missing.has(b.hash)) await store.set(`b:${b.hash}`, 1).catch(warn);
-      for (const [h, why] of await putBlobs(unknown.filter((b) => missing.has(b.hash)), tid)) failed.set(h, why);
+      for (const [h, why] of await putBlobs(unknown.filter((b) => missing.has(b.hash)), tid, plan.gate !== false)) failed.set(h, why);
     }
     if (!failed.size) return;
     const keep = plan.entries.filter((e) => ![...refsOf(e.d)].some((h) => failed.has(h)));
     const refusedHere = plan.entries.filter((e) => [...refsOf(e.d)].some((h) => failed.get(h) === 'refused')).length;
     if ([...failed.values()].includes('quota')) quotaHeld.add(tid);
     if (refusedHere) blobBlocked.set(tid, refusedHere);
+    // a video that has to wait for Wi-Fi after all: held like one planned on mobile data (the badge, Clear this device,
+    // and the re-mark when Wi-Fi is back, also after a reload through rec.held)
+    const wifi = plan.entries.filter((e) => [...refsOf(e.d)].some((h) => failed.get(h) === 'wifi'));
+    if (wifi.length) {
+      for (const e of wifi) plan.held.push({ id: e.id, reason: 'wifi', bytes: plan.blobs.filter((b) => refsOf(e.d).has(b.hash)).reduce((n, b) => n + (b.n || 0), 0) });
+      noteHeld(tid, plan);
+      const r = recs.get(tid) || newRecord(), n = heldMedia.get(tid) || 0;
+      if ((r.held || 0) !== n) await setRec(tid, { ...r, held: n });
+    }
     for (const e of plan.entries) if (!keep.includes(e)) delete plan.sent[e.id];
     plan.entries = keep;
     plan.blobs = plan.blobs.filter((b) => !failed.has(b.hash));
@@ -1398,7 +1873,8 @@ export function createSync(deps = {}) {
   // PUT blob/<hash>, text and images before videos, at most uploadsInFlight at a time. → Map(hash → 'quota' |
   // 'refused') of what the server won't take now. While the server is full (507) nothing is uploaded at all. The first
   // failure stops the other upload too (its request is aborted, it takes no next blob) before the error goes up.
-  async function putBlobs(list, tid) {
+  // gate: false for a delete's kept entries (they were planned with the Wi-Fi rule already, and go up with the delete).
+  async function putBlobs(list, tid, gate = true) {
     const failed = new Map();
     if (quotaFull) { for (const b of list) failed.set(b.hash, 'quota'); return failed; }
     const rank = (b) => (b.kind === 'text' ? 0 : b.kind === 'image' ? 1 : 2);
@@ -1407,13 +1883,22 @@ export function createSync(deps = {}) {
     const ctl = new AbortController();
     let i = 0, sent = 0, stopErr = null;
     if (order.length > 2) { progress = { verb: 'upload', done: 0, total: order.length, left: total }; emitSoon(); }
+    // One blob over bigBlobBytes decoded at a time (a 60 MB clip briefly costs a 60 MB buffer on top of its data: URL):
+    // the other upload may take small ones meanwhile.
+    const bigSlot = async () => { const prev = bigTurn; let free; bigTurn = new Promise((r) => { free = r; }); await prev; return free; };
     const worker = async () => {
       while (i < order.length && !stopErr) {
         if (stopped || forgotten) { stopErr ||= new Halt('stopped'); break; }
         const b = order[i++];
         if (quotaFull) { failed.set(b.hash, 'quota'); continue; }
+        // planned on Wi-Fi, on mobile data now: a large video waits again (checked right before each upload)
+        if (gate && holdBlobs([b])) { failed.set(b.hash, 'wifi'); continue; }
         let r;
-        try { r = await api('PUT', `blob/${b.hash}`, { body: b.bytes(), type: b.type, allow: [507], signal: ctl.signal, timeout: blobTimeout(b.n) }); } catch (err) { if (!stopErr) { stopErr = err; ctl.abort(); } break; }
+        const free = (b.n || 0) > B.bigBlobBytes ? await bigSlot() : null;
+        try {
+          if (stopErr) break;
+          r = await api('PUT', `blob/${b.hash}`, { body: b.bytes(), type: b.type, allow: [507], signal: ctl.signal, timeout: blobTimeout(b.n) });
+        } catch (err) { if (!stopErr) { stopErr = err; ctl.abort(); } break; } finally { free?.(); }
         sent += b.n || 0;
         if (order.length > 2 && !stopErr) { progress = { verb: 'upload', done: Math.min(order.length, (progress?.done || 0) + 1), total: order.length, left: Math.max(0, total - sent) }; emitSoon(); }
         if (r.ok) { await store.set(`b:${b.hash}`, 1).catch(warn); continue; }
@@ -1441,7 +1926,7 @@ export function createSync(deps = {}) {
   // bases: each entry's base revision at the moment of the delete (the record may move on before the kept entries are
   // sent — a push answer still on the wire, say — and a later base would turn a concurrent edit into a replace).
   async function unsyncedCopy(id, t, rec, locked = null) {
-    const plan = await planPush({ thread: t, record: rec, locked: locked || (await pushLocks()), media, hashOf: hasher(id) });
+    const plan = await planPush({ thread: t, record: rec, locked: locked || (await pushLocks()), media, hashOf: hasher(id), holdBlobs });
     if (!plan.entries.length) return null;
     const ids = new Set(plan.entries.map((e) => e.id));
     return {
@@ -1477,6 +1962,7 @@ export function createSync(deps = {}) {
       return out;
     };
     const plan = await planPush({ thread, record: keepRec, locked: new Set(), media, hashOf: hasher(id) });
+    plan.gate = false;
     plan.title = d.keep.titlePush && typeof d.keep.titlePush.v === 'string' && isRev(d.keep.titlePush.base) ? d.keep.titlePush : null; // only a title this device hadn't synced
     const answers = plan.entries.length || plan.title ? await send(plan) : [];
     const forks = [];
@@ -1544,7 +2030,7 @@ export function createSync(deps = {}) {
       if (!t || !t.entries?.length || skipReason(id, t, rec)) continue;
       if (hashed && rec?.rev > 0) {
         if (quick && !maybeChanged(t, rec)) continue;
-        const plan = await planPush({ thread: t, record: rec, locked: await pushLocks(), media, hashOf: hasher(id) });
+        const plan = await planPush({ thread: t, record: forPush(id, rec), locked: pushLockedFor(id, await pushLocks()), media, hashOf: hasher(id), holdBlobs });
         if (!plan.dirty && !plan.refetch) { if (Number.isFinite(t.updatedAt)) await setAt(id, t.updatedAt); continue; }
         if (plan.refetch) pullAfter.add(id);
       }
@@ -1601,6 +2087,15 @@ export function createSync(deps = {}) {
         for (const id of [...deferred]) if (!liveIn(id, await localThread(id).catch(() => null), locked)) { deferred.delete(id); pullAfter.add(id); }
       }
       if (first) await markEligible();
+      // Media sync turned on (images, then videos) since this device last looked: entries it held back go up now — every
+      // thread with an entry its record doesn't know is planned (quick: hashed only where something is new).
+      else if (pull && cfg.media !== mediaTag) await markEligible({ hashed: true, quick: true });
+      // Media this device kept back for Wi-Fi (rec.held survives a reload; the in-session list doesn't): once per session
+      // off mobile data, those threads are planned again, so a video that waited goes up without a network 'change'.
+      if (pull && !heldRemarked && (!metered() || cellOk())) {
+        heldRemarked = true;
+        for (const [id, r] of [...recs]) if (r?.held > 0 && !r.deleted && !dirty.has(id)) await markDirty(id);
+      }
       await sendDeletes(sum);
       for (let pass = 0; pass < SYNC_CLIENT.pushPasses; pass++) {
         await pushAll(sum, { hidden: hiddenFlush });
@@ -1609,9 +2104,12 @@ export function createSync(deps = {}) {
         for (const id of again) { halted(); await pullOne(id, sum, { full: Boolean(recs.get(id)?.refetch || recs.get(id)?.full) }); }
         if (hiddenFlush || (!again.length && !dirty.size)) break;
       }
-      if (pull && now() - serverAt > SYNC_CLIENT.statusEveryMs) await refreshStatus();
-      await saveCfg({ lastOkAt: now(), ...(first ? { firstDone: true } : {}) });
+      // Done before the large downloads: a download that fails (or a slow one cut short) never leaves the first sync
+      // unfinished or the media re-mark above repeated on every cycle.
+      await saveCfg({ lastOkAt: now(), ...(first ? { firstDone: true } : {}), ...(pull && cfg.media !== mediaTag ? { media: mediaTag } : {}) });
       if (first && (sum.pulled || sum.pushed)) toast(COPY.firstDone);
+      if (!hiddenFlush) await drainInbound(sum); // large downloads, after everything else, one at a time
+      if (pull && now() - serverAt > SYNC_CLIENT.statusEveryMs) await refreshStatus();
       backoff = 0; retryAt = 0;
       if (sum.failed) {
         // Some threads couldn't be pulled (each waits its own backoff); everything else went through.
@@ -1638,7 +2136,7 @@ export function createSync(deps = {}) {
     if (!r.ok) return;
     const j = r.json;
     if (Number.isFinite(j.bytes) && Number.isFinite(j.quota)) {
-      server = { bytes: j.bytes, quota: j.quota, trash: Number.isFinite(j.trash) ? j.trash : 0, threads: j.threads };
+      server = { bytes: j.bytes, quota: j.quota, trash: Number.isFinite(j.trash) ? j.trash : 0, threads: j.threads, ...(Number.isFinite(j.images) && Number.isFinite(j.videos) ? { images: j.images, videos: j.videos } : {}) };
       serverAt = now();
       // Room again (the owner raised SYNC_QUOTA_BYTES): the threads that waited for it are pushed again.
       if (quotaFull && j.bytes + quotaNeed <= j.quota) {
@@ -1734,6 +2232,7 @@ export function createSync(deps = {}) {
     if (reason === 'offline') { emitSoon(); return null; } // every tab reads its own navigator.onLine: the status says so at once
     if (stopped || forgotten || !cfg?.enabled || !isOwner()) return null;
     if (!leader) { post({ kick: reason }); return null; }
+    if (reason === 'online' || reason === 'now') retryBlobs(); // back online, or Sync now: failed downloads go again
     const t = now();
     if (reason === 'visible') { if (t - T.lastFull < SYNC_CLIENT.visibleThrottleMs) return null; schedulePoll(); }
     if (reason === 'drawer' && t - T.lastFull < SYNC_CLIENT.drawerThrottleMs) return null;
@@ -1807,6 +2306,7 @@ export function createSync(deps = {}) {
       await store.set(`del:${id}`, d);
     } else if (known && !on) await noteHidden(id); // sync is off: it stays on the server, and never comes back here
     await db.del(id);
+    await dropPrints(id);
     dirty.delete(id);
     await store.del(`d:${id}`).catch(() => {});
     for (const k of [...inbound.keys()]) if (k.startsWith(`${id}/`)) await unpark(id, k.slice(id.length + 1));
@@ -1832,7 +2332,12 @@ export function createSync(deps = {}) {
     if (skip || (!onServer && rec?.tooLarge) || !(known || keep)) return COPY.deleteLocal;
     let copy = COPY.deleteConfirm;
     if (onServer && rec.tooLarge) copy += COPY.deleteUnsynced;
-    if (t?.entries?.some((e) => gateHeld(mediaKinds(e), media) && !rec?.e?.[e.id])) copy += COPY.deleteMedia;
+    const plan = t && enabled() ? await planPush({ thread: t, record: rec, locked: await pushLocks(), media, hashOf: hasher(id), holdBlobs }).catch(() => null) : null;
+    // Media held back is never on the server as it is here (a held entry the server knows is an older version of it,
+    // such as a regenerated answer), so every such entry is lost with the thread.
+    const only = (plan?.held || []).filter((h) => MEDIA_HELD_SET.has(h.reason));
+    if (only.some((h) => h.reason !== 'wifi')) copy += COPY.deleteMedia;
+    else if (only.length) copy += COPY.deleteWaiting;
     return copy;
   }
   // The thread as IndexedDB holds it, or this tab's open copy when it isn't saved yet.
@@ -1864,10 +2369,10 @@ export function createSync(deps = {}) {
       if (skip === 'hidden' || skip === 'deleting') continue;
       if (skip || rec?.tooLarge || rec?.refused) { r.threads++; continue; }
       const heldHere = thread.entries.some((e) => e && (e.pending === true || locked.has(e.id) || gateHeld(mediaKinds(e), media)));
-      if (!heldHere && cfg.firstDone && rec?.rev > 0 && !dirty.has(id) && !maybeChanged(thread, rec)) continue;
-      const plan = await planPush({ thread, record: rec, locked, media, hashOf: hasher(id) });
+      if (!heldHere && !rec?.held && !upHeld.has(id) && cfg.firstDone && rec?.rev > 0 && !dirty.has(id) && !maybeChanged(thread, rec)) continue;
+      const plan = await planPush({ thread, record: rec, locked, media, hashOf: hasher(id), holdBlobs });
       r.changes += plan.entries.length + (plan.title ? 1 : 0);
-      for (const h of plan.held) if (h.reason === 'media') r.media++; else r.other++;
+      for (const h of plan.held) if (MEDIA_HELD_SET.has(h.reason)) r.media++; else r.other++;
       r.other += plan.waiting.length;
     }
     return r;
@@ -1941,11 +2446,12 @@ export function createSync(deps = {}) {
       let only = r.tooLarge || r.refused || r.lost || (await syncLocalOnly(id)) || inboundOf(id) > 0;
       for (const c of copies) {
         if (only) break;
-        const plan = await planPush({ thread: c, record: r, locked: await pushLocks(), media, hashOf: hasher(id) });
+        const plan = await planPush({ thread: c, record: r, locked: await pushLocks(), media, hashOf: hasher(id), holdBlobs });
         only = Boolean(plan.entries.length || plan.title || plan.held.length || plan.waiting.length);
       }
       if (only) { kept++; continue; }
       await db.del(id);
+      await dropPrints(id);
       await store.del(`d:${id}`).catch(() => {}); dirty.delete(id);
       await store.del(`t:${id}`).catch(() => {}); recs.delete(id);
       removed.push(id);
@@ -1957,6 +2463,37 @@ export function createSync(deps = {}) {
     emit();
     return { removed: removed.length, kept };
   }
+  // Download now (the #syncNote banner, Settings): this thread's waiting media (or one entry's) comes whatever the network
+  // is, this session. A follower asks the leader.
+  function downloadNow(tid = null, eid = null) {
+    if (!cfg?.enabled || forgotten) return null;
+    if (!leader) { post({ download: { t: tid, e: eid } }); return null; }
+    if (syncId(tid)) allowNow.add(eid && syncId(eid) ? `${tid}/${eid}` : tid);
+    else for (const k of inbound.keys()) allowNow.add(k.slice(0, k.indexOf('/')));
+    storageUntil = 0; // tapped: look at the storage again too
+    retryBlobs();
+    emitSoon();
+    return run({ pull: false });
+  }
+  // "Download videos on mobile data" (Settings; every tab re-reads cfg).
+  async function setCellular(on) {
+    await ready();
+    await saveCfg({ videosOnCellular: Boolean(on) });
+    if (leader) netChanged(); else post({ net: true });
+    emit();
+  }
+  // The network changed (navigator.connection 'change', the switch above): videos that waited for Wi-Fi go now if they can.
+  function netChanged() {
+    emitSoon();
+    if (!leader || stopped || !cfg?.enabled) return;
+    if (!metered() || cellOk()) {
+      const ids = new Set([...upHeld].filter(([, x]) => x.wifi).map(([id]) => id));
+      for (const [id, r] of recs) if (r?.held) ids.add(id);
+      Promise.all([...ids].map((id) => markDirty(id))).then(() => kick('online'), warn);
+      return;
+    }
+    kick('online');
+  }
   function holdRunLock(entryId) {
     if (!syncId(entryId)) return () => {};
     ownRuns.add(entryId); // a refresh of the open copy never touches it while it generates here
@@ -1967,9 +2504,10 @@ export function createSync(deps = {}) {
   }
   function dropState() {
     cfg = null; loaded = null;
-    for (const m of [recs, dirty, deleting, inbound, held, heldMedia, mediaMemo, pullFails, blobRefused, blobBlocked]) m.clear();
+    for (const m of [recs, dirty, deleting, inbound, held, heldMedia, mediaMemo, pullFails, blobRefused, blobBlocked, upHeld, printMemo, bigMemo, blobBack]) m.clear();
+    allowNow.clear();
     for (const s of [localOnly, hidden, qKeys, deferred, pullAfter, quotaHeld, capped, touched]) s.clear();
-    memoChars = 0;
+    memoChars = 0; bigChars = 0; heldRemarked = false;
   }
   // Clear this device. Every other tab is told first (they stop and drop their copy of the sync state, so none of them
   // re-creates it or downloads threads back into the cleared device), then work in flight ends and the store goes.
@@ -1998,6 +2536,7 @@ export function createSync(deps = {}) {
     pushThread: (id) => serial(() => pushThread(id)), pullThread: (id, opts) => serial(() => pullThread(id, {}, opts)),
     intent, noteWrite, noteHidden, noteRead, noteSaving, noteSaved: saved, noteSaveFailed, saveThread, refreshOpen,
     deleteThread, deleteCopy, restore, trash, flush, uploadOlder, removeSynced, pendingCount, localReport, holdRunLock, forget,
+    downloadNow, setCellular, netChanged, noteFor, metered,
     status, emit, badge, on: enabled, busy: () => Boolean(cycling) || openWork > 0 || msgWork > 0, isLeader: () => leader, config: () => (cfg ? { ...cfg } : null),
     record: (id) => recs.get(id) || null, noteImported, onMessage,
   };
@@ -2008,6 +2547,7 @@ export function createSync(deps = {}) {
     const rec = recs.get(id);
     if (deleting.has(id)) return ' · Deleting…';
     if (localOnly.has(id) || rec?.tooLarge || rec?.refused) return ' · This device only';
+    if (upHeld.get(id)?.wifi) return ' · Waiting for Wi-Fi';
     const n = inboundOf(id);
     if (n) return ` · Downloading ${plural(n, 'item')}`;
     if (!(rec?.rev > 0)) {
@@ -2067,11 +2607,15 @@ export function init(deps) {
     ...deps, toast, db: deps.rawDB, store: idbStore(), fetch: (...a) => fetch(...a), locks: navigator.locks || null, channel,
     online: () => navigator.onLine !== false, visible: () => document.visibilityState === 'visible',
     persistStorage: () => navigator.storage?.persist?.().catch(() => {}),
+    connection: () => navigator.connection || null,
+    forceCellular: () => { try { return localStorage.getItem(CELLULAR_FLAG) === '1'; } catch { return false; } },
+    estimate: typeof navigator.storage?.estimate === 'function' ? () => navigator.storage.estimate() : null,
     idle: (fn) => (typeof requestIdleCallback === 'function' ? requestIdleCallback(() => fn(), { timeout: 3000 }) : setTimeout(fn, 200)),
     onStatus: (s) => { ui?.render(s); deps.onStatus?.(s); },
     onAsk: (n) => ui?.ask(n),
   });
   if (early.length) engine.noteWrite(early.splice(0));
+  navigator.connection?.addEventListener?.('change', () => engine.netChanged());
   ui = bindUi(engine, deps);
   engine.load().then(() => engine.emit(), () => {});
   return engine;
@@ -2081,6 +2625,8 @@ const warnOut = (err) => console.warn('[atelier] sync:', err?.message || err);
 export const verified = () => engine?.verified().catch(warnOut);
 // Settings opened, or the network changed: the sync block shows the status as it is now.
 export const showStatus = () => { engine?.emit(); };
+// The open thread changed (renderThread): the banner over it says what of it is still downloading.
+export const showNote = () => { ui?.renderNote(); };
 export const firstRunAhead = () => Boolean(engine?.firstRunAhead());
 // Clear this device's first question ('' when nothing would be lost), from everything only this device has.
 export const wipeWarning = () => (engine ? engine.localReport().then(wipeText, () => '') : Promise.resolve(''));
@@ -2114,6 +2660,7 @@ export function bindUi(eng, deps, doc = globalThis.document) {
     trash: $('#syncTrash'), older: $('#syncUploadOld'), forget: $('#syncForget'), nav: $('#navLocal'), wipe: $('#wipeHint'),
     first: $('#syncFirst'), firstBody: $('#syncFirstBody'), firstNew: $('#syncFirstNew'), firstAll: $('#syncFirstAll'), firstExport: $('#syncFirstExport'),
     trashDialog: $('#trashDialog'), trashList: $('#trashList'), trashClose: $('#trashClose'), note: $('#syncNote'),
+    dlNow: $('#syncDownloadNow'), cellRow: $('#syncCellRow'), cell: $('#syncCell'),
   };
   const wipeDefault = el.wipe?.textContent || '', navDefault = el.nav?.textContent || COPY.navLocal;
   let last = null, answered = false;
@@ -2131,9 +2678,38 @@ export function bindUi(eng, deps, doc = globalThis.document) {
     if (el.forget) el.forget.hidden = !(s.on && s.paused?.reason === 'passcode');
     if (el.nav) el.nav.textContent = !s.owner || !s.on || s.tester ? navDefault : s.paused ? COPY.navPaused : COPY.navSynced;
     if (el.wipe) el.wipe.textContent = s.owner && s.on && !s.tester ? (deviceOnly(s) ? COPY.wipeSyncedLocal : COPY.wipeSynced) : wipeDefault;
-    if (el.note) el.note.hidden = true; // phase 3: "N items in this thread are still downloading · Waiting for Wi-Fi"
+    const inb = s.inbound || {};
+    if (el.dlNow) el.dlNow.hidden = !(s.on && !refused && inb.wifi);
+    if (el.cellRow) el.cellRow.hidden = !(s.on && s.network);
+    if (el.cell) el.cell.checked = Boolean(s.cellular);
+    renderNote();
     // The first-sync question was answered in another tab: this tab's copy of it closes (and doesn't answer again).
     if (s.asked && el.first?.open) { answered = true; el.first.close(); }
+  }
+  // #syncNote over the open thread: "2 items in this thread are still downloading · Waiting for Wi-Fi" + Download now.
+  let noteKey = '';
+  function renderNote() {
+    const n = el.note;
+    if (!n) return;
+    const tid = deps.getOpen?.()?.id;
+    const x = typeof eng.noteFor === 'function' ? eng.noteFor(tid) : null;
+    const text = noteText(x);
+    const key = `${tid}|${text}|${x?.wifi ? 1 : 0}`;
+    if (key === noteKey) return;
+    noteKey = key;
+    n.hidden = !text;
+    if (!text) { n.replaceChildren(); return; }
+    const span = doc.createElement('span');
+    span.className = 'sync-note-text';
+    span.textContent = text;
+    const kids = [span];
+    if (x.wifi && !x.downloading) {
+      const b = doc.createElement('button');
+      b.type = 'button'; b.className = 'chip sync-note-now'; b.textContent = COPY.downloadNow;
+      b.addEventListener('click', () => { b.disabled = true; eng.downloadNow(tid)?.catch?.(warnOut); });
+      kids.push(b);
+    }
+    n.replaceChildren(...kids);
   }
   // "Up to date · synced 2 min ago" stays true while Settings is open.
   setInterval(() => { if (last && el.block && !el.block.hidden && el.block.offsetParent) render(eng.status()); }, 30_000)?.unref?.();
@@ -2143,6 +2719,8 @@ export function bindUi(eng, deps, doc = globalThis.document) {
     else eng.disable().catch(warnOut);
   });
   el.now?.addEventListener('click', () => { eng.kick('now'); });
+  el.dlNow?.addEventListener('click', () => { eng.downloadNow()?.catch?.(warnOut); });
+  el.cell?.addEventListener('change', () => { eng.setCellular(el.cell.checked).catch(warnOut); });
   el.older?.addEventListener('click', () => { eng.uploadOlder().catch(warnOut); });
   el.forget?.addEventListener('click', async () => {
     if (!confirm(COPY.removeSynced)) return;
@@ -2208,5 +2786,5 @@ export function bindUi(eng, deps, doc = globalThis.document) {
   el.trash?.addEventListener('click', openTrash);
   el.trashClose?.addEventListener('click', () => el.trashDialog?.close());
   el.trashDialog?.addEventListener('click', (ev) => { if (ev.target === el.trashDialog) el.trashDialog.close(); });
-  return { render, ask, openTrash };
+  return { render, ask, openTrash, renderNote };
 }

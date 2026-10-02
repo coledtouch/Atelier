@@ -127,20 +127,29 @@ test('Quick launch’s on-device storage is disclosed with the lifetimes public/
   assert.match(text(row), /Talk to Atelier or “Start listening when I open Atelier” opens the microphone for you/);
 });
 
-test('owner thread sync is disclosed as v1 behaves: media stays on the device, long texts can outlive a delete, Clear this device keeps synced copies', async () => {
+test('owner thread sync is disclosed as it behaves: images and videos sync, media and long texts outlive a delete, the Wi-Fi rule, Clear this device keeps synced copies', async () => {
   const MERGE = await read('public/sync-merge.js'), SYNC = await read('public/sync.js');
-  // what the wording below rests on: phase 1 keeps images and videos on the device; strings over INLINE_MAX go to blobs
-  assert.match(MERGE, /export const MEDIA_SYNC = Object\.freeze\(\{ image: false, video: false \}\);/, 'media sync turned on: update the privacy wording');
+  // what the wording below rests on: images and videos sync; strings over INLINE_MAX go to blobs; blobs are never
+  // deleted (no compaction yet); a video over 10 MB waits for Wi-Fi on mobile data both ways unless the owner allows it
+  assert.match(MERGE, /export const MEDIA_SYNC = Object\.freeze\(\{ image: true, video: true \}\);/, 'media sync changed: update the privacy wording');
   assert.match(MERGE, /inline: 32768, \/\/ strings longer than this/, 'the long-text threshold changed: update "about 32 KB"');
+  assert.match(SYNC, /cellularMaxBytes: 10 \* 1024 \* 1024, \/\/ a video bigger than this waits for Wi-Fi on mobile data \/ Data Saver \(both ways\)/, 'the Wi-Fi rule changed: update "videos over 10 MB"');
+  assert.match(SYNC, /cellular: 'Download videos on mobile data'/);
+  assert.doesNotMatch(await read('src/sync.js'), /bucket\.delete\(blobKey|delete\(`b\//, 'blobs are deleted now: update "until a later clean-up"');
   assert.match(SYNC, /wipeConfirm: 'Clear Atelier threads[^']*synced threads stay on your Atelier server/);
   const items = [...PRIVACY.matchAll(/<li><b>The studio owner’s threads:?<\/b>([\s\S]*?)<\/li>/g)].map((m) => text(m[1]));
   assert.equal(items.length, 2, 'the tester section and section 6');
   for (const it of items) {
-    assert.doesNotMatch(it, /including generated media/);
-    assert.match(it, /images and videos/);
+    assert.doesNotMatch(it, /for now without|don’t sync|stay on the device where they were made/, 'no "media stays on the device" left');
+    assert.match(it, /including their images and videos/);
     assert.match(it, /LinkedIn testers’ threads are never uploaded/);
   }
-  assert.match(items[1], /except copies of long texts \(over about 32 KB, such as long answers or pasted documents\)/);
+  assert.match(items[1], /The original of a video attached to a question isn’t synced \(only the frames and preview Atelier took from it are\)/);
+  assert.match(items[1], /videos over 10 MB wait for Wi-Fi before they upload or download, unless the owner turns on “Download videos on mobile data”/);
+  // the rule rests on navigator.connection, which Safari and Firefox don't have: there, videos sync on any network
+  assert.match(SYNC, /connection: \(\) => navigator\.connection \|\| null/);
+  assert.match(items[1], /On a phone whose browser reports mobile data or Data Saver \(Chrome on Android does; Safari on iPhone doesn’t, so there videos sync on any network\)/);
+  assert.match(items[1], /except copies of images, videos and long texts \(over about 32 KB, such as long answers or pasted documents\), which remain in that private storage until a later clean-up removes the ones no thread uses/);
   const cache = text(/<li><b>Look-up cache \(Cloudflare\):<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
   assert.doesNotMatch(cache, /is the one exception|the only exception/);
   assert.match(cache, /Together with your profile and memory \(section 2\) and the studio owner’s own synced threads \(see above\), it is an exception/);

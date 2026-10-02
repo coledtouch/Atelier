@@ -19,6 +19,9 @@
 //   5. forks appear only for true concurrent edits (neither version descends from the other);
 //   6. no local thread was ever removed except by a delete (here or elsewhere) — never because the server lacked it;
 //   7. tester-mode threads never reach the server.
+// Answers carry images and videos too (their bytes derive from the version, so invariant 1 compares them byte for
+// byte): small sizes stand in for the phone budget's (a "video" is large enough to wait for Wi-Fi on mobile data and to
+// be downloaded on its own after the rest), and devices go on and off mobile data.
 // SYNC_SIM_SEEDS / SYNC_SIM_ROUNDS / SYNC_SIM_OPS scale it up (defaults keep npm test quick).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -65,6 +68,11 @@ function fakeLocks() {
   };
 }
 const vid = (text) => (typeof text === 'string' && /^v\d+/.test(text) ? text.split(' ')[0] : null);
+// The phone budget, shrunk: a 1200-byte "video" waits for Wi-Fi on mobile data and is a large download.
+const BUDGET = { cellularMaxBytes: 500, bigBlobBytes: 1000, printMemoChars: 64 };
+const mediaBytes = (tag, n) => { const b = Buffer.alloc(n); for (let i = 0; i < n; i++) b[i] = (tag.charCodeAt(i % tag.length) * 31 + i * 7) & 255; return b; };
+const imageOf = (v) => `data:image/png;base64,${mediaBytes(`img ${v}`, 200).toString('base64')}`;
+const videoOf = (v) => `data:video/mp4;base64,${mediaBytes(`vid ${v}`, 1200).toString('base64')}`;
 // A BroadcastChannel stand-in shared by a device's two tabs.
 function bus() {
   const ports = [];
@@ -114,6 +122,7 @@ async function simulate(seed) {
       db: dev.db, store: dev.store, locks: dev.locks, channel: port(),
       apiHeaders: () => ({ 'content-type': 'application/json', 'x-app-pass': 'pw' }),
       isOwner: () => !dev.tester, isTester: () => dev.tester, hasTesterTraces: () => false,
+      budget: BUDGET, connection: () => (dev.cell ? { type: 'cellular' } : null), idle: (fn) => setImmediate(fn),
       getOpen: () => dev.open, isLive: (id) => dev.live.has(id), onAsk: () => {},
       onApplied: (x) => { if (x.open?.closed) dev.open = null; }, // app.js syncApplied: S.thread = null, startFresh()
       debug: (ev, x) => { // fork decisions go into the trail, with what they were made from
@@ -145,6 +154,7 @@ async function simulate(seed) {
       db: dev.db, store: dev.store, locks: dev.locks, channel: port(),
       apiHeaders: () => ({ 'content-type': 'application/json', 'x-app-pass': 'pw' }),
       isOwner: () => !dev.tester, isTester: () => dev.tester, hasTesterTraces: () => false,
+      budget: BUDGET, connection: () => (dev.cell ? { type: 'cellular' } : null), idle: (fn) => setImmediate(fn),
       getOpen: () => dev.tab2.open, isLive: (id) => dev.tab2.live.has(id), onAsk: () => {},
       onApplied: (x) => { if (x.open?.closed) dev.tab2.open = null; },
       fetch: fetchFor(dev), now: () => clock.t, uid: () => `${dev.name}j${++dev.n}`, timers: NO_TIMERS,
@@ -231,7 +241,7 @@ async function simulate(seed) {
     const onServer = r2.json(`t/${t.id}.json`)?.entries.find((x) => x.id === e.id && vid(docText(x.d)) === parent);
     if (!onServer) supersededOk.add(parent);
     Object.assign(e, { pending: true, text: '', error: null, stage: 'Composing', startedAt: clock.t });
-    delete e.recovered;
+    delete e.recovered; delete e.media;
     startRun(dev, t, e, parent);
     await put(dev, t);
   }
@@ -248,6 +258,10 @@ async function simulate(seed) {
     const { t, tid, eid, parent, release } = dev.running;
     const e = t.entries.find((x) => x.id === eid);
     Object.assign(e, { pending: false, text: newVersion(parent, chance(0.05)) });
+    const m = rnd(); // an image or a video answer now and then (its bytes follow the version)
+    if (m < 0.2) e.media = [{ type: 'image', src: imageOf(vid(e.text)) }];
+    else if (m < 0.3) e.media = [{ type: 'video', src: videoOf(vid(e.text)) }];
+    else delete e.media;
     for (const k of ['stage', 'startedAt', 'status', 'chars']) delete e[k];
     dev.live.delete(tid);
     const saved = put(dev, t);
@@ -295,7 +309,8 @@ async function simulate(seed) {
     clock.t += 1000;
     if (dev.open?.id === 'canva-imports' || dev.frozen.has('canva-imports')) return;
     const t = (await dev.db.get('canva-imports')) || { id: 'canva-imports', title: 'From Canva', createdAt: clock.t, updatedAt: clock.t, entries: [] };
-    t.entries.push({ id: `${dev.name}c${++dev.n}`, kind: 'image', prompt: 'Canva design', createdAt: clock.t, text: newVersion(null), meta: { model: 'canva', note: 'From Canva' }, canva: { design_id: `D${seq}` } });
+    const v = newVersion(null);
+    t.entries.push({ id: `${dev.name}c${++dev.n}`, kind: 'image', prompt: 'Canva design', createdAt: clock.t, text: v, media: [{ type: 'image', src: imageOf(v) }], meta: { model: 'canva', note: 'From Canva' }, canva: { design_id: `D${seq}` } });
     await put(dev, t);
   }
   async function userEdit(dev, why) {
@@ -456,6 +471,11 @@ async function simulate(seed) {
       return;
     }
     if (r < 0.92 && !dev.tester) { label('clear'); return clearDevice(dev); }
+    if (r < 0.935) { // on and off mobile data (videos wait for Wi-Fi both ways meanwhile)
+      dev.cell = !dev.cell; label(dev.cell ? 'cellular' : 'wifi');
+      if (!dev.cell) dev.engine.netChanged();
+      return;
+    }
     if (r < 0.95) { // a few threads made in LinkedIn tester mode on this browser, then the owner is back
       label('tester thread'); await openThread(dev, null); dev.tester = true; await newThread(dev); dev.open = null; dev.tester = false;
       await dev.engine.verified();
@@ -494,6 +514,7 @@ async function simulate(seed) {
       if (d.running) { trail.push(`${d.name}:end ${d.running.tid}/${d.running.eid}`); where = `${d.name} end of round`; await (chance(0.8) ? settle(d) : crash(d)); }
       if (d.tab2.running) await tab2Settle(d);
       d.offline = false; d.tester = false;
+      if (d.cell) { d.cell = false; d.engine.netChanged(); }
     }
     await drain();
     faulty = true;
@@ -501,6 +522,9 @@ async function simulate(seed) {
     for (let i = 0; i < 3; i++) await everyone();
     faulty = false;
     for (let pass = 0; pass < 12; pass++) {
+      // polls a few minutes apart: a media download that failed during the faults waits its backoff (blobRetryMinMs,
+      // doubling), so the quiet passes let that time go by as real polls would
+      clock.t += 4 * 60_000;
       await everyone();
       await drain(true);
       if (pass >= 1 && (await converged())) return;
@@ -514,7 +538,7 @@ async function simulate(seed) {
       lines.push(`server ${id}: ${doc ? `"${doc.title}"/${doc.titleRev} rev ${doc.rev} del ${doc.deletedAt} gone ${JSON.stringify(doc.gone)} [${doc.entries.map((e) => `${e.id}@${e.rev}=${vid(docText(e.d)) || e.d.error}`).join(',')}]` : 'none'}`);
       for (const d of devices) {
         const rec = d.engine.record(id);
-        lines.push(`${d.name} ${id}: ${threadsOf(d).get(id) ? show(threadsOf(d).get(id)) : 'absent'} rec ${rec ? JSON.stringify({ ...rec, e: Object.fromEntries(Object.entries(rec.e).map(([k, v]) => [k, v.r])) }) : 'none'} d ${await d.store.get(`d:${id}`)} del ${JSON.stringify(await d.store.get(`del:${id}`))} lo ${await d.store.get(`lo:${id}`)} hide ${await d.store.get(`hide:${id}`)}`);
+        lines.push(`${d.name} ${id}: ${threadsOf(d).get(id) ? show(threadsOf(d).get(id)) : 'absent'} rec ${rec ? JSON.stringify({ ...rec, e: Object.fromEntries(Object.entries(rec.e).map(([k, v]) => [k, v.r])) }) : 'none'} d ${await d.store.get(`d:${id}`)} del ${JSON.stringify(await d.store.get(`del:${id}`))} lo ${await d.store.get(`lo:${id}`)} hide ${await d.store.get(`hide:${id}`)} in ${JSON.stringify((await d.store.entries(`in:${id}/`)).map(([k, v]) => [k, v.wait, v.missing.length]))}`);
       }
     }
     fail(`round ${round}: devices did not converge\n  ${lines.join('\n  ')}${staleOpen ? `\n  open copy differs: ${staleOpen}` : ''}`);
@@ -569,19 +593,20 @@ async function simulate(seed) {
   }
   await drain(true);
   for (const d of devices) d.engine.stop();
-  return { versions: versions.size, threads: threadsOf(devices[0]).size, docs: r2.keys('t/').length, trash: r2.keys('x/').length, blobs: r2.keys('b/').length };
+  const media = r2.keys('b/').filter((k) => /^(image|video)\//.test(r2.objects.get(k).httpMetadata.contentType || '')).length;
+  return { versions: versions.size, threads: threadsOf(devices[0]).size, docs: r2.keys('t/').length, trash: r2.keys('x/').length, blobs: r2.keys('b/').length, media };
 }
 
 test(`three devices, ${SEEDS} seeds × ${ROUNDS} rounds of random work with faults: nothing is lost, everything converges`, async () => {
-  const totals = { versions: 0, threads: 0, trash: 0, blobs: 0 };
+  const totals = { versions: 0, threads: 0, trash: 0, blobs: 0, media: 0 };
   const only = Number(process.env.SYNC_SIM_SEED || 0); // re-run one failing seed
   for (let seed = only || 1; seed <= (only || SEEDS); seed++) {
     const r = await simulate(seed);
     for (const k of Object.keys(totals)) totals[k] += r[k];
   }
   if (only) return;
-  // the runs did real work (not vacuous): versions, surviving threads, trash snapshots and long-text blobs
+  // the runs did real work (not vacuous): versions, surviving threads, trash snapshots, long-text and media blobs
   assert.ok(totals.versions > SEEDS * ROUNDS * 5, JSON.stringify(totals));
   assert.ok(totals.threads > SEEDS, JSON.stringify(totals));
-  assert.ok(totals.trash > 0 && totals.blobs > 0, JSON.stringify(totals));
+  assert.ok(totals.trash > 0 && totals.blobs > 0 && totals.media > 0, JSON.stringify(totals));
 });

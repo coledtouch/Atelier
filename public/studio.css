@@ -396,6 +396,15 @@ html.kb-open .lookup { display: none; } /* (0,2,1) beats .lookup[data-state='pil
 .sync-note { margin: 0 0 10px; font: 500 10.5px/1.4 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
 .sync-note-bar { margin: 0 auto 12px; max-width: 780px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); font-size: 12.5px; color: var(--ink-2); }
 .sync-note-bar[hidden] { display: none; }
+.sync-note-bar:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.sync-note-bar .chip { min-height: 32px; }
+/* "Download videos on mobile data" (shown where the browser reports its network: Android) */
+.sync-cell { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 4px 0; cursor: pointer; }
+.sync-cell[hidden] { display: none; }
+.sync-cell input { flex: none; width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--c-ask); }
+.sync-cell > span { display: grid; gap: 2px; }
+.sync-cell-title { font-size: 13.5px; color: var(--ink); }
+.sync-cell .hint { margin: 0; font-size: 11.5px; }
 /* Recently deleted and the first-sync question */
 dialog.sync-dialog { width: min(520px, calc(100vw - 24px)); }
 .sync-dialog .sheet-body { min-height: 0; gap: 10px; }
@@ -421,6 +430,7 @@ dialog.sync-dialog { width: min(520px, calc(100vw - 24px)); }
   .sync-dialog h2 { font-size: 30px; }
   .sync-block { padding: 12px 14px; }
   .sync-block .row-actions .chip { min-height: 44px; }
+  .sync-note-bar .chip { min-height: 44px; }
 }
 
 /* Installed desktop app with the title bar hidden (window-controls-overlay): keep the header's right-hand controls (the

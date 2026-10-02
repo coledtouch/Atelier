@@ -7,7 +7,7 @@ import {
   FORMAT, LIMITS, TRANSIENT, MEDIA_RE, MEDIA_SYNC, INLINE_MAX, canonical, sha256hex, entryHash, strip, dehydrate, hydrate, validateDehydrated,
   checkPush, checkDelete, checkView, applyPush, applyDelete, applyRestore, docView, newRefs, planPull, planPush, planPushResult, pushBodies,
   applyPlan, forkEntry, betterFileRef, quickPrint, utf8Length, newRecord, mediaKinds, gateHeld, refsOf, syncId, docMeta, sortEntries,
-  fullPrint, snapOf, sameSnap, validFileRef,
+  fullPrint, snapOf, sameSnap, validFileRef, MEDIA_HELD,
 } from '../public/sync-merge.js';
 import { validVideo } from '../public/video.js';
 
@@ -182,9 +182,10 @@ test('lone surrogates stay inline; a literal $b key or a 2 MiB+ entry is held; b
   assert.equal(validateDehydrated({ ...ask('e1', 1), images: ['data:image/png;base64,YQ=='] }), 'inline_media');
 });
 
-test('the phase gate holds media entries in phase 1 without decoding them', () => {
-  assert.deepEqual(MEDIA_SYNC, { image: false, video: false });
-  assert.equal(gateHeld(mediaKinds({ ...ask('e', 1), images: [PNG] })), 'media');
+test('the phase gate: images and videos sync now (phase 3); a gate that is closed holds media entries without decoding them', () => {
+  assert.deepEqual(MEDIA_SYNC, { image: true, video: true });
+  assert.equal(gateHeld(mediaKinds({ ...ask('e', 1), images: [PNG] })), null);
+  assert.equal(gateHeld(mediaKinds({ ...ask('e', 1), images: [PNG] }), { image: false, video: false }), 'media');
   assert.equal(gateHeld(mediaKinds({ ...ask('e', 1), media: [{ type: 'video', src: MP4 }] }), { image: true, video: false }), 'media');
   assert.equal(gateHeld(mediaKinds({ ...ask('e', 1), media: [{ type: 'video', src: MP4 }] }), { image: true, video: true }), null);
   assert.equal(gateHeld(mediaKinds({ ...ask('e', 1), media: [{ type: 'image', src: 'https://example.com/a.png' }] })), null);
@@ -617,7 +618,7 @@ test('planPush never sends pending, locked, held, recovered (r > 0) or stale wri
     { ...ask('k1', 8), params: { $b: 1 } },
     ask('ok', 9),
   ], { title: 'T' });
-  const plan = await planPush({ thread: t, record: rec, locked: new Set(['l1']) });
+  const plan = await planPush({ thread: t, record: rec, locked: new Set(['l1']), media: { image: false, video: false } });
   assert.deepEqual(plan.entries.map((e) => [e.id, e.base]), [['r0', 0], ['ok', 0]]);
   assert.deepEqual(plan.waiting.sort(), ['l1', 'p1', 's1']);
   assert.deepEqual(plan.held.map((h) => [h.id, h.reason]), [['m1', 'media'], ['k1', 'ref_key']]);
@@ -1061,4 +1062,63 @@ test('buildSlots: a local entry without a createdAt is passed over when placing 
   const local = thread('t1', [ask('e1', 1), legacy, ask('e9', 9)], { title: '' });
   const plan = await planPull({ local, record: rec, remote: viewOf(doc2), uid });
   assert.deepEqual(plan.slots.map((s) => s.id), ['e1', 'ex', 'e5', 'e9']);
+});
+
+// ── phases 2-3 ──
+test('planPush holdBlobs: a large video waits (with its size) unless it is already on the server; MEDIA_HELD names the media reasons', async () => {
+  const e1 = { ...ask('v1', 1, ''), kind: 'video', media: [{ type: 'video', src: MP4 }] }, e2 = ask('t2', 2), e3 = { ...ask('i3', 3), images: [PNG] };
+  const hold = (blobs) => (blobs.some((b) => b.kind === 'video') ? 'wifi' : null);
+  const plan = await planPush({ thread: thread('t1', [e1, e2, e3]), holdBlobs: hold });
+  assert.deepEqual(plan.entries.map((e) => e.id), ['t2', 'i3']);
+  assert.deepEqual(plan.held, [{ id: 'v1', reason: 'wifi', bytes: Buffer.from('mp4-bytes').length }]);
+  assert.deepEqual(plan.blobs.map((b) => b.t), ['image/png'], 'the held video is not uploaded');
+  assert.deepEqual(MEDIA_HELD, ['media', 'wifi', 'blob_too_large']);
+  // already synced as it is: nothing to send, so nothing to wait for (and no "waiting for Wi-Fi" for it)
+  const doc = await docOf('t1', [e1]);
+  const rec = await recordFor(doc);
+  const again = await planPush({ thread: thread('t1', [e1]), record: rec, holdBlobs: hold });
+  assert.deepEqual([again.entries.length, again.held.length], [0, 0]);
+});
+
+test('planPull clears the "only waiting for media" mark, so a full read decides it afresh', async () => {
+  const doc = await docOf('t1', [ask('e1', 1)]);
+  const rec = { ...(await recordFor(doc)), refetch: true, wait: true };
+  const plan = await planPull({ local: thread('t1', [ask('e1', 1)]), record: rec, remote: docView(doc, 'etag1'), uid });
+  assert.equal('wait' in plan.record, false);
+  assert.equal('refetch' in plan.record, false);
+});
+
+test('planPull: a pending entry no tab is generating (orphans) no longer holds the thread back; a locked or unlisted one still does', async () => {
+  const e1 = ask('e1', 1), e2 = ask('e2', 2);
+  const doc = await docOf('t1', [e1, e2]);
+  const rec = await recordFor(doc);
+  const del = applyDelete(doc, { e1: 1, e2: 1 }, NOW + 1).doc; // deleted everywhere
+  const back = applyPush(del, await bodyOf([ask('e3', 3)]), NOW + 2, 't1').doc; // and revived by a new entry
+  const local = thread('t1', [e1, { ...e2, pending: true, text: '' }]);
+  const view = docView(back, 'etag2');
+  const held = await planPull({ local, record: rec, remote: view, uid });
+  assert.equal(held.defer, 'busy', 'a pending entry waits by default');
+  const locked = await planPull({ local, record: rec, remote: view, uid, orphans: new Set(['e2']), locked: new Set(['e2']) });
+  assert.equal(locked.defer, 'busy', 'a run lock wins over the orphan list');
+  const plan = await planPull({ local, record: rec, remote: view, uid, orphans: new Set(['e2']) });
+  assert.equal(plan.defer, null);
+  assert.deepEqual(plan.slots.map((x) => [x.id, x.from]), [['e3', 'remote']], 'the orphan goes with the delete, like a recovered entry');
+});
+
+test('planPull (full): an entry gone from both the server and this device keeps its history in record.dead, so a stale copy written back later is recognised', async () => {
+  const e1 = ask('e1', 1, 'v-old'), e2 = ask('e2', 2);
+  const doc = await docOf('t1', [e1, e2]);
+  const rec = await recordFor(doc);
+  const fOld = rec.e.e1.f;
+  // the server lost the thread; another device re-created it without e1; this device's copy lacks e1 too
+  const again = await docOf('t1', [e2]);
+  const plan = await planPull({ local: thread('t1', [e2]), record: rec, remote: docView({ ...again, born: NOW + 5 }, 'etag9'), uid });
+  assert.equal(plan.record.e.e1, undefined);
+  assert.equal(plan.record.dead.e1.f, fOld, 'what it knew of e1 stays');
+  // e1 comes back (newer) from another device: its record remembers the old version, so a stale write-back of it is old
+  const newer = applyPush(again, await bodyOf([ask('e1', 1, 'v-new')]), NOW + 6).doc;
+  const p2 = await planPull({ local: thread('t1', [e2]), record: plan.record, remote: docView(newer, 'etag10'), uid });
+  assert.ok(p2.record.e.e1.old.includes(fOld));
+  const push = await planPush({ thread: thread('t1', [e1, e2]), record: p2.record });
+  assert.deepEqual([push.entries.length, push.refetch], [0, true], 'the stale copy is never pushed over the newer answer');
 });

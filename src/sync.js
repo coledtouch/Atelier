@@ -4,7 +4,7 @@
 //   b/<aa>/<sha256>     content-addressed blobs (media, long text), written once with R2's sha256 check, never deleted
 //   x/<id>/<ms>.json    trash: the document just before a delete removed entries (listed/restorable for 30 days)
 //   v/<id>/<rev>.json   history: the previous document, at most once per thread per 15 minutes and before a restore
-//   u/usage.json        a cached sum of b/ sizes for the SYNC_QUOTA_BYTES cap
+//   u/usage.json        a cached sum of b/ sizes for the SYNC_QUOTA_BYTES cap, with how many are images and videos
 // worker.js calls handleSync only after the deny-by-default tester router and its own passOk check, so every request
 // here is the owner's. This module never reads cookies, LEDGER or ATELIER_KV, imports nothing but the shared pure
 // core, and never answers 429 (to the client that status means passcodeGuard's IP lockout).
@@ -159,14 +159,17 @@ async function countThreads(bucket, stopAt) {
   for await (const o of listAll(bucket, 't/', false)) { if (o.key.endsWith('.json') && ++n >= stopAt) break; }
   return n;
 }
-// u/usage.json {bytes, blobs, at}: recomputed from list('b/') when older than maxAge, otherwise trusted.
+// u/usage.json {bytes, blobs, images, videos, at}: recomputed from list('b/') (customMetadata t: the blob's type) when
+// older than maxAge, otherwise trusted.
+const kindOf = (t) => (/^image\//.test(t || '') ? 'images' : /^video\//.test(t || '') ? 'videos' : null);
 async function getUsage(bucket, now, maxAge) {
   let u = null;
   try { const o = await bucket.get(USAGE); if (o) u = JSON.parse(await o.text()); } catch {}
-  if (u && Number.isFinite(u.bytes) && Number.isFinite(u.blobs) && Number.isFinite(u.at) && now - u.at < maxAge && now >= u.at) return u;
+  if (u && ['bytes', 'blobs', 'images', 'videos', 'at'].every((k) => Number.isFinite(u[k])) && now - u.at < maxAge && now >= u.at) return u;
   let bytes = 0, blobs = 0;
-  for await (const o of listAll(bucket, 'b/', false)) { bytes += o.size || 0; blobs++; }
-  u = { bytes, blobs, at: now };
+  const kinds = { images: 0, videos: 0 };
+  for await (const o of listAll(bucket, 'b/', true)) { bytes += o.size || 0; blobs++; const k = kindOf(o.customMetadata?.t); if (k) kinds[k]++; }
+  u = { bytes, blobs, ...kinds, at: now };
   try { await bucket.put(USAGE, JSON.stringify(u), { httpMetadata: JSON_TYPE }); } catch {}
   return u;
 }
@@ -377,7 +380,8 @@ async function putBlob({ req, env, bucket, hash, now }) {
     if (isRateLimit(err)) return (await bucket.head(key).catch(() => null)) ? json({ v: FORMAT, exists: true }) : busy();
     throw err;
   }
-  try { await bucket.put(USAGE, JSON.stringify({ bytes: usage.bytes + length, blobs: usage.blobs + 1, at: usage.at }), { httpMetadata: JSON_TYPE }); } catch {} // corrected at the next recount
+  const k = kindOf(type);
+  try { await bucket.put(USAGE, JSON.stringify({ ...usage, bytes: usage.bytes + length, blobs: usage.blobs + 1, ...(k ? { [k]: usage[k] + 1 } : {}) }), { httpMetadata: JSON_TYPE }); } catch {} // corrected at the next recount
   return json({ v: FORMAT, created: true }, 201);
 }
 
@@ -395,11 +399,12 @@ async function getBlob({ bucket, hash }) {
   });
 }
 
-// GET status → {v, threads, deleted, trash, blobs, bytes, quota, at}: Settings, and the "sync is configured" probe.
+// GET status → {v, threads, deleted, trash, blobs, images, videos, bytes, quota, at}: Settings, and the "sync is
+// configured" probe.
 async function getStatus({ env, bucket, now }) {
   let threads = 0, deleted = 0, trash = 0;
   for await (const o of listAll(bucket, 't/', true)) if (o.key.endsWith('.json')) { if (o.customMetadata?.del === '1') deleted++; else threads++; }
   for await (const o of listAll(bucket, 'x/', false)) { const m = TRASH_KEY.exec(o.key); if (m && now - Number(m[2]) < SYNC_OPTIONS.trashDays * DAY) trash++; }
   const u = await getUsage(bucket, now, SYNC_OPTIONS.usageStatusMaxAgeMs);
-  return json({ v: FORMAT, threads, deleted, trash, blobs: u.blobs, bytes: u.bytes, quota: quotaOf(env), at: u.at });
+  return json({ v: FORMAT, threads, deleted, trash, blobs: u.blobs, images: u.images, videos: u.videos, bytes: u.bytes, quota: quotaOf(env), at: u.at });
 }

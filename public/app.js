@@ -1042,6 +1042,7 @@ function renderThread() {
   welcome.classList.toggle('gone', !!has);
   if (has) S.thread.entries.forEach((e, i) => stream.append(renderEntry(e, i)));
   updateKeyState();
+  Sync.showNote(); // owner thread sync: "N items in this thread are still downloading" over the open thread
 }
 
 // A step cut off mid-call has an unknown outcome. Say so instead of showing it as declined (that invites a duplicate send).

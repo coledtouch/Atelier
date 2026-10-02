@@ -10,6 +10,7 @@ import {
 } from '../public/sync.js';
 import { canonical, strip, applyPush, sha256hex, entryHash, quickPrint, utf8Length } from '../public/sync-merge.js';
 import { validateBackup, recoverThread } from '../public/data-safety.js';
+import { createHash } from 'node:crypto';
 
 const T0 = 1_800_000_000_000, MIN = 60_000;
 const NO_TIMERS = { setTimeout: () => 0, clearTimeout: () => {} };
@@ -93,6 +94,7 @@ function device(w, name, opts = {}) {
     fetch: w.fetchFor(dev), now: () => w.clock.t, uid: () => `${name}f${++dev.n}`, timers: opts.timers || NO_TIMERS,
     online: () => !dev.offline, visible: () => !dev.hiddenTab, toast: (m) => dev.toasts.push(m), random: () => 0.5,
     onCleared: () => { dev.cleared = (dev.cleared || 0) + 1; }, ...(opts.validate ? { validate: opts.validate } : {}),
+    connection: () => dev.conn || null, ...(opts.engine || {}),
   });
   // app.js's wrapped DB: put saves through the engine (saveThread: a copy it knows takes in other tabs' saves first),
   // then tells it the save landed (noteWrite); load is DB.get, whose object the engine knows as read (noteRead) — what
@@ -730,7 +732,7 @@ test('review: a push answer for a generating thread waits for the run, so the ru
 
 test('review: "Remove synced threads" keeps every thread holding something only this device has', async () => {
   const w = world();
-  const pc = device(w, 'pc');
+  const pc = device(w, 'pc', { engine: { media: { image: false, video: false } } }); // a device still on phase 1 (its media stays here)
   const img = `data:image/png;base64,${Buffer.from('fake png bytes').toString('base64')}`;
   await pc.put(thread('t1', [ask('e1', T0, 'text answer'), { ...ask('e2', T0 + 1, ''), kind: 'image', images: [img] }]));
   await pc.put(thread('t2', [ask('e3', T0 + 2)]));
@@ -1326,7 +1328,7 @@ test('second review: a fork the leader merges into a thread generating in anothe
 
 test('second review: Clear this device names everything only this device has — images and videos, threads left out by "Only threads I make from now on"', async () => {
   const w = world();
-  const pc = device(w, 'pc');
+  const pc = device(w, 'pc', { engine: { media: { image: false, video: false } } }); // a device still on phase 1 (its media stays here)
   await pc.put(thread('t1', [ask('e1', T0)]));
   await online(pc);
   const t = structuredClone(pc.get('t1'));
@@ -1404,7 +1406,7 @@ test('second review: a wrong passcode answered 403 owner_only (a tester cookie i
 
 test('second review: deleting a thread whose every entry holds an image never promises a 30-day restore', async () => {
   const w = world();
-  const pc = device(w, 'pc');
+  const pc = device(w, 'pc', { engine: { media: { image: false, video: false } } }); // a device still on phase 1 (its media stays here)
   await pc.put(thread('t1', [ask('e1', T0)]));
   await online(pc);
   await pc.put(thread('p1', [ask('q1', T0 + 1, 'what is this?', { images: [IMG] })])); await sync(pc);
@@ -1835,4 +1837,472 @@ test('v56 review: an index read in flight across a restore does not keep its pre
   const reads = w.requests(pc).filter((x) => x.method === 'GET' && x.path.startsWith('index'));
   assert.equal(reads.at(-1).inm, null, 'the read after the restore is a whole one');
   assert.deepEqual(pc.get('t1')?.entries.map((e) => e.id), ['e1'], 'the restored thread comes back');
+});
+
+// ── phases 2-3: images and videos ──
+// Small sizes stand in for the real ones (a 10 MB video on mobile data, a 16 MB "large" blob).
+const BUDGET = { cellularMaxBytes: 1000, bigBlobBytes: 4000, printMemoChars: 64 };
+const bytesOf = (tag, n) => { const b = Buffer.alloc(n); for (let i = 0; i < n; i++) b[i] = (tag.charCodeAt(i % tag.length) * 7 + i * 13 + (i >> 8)) & 255; return b; };
+const dataUrl = (type, tag, n) => `data:${type};base64,${bytesOf(tag, n).toString('base64')}`;
+const mediaDevice = (w, name, opts = {}) => device(w, name, { ...opts, engine: { budget: BUDGET, idle: (fn) => setImmediate(fn), ...(opts.engine || {}) } });
+const blobGets = (w, dev) => w.requests(dev).filter((x) => x.method === 'GET' && x.path.startsWith('blob/'));
+const shaOf = (u) => createHash('sha256').update(Buffer.from(u.slice(u.indexOf(',') + 1), 'base64')).digest('hex');
+
+test('images: attached photos, generated images, video posters and frames, motion stills round-trip byte-exact to another device', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc'), phone = mediaDevice(w, 'phone');
+  const photo = dataUrl('image/jpeg', 'photo', 300), gen = dataUrl('image/png', 'gen', 500), still = dataUrl('image/webp', 'still', 200);
+  const poster = dataUrl('image/jpeg', 'poster', 120), frame = dataUrl('image/jpeg', 'frame', 90);
+  await pc.put(thread('t1', [
+    ask('e1', T0, 'what is in this photo?', { images: [photo] }),
+    { ...ask('e2', T0 + 1, ''), kind: 'image', media: [{ type: 'image', src: gen }, { type: 'image', src: gen }] },
+    { ...ask('e3', T0 + 2, ''), kind: 'video', media: [{ type: 'video', src: dataUrl('video/mp4', 'motion', 300), still }] },
+    ask('e4', T0 + 3, 'about the clip', { video: { name: 'clip.mp4', mime: 'video/mp4', size: 10, duration: 1, poster, frames: [{ t: 0, src: frame }] } }),
+  ]));
+  await online(pc);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1', 'e2', 'e3', 'e4'], 'every image entry went up');
+  assert.equal(w.r2.keys('b/').length, 6, 'one blob per distinct image or video (the same image twice is one blob)');
+  assert.equal(w.r2.objects.get(`b/${shaOf(gen).slice(0, 2)}/${shaOf(gen)}`).httpMetadata.contentType, 'image/png');
+  await online(phone);
+  assert.deepEqual(shape(phone.get('t1')), shape(pc.get('t1')), 'byte-exact on the other device');
+  assert.equal(phone.get('t1').entries[0].images[0], photo);
+  assert.equal(blobGets(w, phone).length, 6, 'each blob downloaded once');
+  // the status counts what the server holds
+  w.clock.t += 61 * MIN; await sync(phone); // the usage count is recounted hourly (uploads racing each other can undercount it meanwhile)
+  assert.match(countsLine(phone.engine.status()), /on your server \(5 images, 1 video\)/);
+});
+
+test('phase 1 held image entries go up by themselves once this device syncs images', async () => {
+  const w = world();
+  const db = memDb(), store = memoryStore();
+  const old = mediaDevice(w, 'pc', { db, store, engine: { media: { image: false, video: false } } });
+  await old.put(thread('t1', [ask('e1', T0, 'text'), ask('e2', T0 + 1, 'with a photo', { images: [IMG] })]));
+  await online(old);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1'], 'phase 1 kept the photo entry here');
+  old.engine.stop();
+  const pc = mediaDevice(w, 'pc', { db, store }); // the update: same browser, same storage
+  w.clock.t += MIN;
+  await online(pc);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1', 'e2'], 'the held entry went up without a new write');
+  assert.equal(pc.engine.config().media, '11');
+});
+
+test('videos: on mobile data a video over the limit waits for Wi-Fi; the thread’s text is already there; Download now fetches it', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc'), phone = mediaDevice(w, 'phone');
+  const clip = dataUrl('video/mp4', 'veo', 1500), small = dataUrl('video/webm', 'tiny', 400);
+  await pc.put(thread('t1', [ask('e1', T0, 'first'), { ...ask('e2', T0 + 1, ''), kind: 'video', media: [{ type: 'video', src: clip }] }, { ...ask('e3', T0 + 2, ''), kind: 'video', media: [{ type: 'video', src: small }] }]));
+  await online(pc);
+  assert.equal(w.doc('t1').entries.length, 3);
+  phone.conn = { type: 'cellular' };
+  await online(phone);
+  assert.deepEqual(idsOf(phone.get('t1')), ['e1', 'e3'], 'text and the small video are here at once');
+  assert.equal(blobGets(w, phone).filter((x) => x.path.includes(shaOf(clip))).length, 0, 'the large video was never requested');
+  const st = phone.engine.status();
+  assert.equal(statusLine(st, w.clock.t), 'Waiting for Wi-Fi · 1 video (1.5 KB)');
+  assert.equal(phone.engine.badge(phone.get('t1')), ' · Downloading 1 item');
+  assert.deepEqual(phone.engine.noteFor('t1'), { n: 1, wifi: 1, storage: 0, videos: 1, bytes: 1500, downloading: false });
+  // the next polls don't read the waiting thread again
+  const reads = () => w.requests(phone).filter((x) => x.path.startsWith('thread/t1')).length;
+  const before = reads();
+  w.clock.t += MIN; await sync(phone); w.clock.t += MIN; await sync(phone);
+  assert.equal(reads(), before, 'no re-read while it can only wait');
+  await phone.engine.downloadNow('t1');
+  await settle(phone);
+  assert.deepEqual(shape(phone.get('t1')), shape(pc.get('t1')), 'Download now brought it');
+  assert.equal(phone.engine.noteFor('t1').n, 0);
+  assert.match(statusLine(phone.engine.status(), w.clock.t), /^Up to date/);
+});
+
+test('videos: "Download videos on mobile data" lets them come on mobile data; Wi-Fi coming back does too', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc'), phone = mediaDevice(w, 'phone'), tablet = mediaDevice(w, 'tablet');
+  const clip = dataUrl('video/mp4', 'veo', 1500);
+  await pc.put(thread('t1', [{ ...ask('e1', T0, ''), kind: 'video', media: [{ type: 'video', src: clip }] }]));
+  await online(pc);
+  phone.conn = { type: 'cellular' }; tablet.conn = { type: 'wifi', saveData: true };
+  await online(phone); await online(tablet);
+  assert.equal(phone.get('t1'), undefined); assert.equal(tablet.get('t1'), undefined, 'Data Saver counts as mobile data');
+  await phone.engine.setCellular(true); await settle(phone);
+  assert.equal(phone.get('t1')?.entries[0].media[0].src, clip, 'the setting lets it come');
+  tablet.conn = { type: 'wifi' }; tablet.engine.netChanged(); await settle(tablet);
+  assert.equal(tablet.get('t1')?.entries[0].media[0].src, clip, 'Wi-Fi brings it');
+});
+
+test('videos: a phone on mobile data keeps a large new video until Wi-Fi (no upload), says so, and sends it once on Wi-Fi', async () => {
+  const w = world();
+  const phone = mediaDevice(w, 'phone'), pc = mediaDevice(w, 'pc');
+  await online(pc);
+  phone.conn = { type: 'cellular' };
+  const clip = dataUrl('video/mp4', 'mine', 1500);
+  await phone.put(thread('t1', [ask('e1', T0, 'text first'), { ...ask('e2', T0 + 1, ''), kind: 'video', media: [{ type: 'video', src: clip }] }]));
+  await online(phone);
+  assert.equal(w.requests(phone).filter((x) => x.method === 'PUT').length, 0, 'nothing uploaded over mobile data');
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1'], 'the text went up');
+  assert.equal(phone.engine.badge(phone.get('t1')), ' · Waiting for Wi-Fi');
+  assert.equal(statusLine(phone.engine.status(), w.clock.t), 'Waiting for Wi-Fi · 1 video (1.5 KB)');
+  assert.equal(deviceOnly(phone.engine.status()), true, 'Clear this device warns');
+  assert.deepEqual(await phone.engine.localReport(), { changes: 0, media: 1, other: 0, threads: 0 });
+  assert.equal(await phone.engine.deleteCopy('t1'), COPY.deleteConfirm + COPY.deleteWaiting);
+  phone.conn = { type: 'wifi' }; phone.engine.netChanged(); await settle(phone);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1', 'e2'], 'on Wi-Fi it goes');
+  assert.equal(w.requests(phone).filter((x) => x.method === 'PUT').length, 1);
+  await sync(pc);
+  assert.equal(pc.get('t1').entries[1].media[0].src, clip);
+});
+
+test('large videos: downloaded after the thread’s text, one at a time, each applied before the next is fetched', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc'), phone = mediaDevice(w, 'phone');
+  const v1 = dataUrl('video/mp4', 'one', 5000), v2 = dataUrl('video/webm', 'two', 6000);
+  await pc.put(thread('t1', [ask('e1', T0, 'text'), { ...ask('e2', T0 + 1, ''), kind: 'video', media: [{ type: 'video', src: v1 }] }, { ...ask('e3', T0 + 2, ''), kind: 'video', media: [{ type: 'video', src: v2 }] }]));
+  await online(pc);
+  const seen = [];
+  phone.before = async (x) => {
+    if (x.method === 'GET' && x.path.startsWith('blob/')) seen.push([x.path.slice(5, 13), idsOf(phone.get('t1'))]);
+    return null;
+  };
+  await online(phone);
+  assert.equal(seen.length, 2, JSON.stringify(seen));
+  assert.deepEqual(seen.map((x) => x[1]), [['e1'], seen[0][0] === shaOf(v1).slice(0, 8) ? ['e1', 'e2'] : ['e1', 'e3']], 'text before any video; one applied before the next is fetched');
+  assert.deepEqual(shape(phone.get('t1')), shape(pc.get('t1')));
+  assert.deepEqual(await phone.store.entries('bc:'), [], 'the download cache is emptied once applied');
+});
+
+test('large videos: an interrupted download or a reload never fetches a finished blob again', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc');
+  const v1 = dataUrl('video/mp4', 'one', 5000), v2 = dataUrl('video/mp4', 'two', 5200);
+  await pc.put(thread('t1', [ask('e1', T0, 'text'), { ...ask('e2', T0 + 1, ''), kind: 'video', media: [{ type: 'video', src: v1 }, { type: 'video', src: v2 }] }]));
+  await online(pc);
+  const db = memDb(), store = memoryStore();
+  let phone = mediaDevice(w, 'phone', { db, store });
+  // the connection drops right after the first video arrived
+  phone.before = async (x) => { if (x.method === 'GET' && x.path.includes(shaOf(v2))) throw new TypeError('Failed to fetch'); return null; };
+  await online(phone);
+  assert.deepEqual(idsOf(phone.get('t1')), ['e1']);
+  assert.equal((await store.entries('bc:')).length, 1, 'the finished one waits in the cache');
+  // the page reloads
+  phone.engine.stop();
+  phone = mediaDevice(w, 'phone', { db, store });
+  await online(phone);
+  assert.deepEqual(shape(phone.get('t1')), shape(pc.get('t1')));
+  const gets = w.requests().filter((x) => x.dev === 'phone' && x.method === 'GET' && x.path.startsWith('blob/'));
+  assert.equal(gets.filter((x) => x.path.includes(shaOf(v1))).length, 1, 'v1 downloaded once across the reload');
+});
+
+test('storage: downloads stop when the browser is 85% full (text still comes) and resume once there is room; a QuotaExceededError pauses them too', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc');
+  await pc.put(thread('t1', [ask('e1', T0, 'text'), ask('e2', T0 + 1, 'pic', { images: [dataUrl('image/png', 'p', 300)] })]));
+  await online(pc);
+  let est = { usage: 90, quota: 100 };
+  const phone = mediaDevice(w, 'phone', { engine: { estimate: async () => est } });
+  await online(phone);
+  assert.deepEqual(idsOf(phone.get('t1')), ['e1']);
+  assert.equal(blobGets(w, phone).length, 0);
+  assert.equal(statusLine(phone.engine.status(), w.clock.t), 'Storage almost full on this device · 1 item not downloaded');
+  est = { usage: 10, quota: 1_000_000 };
+  w.clock.t += 16 * MIN; await sync(phone);
+  assert.deepEqual(idsOf(phone.get('t1')), ['e1', 'e2'], 'room again: it came');
+  // the cache write itself is refused
+  const tablet = mediaDevice(w, 'tablet');
+  const set = tablet.store.set;
+  tablet.store.set = async (k, v) => { if (k.startsWith('bc:')) { const e = new Error('The quota has been exceeded.'); e.name = 'QuotaExceededError'; throw e; } return set.call(tablet.store, k, v); };
+  await pc.put({ ...structuredClone(pc.get('t1')), entries: [...pc.get('t1').entries, { ...ask('e3', T0 + 2, ''), kind: 'video', media: [{ type: 'video', src: dataUrl('video/mp4', 'big', 5000) }] }] });
+  await sync(pc);
+  await online(tablet);
+  assert.deepEqual(idsOf(tablet.get('t1')), ['e1', 'e2']);
+  assert.equal(tablet.engine.status().storageFull, true);
+  assert.equal(statusLine(tablet.engine.status(), w.clock.t), 'Storage almost full on this device · 1 item not downloaded');
+});
+
+test('a parked entry whose server version changed is let go; an edited same-length image is never mistaken for the old one', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc'), phone = mediaDevice(w, 'phone');
+  await pc.put(thread('t1', [{ ...ask('e1', T0, ''), kind: 'video', media: [{ type: 'video', src: dataUrl('video/mp4', 'a', 1500) }] }]));
+  await online(pc);
+  phone.conn = { type: 'cellular' };
+  await online(phone);
+  assert.equal(phone.engine.noteFor('t1').n, 1);
+  // the video is replaced on the pc by a text answer (a retry)
+  const t = structuredClone(pc.get('t1')); t.entries[0] = { ...ask('e1', T0, 'a text answer instead') }; await pc.put(t); await sync(pc);
+  w.clock.t += MIN; await sync(phone);
+  assert.equal(phone.engine.noteFor('t1').n, 0, 'nothing waits any more');
+  assert.equal(phone.get('t1').entries[0].text, 'a text answer instead');
+  // same length, different bytes: the print memo must not reuse the old hash
+  const img1 = dataUrl('image/png', 'x', 400), img2 = dataUrl('image/png', 'y', 400);
+  assert.equal(img1.length, img2.length);
+  const t2 = structuredClone(pc.get('t1')); t2.entries.push(ask('e2', T0 + 1, 'pic', { images: [img1] })); await pc.put(t2); await sync(pc);
+  const t3 = structuredClone(pc.get('t1')); t3.entries[1].images = [img2]; await pc.put(t3); await sync(pc);
+  assert.ok(await pc.store.get('hm:t1'), 'the print memo is kept');
+  assert.equal(w.doc('t1').entries[1].d.images[0].$b, shaOf(img2), 'the new image went up');
+  phone.conn = null; phone.engine.netChanged(); await settle(phone);
+  w.clock.t += MIN; await sync(phone);
+  assert.equal(phone.get('t1').entries[1].images[0], img2);
+});
+
+test('uploads: only one large blob is decoded and on the wire at a time', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc');
+  let inFlight = 0, most = 0;
+  pc.before = async (x) => {
+    if (x.method !== 'PUT' || !(x.body?.byteLength > BUDGET.bigBlobBytes)) return null;
+    inFlight++; most = Math.max(most, inFlight);
+    await new Promise((r) => setTimeout(r, 5));
+    inFlight--;
+    return null;
+  };
+  await pc.put(thread('t1', [{ ...ask('e1', T0, ''), kind: 'video', media: [{ type: 'video', src: dataUrl('video/mp4', 'one', 5000) }, { type: 'video', src: dataUrl('video/mp4', 'two', 5100) }, { type: 'image', src: dataUrl('image/png', 'i', 100) }] }]));
+  await online(pc);
+  assert.equal(w.doc('t1').entries.length, 1);
+  assert.equal(most, 1);
+});
+
+test('the Settings block and the banner over the open thread: Wi-Fi wait, Download now, the mobile-data switch', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc');
+  await pc.put(thread('t1', [ask('e1', T0, 'text'), { ...ask('e2', T0 + 1, ''), kind: 'video', media: [{ type: 'video', src: dataUrl('video/mp4', 'v', 1500) }] }]));
+  await online(pc);
+  const doc = fakeDoc();
+  const phone = mediaDevice(w, 'phone');
+  phone.conn = { type: 'cellular' };
+  const ui = bindUi(phone.engine, { toast: () => {}, getOpen: () => phone.open }, doc);
+  await online(phone);
+  phone.open = await phone.load('t1');
+  ui.render(phone.engine.status());
+  const $ = (s) => doc.querySelector(s);
+  assert.equal($('#syncStatus').textContent, 'Waiting for Wi-Fi · 1 video (1.5 KB)');
+  assert.equal($('#syncDownloadNow').hidden, false);
+  assert.equal($('#syncCellRow').hidden, false, 'shown where the browser reports its network');
+  assert.equal($('#syncNote').hidden, false);
+  assert.equal($('#syncNote').children[0].textContent, '1 item in this thread is still downloading · Waiting for Wi-Fi');
+  assert.equal($('#syncNote').children[1].textContent, 'Download now');
+  $('#syncNote').children[1].click();
+  await settle(phone);
+  ui.render(phone.engine.status());
+  assert.equal($('#syncNote').hidden, true, 'nothing left to download');
+  assert.equal($('#syncDownloadNow').hidden, true);
+  assert.equal(phone.get('t1').entries.length, 2);
+  $('#syncCell').checked = true; $('#syncCell').fire('change');
+  await settle(phone);
+  assert.equal(phone.engine.config().videosOnCellular, true);
+});
+
+test('memory: one thread read brings in about planMediaBytes of media; the rest comes through the cache right after', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc');
+  const imgs = ['a', 'b', 'c', 'd'].map((k) => dataUrl('image/png', k, 600));
+  await pc.put(thread('t1', [ask('e0', T0, 'text'), ...imgs.map((src, i) => ask(`e${i + 1}`, T0 + i + 1, 'pic', { images: [src] }))]));
+  await online(pc);
+  const phone = mediaDevice(w, 'phone', { engine: { budget: { ...BUDGET, planMediaBytes: 1000 } } });
+  const sizes = [];
+  phone.before = async (x) => { if (x.method === 'GET' && x.path.startsWith('thread/t1')) sizes.push(idsOf(phone.get('t1')).length); return null; };
+  await online(phone);
+  assert.deepEqual(shape(phone.get('t1')), shape(pc.get('t1')), 'everything arrived');
+  assert.ok(sizes.length >= 3, `read again as the cache filled: ${JSON.stringify(sizes)}`);
+  assert.equal(blobGets(w, phone).length, 4, 'each image downloaded once');
+  assert.deepEqual(await phone.store.entries('bc:'), []);
+});
+
+// ── media review (adversarial pass over phases 2-3) ──
+const videoEntry = (id, at, src) => ({ ...ask(id, at, ''), kind: 'video', media: [{ type: 'video', src }] });
+const getsOf = (w, dev, u) => blobGets(w, dev).filter((x) => x.path.includes(shaOf(u))).length;
+const threadReads = (w, dev, id) => w.requests(dev).filter((x) => x.method === 'GET' && x.path.startsWith(`thread/${id}`)).length;
+
+test('media review: a large download that keeps failing never stops the cycle finishing, and waits a backoff between tries', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc');
+  const big = dataUrl('video/mp4', 'big', 5000), pic = dataUrl('image/png', 'pic', 3000);
+  await pc.put(thread('t1', [ask('e1', T0, 'text'), videoEntry('e2', T0 + 1, big), ask('e3', T0 + 2, 'pic', { images: [pic] })]));
+  await online(pc);
+  const phone = mediaDevice(w, 'phone');
+  phone.before = async (x) => { if (x.method === 'GET' && (x.path.includes(shaOf(big)) || x.path.includes(shaOf(pic)))) throw new TypeError('connection reset'); return null; };
+  await online(phone);
+  assert.equal(phone.engine.config().firstDone, true, 'the first sync finished');
+  assert.ok(phone.engine.config().lastOkAt > 0);
+  assert.deepEqual(idsOf(phone.get('t1')), ['e1'], 'the text is in; both media entries wait');
+  for (let i = 0; i < 20; i++) { w.clock.t += MIN; await sync(phone); }
+  assert.ok(getsOf(w, phone, big) <= 8, `large blob tried ${getsOf(w, phone, big)} times in 20 polls`);
+  assert.ok(getsOf(w, phone, pic) <= 8, `small blob tried ${getsOf(w, phone, pic)} times in 20 polls`);
+  assert.equal(phone.engine.status().errorKind, null, 'no error state from one bad blob');
+  phone.before = null;
+  phone.engine.kick('online'); // the network is back: failed downloads go again at once
+  await settle(phone);
+  assert.deepEqual(shape(phone.get('t1')), shape(pc.get('t1')));
+});
+
+test('media review: a blob the server lacks (404) is asked for with a backoff, not with a thread read and a GET every poll', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc');
+  const big = dataUrl('video/mp4', 'gone', 5000), pic = dataUrl('image/png', 'gonepic', 300);
+  await pc.put(thread('t1', [ask('e1', T0, 'text'), videoEntry('e2', T0 + 1, big), ask('e3', T0 + 2, 'pic', { images: [pic] })]));
+  await online(pc);
+  const phone = mediaDevice(w, 'phone');
+  phone.before = async (x) => (x.method === 'GET' && (x.path.includes(shaOf(big)) || x.path.includes(shaOf(pic))) ? new Response('{"error":"Not found.","code":"not_found"}', { status: 404 }) : null);
+  await online(phone);
+  const reads0 = threadReads(w, phone, 't1'), gets0 = blobGets(w, phone).length;
+  for (let i = 0; i < 10; i++) { w.clock.t += MIN; await sync(phone); }
+  const reads = threadReads(w, phone, 't1') - reads0, gets = blobGets(w, phone).length - gets0;
+  assert.ok(reads <= 4, `thread read ${reads} times in 10 polls`);
+  assert.ok(gets <= 8, `missing blobs asked for ${gets} times in 10 polls`);
+  assert.deepEqual(idsOf(phone.get('t1')), ['e1']);
+  phone.before = null; // it turns up (another device uploads it again): the next read after the backoff brings it
+  for (let i = 0; i < 8; i++) { w.clock.t += 10 * MIN; await sync(phone); }
+  await settle(phone);
+  assert.deepEqual(shape(phone.get('t1')), shape(pc.get('t1')));
+});
+
+test('media review: what a parked entry already downloaded stays in the cache through the first sweep (downloaded once)', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc');
+  const still = dataUrl('image/png', 'poster', 300), clip = dataUrl('video/mp4', 'veo', 1500);
+  await pc.put(thread('t1', [ask('e1', T0, 'text'), { ...videoEntry('e2', T0 + 1, clip), media: [{ type: 'video', src: clip, still }] }]));
+  await online(pc);
+  const phone = mediaDevice(w, 'phone');
+  phone.conn = { type: 'cellular' };
+  await online(phone);
+  assert.deepEqual(idsOf(phone.get('t1')), ['e1'], 'the video entry waits for Wi-Fi');
+  phone.conn = { type: 'wifi' }; phone.engine.netChanged();
+  await settle(phone);
+  assert.deepEqual(shape(phone.get('t1')), shape(pc.get('t1')));
+  assert.equal(getsOf(w, phone, still), 1, 'the poster came down once');
+  assert.deepEqual(await phone.store.entries('bc:'), [], 'and the cache is empty once applied');
+});
+
+test('media review: editing an entry whose newer server version waits for Wi-Fi costs no request per poll; both versions are kept', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc'), phone = mediaDevice(w, 'phone');
+  await pc.put(thread('t1', [ask('e1', T0, 'text'), ask('e2', T0 + 1, 'v1')]));
+  await online(pc); await online(phone);
+  let t = structuredClone(pc.get('t1'));
+  t.entries[1] = { ...t.entries[1], kind: 'video', text: '', media: [{ type: 'video', src: dataUrl('video/mp4', 'v2', 1500) }] }; t.updatedAt = T0 + 10;
+  await pc.put(t); await sync(pc);
+  phone.conn = { type: 'cellular' };
+  w.clock.t += MIN; await sync(phone);
+  t = structuredClone(phone.get('t1')); t.entries[1].text = 'v1 edited on the phone'; t.updatedAt = T0 + 20;
+  await phone.put(t);
+  w.clock.t += MIN; await sync(phone);
+  const n0 = w.requests(phone).length;
+  for (let i = 0; i < 5; i++) { w.clock.t += MIN; await sync(phone); }
+  const extra = w.requests(phone).slice(n0).filter((x) => !(x.method === 'GET' && x.path === 'index'));
+  assert.deepEqual(extra.map((x) => `${x.method} ${x.path}`), [], 'only the index is read while the video waits');
+  phone.conn = { type: 'wifi' }; phone.engine.netChanged();
+  await settle(phone); await sync(phone); await sync(pc);
+  for (const dev of [phone, pc]) {
+    const es = dev.get('t1').entries;
+    assert.ok(es.some((e) => e.id === 'e2' && e.media?.length), `${dev.name} has the video`);
+    assert.ok(es.some((e) => e.text === 'v1 edited on the phone'), `${dev.name} has the phone's edit`);
+  }
+  assert.deepEqual(shape(phone.get('t1')), shape(pc.get('t1')));
+});
+
+test('media review: a full disk while writing a pulled thread pauses media downloads instead of fetching everything again', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc');
+  const pic = dataUrl('image/png', 'pic', 3000);
+  await pc.put(thread('t1', [ask('e1', T0, 'text'), ask('e2', T0 + 1, 'pic', { images: [pic] })]));
+  await online(pc);
+  const phone = mediaDevice(w, 'phone');
+  const update = phone.db.update;
+  phone.db.update = async () => { const e = new Error('The quota has been exceeded.'); e.name = 'QuotaExceededError'; throw e; };
+  await online(phone);
+  for (let i = 0; i < 10; i++) { w.clock.t += 6 * MIN; await sync(phone); }
+  assert.ok(getsOf(w, phone, pic) <= 2, `image downloaded ${getsOf(w, phone, pic)} times`);
+  phone.db.update = update;
+  w.clock.t += 20 * MIN;
+  await sync(phone); await settle(phone);
+  assert.deepEqual(shape(phone.get('t1')), shape(pc.get('t1')), 'room again: everything arrives');
+});
+
+test('media review: a video held for Wi-Fi goes up after a reload on Wi-Fi (no network change event needed)', async () => {
+  const w = world();
+  const db = memDb(), store = memoryStore();
+  let phone = mediaDevice(w, 'phone', { db, store });
+  await phone.put(thread('t1', [ask('e1', T0, 'text'), ask('e2', T0 + 1, 'old answer')]));
+  await online(phone);
+  phone.conn = { type: 'cellular' };
+  const t = structuredClone(phone.get('t1'));
+  t.entries[1] = { ...t.entries[1], kind: 'video', text: '', media: [{ type: 'video', src: dataUrl('video/mp4', 'regen', 1500) }] }; t.updatedAt = T0 + 5;
+  await phone.put(t); await sync(phone);
+  assert.equal(w.doc('t1').entries[1].d.text, 'old answer', 'held on mobile data');
+  phone.engine.stop();
+  phone = mediaDevice(w, 'phone', { db, store }); // reloaded, on Wi-Fi now
+  w.clock.t += MIN;
+  await online(phone); await settle(phone);
+  assert.ok(w.doc('t1').entries[1].d.media, 'the regenerated video went up');
+  assert.equal(phone.engine.record('t1').held || 0, 0);
+});
+
+test('media review: the delete-everywhere question warns about a held video on an entry the server knows in an older version', async () => {
+  const w = world();
+  const phone = mediaDevice(w, 'phone');
+  await phone.put(thread('t1', [ask('e1', T0, 'text'), ask('e2', T0 + 1, 'old answer')]));
+  await online(phone);
+  phone.conn = { type: 'cellular' };
+  const t = structuredClone(phone.get('t1'));
+  t.entries[1] = { ...t.entries[1], kind: 'video', text: '', media: [{ type: 'video', src: dataUrl('video/mp4', 'regen', 1500) }] }; t.updatedAt = T0 + 5;
+  await phone.put(t); await sync(phone);
+  const copy = await phone.engine.deleteCopy('t1');
+  assert.ok(copy.includes(COPY.deleteWaiting), copy);
+});
+
+test('media review: when the Web Locks can’t be read, a pending entry is never taken for an interrupted one', async () => {
+  const w = world();
+  const locks = fakeLocks();
+  const pc = device(w, 'pc'), phone = device(w, 'phone', { locks });
+  await pc.put(thread('t1', [ask('e1', T0, 'text'), ask('e2', T0 + 1, 'v1')]));
+  await online(pc); await online(phone);
+  let t = structuredClone(pc.get('t1')); t.entries[1].text = 'v2 from pc'; t.updatedAt = T0 + 10; await pc.put(t); await sync(pc);
+  let release;
+  locks.request('atelier-run:e2', () => new Promise((r) => { release = r; }));
+  await tick();
+  t = structuredClone(phone.get('t1')); t.entries[1] = { ...t.entries[1], pending: true, text: 'partial stream…' }; await phone.db.put(t);
+  locks.query = async () => { throw new Error('SecurityError'); };
+  w.clock.t += MIN; await sync(phone);
+  assert.deepEqual(phone.get('t1').entries.map((e) => [e.id, e.text, e.pending ?? null]), [['e1', 'text', null], ['e2', 'partial stream…', true]]);
+  release();
+});
+
+test('media review: a thread that changes while its media downloads is planned again without downloading the media again', async () => {
+  const w = world();
+  const pc = mediaDevice(w, 'pc'), phone = mediaDevice(w, 'phone');
+  await pc.put(thread('t1', [ask('e1', T0, 'text')]));
+  await online(pc); await online(phone);
+  const pic = dataUrl('image/png', 'pic', 3000);
+  const t = structuredClone(pc.get('t1')); t.entries.push(ask('e2', T0 + 1, 'pic', { images: [pic] })); t.updatedAt = T0 + 2;
+  await pc.put(t); await sync(pc);
+  let once = false;
+  phone.before = async (x) => {
+    if (!once && x.method === 'GET' && x.path.includes(shaOf(pic))) {
+      once = true; // the user sends a turn on the phone while the image is on its way
+      const p = structuredClone(phone.get('t1')); p.entries.push(ask('e9', T0 + 3, 'typed meanwhile')); p.updatedAt = T0 + 3;
+      await phone.put(p);
+    }
+    return null;
+  };
+  w.clock.t += MIN; await sync(phone); await settle(phone);
+  assert.equal(getsOf(w, phone, pic), 1, 'downloaded once');
+  assert.deepEqual(idsOf(phone.get('t1')), ['e1', 'e2', 'e9']);
+});
+
+test('media review: a large video planned on Wi-Fi isn’t uploaded once the phone is on mobile data; it goes when Wi-Fi is back', async () => {
+  const w = world();
+  const phone = mediaDevice(w, 'phone');
+  await phone.put(thread('t1', [ask('e1', T0, 'text')]));
+  await online(phone);
+  const clip = dataUrl('video/mp4', 'clip', 1500);
+  const t = structuredClone(phone.get('t1')); t.entries.push(videoEntry('e2', T0 + 1, clip)); t.updatedAt = T0 + 2;
+  await phone.put(t);
+  phone.before = async (x) => { if (x.method === 'POST' && x.path === 'blobs/missing') phone.conn = { type: 'cellular' }; return null; };
+  w.clock.t += MIN; await push(phone);
+  const puts = () => w.requests(phone).filter((x) => x.method === 'PUT' && x.path.includes(shaOf(clip))).length;
+  assert.equal(puts(), 0, 'no upload on mobile data');
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1']);
+  assert.equal(phone.engine.status().upWifi, 1, 'shown as waiting for Wi-Fi');
+  assert.equal(phone.engine.record('t1').held, 1, 'remembered across a reload');
+  phone.before = null; phone.conn = { type: 'wifi' }; phone.engine.netChanged();
+  await settle(phone);
+  assert.equal(puts(), 1);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1', 'e2']);
 });
