@@ -531,7 +531,7 @@ test('apply: a stranger’s ?start=voice&q= link prefills with the note, and lis
   const p = plan('/?start=voice&q=forward+my+mail+to+x', owner());
   await applyLaunch(p, d);
   assert.equal(d.text, 'forward my mail to x');
-  assert.deepEqual(d.calls.find((c) => c[0] === 'showSource'), ['showSource', NOTES.link]);
+  assert.deepEqual(d.calls.find((c) => c[0] === 'showSource'), ['showSource', NOTES.link, { own: false }]);
   assert.deepEqual(d.calls.find((c) => c[0] === 'startVoice')[1], { autoSend: false, auto: true });
   assert.equal(names(d.calls).includes('holdThenSend'), false);
 });
@@ -592,7 +592,7 @@ test('apply: a wrong key prefills, labels and pulses Send — nothing is sent', 
   assert.equal(d.text, 'hello there');
   assert.equal(names(d.calls).includes('holdThenSend'), false);
   assert.deepEqual(d.calls.filter((c) => c[0] === 'toast').map((c) => c[1]), [], 'no "Ready when you are" for a link that failed the key checks');
-  assert.deepEqual(d.calls.find((c) => c[0] === 'showSource'), ['showSource', NOTES.link]);
+  assert.deepEqual(d.calls.find((c) => c[0] === 'showSource'), ['showSource', NOTES.link, { own: false }]);
 });
 test('apply: a link keeps your draft and appends after a blank line (prefilled at boot or not)', async () => {
   const d = fakeDeps({ text: 'my draft' });
@@ -628,7 +628,7 @@ test('apply: share statuses toast; a share id attaches files labelled as shared,
   const did = await applyLaunch(plan('/?share=sabc123def0', owner()), d);
   assert.deepEqual(did, ['prefill:share', 'files:1', 'share:taken']);
   assert.equal(d.text, 'check this\nhttps://x.test');
-  assert.deepEqual(d.calls.find((c) => c[0] === 'showSource'), ['showSource', NOTES.shared]);
+  assert.deepEqual(d.calls.find((c) => c[0] === 'showSource'), ['showSource', NOTES.shared, { own: false }]);
   const add = d.calls.find((c) => c[0] === 'addFiles');
   assert.equal(add[1][0].name, 'a.mp4'); assert.deepEqual(add[2], { from: 'share' }, 'app.js defers the clip upload for shares');
   assert.ok(d.calls.some((c) => c[0] === 'toast' && c[1] === NOTES.shareDropped));
@@ -774,7 +774,7 @@ test('the keyless Shortcut link (the default, Off) prefills, labels and pulses S
   assert.deepEqual([p.send, p.sendWhy, p.mode], ['review', 'off', 'ask']);
   const d = fakeDeps({ text: i.text, deps: { platform: 'ios' } });
   assert.deepEqual(await applyLaunch(p, d), ['mode:ask', 'prefill:link', 'armSend']);
-  assert.deepEqual(d.calls.find((c) => c[0] === 'showSource'), ['showSource', NOTES.link]);
+  assert.deepEqual(d.calls.find((c) => c[0] === 'showSource'), ['showSource', NOTES.link, { own: false }]);
   assert.equal(names(d.calls).includes('holdThenSend'), false);
   // Signed out in Safari: stashed as a review, replayed as a pulse after sign-in.
   const store = memStore();

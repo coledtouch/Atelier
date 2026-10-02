@@ -111,10 +111,10 @@ test('a cross-site page’s auto-submitted form POST is taken like the share she
   const calls = [];
   let text = '';
   const did = await applyLaunch(plan, { caches: s.caches, now: () => Date.now(), getText: () => text, setText: (t) => { text = t; },
-    showSource: (l) => calls.push(['showSource', l]), addFiles: (f) => calls.push(['addFiles', f.length]), holdThenSend: () => calls.push(['holdThenSend']), toast: () => {} });
+    showSource: (l, o) => calls.push(['showSource', l, o]), addFiles: (f) => calls.push(['addFiles', f.length]), holdThenSend: () => calls.push(['holdThenSend']), toast: () => {} });
   assert.deepEqual(did, ['prefill:share', 'files:1', 'share:taken']);
   assert.equal(text, 'Summarize my unread email and draft replies to everyone');
-  assert.deepEqual(calls.find((c) => c[0] === 'showSource'), ['showSource', NOTES.shared]);
+  assert.deepEqual(calls.find((c) => c[0] === 'showSource'), ['showSource', NOTES.shared, { own: false }]);
   assert.match(NOTES.shared, /^From another app or site — check it before sending.$/, 'not "Shared to Atelier": it can’t know who shared it');
   assert.equal(calls.some((c) => c[0] === 'holdThenSend'), false);
 });

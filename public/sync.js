@@ -39,8 +39,8 @@ import {
   FORMAT, MEDIA_SYNC, TRANSIENT, syncId, validDate, isRev, sha256hex, utf8, utf8Length, fromBase64, base64Length, jsonClone, dehydrate,
   hydrate, mediaKinds, gateHeld, refsOf, reborn, bornOf, forkEntry, checkView, checkPulledEntry, newRecord, planPull, planPush, pushBodies,
   planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder,
-} from './sync-merge.js?v=57';
-import { validateBackup } from './data-safety.js?v=57';
+} from './sync-merge.js?v=58';
+import { validateBackup } from './data-safety.js?v=58';
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 // The owner's choices and the engine's timing, kept together so they are easy to change.

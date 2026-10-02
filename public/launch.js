@@ -365,7 +365,9 @@ export function planLaunch(intent, ctx = {}) {
   const share = intent.share ? (SHARE_STATUS.includes(intent.share) ? { status: intent.share } : SHARE_ID.test(intent.share) ? { id: intent.share } : null) : null;
   const plan = {
     mode: intent.mode || null,
-    prefill: text ? { text, from: intent.from === 'share' ? 'share' : 'link', label: intent.from === 'share' ? NOTES.shared : assisted ? NOTES.assist : NOTES.link } : null,
+    // own: the text came with this browser's own key (the owner's paired Atelier Assist or keyed Shortcut), so it counts as
+    // the owner's own words (owner decision 2026-10-02): it may use the accounts agent. A share or an unkeyed link never does.
+    prefill: text ? { text, from: intent.from === 'share' ? 'share' : 'link', label: intent.from === 'share' ? NOTES.shared : assisted ? NOTES.assist : NOTES.link, own: valid && intent.from !== 'share' } : null,
     share, send: 'none', sendWhy: '', voice: null, voiceWhy: null, autoSend: false, stash: false, replay, clean: Boolean(intent.any), key,
     via: assisted ? 'assist' : '',
     // Key-free copy for stashLaunch: a requested send survives only as "review" (pulse Send), never as a send.
@@ -535,7 +537,7 @@ export async function applyLaunch(plan, deps = {}) {
   const prefill = (p) => {
     const cur = String(call('getText') ?? '');
     if (!cur.includes(p.text)) call('setText', joinDraft(cur, p.text));
-    call('showSource', p.label);
+    call('showSource', p.label, { own: Boolean(p.own) });
     did.push(`prefill:${p.from}`);
   };
 

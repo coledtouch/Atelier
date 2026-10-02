@@ -105,7 +105,7 @@ test('the first keyed use still asks (with Atelier Assist’s wording); Allow ho
   assert.deepEqual(await applyLaunch(p, d), ['mode:image', 'prefill:link', 'confirmed', 'hold']);
   assert.deepEqual(find(d.calls, 'confirmLinkSend'), ['confirmLinkSend', { via: 'assist', mode: 'image' }]);
   assert.deepEqual(find(d.calls, 'holdThenSend'), ['holdThenSend', { ms: HOLD_MS.link, mode: 'image', via: 'assist' }]);
-  assert.deepEqual(find(d.calls, 'showSource'), ['showSource', NOTES.assist]);
+  assert.deepEqual(find(d.calls, 'showSource'), ['showSource', NOTES.assist, { own: true }]);
   assert.equal(store.get('launchKeyOk'), CONFIRM_SCOPE + KEY);
   // Not now: Send pulses, nothing is held.
   const s2 = memStore({ launchKey: KEY, launchRole: 'owner' });
@@ -236,4 +236,17 @@ test('the entry, the first-use dialog and Settings → Quick launch know about A
     assert.ok(strings.includes(label), `android strings.xml says "${label}"`);
     assert.ok(HTML.includes(label.split(' → ').at(-1)), `index.html says "${label.split(' → ').at(-1)}"`);
   }
+});
+
+// Owner decision 2026-10-02: text that comes with this browser's own key (the paired Atelier Assist, a keyed Shortcut)
+// is the owner's own words and may use the accounts agent; an unkeyed link, a wrong key or a share stays marked.
+test('own key: a keyed launch prefill is the owner’s own; a wrong key or no key is not', () => {
+  assert.equal(booted(assist('ask', 'what do I need to do today')).prefill.own, true);
+  assert.equal(booted(`/?start=ask#k=${KEY}&send=1&q=hi`).prefill.own, true);
+  assert.equal(booted(assist('ask', 'hi', OTHER)).prefill.own, false);
+  assert.equal(booted('/?start=ask&via=assist#q=hi').prefill.own, false);
+  assert.equal(booted('/?start=ask&q=hi').prefill.own, false);
+});
+test('own key: app.js showSource leaves an own prefill unmarked and marks the rest', () => {
+  assert.match(APP, /function showSource\(msg, \{ own = false \} = \{\}\) \{[^\n]*srcKind = own \? '' : msg === NOTES\.shared \? 'share' : 'link'; setMark\(srcKind\)/);
 });

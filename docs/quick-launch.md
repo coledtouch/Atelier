@@ -41,7 +41,9 @@ code is in `public/launch.js` (pure logic), `public/sw.js` (share intake), `src/
     note goes at the first keystroke. A draft saved with such text comes back marked.
   - An emptied box remembers the mark and the marked text. That text coming back (Undo, Redo, or pasted back after a
     cut) brings the mark back. Text the owner types or pastes after emptying the box is never marked.
-  - `submit()` marks that turn `e.untrusted` (`'link'` or `'share'`), and so does a keyed Shortcut send.
+  - `submit()` marks that turn `e.untrusted` (`'link'` or `'share'`). Text that came with this browser's **own key** (a paired
+    Atelier Assist or a keyed Shortcut) is not marked: owner decision 2026-10-02, it counts as the owner's own words.
+    Write tools still show an approval card, and browser_open/browser_read({url}) always ask.
   - `runChat` never routes a marked turn to the accounts agent. It is answered as plain chat, and the meta line says
     "shared content · tools off for this turn — ask again without it to use your accounts".
   - The owner uses the tools on purpose by asking in their own words.
@@ -97,8 +99,8 @@ iOS, a blocked mic, and a start that failed.
   - A keyed send is still a rate-limited, held and labelled turn. Since v57 it can be any of the six modes, so a key
     read from History or History sync can start paid Image or Video work, after the hold (4 s and the price for
     Video), and only in a browser that holds that confirmed key. Atelier Assist's links land in Chrome's History
-    the same way. Retire a key that may have been seen with **New link**. Since v56 it is also marked `untrusted`,
-    so it never reaches account tools.
+    the same way. Retire a key that may have been seen with **New link**. Since v58 a keyed send is the owner's own
+    (it may use account tools, with the usual approval cards); a leaked key is therefore worth retiring at once.
 - **A stranger's link can start the mic.** Once mic permission is granted, a stranger's link can open the installed
   app listening. Only the user's own words can be sent, behind a visible hold with Cancel, while the Android mic
   indicator shows. "After you speak: Review" removes even the hold-to-send.
