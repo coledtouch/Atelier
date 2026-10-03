@@ -7,20 +7,20 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=65';
-import * as Sync from './sync.js?v=65';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=65';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=65';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=65';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=65';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=65';
-import { initLookup } from './lookup.js?v=65';
-import { createRemix } from './remix-app.js?v=65';
-import { sendMode, looksLikeQuestion } from './remix.js?v=65';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=65';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=65';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=65';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=65';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=66';
+import * as Sync from './sync.js?v=66';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=66';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=66';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=66';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=66';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=66';
+import { initLookup } from './lookup.js?v=66';
+import { createRemix } from './remix-app.js?v=66';
+import { sendMode, looksLikeQuestion } from './remix.js?v=66';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=66';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=66';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=66';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=66';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -5057,6 +5057,7 @@ document.addEventListener('keydown', (ev) => {
   }
   if (ev.altKey && !ev.ctrlKey && /^Digit[1-6]$/.test(ev.code)) { ev.preventDefault(); setMode(MODE_KEYS[+ev.code.slice(5) - 1]); input.focus(); }
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ev.preventDefault(); input.focus(); }
+  if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === 'b' && matchMedia('(min-width: 1100px)').matches) { ev.preventDefault(); navCollapse.click(); }
   if ((ev.ctrlKey || ev.metaKey) && ev.key === '.') { ev.preventDefault(); openDrawer('threadsDrawer'); Sync.kick('drawer'); }
   if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && ev.key.toLowerCase() === 'o') { ev.preventDefault(); startFresh(); }
   if (ev.key === 'Escape') {
@@ -5085,6 +5086,22 @@ $('#brandBtn').onclick = startFresh;
 
 // Keyboard and focus behavior shared by the desktop and compact layouts.
 $$('[data-trigger]').forEach(b => { b.onclick = () => $('#' + b.dataset.trigger).click(); });
+// Desktop sidebar collapses to an icon rail (≥1100px only; below that it's hidden anyway); the choice is per browser.
+const navCollapse = $('#navCollapse');
+function setNavCollapsed(on, save = true) {
+  document.documentElement.classList.toggle('nav-collapsed', on);
+  navCollapse.setAttribute('aria-expanded', String(!on));
+  const label = on ? 'Expand sidebar' : 'Collapse sidebar';
+  navCollapse.setAttribute('aria-label', label); navCollapse.title = `${label} (Ctrl+B)`;
+  if (save) try { localStorage.setItem('atelier.navCollapsed', on ? '1' : '0'); } catch {}
+}
+try { setNavCollapsed(localStorage.getItem('atelier.navCollapsed') === '1', false); } catch { setNavCollapsed(false, false); }
+navCollapse.onclick = () => {
+  const root = document.documentElement;
+  root.classList.add('nav-anim'); clearTimeout(setNavCollapsed.t);
+  setNavCollapsed(!root.classList.contains('nav-collapsed'));
+  setNavCollapsed.t = setTimeout(() => root.classList.remove('nav-anim'), 260);
+};
 modesNav.addEventListener('keydown', ev => {
   const current = MODE_KEYS.indexOf(S.mode);
   const next = ev.key === 'ArrowRight' ? (current + 1) % MODE_KEYS.length : ev.key === 'ArrowLeft' ? (current + MODE_KEYS.length - 1) % MODE_KEYS.length : ev.key === 'Home' ? 0 : ev.key === 'End' ? MODE_KEYS.length - 1 : null;

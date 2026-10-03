@@ -106,6 +106,19 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   .nav-note > span:last-child { font-size: 10px; }
   .nav-bottom { margin-top: auto; }
   .nav-local { display: block; margin: 20px 12px 0; color: var(--ink-3); font-size: 10px; }
+  .nav-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -8px 0 8px; }
+  .nav-head .nav-caption { margin-bottom: 0; }
+  .nav-collapse { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 9px; color: var(--ink-3); }
+  .nav-collapse svg { width: 18px; height: 18px; transition: transform .2s ease; }
+  .nav-collapse:hover { background: var(--surface-2); color: var(--ink); }
+  html.nav-anim :is(.studio-nav, #stage, .dock) { transition: width .2s ease, margin-left .2s ease, left .2s ease, padding .2s ease; } /* only while toggling: never fights the keyboard or toast transitions */
+  /* Collapsed (Ctrl+B or the panel button; remembered per browser): a 68px icon rail, names as tooltips */
+  html.nav-collapsed { --sidebar-w: 68px; }
+  html.nav-collapsed .studio-nav { padding-inline: 10px; overflow-x: hidden; }
+  html.nav-collapsed :is(.nav-caption, .nav-label, .nav-note, .nav-local) { display: none; }
+  html.nav-collapsed .nav-head { justify-content: center; margin-bottom: 14px; }
+  html.nav-collapsed .nav-collapse svg { transform: scaleX(-1); }
+  html.nav-collapsed :is(.nav-new, .nav-item) { justify-content: center; padding-inline: 0; gap: 0; }
   #stage { margin-left: var(--sidebar-w); padding-inline: clamp(32px, 5vw, 80px); }
   .dock { left: var(--sidebar-w); padding-inline: 40px; }
   .toast { left: calc(50% + var(--sidebar-w) / 2); }
