@@ -9,7 +9,7 @@
 //   fade — a 0.33 s crossfade centred on the cut using handles (media beyond the out / before the in; layout() only
 //          keeps 'fade' where those exist).
 // Layers draw in the order cover → image → text, with their fades; text drift is px per second at 1080 wide.
-import { cropFor, FADES, BRAND } from './remix.js?v=62';
+import { cropFor, FADES, BRAND } from './remix.js?v=63';
 
 const r6 = (t) => Math.round(t * 1e6) / 1e6;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));

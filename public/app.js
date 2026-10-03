@@ -7,20 +7,20 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=62';
-import * as Sync from './sync.js?v=62';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=62';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=62';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=62';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=62';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=62';
-import { initLookup } from './lookup.js?v=62';
-import { createRemix } from './remix-app.js?v=62';
-import { sendMode, looksLikeQuestion } from './remix.js?v=62';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=62';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=62';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=62';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=62';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=63';
+import * as Sync from './sync.js?v=63';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=63';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=63';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=63';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=63';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=63';
+import { initLookup } from './lookup.js?v=63';
+import { createRemix } from './remix-app.js?v=63';
+import { sendMode, looksLikeQuestion } from './remix.js?v=63';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=63';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=63';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=63';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=63';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -3164,9 +3164,14 @@ const EDITABLE = 'textarea, select, [contenteditable]:not([contenteditable="fals
 // so `innerHeight - vv.height` read 0 there and the dock stayed under the keyboard. Same parent as the dock: same box.
 const vpProbe = document.createElement('div');
 vpProbe.setAttribute('aria-hidden', 'true');
-vpProbe.style.cssText = 'position:fixed;top:0;bottom:0;left:0;width:0;visibility:hidden;pointer-events:none';
+vpProbe.style.cssText = 'position:fixed;top:0;bottom:0;left:0;width:0;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)';
 document.body.append(vpProbe);
-let vp = viewportState({ innerHeight, innerWidth }), vpKey = '', vpNudged = false, vpEv = 'load', vpN = 0, vpRaf = 0, vpUntil = 0, vpChain = 0, vpPoll = 0;
+// iOS Home Screen app: the only place the bottom gap (viewport.js) can happen. html[data-standalone] for CSS; the safe-area
+// insets come from the probe's padding (env() has no JS API).
+const IOS_APP = PLATFORM === 'ios' && STANDALONE();
+if (IOS_APP) document.documentElement.dataset.standalone = 'ios';
+const vpInsets = () => { const cs = getComputedStyle(vpProbe); return { top: parseFloat(cs.paddingTop) || 0, bottom: parseFloat(cs.paddingBottom) || 0 }; };
+let vp = viewportState({ innerHeight, innerWidth }), vpKey = '', vpHealArm = true, vpHealT = 0, vpHeals = 0, vpNudged = false, vpEv = 'load', vpN = 0, vpRaf = 0, vpUntil = 0, vpChain = 0, vpPoll = 0;
 // The Build preview iframe that has focus, when it got it (frameAge in viewport.js), and whether the composer's keyboard
 // was up then (handoff: viewport.js waits FRAME_HANDOFF_MS before taking a keyboard for the preview's).
 let vpFrame = null, vpFrameAt = 0, vpHandoff = false;
@@ -3182,15 +3187,19 @@ function syncViewport(ev) {
     layoutH: vpProbe.offsetHeight || root.clientHeight, innerHeight, innerWidth, vvHeight: vv?.height, vvOffsetTop: vv?.offsetTop, vvScale: vv?.scale,
     scrollY, editing: !!el?.matches?.(EDITABLE), frame: !!frame, frameAge: performance.now() - vpFrameAt, frameKb: vp.frameKb, handoff: vpHandoff,
     inDock: !!el?.closest?.('#dock'), nudged: vpNudged, coarse: COARSE.matches, fullH: vp.fullH, fullW: vp.fullW, prev: vp,
+    ...(IOS_APP && { standalone: true, ios: true, screenW: screen.width, screenH: screen.height, safeTop: vpInsets().top }),
   });
   // fullW: a width-only resize (desktop window, split-screen, a foldable) re-fits the composer text too
-  const key = [vp.vvh, vp.kb, vp.top, vp.open, vp.tight, vp.frameKb, vp.fullH, vp.fullW].join();
+  const key = [vp.vvh, vp.kb, vp.top, vp.open, vp.tight, vp.frameKb, vp.fullH, vp.fullW, vp.gap].join();
   if (key !== vpKey) {
     vpKey = key;
     root.style.setProperty('--vvh', vp.vvh + 'px');
     root.style.setProperty('--kb', vp.kb + 'px');
     root.style.setProperty('--vv-top', vp.top + 'px');
     root.style.setProperty('--full-h', vp.fullH + 'px');
+    root.style.setProperty('--vp-gap', vp.gap + 'px'); // iOS Home Screen app: the strip under the layout to extend into
+    root.style.setProperty('--vp-full', vp.layoutH + vp.gap + 'px');
+    root.classList.toggle('vp-gap', vp.gap > 0);
     root.classList.toggle('kb-open', vp.open);
     root.classList.toggle('kb-tight', vp.tight);
     root.classList.toggle('kb-frame', vp.frameKb);
@@ -3202,8 +3211,41 @@ function syncViewport(ev) {
   // Home Screen apps can miss visualViewport events entirely: re-read slowly while typing on a touch screen.
   const poll = vp.typing && COARSE.matches;
   if (poll !== !!vpPoll) vpPoll = poll ? setInterval(syncViewport, 700, 'poll') : (clearInterval(vpPoll), 0);
+  // Once per trigger (load, focus leaving, resume, rotation), not on every re-read: let WebKit recover first (vpHeal)
+  if (vp.heal && vpHealArm && !vpHealT) { vpHealArm = false; vpHealT = setTimeout(vpHeal, 150); }
   kbDebug?.render();
 }
+// iOS Home Screen app whose window came up short (viewport.js, the bottom gap): taking a full-height element out of layout
+// and back makes WebKit re-measure the window (the "first keyboard shrinks it for good" fix). The root is the full-height
+// element; the flip is synchronous so nothing paints in between, and it puts back what it discards: scroll positions and
+// the entrance animations (finished ones stay finished, running ones resume where they were). Never with a field focused
+// (the keyboard may still be up or sliding) and ≥150ms after the trigger. If WebKit doesn't recover, --vp-gap covers it.
+function vpHeal() {
+  vpHealT = 0;
+  const el = document.activeElement;
+  if (!IOS_APP || el?.matches?.(EDITABLE) || el?.tagName === 'IFRAME') return;
+  const root = document.documentElement;
+  const scrolled = [...document.querySelectorAll('*')].filter((n) => n.scrollTop || n.scrollLeft).map((n) => [n, n.scrollTop, n.scrollLeft]);
+  const was = new Map();
+  for (const a of document.getAnimations?.() || []) {
+    const t = a.animationName && a.effect?.target;
+    if (t) was.set(t, (was.get(t) || []).concat([[a.animationName, a.playState, a.currentTime]]));
+  }
+  root.style.display = 'none';
+  void root.offsetHeight;
+  root.style.display = '';
+  void root.offsetHeight;
+  for (const [n, t, l] of scrolled) { n.scrollTop = t; n.scrollLeft = l; }
+  for (const a of document.getAnimations?.() || []) {
+    const old = a.animationName && (was.get(a.effect?.target) || []).find(([name]) => name === a.animationName);
+    if (!old) continue;
+    try { if (old[1] === 'finished') a.finish(); else if (old[2] != null) a.currentTime = old[2]; } catch {}
+  }
+  vpHeals++;
+  syncViewport('heal');
+}
+// Re-arm the heal and re-read: what can change the window without a resize event reaching us.
+const vpRearm = (ev) => { vpHealArm = true; vpEvent(ev); };
 // Follow the keyboard animation: WebKit often reports the final visual viewport only after it, sometimes with no event.
 // Every frame for ~600ms, plus a fixed chain of re-reads that a throttled frame or a background tab can't skip.
 const VP_REREAD = [50, 150, 300, 600, 1000];
@@ -3217,7 +3259,10 @@ vv?.addEventListener('resize', vpEvent);
 vv?.addEventListener('scroll', vpEvent);
 addEventListener('resize', syncViewport);
 document.addEventListener('focusin', (ev) => { vpNudged = false; vpEvent(ev); });
-document.addEventListener('focusout', () => vpSettle());
+document.addEventListener('focusout', () => { vpHealArm = true; vpSettle(); });
+addEventListener('pageshow', vpRearm);                           // back from the bfcache / app switcher
+document.addEventListener('visibilitychange', (ev) => { if (document.visibilityState === 'visible') vpRearm(ev); });
+addEventListener('orientationchange', vpRearm);
 addEventListener('blur', () => setTimeout(vpEvent, 0, 'blur')); // focus went into a Build preview frame (no focusin here)…
 addEventListener('focus', vpEvent);                              // …and came back
 document.addEventListener('compositionend', () => vpSettle(0));  // an IME candidate bar can resize the keyboard silently
@@ -3228,7 +3273,7 @@ let kbDebug = null;
 function setKbDebug(on) {
   try { on ? sessionStorage.setItem(KB_DEBUG, '1') : sessionStorage.removeItem(KB_DEBUG); } catch {}
   kbDebug?.remove();
-  kbDebug = on ? createKbDebug({ win: window, probe: vpProbe, dock: $('#dock'), state: () => ({ s: vp, ev: vpEv, n: vpN }) }) : null;
+  kbDebug = on ? createKbDebug({ win: window, probe: vpProbe, dock: $('#dock'), state: () => ({ s: vp, ev: vpEv, n: vpN, heals: vpHeals }), insets: vpInsets }) : null;
   $('#kbDebugBtn')?.setAttribute('aria-pressed', String(on));
 }
 { let stored = null; try { stored = sessionStorage.getItem(KB_DEBUG); } catch {} setKbDebug(kbDebugFlag(location.search, stored)); }

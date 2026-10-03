@@ -15,6 +15,8 @@ export const KB_MIN = 40;     // visible area this much shorter than the layout:
 export const KB_RESIZE = 150; // layout this much shorter than the tallest at this width: keyboard up (Android model)
 export const TIGHT_H = 460;   // below this visible height the header gives its rows to the conversation
 export const FRAME_KB_MS = 1500; // a Build preview's keyboard resizes the layout this soon after focus moves into it
+export const GAP_MIN = 4;      // iOS Home Screen app: the layout ends at least this far above the screen's bottom edge: extend down
+export const GAP_MAX = 100;   // a status-bar-sized strip (59–62px seen on iOS 26/27); more is a real smaller window (iPad split view)
 export const FRAME_HANDOFF_MS = 600; // focus moved into a preview with the composer's keyboard up: wait this long to tell
                                      // a keyboard on its way down from one that stays for a field in the preview
 
@@ -29,8 +31,17 @@ const px = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0)
      focus moved in)
    - fullH/fullW: the previous result's fullH/fullW (tallest layout seen at this width while typing)
    - prev: the previous result (kept as it is while pinch-zoomed during typing)
-   - standalone: Home Screen app. Deliberately not used by the math: reports disagree on which iOS builds shrink what in
-     which mode, so everything is read from the geometry instead of guessed from the platform. */
+   - standalone + ios: iOS Home Screen app; screenW/screenH: screen.width/height (portrait on iOS, whatever the rotation);
+     safeTop: env(safe-area-inset-top) in px. Used only for the bottom gap (below); the keyboard math never looks at them.
+
+   The bottom gap (iOS 26/27 Home Screen apps, WebKit 301994 and the "first keyboard shrinks the window for good" bug):
+   innerHeight, clientHeight, 100dvh, visualViewport and the fixed box can all report the screen minus a status-bar-sized
+   strip (393×852 iPhone: 793) while the page still starts at the top of the screen, so the dock lands that strip above
+   the bottom edge with an empty band under it. No measure inside the page says so; only screen.height does. With no
+   keyboard, `gap` is how far to extend down (--vp-gap, html.vp-gap in studio.css) and `heal` asks app.js to try WebKit's
+   own recovery first (a display toggle on the root). Not when the page starts below the status bar (safe-area-inset-top 0
+   in portrait: WebKit 301994's other shape, where the page is pushed down and its bottom already is the screen's), never
+   while the keyboard is up or a preview has it, and only for a strip: a bigger difference is a real window. */
 export function viewportState(m = {}) {
   const ih = px(m.innerHeight);
   const layoutH = Math.round(px(m.layoutH) || ih);
@@ -72,8 +83,28 @@ export function viewportState(m = {}) {
   // field inside it) and never for other fields, so this can't fight iOS in a loop.
   const sy = m.scrollY > 0 ? m.scrollY : 0;
   const resetScroll = sy > 0 && !zoomed && !m.frame && (open ? !!m.inDock && !m.nudged : !m.editing);
+  const gap = open || frameKb ? 0 : bottomGap(m, layoutH);
   return { vvh: Math.round(vis), kb: open ? kb : 0, top: open ? top : 0, open, tight: open && vis < TIGHT_H, frameKb,
-    typing, zoomed, layoutH, fullH, fullW: m.innerWidth, resetScroll };
+    typing, zoomed, layoutH, fullH, fullW: m.innerWidth, resetScroll, gap, heal: gap > 0 };
+}
+
+// The screen's height in the current orientation: iOS keeps screen.width/height portrait when rotated, so the side that
+// isn't the window's width is the one that runs top to bottom. 0 when unknown.
+export function screenSide(innerWidth, sw, sh) {
+  const a = px(sw), b = px(sh);
+  if (!a || !b) return 0;
+  const long = Math.max(a, b), short = Math.min(a, b);
+  return px(innerWidth) > short + 1 ? short : long;
+}
+// px the layout ends above the screen's bottom edge in an iOS Home Screen app (see the gap note above); 0 everywhere else.
+export function bottomGap(m, layoutH) {
+  if (!m.standalone || !m.ios) return 0;
+  const sh = screenSide(m.innerWidth, m.screenW, m.screenH);
+  if (!sh || !layoutH) return 0;
+  const portrait = sh >= Math.max(px(m.screenW), px(m.screenH));
+  if (portrait && !(px(m.safeTop) > 0)) return 0; // the page starts below the status bar: its bottom is the screen's
+  const gap = Math.round(sh - layoutH);
+  return gap > GAP_MIN && gap <= GAP_MAX ? gap : 0;
 }
 
 // ── ?kbdebug=1 readout (owner diagnostics; nothing renders unless asked for) ──
@@ -96,20 +127,23 @@ export function kbDebugText(d) {
   const s = d.state || {};
   const ios = iosVersion(d.ua);
   const vvBottom = (d.vvTop || 0) + (d.vvH || 0);
-  const off = Math.round((d.dockBottom || 0) - vvBottom); // > 0: that many px of the dock are under the keyboard / off screen
+  // Where the dock should end: the visible bottom, plus the strip under the layout when extending into it (keyboard closed)
+  const target = vvBottom + (s.open ? 0 : s.gap || 0);
+  const off = Math.round((d.dockBottom || 0) - target); // > 0: that many px of the dock are under the keyboard / off screen
   const verdict = d.dockHidden ? 'dock hidden (preview typing)' : off > 2 ? `DOCK CUT ${off}px` : off < -2 ? `gap ${-off}px` : 'ok';
   return [
     `kbdebug · ${d.standalone ? 'Home Screen app' : 'browser tab'} · ${ios ? `iOS ua ${ios.os}${ios.safari ? ` · Safari ${ios.safari}` : ''}` : 'not iOS (ua)'}`,
-    `inner ${num(d.iw)}×${num(d.ih)} · client ${num(d.ch)} · fixed ${num(d.layoutH)}`,
+    `inner ${num(d.iw)}×${num(d.ih)} · client ${num(d.ch)} · fixed ${num(d.layoutH)} · html ${num(d.htmlH)}`,
+    `screen ${num(d.sw)}×${num(d.sh)} · safe top ${num(d.safeTop)} · bottom ${num(d.safeBottom)} · gap ${num(s.gap || 0)}${s.gap ? ' (extended)' : ''}${d.heals ? ` · heals ${d.heals}` : ''}`,
     `vv h ${num(d.vvH)} · top ${num(d.vvTop)} · pageTop ${num(d.pageTop)} · ×${num(d.scale)}`,
     `scrollY ${num(d.scrollY)} · focus ${d.active || '-'}`,
     `kb ${num(s.kb)} · top ${num(s.top)} · vis ${num(s.vvh)} · open ${yn(s.open)} · tight ${yn(s.tight)}${s.frameKb ? ' · frame' : ''}${s.zoomed ? ' · zoomed' : ''}`,
-    `dock bottom ${num(d.dockBottom)} · vv bottom ${num(vvBottom)} · ${verdict}`,
+    `dock bottom ${num(d.dockBottom)} · vv bottom ${num(vvBottom)}${s.gap && !s.open ? ` · target ${num(target)}` : ''} · ${verdict}`,
     `${d.ev || '-'} #${d.n || 0} · ${d.cls || 'no kb classes'}`,
   ].join('\n');
 }
 // Small monospace box pinned to the top-left of what is on screen; pointer-events none so it never takes a tap.
-export function createKbDebug({ win, probe, dock, state }) {
+export function createKbDebug({ win, probe, dock, state, insets = () => ({}) }) {
   const doc = win.document;
   const el = doc.createElement('pre');
   el.id = 'kbDebug';
@@ -120,8 +154,11 @@ export function createKbDebug({ win, probe, dock, state }) {
   doc.body.append(el);
   const render = () => {
     const vv = win.visualViewport, a = doc.activeElement, st = state();
+    const ins = insets();
     el.textContent = kbDebugText({
       standalone: win.matchMedia('(display-mode: standalone)').matches || win.navigator.standalone === true,
+      sw: win.screen?.width, sh: win.screen?.height, safeTop: ins.top, safeBottom: ins.bottom, heals: st.heals,
+      htmlH: doc.documentElement.getBoundingClientRect().height,
       ua: win.navigator.userAgent, iw: win.innerWidth, ih: win.innerHeight, ch: doc.documentElement.clientHeight,
       layoutH: probe.offsetHeight, vvH: vv?.height, vvTop: vv?.offsetTop, pageTop: vv?.pageTop, scale: vv?.scale,
       scrollY: win.scrollY, state: st.s, dockBottom: dock.getBoundingClientRect().bottom,
