@@ -71,6 +71,16 @@ createServer(async (req, res) => {
         : /Return ONLY JSON/.test(system) ? JSON.stringify({ideas:Array.from({length:6},(_,i)=>({title:`Studio idea ${i+1}`,pitch:'A local fixture card for checking the layout and actions.',first_step:'Try expanding this idea.',tags:['Review','Fixture']}))})
         : /<title>|thread title/i.test(system) ? '<title>Design review</title>' : /<facts>/.test(system) ? '<facts></facts>' : 'This is a **local test response**. No AI provider was called.\n\nNero\'s Golden House (Domus Aurea) sat on the Oppian Hill. Mercury is both a planet and a metal.\n\nLook-up test words: slow river, fail state, busy signal, zzz nothing, plain text.\n\n## A little room to create\n\n- Clear navigation across your studio\n- A comfortable reading width\n- Work saved on this device\n\n```javascript\nconst studio = "Atelier";\n```';
       res.setHeader('Content-Type', 'text/event-stream');
+      // Thinking-model failures: "think only" reasons with no answer until the app asks again (its nudge is the last turn);
+      // "think forever" never answers; "no credit" fails like DeepSeek's mid-stream Insufficient Balance.
+      const all = JSON.stringify(body.messages ?? ''), last = JSON.stringify(body.messages?.at(-1) ?? '');
+      const nudged = /wrote no answer/.test(last);
+      if (/no credit/i.test(all) && !globalThis.reviewCreditUsed) { globalThis.reviewCreditUsed = true; res.write(`data: ${JSON.stringify({ error: { message: 'Insufficient Balance' } })}\n\n`); return res.end(); }
+      if ((/think only/i.test(all) && !nudged) || /think forever/i.test(all)) {
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'Planning the files… ' } }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'length' }] })}\n\n`);
+        return res.end('data: [DONE]\n\n');
+      }
       for (const word of answer.match(/.{1,24}/gs)) {
         if (res.destroyed) return;
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: word } }] })}\n\n`);

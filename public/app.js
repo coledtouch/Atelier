@@ -7,20 +7,20 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=66';
-import * as Sync from './sync.js?v=66';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=66';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=66';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=66';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=66';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=66';
-import { initLookup } from './lookup.js?v=66';
-import { createRemix } from './remix-app.js?v=66';
-import { sendMode, looksLikeQuestion } from './remix.js?v=66';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=66';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=66';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=66';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=66';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=67';
+import * as Sync from './sync.js?v=67';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=67';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=67';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=67';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=67';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=67';
+import { initLookup } from './lookup.js?v=67';
+import { createRemix } from './remix-app.js?v=67';
+import { sendMode, looksLikeQuestion } from './remix.js?v=67';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=67';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=67';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=67';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=67';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -481,7 +481,9 @@ async function toApiError(r) {
 // or to another provider when one is unusable (bad key, workspace, billing, quota).
 // onModel(id) reports the model that actually answered; onSkip(provider, err) reports a provider switch.
 const accountProblem = (err) => err.status === 401 || err.status === 403 || err.status === 402
-  || ((err.status === 400 || err.status === 429) && /workspace|api key|credit|billing|quota|balance|permission|not enabled|organization/i.test(err.message));
+  || ((err.status === 400 || err.status === 429) && /workspace|api key|credit|billing|quota|balance|permission|not enabled|organization/i.test(err.message))
+  // out of credit reported mid-stream or as a 5xx (DeepSeek "Insufficient Balance", OpenAI insufficient_quota…): same as a 402
+  || (err.status >= 500 && /insufficient[ _](balance|quota|credit|funds)|out of credits?|credit balance is too low|exceeded your current quota|billing/i.test(err.message));
 // Friendly error kinds. New entries store e.errorKind; older/restored entries only have e.error, so text is classified too.
 function errorKind(msg = '', status, code) {
   const m = String(msg || '');
@@ -513,11 +515,15 @@ function budgetOf(err) {
 }
 function errorTitle(kind, msg = '', budget) {
   if (kind === 'budget') return (budget?.short && SHORT_TITLE[budget.scope]) || BUDGET_TITLE[budget?.scope] || ERROR_TITLE.budget;
-  if (kind === 'key' && S.tester) return 'That model isn’t available'; // testers have no provider keys to check
+  if (kind === 'key' && S.tester) return 'That model isn’t available';
+  if (kind === 'key' && /insufficient|balance|credit|quota/i.test(msg)) return 'Out of credit on every available model';
+  if (/only thought and never wrote/i.test(msg)) return 'No answer came back'; // kind stays 'busy': synced/backed-up kinds are a fixed list // testers have no provider keys to check
   if (kind === 'offline') return /dropped/i.test(msg) ? 'The connection dropped' : navigator.onLine ? ERROR_TITLE.offline : 'You’re offline';
   if (kind === 'passcode' && /too many/i.test(msg)) return 'Too many passcode tries';
   return ERROR_TITLE[kind] || ERROR_TITLE.error;
 }
+// Sent when a thinking model ended its turn with reasoning only (streamChat).
+const EMPTY_NUDGE = 'Your previous attempt used up its room thinking and wrote no answer. Write the final answer now, directly, in the format asked for; skip re-planning. If it is long (several files), give the most important parts complete and say what to ask for next.';
 const deadProviders = new Map(); // provider → reason, for this session
 // Gemini can take a video as the clip: it has a key and hasn't failed on an account problem this session.
 const geminiUsable = () => providerReady('gemini') && !deadProviders.has('gemini') && feat('video');
@@ -529,7 +535,7 @@ async function streamChat(opts) {
     .filter((v, i, a) => v && a.indexOf(v) === i && !deadProviders.has(providerOf(v)) && (!S.tester || modelReady(v)));
   if (!chain.length && opts.model && !S.tester) chain.push(opts.model);
   if (!chain.length && S.tester) throw new ApiError(403, 'None of the models in your tester plan can do this one.', { code: 'tester_model' });
-  let lastErr, stale = false, served = null;
+  let lastErr, stale = false, served = null, empties = 0, nudgeNoted = false;
   models: for (const model of chain) {
     if (lastErr && deadProviders.has(providerOf(model))) continue;
     // messages may be built per model (a video goes to Gemini as the clip, to everyone else as frames); null skips it.
@@ -538,9 +544,24 @@ async function streamChat(opts) {
     // A dropped connection (deploy, network switch) gets one retry on the same model before moving on.
     for (let attempt = 0; attempt < 2; attempt++) {
       let got = false, shown = false;
-      if (stale) { stale = false; opts.onRestart(); }
+      if (stale) { stale = false; opts.onRestart?.(); }
       try {
-        await streamChatOnce({ ...opts, model, messages, extra: typeof opts.extra === 'function' ? opts.extra(model) : opts.extra, onDelta: (d) => { got = true; if (d.content || d.tool_calls || d.anthropic_content) shown = true; opts.onDelta(d); }, onServed: (m) => { served = m; } });
+        const extra = typeof opts.extra === 'function' ? opts.extra(model) : opts.extra;
+        let cut = false;
+        const onDelta = (d) => { got = true; if (d.content || d.tool_calls || d.anthropic_content) shown = true; if (d.finish === 'length') cut = true; opts.onDelta(d); };
+        await streamChatOnce({ ...opts, model, messages, extra, onDelta, onServed: (m) => { served = m; } });
+        // Any thinking model (DeepSeek, GLM, Gemini, Kimi, o-series…) can spend all of max_tokens reasoning and end with no
+        // answer. Ask the same model once more for the answer itself with light thinking; if that is empty too, try the
+        // next model in the chain (or say so) instead of leaving a blank reply.
+        if (!shown) {
+          opts.signal?.throwIfAborted();
+          if (!nudgeNoted) { nudgeNoted = true; opts.onNote?.('reasoning ran long — asking for the answer'); }
+          cut = false;
+          await streamChatOnce({ ...opts, model, extra: { ...(extra || {}), reasoning_effort: 'low' }, onDelta, onServed: (m) => { served = m; },
+            messages: [...messages, { role: 'user', content: EMPTY_NUDGE }] });
+        }
+        if (!shown) throw new ApiError(502, `${modelLabel(served || model)} only thought and never wrote an answer.`, { code: 'empty_answer' });
+        if (cut) opts.onNote?.('hit the length limit — ask “continue” for the rest');
         opts.onModel?.(served || model);
         return model;
       } catch (err0) {
@@ -550,7 +571,8 @@ async function streamChat(opts) {
         lastErr = err;
         // A caller that can clear a failed attempt (onRestart) still moves on after thinking-only output (e.g. Gemini
         // ran out of tokens while thinking); everyone else stops once anything streamed.
-        if ((opts.onRestart ? shown : got) || err.name === 'AbortError') throw err;
+        // (a reasoning-only reply showed nothing, so the next model may take over)
+        if (((opts.onRestart ? shown : got) && err.code !== 'empty_answer') || err.name === 'AbortError') throw err;
         // Day/month/pool/paused/sign-in limits are the same on every model: no fallback, no dead provider. A per-call
         // refusal ('call': too big for one tester request on THIS model) isn't: a cheaper model in the chain may fit.
         const callCap = err.code === 'tester_budget' && err.scope === 'call';
@@ -565,6 +587,7 @@ async function streamChat(opts) {
         if (!opts.role) throw err;
         if (callCap) { toast(`Too much for ${modelLabel(model)} in one tester request — switching`); continue models; } // a cheaper model may fit
         if (err.code === 'model_no_images') continue models; // this model can't price or read images: the next one may
+        if (err.code === 'empty_answer') { if (++empties >= 2) throw err; toast(`${modelLabel(model)} gave no answer — switching`); continue models; } // two models at most: each try costs a call
         const retired = err.status === 404 || err.status === 410 || (err.status === 400 && /not found|deprecat|end of life|does not exist|unknown model/i.test(err.message));
         if ((err.status === 405 || err.status === 408 || err.status === 429 || err.status >= 500) && !accountProblem(err)) {
           toast(err.status === 408 ? `${modelLabel(model)} is slow — switching` : `${modelLabel(model)} is busy — switching`);
@@ -574,7 +597,7 @@ async function streamChat(opts) {
           const prov = providerOf(model);
           deadProviders.set(prov, err.message);
           if (prov === 'gemini') syncClip(); // a composer clip upload Gemini can't use any more stops now
-          toast(`${PROVIDER_NAMES[prov]} unavailable — switching models`);
+          toast(/credit|balance|quota|billing|402/i.test(`${err.status} ${err.message}`) ? `${PROVIDER_NAMES[prov]} is out of credit — switching to the next best model` : `${PROVIDER_NAMES[prov]} unavailable — switching models`);
           console.warn(`[atelier] ${prov} skipped:`, err.message);
           continue models;
         }
@@ -1858,12 +1881,15 @@ In the browser: read a page before acting on it, use browser_elements to get ele
     let text = '';
     let reasoningTurn = '';
     let anthropic = null;
+    let finish = null;
     const calls = [];
     const prefix = e.text ? e.text + '\n\n' : '';
     await streamChat({
-      model, role: 'agent', messages: forModel || messages, signal, max_tokens: 16000, extra: { tools },
+      model, role: 'agent', messages: forModel || messages, signal, max_tokens: 16000,
+      extra: { tools },
       onModel: (m) => { e.meta.model = m; },
-      onDelta: ({ content, reasoning, tool_calls, anthropic_content }) => {
+      onDelta: ({ content, reasoning, tool_calls, anthropic_content, finish: f }) => {
+        if (f) finish = f;
         if (content) { text += content; e.text = prefix + text; }
         if (reasoning) { e.think += reasoning; reasoningTurn += reasoning; }
         if (anthropic_content) anthropic = anthropic_content;
@@ -1879,7 +1905,10 @@ In the browser: read a page before acting on it, use browser_elements to get ele
     });
     const toolCalls = calls.filter((c) => c && c.function.name).map((c) => ({ ...c, id: c.id || 'call_' + uid() }));
     messages.push({ role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}), ...(reasoningTurn ? { reasoning_content: reasoningTurn } : {}), ...(anthropic ? { anthropic_content: anthropic } : {}) });
-    if (!toolCalls.length) return;
+    if (!toolCalls.length) {
+      if (finish === 'length') { e.text += '\n\n_The answer hit the length limit and stopped here — ask “continue” for the rest._'; repaint(e); }
+      return;
+    }
 
     for (const call of toolCalls) {
       const def = allTools.find((t) => t.function.name === call.function.name);
