@@ -361,6 +361,9 @@ html.kb-open .cv-grid { padding-bottom: calc(12px + var(--kb, 0px)); }
 html.kb-open .you-scroll { padding-bottom: calc(20px + var(--kb, 0px)); }
 html.kb-tight .top { opacity: 0; visibility: hidden; } /* <460px visible: rows go to the conversation */
 html.kb-tight #stage { padding-top: calc(env(safe-area-inset-top) + 12px); } /* …and so does the header's band: no empty strip where it was */
+/* With the header hidden nothing covers the status bar, so answers scrolled up ran under the clock: a solid band there
+   (fading out below it), pinned to the top of what's visible */
+html.kb-tight body::before { content: ''; position: fixed; left: 0; right: 0; top: var(--vv-top, 0px); height: calc(env(safe-area-inset-top) + 14px); background: linear-gradient(var(--bg) calc(100% - 14px), transparent); z-index: 29; pointer-events: none; }
 /* home screen while typing (<460px visible): the greeting alone, small enough to stay above the dock */
 html.kb-tight .welcome :is(.welcome-copy, .section-label, .bento, .legal-links) { display: none; }
 html.kb-tight .welcome .eyebrow { margin-bottom: 10px; }
