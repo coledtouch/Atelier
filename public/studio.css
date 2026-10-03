@@ -155,7 +155,7 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   /* Settings: full-height bottom sheet, 2×2 tabs, full-width Save */
   #settings { width: 100%; max-width: none; height: calc(var(--vvh, 100dvh) - env(safe-area-inset-top) - 8px); max-height: none; margin: auto 0 var(--kb, 0px); border-width: 1px 0 0; border-radius: 22px 22px 0 0; }
   #settings[open] { animation-name: sheetUp; }
-  html.vp-gap #settings { height: calc(var(--vvh, 100dvh) + var(--vp-gap, 0px) - env(safe-area-inset-top) - 8px); margin-bottom: calc(0px - var(--vp-gap, 0px)); } /* iOS Home Screen app short window: the sheet reaches the screen's bottom (see html.vp-gap below) */
+  html.vp-gap:not(.kb-open) #settings { height: calc(var(--vvh, 100dvh) + var(--vp-gap, 0px) - env(safe-area-inset-top) - 8px); margin-bottom: calc(0px - var(--vp-gap, 0px)); } /* iOS Home Screen app short window: the sheet reaches the screen's bottom (see the vp-gap rules below) */
   #settings .sheet-head { padding: 12px max(10px, env(safe-area-inset-right)) 4px max(20px, env(safe-area-inset-left)); }
   #settings .sheet-head h2 { font-size: 34px; }
   #settings .settings-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left)); }
@@ -350,7 +350,8 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   .lk-figure img { max-height: 40vh; }
 }
 /* keyboard state — classes/vars from syncViewport() in app.js */
-html.kb-open .dock { padding-bottom: 8px; } /* the keyboard covers the home indicator */
+html.kb-open .dock { padding-bottom: 4px; } /* the keyboard covers the home indicator: the composer sits right on the keyboard's bar */
+html.kb-open .options { padding-bottom: 8px; }
 /* glued to the bottom of what is on screen: % is the dock's own fixed box, so this needs no layout height from JS (equals --kb) */
 html.kb-open .dock { bottom: max(0px, calc(100% - var(--vv-top, 0px) - var(--vvh, 100%))); }
 html.kb-frame .dock { visibility: hidden; } /* typing in a Build preview: the composer would cover the field iOS just revealed */
@@ -359,6 +360,11 @@ html.kb-open .thread-list { padding-bottom: var(--kb, 0px); }
 html.kb-open .cv-grid { padding-bottom: calc(12px + var(--kb, 0px)); }
 html.kb-open .you-scroll { padding-bottom: calc(20px + var(--kb, 0px)); }
 html.kb-tight .top { opacity: 0; visibility: hidden; } /* <460px visible: rows go to the conversation */
+html.kb-tight #stage { padding-top: calc(env(safe-area-inset-top) + 12px); } /* …and so does the header's band: no empty strip where it was */
+/* home screen while typing (<460px visible): the greeting alone, small enough to stay above the dock */
+html.kb-tight .welcome :is(.welcome-copy, .section-label, .bento, .legal-links) { display: none; }
+html.kb-tight .welcome .eyebrow { margin-bottom: 10px; }
+html.kb-tight .welcome .greeting { font-size: clamp(30px, 9vw, 44px); line-height: 1.04; margin-bottom: 0; }
 html.kb-open :is(#onboard, dialog.tok-dialog) { top: var(--vv-top, 0px); bottom: var(--kb, 0px); max-height: calc(var(--vvh, 100dvh) - 16px); }
 html.kb-open #onboard .sheet-body { max-height: calc(var(--vvh, 100dvh) - 16px); }
 html.kb-tight :is(.onboard-copy, .ob-by, .ob-brand) { display: none; } /* iOS twin of the max-height:500 rule (its layout viewport doesn't shrink) */
@@ -367,13 +373,14 @@ html.kb-tight #settings .settings-nav { display: flex; flex-wrap: nowrap; overfl
 html.kb-tight #settings .settings-nav .chip { flex: 1 0 auto; padding-inline: 10px; } /* all four tabs fit at 360px */
 /* iOS Home Screen app whose window ends a status-bar strip above the screen's bottom with no keyboard (viewport.js bottom
    gap, WebKit 301994: 393×852 reports 793). --vp-gap is that strip, --vp-full the layout plus it; never set while the
-   keyboard is up (kb-open owns the dock then) or anywhere else. Everything pinned to the bottom extends into the strip. */
-html.vp-gap { height: calc(100% + var(--vp-gap, 0px)); }
-html.vp-gap #stage { height: var(--vp-full, 100dvh); }
-html.vp-gap .dock { bottom: calc(var(--kb, 0px) - var(--vp-gap, 0px)); padding-bottom: max(34px, env(safe-area-inset-bottom, 0px)); } /* the short window may report no bottom inset: keep the home indicator clear */
-html.vp-gap :is(.scrim, .drawer, .viewer) { bottom: calc(0px - var(--vp-gap, 0px)); }
-html.vp-gap body > .toast { bottom: calc(var(--dock-h) - var(--vp-gap, 0px) + 16px); }
-html.vp-gap body.overlay-open > .toast { bottom: calc(max(34px, env(safe-area-inset-bottom, 0px)) - var(--vp-gap, 0px) + 16px); }
+   keyboard is up (kb-open owns the dock then; :not(.kb-open) also guards a stale class) or anywhere else. Everything
+   pinned to the bottom extends into the strip. */
+html.vp-gap:not(.kb-open) { height: calc(100% + var(--vp-gap, 0px)); }
+html.vp-gap:not(.kb-open) #stage { height: var(--vp-full, 100dvh); }
+html.vp-gap:not(.kb-open) .dock { bottom: calc(var(--kb, 0px) - var(--vp-gap, 0px)); padding-bottom: max(34px, env(safe-area-inset-bottom, 0px)); } /* the short window may report no bottom inset: keep the home indicator clear */
+html.vp-gap:not(.kb-open) :is(.scrim, .drawer, .viewer) { bottom: calc(0px - var(--vp-gap, 0px)); }
+html.vp-gap:not(.kb-open) body > .toast { bottom: calc(var(--dock-h) - var(--vp-gap, 0px) + 16px); }
+html.vp-gap:not(.kb-open) body.overlay-open > .toast { bottom: calc(max(34px, env(safe-area-inset-bottom, 0px)) - var(--vp-gap, 0px) + 16px); }
 html.kb-open .lookup { display: none; } /* (0,2,1) beats .lookup[data-state='pill'] {display:flex}; lookup.js also closes the card on kb-open */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; }
