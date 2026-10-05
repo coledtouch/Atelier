@@ -1571,7 +1571,6 @@ function failingDb() {
   };
   return db;
 }
-const later = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 const WHO = [['sync off', { pass: '' }, false], ['a tester', { pass: '', tester: true }, false], ['the owner, sync on', {}, true]];
 
 for (const [who, opts, on] of WHO) {
@@ -1583,14 +1582,14 @@ for (const [who, opts, on] of WHO) {
     const t = dev.open = await dev.load('T');
     dev.db.fail = true; // the phone's storage is full from here on
     const errs = [];
-    const save = () => dev.put(t).catch((err) => errs.push(err.name)); // app.js: DB.put(…).catch(storageError), never awaited
+    // app.js: DB.put(…).catch(storageError), never awaited; the test awaits the promises only to see each save finish
+    // (a fixed sleep raced failingDb's task hops on a loaded machine)
+    const save = () => dev.put(t).catch((err) => errs.push(err.name));
     const e1 = { ...ask('e1', T0 + 1, ''), pending: true }; // submit(): the turn goes in, persist(true)
     t.entries.push(e1);
-    save();
-    await later();
+    await save(); // the answer takes far longer than this save
     Object.assign(e1, { pending: false, text: 'the answer the user just got' }); // run() finally: DB.put(thread), then persist(true)
-    save(); save();
-    await later();
+    await Promise.all([save(), save()]); // both started before either finishes, as in app.js
     assert.deepEqual(errs, ['QuotaExceededError', 'QuotaExceededError', 'QuotaExceededError'], 'every save reported the storage error');
     assert.deepEqual(idsOf(t), ['e0', 'e1'], 'the open thread (what Export saves) still holds the answer');
     assert.equal(t.entries[1].text, 'the answer the user just got');
@@ -1628,13 +1627,10 @@ test('third review: nearly full storage — a new image the device couldn’t sa
   await dev.put(t); // submit(): the first turn, small
   Object.assign(e1, { pending: false, media: [{ type: 'image', src: `data:image/png;base64,${'A'.repeat(60_000)}` }] });
   const errs = [];
-  const save = () => dev.put(t).catch((err) => errs.push(err.name));
-  save(); save(); // run() finally: DB.put(thread), persist(true)
-  await later();
-  t.title = 'A fox'; save(); // nameThread
-  await later();
-  save(); // visibilitychange → persist(true)
-  await later();
+  const save = () => dev.put(t).catch((err) => errs.push(err.name)); // never awaited by app.js; awaited here to see each finish
+  await Promise.all([save(), save()]); // run() finally: DB.put(thread), persist(true)
+  t.title = 'A fox'; await save(); // nameThread
+  await save(); // visibilitychange → persist(true)
   assert.ok(errs.length >= 2, 'the user was told saving failed');
   assert.equal(t.entries[0].pending, false);
   assert.equal(t.entries[0].media?.length, 1, 'the image is still in the open thread, so Export can save it');
