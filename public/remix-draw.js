@@ -4,7 +4,7 @@
 // shows is what the cut gets. No ctx.filter (older Safari): blur is a downscale/upscale chain, glow is shadowBlur.
 // Node-tested with a fake 2D context that records calls (tests/remix-draw.test.mjs); the DOM helpers at the bottom
 // (grabFrame, padFrameAt) only run in a browser.
-import { CARD_STYLES, ACCENTS, GLOW, BANDS, BRAND, padBox } from './remix.js?v=68';
+import { CARD_STYLES, ACCENTS, GLOW, BANDS, BRAND, padBox } from './remix.js?v=69';
 
 export const FALLBACK_FAMILIES = Object.freeze({
   'Instrument Serif': "'Instrument Serif', 'Iowan Old Style', Georgia, serif",

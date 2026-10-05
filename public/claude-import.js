@@ -37,29 +37,67 @@ function hashId(s) {
 
 // ── reading the export ──
 const isZip = (b) => b.length > 3 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04;
-const CONV_RE = /(^|\/)conversations\.json$/;
+const JSON_RE = /\.jsonl?$/i;
+const CONV_RE = /(^|\/)conversations[^/]*\.jsonl?$/i;
+// A conversation in any of the shapes claude.ai has exported: chat_messages (classic), or messages with sender/role.
+function asConv(c) {
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return null;
+  if (Array.isArray(c.chat_messages)) return c;
+  if (Array.isArray(c.messages) && c.messages.some((m) => m && typeof m === 'object' && ('sender' in m || 'role' in m))) {
+    const sender = (m) => { const r = String(m.sender ?? m.role ?? ''); return r === 'user' ? 'human' : r; };
+    return { ...c, chat_messages: c.messages.map((m) => (m && typeof m === 'object' ? { ...m, sender: sender(m) } : m)) };
+  }
+  return null;
+}
+// Every conversation in one parsed JSON value: an array, { conversations: [...] }, or a single conversation.
+let emptyExport = false; // set by convsIn when a file held an empty conversations list (an account with no chats)
+function convsIn(data) {
+  if ((Array.isArray(data) && !data.length) || (Array.isArray(data?.conversations) && !data.conversations.length)) emptyExport = true;
+  const list = Array.isArray(data) ? data : Array.isArray(data?.conversations) ? data.conversations : [data];
+  return list.map(asConv).filter(Boolean);
+}
+const isManifest = (d) => d && typeof d === 'object' && !Array.isArray(d) && Array.isArray(d.data_files) && d.data_files.some((f) => f && f.export_url);
+const MANIFEST_MSG = 'That’s the export’s list of download links, not the chats themselves. Download conversations-000.zip (and any conversations-001.zip …) from the links in your claude.ai export email, then import that zip here.';
+function parseText(text, name = '') {
+  const t = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  if (/\.jsonl$/i.test(name)) return t.split('\n').filter((l) => l.trim()).flatMap((l) => { try { return convsIn(JSON.parse(l)); } catch { return []; } });
+  let data;
+  try { data = JSON.parse(t); } catch { throw new Error('That file isn’t valid JSON. Choose the conversations .zip from your claude.ai export, or the conversations.json inside it.'); }
+  if (isManifest(data)) throw new Error(MANIFEST_MSG);
+  return convsIn(data);
+}
 // bytes: the picked file's contents. fflate: { unzipSync, strFromU8 } (vendor/fflate.js in the browser, the fflate
 // package in tests). → the conversations array; throws an Error worded for people when it isn't a Claude export.
+// Zips: classic exports hold one conversations.json; newer ones (conversations-000.zip) may hold several JSON files.
 export function readConversations(bytes, fflate) {
-  let text;
+  let convs = [];
+  emptyExport = false;
   if (isZip(bytes)) {
-    let big = false;
-    const files = fflate.unzipSync(bytes, { filter: (f) => { if (!CONV_RE.test(f.name)) return false; if (f.originalSize > LIMITS.bytes) { big = true; return false; } return true; } });
-    if (big) throw new Error('That export’s conversations.json is too large to open in a browser (over 480 MB).');
-    const key = Object.keys(files).sort((a, b) => a.length - b.length)[0]; // the top-level copy when there are several
-    if (!key) throw new Error('No conversations.json in that zip — choose the .zip claude.ai emailed you (Settings → Privacy → Export data).');
-    text = fflate.strFromU8(files[key]);
+    let big = false, total = 0;
+    const files = fflate.unzipSync(bytes, { filter: (f) => {
+      if (!JSON_RE.test(f.name) || /(^|\/)__MACOSX\//.test(f.name)) return false;
+      total += f.originalSize;
+      if (f.originalSize > LIMITS.bytes || total > LIMITS.bytes) { big = true; return false; }
+      return true;
+    } });
+    if (big) throw new Error('That export is too large to open in a browser (over 480 MB of chats in one zip).');
+    const names = Object.keys(files);
+    // conversations*.json first; other JSON files only when they hold conversations (users.json, projects.json don't)
+    const ordered = [...names.filter((n) => CONV_RE.test(n)), ...names.filter((n) => !CONV_RE.test(n))];
+    for (const n of ordered) {
+      try { convs.push(...parseText(fflate.strFromU8(files[n]), n)); } catch (err) { if (err.message === MANIFEST_MSG) throw err; }
+    }
+    if (!names.length) throw new Error('No chats in that zip — choose conversations-000.zip (or the classic export .zip) from your claude.ai export.');
   } else {
     if (bytes.length > LIMITS.bytes) throw new Error('That file is too large to open in a browser (over 480 MB).');
-    text = new TextDecoder().decode(bytes);
+    convs = parseText(new TextDecoder().decode(bytes));
   }
-  let data;
-  try { data = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); } catch { throw new Error('That file isn’t valid JSON. Choose the .zip claude.ai emailed you, or the conversations.json inside it.'); }
-  const convs = Array.isArray(data) ? data : Array.isArray(data?.conversations) ? data.conversations : null;
-  if (!convs || (convs.length && !convs.some((c) => c && typeof c === 'object' && Array.isArray(c.chat_messages)))) {
-    throw new Error('That doesn’t look like a Claude export (no chat_messages). For ChatGPT, use Your profile → ChatGPT export.');
-  }
-  return convs;
+  if (!convs.length && emptyExport) return [];
+  if (!convs.length) throw new Error('No Claude chats found in that file. Choose conversations-000.zip from your claude.ai export (not projects, memories or light_metadata). For ChatGPT, use Your profile → ChatGPT export.');
+  // the same conversation in two files (split exports overlap): keep the copy with more messages
+  const byId = new Map();
+  for (const c of convs) { const k = c.uuid || JSON.stringify([c.created_at, c.name]); const o = byId.get(k); if (!o || c.chat_messages.length > o.chat_messages.length) byId.set(k, c); }
+  return [...byId.values()];
 }
 
 // Newest first (by updated_at), capped at LIMITS.conversations: → { list, skipped } (skipped: left out by the cap).

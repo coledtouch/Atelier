@@ -32,11 +32,35 @@ test('reads conversations.json from the export zip, or the .json itself (with or
 });
 
 test('says plainly what is wrong with a file that is not a Claude export', () => {
-  assert.throws(() => readConversations(fflate.zipSync({ 'users.json': enc([]) }), fflate), /No conversations\.json/);
+  assert.throws(() => readConversations(fflate.zipSync({ 'users.json': enc([{ uuid: 'u1', full_name: 'X' }]) }), fflate), /No Claude chats found/);
+  assert.throws(() => readConversations(fflate.zipSync({ 'notes.txt': enc('hi') }), fflate), /No chats in that zip/);
   assert.throws(() => readConversations(enc('{not json'), fflate), /isn’t valid JSON/);
-  assert.throws(() => readConversations(enc([{ mapping: {}, title: 'ChatGPT chat' }]), fflate), /doesn’t look like a Claude export/);
-  assert.throws(() => readConversations(enc({ hello: 1 }), fflate), /doesn’t look like a Claude export/);
+  assert.throws(() => readConversations(enc([{ mapping: {}, title: 'ChatGPT chat' }]), fflate), /No Claude chats found.*ChatGPT export/);
+  assert.throws(() => readConversations(enc({ hello: 1 }), fflate), /No Claude chats found/);
   assert.deepEqual(readConversations(enc([]), fflate), [], 'an empty export is just empty');
+});
+
+test('the export manifest (list of download links) gets told to download conversations-000.zip', () => {
+  const manifest = { instructions: 'Download each file…', total_files: 2, version: '1.0', data_files: [
+    { batch_index: 0, export_url: 'https://claude.ai/export/x/download/a', category: 'projects', part: 0, filename: 'projects-000.zip' },
+    { batch_index: 1, export_url: 'https://claude.ai/export/x/download/b', category: 'conversations', part: 0, filename: 'conversations-000.zip' }] };
+  assert.throws(() => readConversations(enc(manifest), fflate), /list of download links.*conversations-000\.zip/);
+});
+
+test('newer split exports: several JSON files, single-conversation files, messages with role/sender, overlaps deduped', () => {
+  const conv = (uuid, n, extra = {}) => ({ uuid, name: `Chat ${uuid}`, created_at: '2026-09-01T10:00:00Z', updated_at: `2026-09-0${n}T10:00:00Z`,
+    chat_messages: Array.from({ length: n }, (_, i) => ({ uuid: `${uuid}-m${i}`, sender: i % 2 ? 'assistant' : 'human', text: `msg ${i}`, created_at: '2026-09-01T10:00:00Z' })), ...extra });
+  const zip = fflate.zipSync({
+    'conversations/part-1.json': enc([conv('a1', 2), conv('b2', 2)]),
+    'conversations/c3.json': enc(conv('c3', 4)),
+    'conversations/part-2.json': enc({ conversations: [conv('b2', 4)] }), // b2 again, grown
+    'roles.json': enc([{ uuid: 'd4', name: 'Role style', messages: [{ uuid: 'd4-0', role: 'user', text: 'hi' }, { uuid: 'd4-1', role: 'assistant', text: 'hello' }] }]),
+    'users.json': enc([{ uuid: 'u1', full_name: 'Someone' }]),
+  });
+  const got = readConversations(zip, fflate);
+  assert.deepEqual(got.map((c) => c.uuid).sort(), ['a1', 'b2', 'c3', 'd4']);
+  assert.equal(got.find((c) => c.uuid === 'b2').chat_messages.length, 4, 'the fuller copy wins');
+  assert.deepEqual(got.find((c) => c.uuid === 'd4').chat_messages.map((m) => m.sender), ['human', 'assistant']);
 });
 
 test('newest first, empty chats skipped, capped per import', () => {
