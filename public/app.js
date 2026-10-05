@@ -7,21 +7,21 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=69';
-import * as Sync from './sync.js?v=69';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=69';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=69';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=69';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=69';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=69';
-import { initLookup } from './lookup.js?v=69';
-import { createRemix } from './remix-app.js?v=69';
-import { sendMode, looksLikeQuestion } from './remix.js?v=69';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=69';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=69';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=69';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=69';
-import * as ClaudeImport from './claude-import.js?v=69';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=70';
+import * as Sync from './sync.js?v=70';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=70';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=70';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=70';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=70';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=70';
+import { initLookup } from './lookup.js?v=70';
+import { createRemix } from './remix-app.js?v=70';
+import { sendMode, looksLikeQuestion } from './remix.js?v=70';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=70';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=70';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=70';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=70';
+import * as ClaudeImport from './claude-import.js?v=70';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -4199,8 +4199,33 @@ async function claudeSource(file, job) {
     },
   };
 }
+// claude.ai's export email now links a small manifest .json listing the real zips (each link expires in 24 h and may
+// work only once). Picking it shows download links for the conversations zip(s) — only https://claude.ai/export/… URLs.
+async function claudeManifestLinks(file) {
+  if (!file || file.size > 1_000_000 || /\.zip$/i.test(file.name)) return null;
+  let d; try { d = JSON.parse(await file.text()); } catch { return null; }
+  if (!d || !Array.isArray(d.data_files) || !d.data_files.some((f) => f?.export_url)) return null;
+  return d.data_files.filter((f) => f && f.category === 'conversations' && typeof f.export_url === 'string')
+    .map((f) => { try { const u = new URL(f.export_url); return u.protocol === 'https:' && u.hostname === 'claude.ai' && u.pathname.startsWith('/export/') ? { url: u.href, name: String(f.filename || 'conversations.zip').slice(0, 80) } : null; } catch { return null; } })
+    .filter(Boolean);
+}
+function showClaudeManifest(links) {
+  const el = $('#claudeImpStatus');
+  el.classList.remove('bad'); el.replaceChildren();
+  if (!links.length) { claudeStatus('That’s the export’s list of download links, but it has no conversations file. Start a new export on claude.ai (Settings → Privacy → Export data).', 'bad'); return; }
+  el.append(`That’s the export’s list of download links. Step 1: download your chats${links.length > 1 ? ` (${links.length} files)` : ''} — you need to be signed in to claude.ai in this browser:`);
+  for (const l of links) {
+    const a = document.createElement('a');
+    a.href = l.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.className = 'chip on'; a.style.margin = '8px 8px 0 0'; a.style.display = 'inline-flex';
+    a.textContent = `Download ${l.name}`;
+    el.append(document.createElement('br'), a);
+  }
+  el.append(document.createElement('br'), 'Step 2: tap Import Claude chats… again and choose the downloaded .zip. The links expire 24 hours after the export and may work only once — if one fails, start a new export on claude.ai.');
+}
 async function importClaudeChats(file) {
   if (!file || claudeJob) return;
+  const manifest = await claudeManifestLinks(file).catch(() => null);
+  if (manifest) { showClaudeManifest(manifest); return; }
   const job = (claudeJob = { stopped: false, src: null });
   const cancel = $('#impClaudeCancel'), label = $('#impClaudeChatsLabel');
   cancel.hidden = false; label.classList.add('busy'); label.setAttribute('aria-disabled', 'true');
