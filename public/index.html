@@ -28,9 +28,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=70" />
-  <link rel="stylesheet" href="/studio.css?v=70" />
-  <link rel="stylesheet" href="/remix.css?v=70" />
+  <link rel="stylesheet" href="/app.css?v=71" />
+  <link rel="stylesheet" href="/studio.css?v=71" />
+  <link rel="stylesheet" href="/remix.css?v=71" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -130,7 +130,12 @@
       <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
     <p class="drawer-description">Pick up where you left off.</p>
-    <input class="search" id="threadSearch" type="search" placeholder="Search threads…" aria-label="Search threads" />
+    <button type="button" class="thread-new" id="drawerNewThread"><span aria-hidden="true">＋</span> New thread</button>
+    <div class="thread-search">
+      <input class="search" id="threadSearch" type="search" placeholder="Search your conversations…" aria-label="Search threads" aria-describedby="threadCount" />
+      <button type="button" class="icon-btn" id="clearThreadSearch" aria-label="Clear search" hidden>×</button>
+    </div>
+    <p class="thread-count" id="threadCount" role="status" aria-live="polite"></p>
     <ul class="thread-list" id="threadList"></ul>
   </aside>
 
@@ -216,6 +221,14 @@
 
       <div class="sheet-scroll" id="settingsScroll">
         <section class="field-group">
+          <h4>Appearance</h4>
+          <div class="seg" id="themeSeg">
+            <label><input type="radio" name="theme" value="auto" /> <span>Auto</span></label>
+            <label><input type="radio" name="theme" value="dark" /> <span>Dark</span></label>
+            <label><input type="radio" name="theme" value="light" /> <span>Paper</span></label>
+          </div>
+        </section>
+        <section class="field-group">
           <h4>Access</h4>
           <div class="owner-only">
             <label class="field">
@@ -269,14 +282,6 @@
           <button type="button" class="chip owner-only" id="refreshModels">Load my model catalog</button>
         </section>
 
-        <section class="field-group">
-          <h4>Appearance</h4>
-          <div class="seg" id="themeSeg">
-            <label><input type="radio" name="theme" value="auto" /> <span>Auto</span></label>
-            <label><input type="radio" name="theme" value="dark" /> <span>Dark</span></label>
-            <label><input type="radio" name="theme" value="light" /> <span>Paper</span></label>
-          </div>
-        </section>
         <section class="field-group ql" id="quickLaunch">
           <h4>Quick launch</h4>
           <p class="hint ql-lead">Atelier, one gesture away. Your phone keeps its own assistant button; these put Atelier right beside it.</p>
@@ -488,6 +493,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=70" type="module"></script>
+  <script src="/app.js?v=71" type="module"></script>
 </body>
 </html>

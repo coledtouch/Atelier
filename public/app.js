@@ -7,21 +7,21 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=70';
-import * as Sync from './sync.js?v=70';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=70';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=70';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=70';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=70';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=70';
-import { initLookup } from './lookup.js?v=70';
-import { createRemix } from './remix-app.js?v=70';
-import { sendMode, looksLikeQuestion } from './remix.js?v=70';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=70';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=70';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=70';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=70';
-import * as ClaudeImport from './claude-import.js?v=70';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=71';
+import * as Sync from './sync.js?v=71';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=71';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=71';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=71';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=71';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=71';
+import { initLookup } from './lookup.js?v=71';
+import { createRemix } from './remix-app.js?v=71';
+import { sendMode, looksLikeQuestion } from './remix.js?v=71';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=71';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=71';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=71';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=71';
+import * as ClaudeImport from './claude-import.js?v=71';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -3437,7 +3437,10 @@ async function renderThreads() {
   const q = $('#threadSearch').value.trim().toLowerCase();
   let all = await allThreads();
   if (seq !== threadsSeq) return;
-  if (q) all = all.filter((t) => (t.title + ' ' + t.entries.map((e) => e.prompt).join(' ')).toLowerCase().includes(q));
+  $('#clearThreadSearch').hidden = !q;
+  if (q) all = all.filter((t) => [t.title, ...t.entries.flatMap((e) => [e.prompt, e.text, e.app?.title,
+    ...(e.ideas || []).flatMap((idea) => [idea.title, idea.pitch])])].join(' ').toLowerCase().includes(q));
+  $('#threadCount').textContent = q ? `${all.length} ${all.length === 1 ? 'matching thread' : 'matching threads'}` : `${all.length} saved ${all.length === 1 ? 'thread' : 'threads'}`;
   const list = $('#threadList');
   if (!all.length) { list.innerHTML = `<li class="empty-note"><strong>${q ? 'No matching threads' : 'A fresh page awaits'}</strong>${q ? 'Try another word or clear your search.' : 'Your conversations will appear here after you send your first prompt.'}</li>`; return; }
   const day = 864e5, today = new Date().setHours(0, 0, 0, 0);
@@ -3455,6 +3458,12 @@ async function renderThreads() {
   list.innerHTML = h;
 }
 $('#threadSearch').addEventListener('input', renderThreads);
+$('#clearThreadSearch').onclick = () => {
+  $('#threadSearch').value = '';
+  $('#threadSearch').focus({ preventScroll: true });
+  renderThreads();
+};
+$('#drawerNewThread').onclick = () => { closeDrawers(false); startFresh(); };
 $('#threadList').addEventListener('click', async (ev) => {
   const del = ev.target.closest('[data-del]');
   if (del) {
@@ -5286,7 +5295,7 @@ modesNav.addEventListener('keydown', ev => {
   if (next === null) return;
   ev.preventDefault(); setMode(MODE_KEYS[next]); $(`#mode-${MODE_KEYS[next]}`).focus();
 });
-const settingsGroups = { Connections: 'connections', Models: 'models', 'Your data': 'data' };
+const settingsGroups = { Connections: 'connections', Models: 'models', 'Available providers': 'models', 'Your data': 'data' };
 function selectSettings(panel) {
   $$('#settingsForm .field-group').forEach(section => { section.hidden = (settingsGroups[$('h4', section)?.textContent] || 'general') !== panel; });
   $$('[data-settings]').forEach(b => { b.classList.toggle('on', b.dataset.settings === panel); b.setAttribute('aria-pressed', b.dataset.settings === panel); });
