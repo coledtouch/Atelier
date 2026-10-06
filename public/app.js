@@ -1995,7 +1995,7 @@ async function runImage(e, signal) {
 }
 
 async function runPremiumEdit(e, cfg, signal) {
-  e.meta = { model: cfg.id, note: 'edit' };
+  e.meta = { model: cfg.editId || cfg.id, note: 'edit' };
   e.media = []; e.expect = 1;
   e.stage = 'Retouching'; repaint(e);
   const img = await shrinkDataUrl(e.images[0], 1536, 1536, 3_000_000);
