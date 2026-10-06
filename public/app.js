@@ -718,7 +718,7 @@ async function openaiImage(prompt, o, signal) {
   const edit = Boolean(o.image);
   // Testers: medium quality and always an explicit size, so the request can be priced (spec §6, addendum A7b).
   const body = { model: edit ? 'gpt-image-2.5-sunburst' : 'gpt-image-2.5-flare', prompt, n: 1, quality: S.tester ? 'medium' : 'high', output_format: 'jpeg' };
-  if (edit) Object.assign(body, { images: [{ image_url: o.image }], input_fidelity: 'high' }, S.tester ? { size: OPENAI_SIZES[o.aspect] || '1024x1024' } : {});
+  if (edit) Object.assign(body, { images: [{ image_url: o.image }] }, S.tester ? { size: OPENAI_SIZES[o.aspect] || '1024x1024' } : {});
   else body.size = OPENAI_SIZES[o.aspect] || '1024x1024';
   const j = await (await xfetch(`openai/images/${edit ? 'edits' : 'generations'}`, { body, signal })).json();
   const out = (j.data || []).map((d) => ({ src: d.b64_json ? `data:image/jpeg;base64,${d.b64_json}` : d.url })).filter((m) => m.src);
