@@ -414,7 +414,7 @@ test('OpenAI images: allow-listed models, n ≤ 4, explicit size and quality ≤
   const png = 'data:image/png;base64,iVBORw0KGgo=';
   let r = await call('x/openai/images/edits', post({ model: 'gpt-image-2.5-sunburst', prompt: 'make it blue', n: 1, quality: 'high', output_format: 'jpeg', images: [{ image_url: png }], input_fidelity: 'high', moderation: 'low', stream: true, partial_images: 3 }));
   assert.equal(r.status, 200);
-  assert.deepEqual(upstream.calls[0].json, { model: 'gpt-image-2.5-sunburst', prompt: 'make it blue', n: 1, size: '1024x1024', quality: 'medium', output_format: 'jpeg', images: [{ image_url: png }], input_fidelity: 'high' });
+  assert.deepEqual(upstream.calls[0].json, { model: 'gpt-image-2.5-sunburst', prompt: 'make it blue', n: 1, size: '1024x1024', quality: 'medium', output_format: 'jpeg', images: [{ image_url: png }] }, 'input_fidelity is dropped: gpt-image-2.5-sunburst rejects it');
   assert.deepEqual(await r.json(), { data: [{ b64_json: 'AAAA' }], usage });
   const actual = imageActual({ model: 'openai:gpt-image-2.5-sunburst', usage });
   assert.deepEqual(spent(L, sub), { spent: actual, reserved: 0, limit: 1_000_000 });
