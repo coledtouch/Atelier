@@ -97,14 +97,14 @@ test('a stranger can’t borrow the label: via=assist without this browser’s k
   assert.deepEqual([r.send, r.via, r.mode, r.prefill.label], ['review', '', 'image', NOTES.link]);
 });
 
-test('the first keyed use still asks (with Atelier Assist’s wording); Allow holds in the link’s mode', async () => {
+test('the first keyed use still asks (with Atelier Assist’s wording); Allow sends in the link’s mode', async () => {
   const store = memStore({ launchKey: KEY, launchRole: 'owner' });
   const p = booted(assist('image'), { keys: keyState(store) });
   assert.deepEqual([p.send, p.sendWhy, p.mode, p.via], ['confirm', 'unconfirmed', 'image', 'assist']);
   const d = fakeDeps({ store, text: 'a red fox' });
   assert.deepEqual(await applyLaunch(p, d), ['mode:image', 'prefill:link', 'confirmed', 'hold']);
   assert.deepEqual(find(d.calls, 'confirmLinkSend'), ['confirmLinkSend', { via: 'assist', mode: 'image' }]);
-  assert.deepEqual(find(d.calls, 'holdThenSend'), ['holdThenSend', { ms: HOLD_MS.link, mode: 'image', via: 'assist' }]);
+  assert.deepEqual(find(d.calls, 'holdThenSend'), ['holdThenSend', { ms: HOLD_MS.assist, mode: 'image', via: 'assist' }]);
   assert.deepEqual(find(d.calls, 'showSource'), ['showSource', NOTES.assist, { own: true }]);
   assert.equal(store.get('launchKeyOk'), CONFIRM_SCOPE + KEY);
   // Not now: Send pulses, nothing is held.
@@ -134,15 +134,17 @@ test('an Allow given under the Ask-only dialog (a bare key) no longer counts: th
   assert.equal(fresh.get('launchKeyOk'), CONFIRM_SCOPE + KEY);
 });
 
-test('Video holds 4 s, every other mode 2.5 s; the 15 s window starts either way', async () => {
+test('Atelier Assist sends at once, except Video (4 s); other keyed links hold 2.5 s; the 15 s window starts either way', async () => {
   assert.equal(HOLD_MS.video, 4000);
+  assert.equal(HOLD_MS.assist, 0);
   for (const m of LAUNCH_MODES) assert.equal(holdMs(m), m === 'video' ? 4000 : HOLD_MS.link, m);
+  for (const m of LAUNCH_MODES) assert.equal(holdMs(m, 'assist'), m === 'video' ? 4000 : 0, `assist ${m}`);
   assert.equal(holdMs(undefined), HOLD_MS.link);
   for (const m of ['video', 'build']) {
     const store = memStore({ launchKey: KEY, launchRole: 'owner', launchKeyOk: CONFIRM_SCOPE + KEY });
     const d = fakeDeps({ store, text: 'a red fox' });
     assert.deepEqual(await applyLaunch(booted(assist(m), { keys: keyState(store) }), d), [`mode:${m}`, 'prefill:link', 'hold']);
-    assert.deepEqual(find(d.calls, 'holdThenSend'), ['holdThenSend', { ms: holdMs(m), mode: m, via: 'assist' }]);
+    assert.deepEqual(find(d.calls, 'holdThenSend'), ['holdThenSend', { ms: holdMs(m, 'assist'), mode: m, via: 'assist' }]);
     assert.equal(store.get('lastAutoSend'), NOW);
     assert.equal(booted(assist(m), { keys: keyState(store) }).sendWhy, 'rate', `${m}: the same link again right away only prefills`);
   }
@@ -212,6 +214,20 @@ test('the hold’s toast names the mode; Video says its length and price; the se
   assert.equal(img.confirmWhat('image'), 'This one goes to Image, after a short pause you can cancel.');
   assert.equal(vid.confirmWhat('video'), 'This one: Making a 4 s video · ≈ $0.25, after a 4-second pause you can cancel.');
   assert.equal(img.confirmWhat(undefined), 'This one goes to Ask, after a short pause you can cancel.');
+  assert.equal(img.confirmWhat('image', 'assist'), 'This one goes to Image and sends right away.');
+  assert.equal(vid.confirmWhat('video', 'assist'), 'This one: Making a 4 s video · ≈ $0.25, after a 4-second pause you can cancel.');
+
+  // Atelier Assist (HOLD_MS.assist = 0): sends at once, no hold, no "Sending… Cancel" toast.
+  const now = holdRig({ mode: 'code' });
+  now.holdThenSend({ ms: HOLD_MS.assist, mode: 'code', via: 'assist' });
+  assert.deepEqual(now.calls, [['submit', undefined, 'code', { launch: true, via: 'assist' }]]);
+  assert.equal(now.due.size, 0);
+  assert.equal(now.vars.sendHold, null);
+  // The mic opened meanwhile: nothing sends, Send pulses.
+  const mic = holdRig({ mode: 'ask' });
+  mic.vars.micOn = () => true;
+  mic.holdThenSend({ ms: 0, mode: 'ask', via: 'assist' });
+  assert.deepEqual(mic.calls, [['armSend'], ['toast', NOTES.held, null]]);
 
   // The iPhone Shortcut (no via) and Talk's own hold (no mode) are unchanged.
   const plain = holdRig();
@@ -226,7 +242,7 @@ test('the entry, the first-use dialog and Settings → Quick launch know about A
   assert.match(fnSource('renderEntry'), /e\.via === 'assist' \? '<p class="task-of">From Atelier Assist<\/p>'/);
   assert.match(fnSource('confirmLinkSend'), /via === 'assist' \? NOTES\.confirmTitleAssist : NOTES\.confirmTitle/);
   assert.match(fnSource('confirmLinkSend'), /\{ via = '', mode: launchMode = 'ask' \}/);
-  assert.match(fnSource('confirmLinkSend'), /esc\(confirmWhat\(launchMode\)\)/, 'the dialog names the mode (and Video’s price)');
+  assert.match(fnSource('confirmLinkSend'), /esc\(confirmWhat\(launchMode, via\)\)/, 'the dialog names the mode (and Video’s price)');
   for (const id of ['qlAssist', 'qlAssistCopy', 'qlAssistReset', 'qlAssistLink']) assert.match(HTML, new RegExp(`id="${id}"`), id);
   assert.match(HTML, /name="qlAssistSend" value="on"/);
   assert.match(APP, /\$\('#qlAssistCopy'\)\?\.addEventListener\('click'/);

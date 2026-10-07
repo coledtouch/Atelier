@@ -30,8 +30,8 @@ android {
         minSdk = 29
         targetSdk = 36
         // 2.0: the whole Atelier app (a TWA) with the Assist card inside. Same package and key as Atelier Assist 1.x.
-        versionCode = 4
-        versionName = "2.0.0"
+        versionCode = 5
+        versionName = "2.1.0"
     }
 
     // English only: drops the ~90 translations android-browser-helper and AppCompat bring along (the app's own text is

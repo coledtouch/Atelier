@@ -16,8 +16,9 @@ It is sideloaded and for the owner only. It isn't published anywhere and has no 
 
 - **Package:** `ai.ciprari.atelier.assist` (Atelier Assist 1.x's, so 2.0 installs over it and keeps the
   digital-assistant role). **Label:** "Atelier".
-- **Version:** 2.0.0 (versionCode 4). 1.0.x showed the site in a WebView sheet; 1.1 was the card on its own; 2.0 adds
-  the full app as a TWA and makes the icon open it.
+- **Version:** 2.1.0 (versionCode 5). 1.0.x showed the site in a WebView sheet; 1.1 was the card on its own; 2.0 adds
+  the full app as a TWA and makes the icon open it; 2.1 opens Atelier as soon as you stop talking (no 1.2 s
+  "Opening in …" countdown), and the site sends it at once.
 - **How it opens:**
   - App icon, shortcuts, Atelier links, shares → `AtelierLauncherActivity` (the TWA).
   - `android.intent.action.ASSIST`, which the system sends to the default digital assistant → `AssistActivity` (the
@@ -58,7 +59,7 @@ It is sideloaded and for the owner only. It isn't published anywhere and has no 
 |---|---|---|
 | Listening | "LISTENING". The A bobs slowly and its glow and ring swell with your voice. Partial words appear as you speak. The mode chip appears as soon as the words suggest one, and the glow takes that mode's colour. | Talk. Tap the A to finish early (before any words: it stops and waits). **Type** switches to the keyboard. Tap the chip to pick a mode yourself. |
 | Thinking | "THINKING". The A breathes. | Wait a moment. |
-| Opening in … | "OPENING IN IMAGE" and a thin bar fills for 1.2 s. | Any touch on the card holds it ("READY — TAP OPEN"). Then tap the chip to change the mode, **Edit** to fix the words, or **Open**. |
+| Opening | As soon as your words are final, "OPENING IN IMAGE" and Atelier opens. | Nothing to do: tap the chip while you talk to change the mode first. |
 | Typing | A text field with Send. The chip follows what you type. | Send (or the keyboard's Send) opens Atelier at once. **Talk** goes back to the mic. |
 | Error | A short title and one line of help: didn't catch that, no connection, mic busy, microphone off, language not available, no speech service. | **Try again**, **Type**, **Allow** or **Settings** (when Android won't ask for the mic again). Nothing crashes. |
 
@@ -66,7 +67,7 @@ It is sideloaded and for the owner only. It isn't published anywhere and has no 
   on the setup page and during system screens it opened itself (unlock, Settings).
 - **Press the side button again:** while it listens, that ends the request (before any words, it closes). Otherwise it
   listens again.
-- **With TalkBack:** it never opens by itself after the 1.2 s. It waits on "Ready" for you to choose Open, and the
+- **With TalkBack:** it never opens by itself when you stop talking. It waits on "Ready" for you to choose Open, and the
   status line isn't read aloud while the mic is open.
 - **Reduced motion:** with Settings › Accessibility › Remove animations on (animator duration scale 0), the A stays
   still: no bob, no pulse and no frame loop. Its glow switches to the new mode colour at once instead of fading.
@@ -129,11 +130,12 @@ https://atelier.ciprari.ai/?start=<mode>&via=assist                             
   the link goes **without** the key (prefill only; the card says so). Google Play must be visible to this app
   (`<package android:name="com.android.vending"/>` in `<queries>`), or Android 11+ reports a null installer for a
   Play-installed Chrome. 1.1's Chrome-WebAPK lookup is gone: the request never leaves this app except to that browser.
-- **What Atelier does with it:** a keyed link sends after Atelier's own visible, cancellable hold. It needs the key to
+- **What Atelier does with it:** a keyed link sends at once (`launch.js` `HOLD_MS.assist` = 0), except Video, which
+  keeps its 4 s cancellable hold with the price. It needs the key to
   match the one that browser made, a one-time confirmation in Atelier, and its usual gates (signed in, idle, empty
   composer, at most one keyed send per 15 s). A link without a key, or one Atelier doesn't accept, only fills the box
   and Send pulses.
-- **Who may open it by itself:** the 1.2 s auto-open runs only when the card was started by the system (`android`,
+- **Who may open it by itself:** the automatic open runs only when the card was started by the system (`android`,
   System UI: the assistant gesture), the default home app, this app, or another system-image app (an OEM side-key
   handler). The caller is the system's own record (`getReferrer()` after the extras are cleared, so a caller can't
   claim another name). Any other app that starts the card gets the card and the mic, but it waits on "Ready" for
@@ -313,7 +315,7 @@ and so on) out of git.
 ### Versioning
 
 Raise `versionCode` (and `versionName`) in `app/build.gradle.kts` for every APK that will be installed over an
-earlier one. The current build is `versionCode 4`, `2.0.0`.
+earlier one. The current build is `versionCode 5`, `2.1.0`.
 
 ## Install on the phone
 
@@ -324,7 +326,7 @@ app's links when it is installed, and Chrome checks the file before it hides the
 1. Temporarily turn off Auto Blocker (Settings › Security and privacy › Auto Blocker). While it is on, it blocks
    sideloads and USB commands.
 2. Install, either:
-   - with USB debugging on: `adb install -r Atelier-2.0.0.apk`; or
+   - with USB debugging on: `adb install -r Atelier-2.1.0.apk`; or
    - by opening the APK in My Files.
 
    2.0.0 installs over Atelier Assist 1.x (same package, same key). The pairing key, "setup seen" and the
@@ -347,7 +349,7 @@ adb shell cmd role get-role-holders android.app.role.ASSISTANT    # → ai.cipra
 adb shell settings get secure assistant                           # → ai.ciprari.atelier.assist/.AssistActivity
 adb shell pm get-app-links ai.ciprari.atelier.assist              # → atelier.ciprari.ai: verified
 adb shell pm verify-app-links --re-verify ai.ciprari.atelier.assist   # if installed before assetlinks.json was live
-adb shell dumpsys package ai.ciprari.atelier.assist | findstr versionName   # → 2.0.0
+adb shell dumpsys package ai.ciprari.atelier.assist | findstr versionName   # → 2.1.0
 ```
 
 ## Fallback if One UI ignores an activity-only assistant

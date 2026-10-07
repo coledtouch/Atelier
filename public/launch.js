@@ -28,9 +28,11 @@ export const PENDING_TTL = 15 * 60e3;
 export const DRAFT_TTL = 6 * 36e5;
 export const RATE_MS = 15e3; // at most one keyed auto-send per 15 s
 export const MAX_TEXT = 8000;
-export const HOLD_MS = { link: 2500, voice: 1500, video: 4000 };
+export const HOLD_MS = { link: 2500, voice: 1500, video: 4000, assist: 0 };
 // A keyed link holds 2.5 s before it sends; Video, the costly one, 4 s (its toast shows the price: app.js holdNote).
-export const holdMs = (mode) => (mode === 'video' ? HOLD_MS.video : HOLD_MS.link);
+// A keyed Atelier Assist launch (via 'assist') sends at once, like a phone assistant: you already saw your words on the
+// card. Video still holds 4 s, so its price shows and it can be cancelled.
+export const holdMs = (mode, via = '') => (mode === 'video' ? HOLD_MS.video : via === 'assist' ? HOLD_MS.assist : HOLD_MS.link);
 export const MODE_LABELS = Object.freeze({ ask: 'Ask', code: 'Code', image: 'Image', video: 'Video', ideas: 'Ideas', build: 'Build' });
 // A voice launch opens the mic only if the page is visible within this long: a boot that stays in the background (power
 // button, app switch) arms the mic instead of opening it at the next unlock or return through Recents.
@@ -73,7 +75,7 @@ export const NOTES = Object.freeze({
   // Atelier Assist (android/): only a link with this browser's own key gets these (planLaunch plan.via).
   assist: 'From Atelier Assist — check it before sending.',
   confirmTitleAssist: 'Send from Atelier Assist without a tap?',
-  confirmHintAssist: 'What you ask Atelier Assist on this phone will send here after a short pause, in the mode it picked. Links without your private key only fill the box.',
+  confirmHintAssist: 'What you ask Atelier Assist on this phone will send here right away, in the mode it picked (Video waits 4 seconds so you can cancel). Links without your private key only fill the box.',
   assistOn: 'Turn on Send without a tap first, then copy the link.',
   assistCopied: 'Assist link copied — in Atelier Assist, tap ⋯ → Paste link, then delete it from your keyboard’s clipboard history.',
   assistCopyBelow: 'Copy the link below, then in Atelier Assist tap ⋯ → Paste link. Delete it from your keyboard’s clipboard history afterwards.',
@@ -559,7 +561,7 @@ export async function applyLaunch(plan, deps = {}) {
 
   if (plan.send === 'send') {
     if (d.store) noteAutoSend(d.store, d.now());
-    call('holdThenSend', { ms: holdMs(plan.mode), mode: plan.mode, via: plan.via || '' }); did.push('hold');
+    call('holdThenSend', { ms: holdMs(plan.mode, plan.via), mode: plan.mode, via: plan.via || '' }); did.push('hold');
     return did;
   }
   if (plan.send === 'confirm') {
@@ -568,7 +570,7 @@ export async function applyLaunch(plan, deps = {}) {
     try { ok = Boolean(await call('confirmLinkSend', { via: plan.via || '', mode: plan.mode || 'ask' })); } catch {}
     // Allow counts only for the key the link was checked against (a "New link" in another tab voids it).
     if (ok && d.store && keyState(d.store).mine === before && confirmLaunchKey(d.store, d.now())) {
-      call('holdThenSend', { ms: holdMs(plan.mode), mode: plan.mode, via: plan.via || '' }); did.push('confirmed', 'hold');
+      call('holdThenSend', { ms: holdMs(plan.mode, plan.via), mode: plan.mode, via: plan.via || '' }); did.push('confirmed', 'hold');
       return did;
     }
     call('armSend'); did.push('declined', 'armSend');
