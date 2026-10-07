@@ -8,9 +8,9 @@
 // itself. Only a DEFINITIVE answer (an HTTP status with a body) can be retried: 429 → 'queued' (no operation was
 // created, nothing billed), tester 402 → 'budget'. A dropped connection or timeout after sending → 'unknown', which
 // needs the user's fresh approval ("retrying may bill twice").
-import { createTask, getTask, downloadOutput, failureOf, buildRequest, ratioFor } from './runway.js?v=78';
-import { parseResetsAt } from './tester.js?v=78';
-import { shotModel, shotPrompt, SHOT_NEGATIVE, isShotOp } from './remix.js?v=78';
+import { createTask, getTask, downloadOutput, failureOf, buildRequest, ratioFor } from './runway.js?v=79';
+import { parseResetsAt } from './tester.js?v=79';
+import { shotModel, shotPrompt, SHOT_NEGATIVE, isShotOp } from './remix.js?v=79';
 
 export const SHOT_TIMING = { start: 60_000, poll: 5_000, pollSlow: 10_000, slowAfter: 180_000, queuedRetry: 30_000, queuedMax: 600_000, expireAfter: 47 * 3_600_000, request: 30_000, download: 300_000, downloadTries: 3 };
 const OP_RE = /^models\/[\w.-]+\/operations\/[\w.-]+$/;

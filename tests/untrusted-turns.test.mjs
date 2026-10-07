@@ -243,13 +243,14 @@ const DEFS = [
   { name: 'gmail_search', service: 'gmail' }, { name: 'browser_click', service: 'browser', write: true },
 ].map((d) => ({ type: 'function', function: { name: d.name }, 'x-write': Boolean(d.write), 'x-label': d.name, 'x-service': d.service }));
 // searches[n]: the web searches Claude reports during turn n (onDelta's searches), alongside that turn's tool calls.
-function agentRig({ e, batches, approve = () => true, searches = [], extra = {} }) {
-  const calls = { asked: [], ext: [], tool: [] };
+function agentRig({ e, batches, approve = () => true, searches = [], extra = {}, thread }) {
+  const calls = { asked: [], ext: [], tool: [], extras: [] };
   let n = 0, id = 0;
   const vars = {
     TOOLS: { services: { gmail: true } }, EXT: { ready: true }, REMOTE: { online: false }, SYS: { ask: () => 'ask', code: () => 'code' },
     browserAvailable: () => true, historyFor: () => [], agentTools: () => DEFS, uid: () => `s${++id}`, modelFor: () => 'anthropic:claude-sonnet-5-5',
     streamChat: async (o) => {
+      calls.extras.push(typeof o.extra === 'function' ? o.extra(o.model) : o.extra);
       const batch = batches[n++] || [];
       o.onDelta({ content: batch.length ? '' : 'done', reasoning: '', searches: searches[n - 1] || 0, tool_calls: batch.map(([name, args], index) => ({ index, id: `c${n}${index}`, function: { name, arguments: JSON.stringify(args) } })) });
     },
@@ -260,7 +261,7 @@ function agentRig({ e, batches, approve = () => true, searches = [], extra = {} 
   };
   vars.asksFirst = evalIn(vars, `return (${constSource('asksFirst').replace(/^asksFirst = /, '').replace(/;$/, '')});`);
   const { runAgent } = lift(vars, 'runAgent');
-  return { run: () => runAgent(e, null, { entries: [e] }), calls };
+  return { run: () => runAgent(e, null, thread || { entries: [e] }), calls };
 }
 
 test('runAgent: browser_open and browser_read with a url wait for approval; reading an open tab or Gmail does not', async () => {
@@ -495,4 +496,30 @@ test('md(): only the code-block actions survive in a reply; every other data-* i
   // the app's own code blocks still carry exactly these actions
   const used = APP.match(/<div class="codeblock".*/)[0].match(/data-act="([\w-]+)"/g).map((x) => x.slice(10, -1)).sort();
   assert.deepEqual(used, [...v.REPLY_ACTS].sort());
+});
+
+test('runAgent: web search is offered only before any account data is read — never after, never in a thread holding earlier reads', async () => {
+  const web = { providerReady: () => true, feat: () => true, providerOf: () => 'anthropic' };
+  const offered = (calls) => calls.extras.map((x) => Boolean(x?.web_search));
+  // Turn 1 offers search; Gmail returns data; every later turn in this run goes without it (mail can't leave in a query).
+  const e = { kind: 'ask', prompt: 'weather, then anything in my inbox about the trip', params: {}, via: 'assist' };
+  const r = agentRig({ e, extra: web, batches: [[['gmail_search', { q: 'trip' }]], [['gmail_search', { q: 'hotel' }]], []] });
+  await r.run();
+  assert.deepEqual(offered(r.calls), [true, false, false]);
+  // A declined read returned nothing, so search stays available.
+  const d = { kind: 'ask', prompt: 'x', params: {}, via: 'assist' };
+  const dr = agentRig({ e: d, extra: web, approve: () => false, searches: [1], batches: [[['gmail_search', { q: 'a' }]], []] });
+  await dr.run();
+  assert.deepEqual(offered(dr.calls), [true, true]);
+  // A thread whose earlier agent turn already read an account: no search at all (its answer may quote that mail).
+  const later = { kind: 'ask', prompt: 'and the weather there?', params: {}, via: 'assist' };
+  const before = { kind: 'ask', prompt: 'my inbox', steps: [{ name: 'gmail_search', status: 'done' }] };
+  const t = agentRig({ e: later, extra: web, thread: { entries: [before, later] }, batches: [[]] });
+  await t.run();
+  assert.deepEqual(offered(t.calls), [false]);
+  // Not Assist: never offered.
+  const plain = { kind: 'ask', prompt: 'x', params: {} };
+  const pr = agentRig({ e: plain, extra: web, batches: [[]] });
+  await pr.run();
+  assert.deepEqual(offered(pr.calls), [false]);
 });
