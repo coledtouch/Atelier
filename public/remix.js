@@ -8,9 +8,9 @@
 //     in e.remix.shots, never Gemini's.
 //   - Plan strings are untrusted (on-screen text in the footage can steer Gemini): they are cleaned and capped here and
 //     must still be escaped wherever they are shown. No plan field ever reaches a URL, a tool or a model id.
-import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=76';
-import { quote as runwayQuote, RUNWAY_MODELS } from './runway.js?v=76';
-import { stripThink } from './context.js?v=76';
+import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=77';
+import { quote as runwayQuote, RUNWAY_MODELS } from './runway.js?v=77';
+import { stripThink } from './context.js?v=77';
 
 export const REMIX_V = 1;
 export const LIMITS = Object.freeze({
