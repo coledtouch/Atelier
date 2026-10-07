@@ -7,21 +7,21 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=73';
-import * as Sync from './sync.js?v=73';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=73';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=73';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=73';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=73';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=73';
-import { initLookup } from './lookup.js?v=73';
-import { createRemix } from './remix-app.js?v=73';
-import { sendMode, looksLikeQuestion } from './remix.js?v=73';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=73';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=73';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=73';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=73';
-import * as ClaudeImport from './claude-import.js?v=73';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=74';
+import * as Sync from './sync.js?v=74';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=74';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=74';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=74';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=74';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=74';
+import { initLookup } from './lookup.js?v=74';
+import { createRemix } from './remix-app.js?v=74';
+import { sendMode, looksLikeQuestion } from './remix.js?v=74';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=74';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=74';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=74';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=74';
+import * as ClaudeImport from './claude-import.js?v=74';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -5561,7 +5561,11 @@ remix = createRemix({
   // The draft: read once, only into an empty composer. It was the user's (only typed or dictated text is saved), and if
   // the "From a link / Shared" note was still showing when it was saved, it shows again.
   const draft = takeDraft(LS, Date.now());
-  if (draft.text && !input.value.trim()) { input.value = draft.text; autosize(); drafts.restored(); if (draft.src) showSource(draft.src === 'share' ? NOTES.shared : NOTES.link); }
+  // An Atelier Assist request you just spoke (a send link) gets the composer to itself, so a leftover draft can't hold it
+  // back (planLaunch's 'draft' gate) or ride along with it. The draft goes back into the composer once the launch is done
+  // (Assist sends at once, HOLD_MS.assist; Video's 4 s hold would send whatever is in the composer when it fires).
+  const asideDraft = launch.via === 'assist' && launch.send && launch.text && launch.mode !== 'video' && draft.text && !input.value.trim() ? draft : null; // Video holds 4 s first: no
+  if (draft.text && !input.value.trim() && !asideDraft) { input.value = draft.text; autosize(); drafts.restored(); if (draft.src) showSource(draft.src === 'share' ? NOTES.shared : NOTES.link); }
   if (launch.text) { if (!input.value.includes(launch.text)) input.value = joinDraft(input.value, launch.text); autosize(); showSource(launch.from === 'share' ? NOTES.shared : NOTES.link); }
   const shared = launch.text || launch.share || launch.voice; // a launch skips the thread resume below
   sweepShare({ caches: self.caches, keep: [launch.share, peekPendingLaunch(LS, Date.now())?.share] }); // drop a stale share
@@ -5609,7 +5613,13 @@ remix = createRemix({
   // Already signed in (passcode or a cached tester): a stash left by an earlier signed-out launch is stale, because
   // replays only follow a sign-in (H10, H12, H15). Then this launch: start/arm/send per launch.js, or, signed out, stash.
   if (hasCredentials()) takePendingLaunch(LS, Date.now());
-  runLaunch(launch);
+  runLaunch(launch).then(() => {
+    if (!asideDraft || input.value.includes(asideDraft.text)) return;
+    // Sent: the draft comes back as it was. Not sent (no key, signed out, a held send): it goes back in front of the request.
+    const sent = !input.value.trim();
+    input.value = sent ? asideDraft.text : joinDraft(asideDraft.text, input.value); autosize(); drafts.restored();
+    if (sent && asideDraft.src) showSource(asideDraft.src === 'share' ? NOTES.shared : NOTES.link);
+  });
   const connected = params.get('connected');
   if (connected) {
     // denied / error don't say which sign-in they came from: use the one this device started last.
