@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { viewportState, kbDebugFlag, iosVersion, kbDebugText, KB_MIN, KB_RESIZE, TIGHT_H, FRAME_KB_MS, FRAME_HANDOFF_MS } from '../public/viewport.js';
+import { viewportState, kbDebugFlag, iosVersion, kbDebugText, screenSide, bottomGap, KB_MIN, STRIP_MIN, STRIP_MAX, KB_RESIZE, TIGHT_H, FRAME_KB_MS, FRAME_HANDOFF_MS, GAP_MIN, GAP_MAX } from '../public/viewport.js';
 
 const read = (p) => readFile(new URL(`../${p}`, import.meta.url), 'utf8');
 
@@ -364,6 +364,185 @@ test('readout text: every number the owner needs, and a plain verdict on the doc
   assert.match(kbDebugText({ ...d, vvTop: 412.5, vvH: 439.75 }), /vv h 439\.8 · top 412\.5/);
 });
 
+// ── iOS Home Screen app bottom gap (WebKit 301994 / first-keyboard shrink): the window ends a strip above the screen ──
+// The owner's iPhone (393×852, iOS 27 Home Screen app, keyboard closed): innerHeight, clientHeight, the fixed box and the
+// visual viewport all said 793, so the dock sat 59px above the screen's bottom edge.
+const APP = { ...IPHONE, standalone: true, ios: true, screenW: 393, screenH: 852, safeTop: 59 };
+const SHORT = { layoutH: 793, innerHeight: 793, vvHeight: 793 };
+// Where the dock's bottom edge lands with html.vp-gap .dock { bottom: calc(var(--kb) - var(--vp-gap)) } (keyboard closed).
+const dockBottomGap = (s) => (s.open ? dockBottom(s) : s.layoutH - s.kb + s.gap);
+
+test('owner\'s readout: standalone, every measure 793 on an 852 screen, no keyboard: extend 59px, the dock ends on the screen\'s bottom', () => {
+  const s = viewportState({ ...APP, ...SHORT, editing: false, fullH: 793, fullW: 393 });
+  assert.deepEqual([s.open, s.kb, s.top, s.vvh, s.layoutH], [false, 0, 0, 793, 793], 'the keyboard math is untouched');
+  assert.equal(s.gap, 59); assert.equal(s.heal, true, 'try WebKit\'s own recovery first');
+  assert.equal(dockBottomGap(s), 852, 'dock bottom at the 852 screen edge');
+  assert.equal(s.layoutH + s.gap, 852, '--vp-full: the stage runs to the screen\'s bottom too');
+  // the same numbers anywhere else: nothing changes
+  for (const [name, m] of [['Safari tab', { standalone: false }], ['Android PWA', { ios: false }], ['desktop', { standalone: false, ios: false, coarse: false }],
+    ['no screen numbers', { screenW: 0, screenH: 0 }]]) {
+    const o = viewportState({ ...APP, ...SHORT, ...m, editing: false, fullH: 793, fullW: 393 });
+    assert.deepEqual([o.gap, o.heal], [0, false], name);
+  }
+});
+
+test('bottom gap: zero while the keyboard is up or a preview has it, when the page starts below the status bar, or for a real window', () => {
+  const [, up] = run([
+    { focus: true, editing: true, inDock: true, ...SHORT },
+    { editing: true, inDock: true, layoutH: 793, innerHeight: 440, vvHeight: 440 },
+  ], APP);
+  assert.deepEqual([up.open, up.gap, up.heal], [true, 0, false], 'kb-open owns the dock');
+  assertDockOnScreen(up, 0, 440, 'keyboard up in the short window');
+  const frame = viewportState({ ...APP, frame: true, frameAge: 5000, frameKb: true, layoutH: 793, innerHeight: 400, vvHeight: 400, fullH: 793, fullW: 393 });
+  assert.deepEqual([frame.frameKb, frame.gap], [true, 0], 'a Build preview\'s keyboard: dock hidden, no extension');
+  // WebKit 301994's other shape: the page is pushed below the status bar (top inset 0, the home indicator's bottom inset
+  // still there), so its bottom already is the screen's — even if 100lvh says 852
+  assert.equal(viewportState({ ...APP, ...SHORT, safeTop: 0, safeBottom: 34 }).gap, 0);
+  assert.equal(viewportState({ ...APP, ...SHORT, safeTop: 0, safeBottom: 34, largeH: 852 }).gap, 0);
+  assert.equal(viewportState({ ...APP, layoutH: 852, innerHeight: 852, vvHeight: 852 }).gap, 0, 'a healthy window');
+  assert.equal(viewportState({ ...APP, layoutH: 852 - GAP_MIN, innerHeight: 848, vvHeight: 848 }).gap, 0, 'rounding noise');
+  assert.equal(viewportState({ ...APP, layoutH: 852 - GAP_MAX - 1, innerHeight: 751, vvHeight: 751 }).gap, 0, 'iPad split view / a real smaller window');
+  assert.equal(viewportState({ ...APP, layoutH: 852 - GAP_MAX, innerHeight: 752, vvHeight: 752 }).gap, GAP_MAX);
+  // landscape: iOS keeps screen.width/height portrait; the screen's height is then its width (no top inset in landscape)
+  assert.equal(screenSide(852, 393, 852), 393); assert.equal(screenSide(393, 393, 852), 852); assert.equal(screenSide(393, 0, 852), 0);
+  assert.equal(bottomGap({ ...APP, innerWidth: 852, safeTop: 0 }, 372), 21);
+  assert.equal(bottomGap({ ...APP, innerWidth: 852, safeTop: 0 }, 393), 0);
+});
+
+test('stale state after the keyboard closes with no resize event: the settle re-reads clear kb-open and extend into the gap', () => {
+  // keyboard up, then focus leaves (focusout) with no resize/vv event: vv.height and innerHeight still say 440
+  const [, up, stale, settled] = run([
+    { focus: true, editing: true, inDock: true, ...SHORT },
+    { editing: true, inDock: true, layoutH: 793, innerHeight: 440, vvHeight: 440 },
+    { editing: false, layoutH: 793, innerHeight: 440, vvHeight: 440 },  // focusout: settle re-read, numbers stale
+    { editing: false, ...SHORT },                                       // a later re-read once WebKit catches up
+  ], APP);
+  assert.equal(up.open, true);
+  assert.deepEqual([stale.open, stale.kb, stale.top], [false, 0, 0], 'nothing focused: kb-open cleared even with stale numbers');
+  assert.equal(stale.gap, 59); assert.equal(dockBottomGap(stale), 852, 'dock back on the screen\'s bottom at once');
+  assert.deepEqual([settled.open, settled.gap, dockBottomGap(settled)], [false, 59, 852]);
+});
+
+test('resume from the background (pageshow / visibilitychange, no resize): read again, the dock lands on the screen\'s bottom', () => {
+  // left with the keyboard up and a 59px pan, came back with nothing focused and a window that came back short
+  const [, away, back] = run([
+    { focus: true, editing: true, inDock: true, layoutH: 852, innerHeight: 852, vvHeight: 852 },
+    { editing: true, inDock: true, layoutH: 852, innerHeight: 440, vvHeight: 440, vvOffsetTop: 59, scrollY: 59 },
+    { editing: false, ...SHORT, vvOffsetTop: 0, scrollY: 0 },
+  ], APP);
+  assert.equal(away.open, true);
+  assert.deepEqual([back.open, back.kb, back.top, back.gap, back.heal], [false, 0, 0, 59, true]);
+  assert.equal(dockBottomGap(back), 852);
+  // resumed with a healthy window: no extension, no heal
+  const fine = viewportState({ ...APP, layoutH: 852, innerHeight: 852, vvHeight: 852, prev: back, fullH: back.fullH, fullW: back.fullW });
+  assert.deepEqual([fine.gap, fine.heal, dockBottomGap(fine)], [0, false, 852]);
+});
+
+test('first keyboard shrinks the window for good (932 → 873 reports): heal asked once it is down, extended until it recovers', () => {
+  const PRO_MAX = { ...APP, innerWidth: 430, screenW: 430, screenH: 932 };
+  const [boot, up, down, healed] = run([
+    { layoutH: 932, innerHeight: 932, vvHeight: 932 },
+    { focus: true, editing: true, inDock: true, layoutH: 932, innerHeight: 500, vvHeight: 500 },
+    { editing: false, layoutH: 873, innerHeight: 873, vvHeight: 873 },
+    { editing: false, layoutH: 932, innerHeight: 932, vvHeight: 932 }, // after the display toggle
+  ], PRO_MAX);
+  assert.deepEqual([boot.gap, boot.heal, dockBottomGap(boot)], [0, false, 932]);
+  assert.deepEqual([up.open, up.gap], [true, 0]);
+  assert.deepEqual([down.open, down.gap, down.heal, dockBottomGap(down)], [false, 59, true, 932]);
+  assert.deepEqual([healed.gap, healed.heal, dockBottomGap(healed)], [0, false, 932]);
+});
+
+test('bottom gap leaves every non-standalone answer exactly as it was (legacy comparison)', () => {
+  for (const m of [
+    { ...IPHONE, innerHeight: 793, vvHeight: 793, editing: false },
+    { ...IPHONE, innerHeight: 852, vvHeight: 440, editing: true },
+    { innerWidth: 1280, innerHeight: 720, vvHeight: 720, vvOffsetTop: 0, vvScale: 1, editing: true, coarse: false },
+  ]) {
+    const st = { w: 0, fullH: 0 };
+    const now = viewportState({ ...m, screenW: 393, screenH: 852, safeTop: 59, fullH: m.innerHeight, fullW: m.innerWidth });
+    assert.deepEqual(pick(now), legacy(st, m));
+    assert.deepEqual([now.gap, now.heal], [0, false]);
+  }
+});
+
+test('readout: screen, insets, gap and the dock verdict against the extended target', () => {
+  const state = viewportState({ ...APP, ...SHORT, editing: false, fullH: 793, fullW: 393 });
+  const d = { standalone: true, ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+    iw: 393, ih: 793, ch: 793, layoutH: 793, htmlH: 852, sw: 393, sh: 852, safeTop: 59, safeBottom: 34, heals: 1, vvH: 793, vvTop: 0, pageTop: 0,
+    scale: 1, scrollY: 0, state, dockBottom: 852, active: 'body', cls: '', ev: 'reread', n: 564 };
+  const text = kbDebugText(d);
+  for (const want of ['screen 393×852', 'safe top 59', 'bottom 34', 'gap 59 (extended, screen)', 'heals 1', 'html 852', 'fixed 793', 'target 852', ' ok'])
+    assert.ok(text.includes(want), `readout shows "${want}"\n${text}`);
+  assert.match(kbDebugText({ ...d, dockBottom: 793 }), /gap 59px$/m, 'the owner\'s v62 picture reads as a 59px gap');
+  const healthy = viewportState({ ...APP, layoutH: 852, innerHeight: 852, vvHeight: 852 });
+  assert.match(kbDebugText({ ...d, state: healthy, vvH: 852, dockBottom: 852 }), /gap 0 ·/);
+});
+
+// ── v64: the owner still saw the band after v63 — every way the short window can hide from the v63 test ──
+test('owner state A (keyboard closed, 793 of 852): extended whichever evidence the device gives, and the readout names it', () => {
+  const base = { ...APP, ...SHORT, editing: false, fullH: 793, fullW: 393 };
+  // v63's path: the top inset reads 59
+  assert.deepEqual([viewportState(base).gap, viewportState(base).gapBy], [59, 'screen']);
+  // env() lost in the short window: both insets read 0 (v63 bailed here) — a status-bar strip is still extended
+  const lost = viewportState({ ...base, safeTop: 0, safeBottom: 0 });
+  assert.deepEqual([lost.gap, lost.gapBy, lost.heal, dockBottomGap(lost)], [59, 'noinset', true, 852]);
+  // …but only a status-bar-sized one: no inset and a 90px difference is a real window
+  assert.equal(viewportState({ ...base, safeTop: 0, safeBottom: 0, layoutH: 762, innerHeight: 762, vvHeight: 762 }).gap, 0);
+  assert.equal(viewportState({ ...base, safeTop: 0, safeBottom: 0, layoutH: 852 - STRIP_MIN, innerHeight: 812, vvHeight: 812 }).gap, STRIP_MIN);
+  assert.equal(viewportState({ ...base, safeTop: 0, safeBottom: 0, layoutH: 852 - STRIP_MAX - 1, innerHeight: 771, vvHeight: 771 }).gap, 0);
+  // the large viewport says 852 (100lvh / 100vh): the strongest evidence, needs no inset and no screen numbers
+  for (const m of [{ safeTop: 0, safeBottom: 0 }, { screenW: 0, screenH: 0 }, {}]) {
+    const s = viewportState({ ...base, ...m, largeH: 852 });
+    assert.deepEqual([s.gap, s.gapBy, dockBottomGap(s)], [59, 'lvh', 852], JSON.stringify(m));
+  }
+  // a large viewport past the screen, or no bigger than the layout, is not evidence: the screen decides
+  assert.deepEqual([viewportState({ ...base, largeH: 900 }).gapBy, viewportState({ ...base, largeH: 793 }).gapBy], ['screen', 'screen']);
+  assert.equal(viewportState({ ...base, screenW: 0, screenH: 0, largeH: 793 }).gap, 0);
+  // never anywhere else, whatever the large viewport says
+  for (const m of [{ standalone: false }, { ios: false }])
+    assert.deepEqual([viewportState({ ...base, ...m, largeH: 852 }).gap, viewportState({ ...base, ...m, largeH: 852 }).gapBy], [0, ''], JSON.stringify(m));
+});
+
+test('owner state B (keyboard up in the short window, 459 visible): tight, dock on the keyboard, no extension; extended again once it closes', () => {
+  const [closed, up, upLost, down] = run([
+    { editing: false, ...SHORT },
+    { focus: true, editing: true, inDock: true, layoutH: 793, innerHeight: 459, vvHeight: 459 },
+    { editing: true, inDock: true, layoutH: 793, innerHeight: 459, vvHeight: 459, safeTop: 0, safeBottom: 0, largeH: 852 },
+    { editing: false, ...SHORT },
+  ], APP);
+  assert.deepEqual([closed.open, closed.gap, dockBottomGap(closed)], [false, 59, 852]);
+  for (const [name, s] of [['up', up], ['up, insets lost, lvh 852', upLost]]) {
+    assert.deepEqual([s.open, s.tight, s.kb, s.vvh, s.gap, s.gapBy, s.heal], [true, true, 334, 459, 0, '', false], name);
+    assertDockOnScreen(s, 0, 459, name); // its bottom is the keyboard's top (studio.css: 4px padding, no 34px strip padding)
+  }
+  assert.ok(TIGHT_H > 459, 'the header gives its rows (and its band: html.kb-tight #stage) to the greeting');
+  assert.deepEqual([down.open, down.tight, down.gap, dockBottomGap(down)], [false, false, 59, 852]);
+});
+
+test('readout v64: the unit probes, the evidence, the vp-gap class and the paint marks', () => {
+  const state = viewportState({ ...APP, ...SHORT, safeTop: 0, safeBottom: 0, largeH: 852, editing: false, fullH: 793, fullW: 393 });
+  const d = { standalone: true, ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)', iw: 393, ih: 793, ch: 793, layoutH: 793, htmlH: 852,
+    sw: 393, sh: 852, safeTop: 0, safeBottom: 0, vh: 852, lvh: 852, svh: 793, dvh: 793, vpGapOn: true, marks: true, vvH: 793, vvTop: 0,
+    pageTop: 0, scale: 1, scrollY: 0, state, dockBottom: 852, active: 'body', cls: 'vp-gap', ev: 'heal', n: 9 };
+  const text = kbDebugText(d);
+  for (const want of ['gap 59 (extended, lvh)', '100vh 852 · lvh 852 · svh 793 · dvh 793', 'vp-gap on', 'marks: pink fixed, cyan page', 'heal #9 · vp-gap', 'target 852 · ok'])
+    assert.ok(text.includes(want), `readout shows "${want}"\n${text}`);
+  const up = viewportState({ ...APP, editing: true, inDock: true, layoutH: 793, innerHeight: 459, vvHeight: 459, fullH: 793, fullW: 393 });
+  const t2 = kbDebugText({ ...d, state: up, vpGapOn: false, marks: false, vvH: 459, dockBottom: 459, cls: 'kb-open kb-tight' });
+  assert.match(t2, /gap 0$/m); assert.match(t2, /vp-gap off/); assert.match(t2, /open Y · tight Y/); assert.match(t2, /vv bottom 459 · ok$/m);
+  assert.doesNotMatch(t2, /marks/);
+});
+
+test('CSS for owner state B: no empty header band, the greeting alone above the dock, the dock right on the keyboard', async () => {
+  const css = await read('public/studio.css');
+  assert.ok(css.includes('html.kb-tight #stage { padding-top: calc(env(safe-area-inset-top) + 12px); }'), 'the header band collapses');
+  assert.ok(css.includes('html.kb-tight .welcome :is(.welcome-copy, .section-label, .bento, .legal-links) { display: none; }'));
+  assert.match(css, /html\.kb-tight \.welcome \.greeting \{ font-size: clamp\(30px, 9vw, 44px\);/);
+  assert.ok(css.includes('html.kb-open .dock { padding-bottom: 4px; }'));
+  assert.ok(css.includes('html.kb-open .options { padding-bottom: 8px; }'));
+  // 459 visible with a 59 top inset: 71 (stage top) + eyebrow ~24 + two 44px lines ≈ 185, well above the dock's top (~291)
+});
+
 // ── wiring (source checks): the browser-only half can't run under node ──
 test('app.js measures the fixed box and wires every viewport trigger', async () => {
   const app = await read('public/app.js');
@@ -375,12 +554,12 @@ test('app.js measures the fixed box and wires every viewport trigger', async () 
   assert.match(app, /handoff: vpHandoff,/);
   assert.match(app, /fullH: vp\.fullH, fullW: vp\.fullW, prev: vp,/, 'the previous answer, kept while pinch-zoomed');
   // a width-only resize changes the key, so the composer text is re-fitted (the old visualViewport resize → autosize)
-  assert.match(app, /const key = \[vp\.vvh, vp\.kb, vp\.top, vp\.open, vp\.tight, vp\.frameKb, vp\.fullH, vp\.fullW\]\.join\(\);/);
+  assert.match(app, /const key = \[vp\.vvh, vp\.kb, vp\.top, vp\.open, vp\.tight, vp\.frameKb, vp\.fullH, vp\.fullW, vp\.gap\]\.join\(\);/);
   assert.match(app, /root\.classList\.toggle\('kb-frame', vp\.frameKb\);\s*if \(input\.value\) fitInput\(\);/);
   assert.match(app, /frame: !!frame, frameAge: performance\.now\(\) - vpFrameAt, frameKb: vp\.frameKb,/, 'frameAge and the previous frameKb reach viewport.js');
   assert.ok(!/Math\.round\(innerHeight - vv\.height/.test(app), 'the iOS 26-broken formula is gone');
   for (const re of [/vv\?\.addEventListener\('resize', vpEvent\)/, /vv\?\.addEventListener\('scroll', vpEvent\)/, /^addEventListener\('resize', syncViewport\)/m,
-    /document\.addEventListener\('focusin', \(ev\) => \{ vpNudged = false; vpEvent\(ev\); \}\)/, /document\.addEventListener\('focusout', \(\) => vpSettle\(\)\)/,
+    /document\.addEventListener\('focusin', \(ev\) => \{ vpNudged = false; vpEvent\(ev\); \}\)/, /document\.addEventListener\('focusout', \(\) => \{ vpHealArm = true; vpSettle\(\); \}\)/,
     /^addEventListener\('blur', /m, /^addEventListener\('focus', vpEvent\)/m, /document\.addEventListener\('compositionend', /])
     assert.ok(re.test(app), `wired: ${re}`);
   assert.match(app, /const vpEvent = \(ev\) => \{ syncViewport\(ev\); vpSettle\(\); \}/, 'every vv event also starts the settle loop');
@@ -398,12 +577,32 @@ test('app.js measures the fixed box and wires every viewport trigger', async () 
   assert.match(app, /setKbDebug\(kbDebugFlag\(location\.search, stored\)\)/);
   assert.match(app, /kbDebug = on \? createKbDebug\(/);
   assert.ok(app.indexOf('setKbDebug(kbDebugFlag(') < app.indexOf("history.replaceState(null, '', '/')"));
+  // iOS Home Screen app bottom gap
+  assert.match(app, /const IOS_APP = PLATFORM === 'ios' && STANDALONE\(\);\s*if \(IOS_APP\) document\.documentElement\.dataset\.standalone = 'ios';/);
+  assert.match(app, /\.\.\.\(IOS_APP && vpAppMetrics\(\)\),/, 'only an iOS Home Screen app passes the screen numbers');
+  assert.match(app, /return \{ standalone: true, ios: true, screenW: screen\.width, screenH: screen\.height, safeTop: ins\.top, safeBottom: ins\.bottom, largeH: Math\.max\(u\.vh, u\.lvh\) \};/);
+  assert.match(app, /\['vh', 'lvh', 'svh', 'dvh'\]/, 'the unit probes');
+  assert.match(app, /insets: vpInsets, units: vpUnits \}\)/, 'the readout shows them');
+  for (const v of ['--vp-gap', '--vp-full']) assert.ok(app.includes(`root.style.setProperty('${v}'`), v);
+  assert.ok(app.includes("root.classList.toggle('vp-gap', vp.gap > 0)"));
+  assert.match(app, /vp\.fullW, vp\.gap\]\.join\(\)/, 'a gap change re-applies');
+  assert.match(app, /if \(vp\.heal && vpHealArm && !vpHealT\) \{ vpHealArm = false; vpHealT = setTimeout\(vpHeal, 150\); \}/, 'one heal per trigger');
+  assert.match(app, /if \(!IOS_APP \|\| el\?\.matches\?\.\(EDITABLE\) \|\| el\?\.tagName === 'IFRAME'\) return;/, 'never with a field or preview focused');
+  assert.match(app, /root\.style\.display = 'none';\s*void root\.offsetHeight;\s*root\.style\.display = '';/);
+  for (const re of [/^addEventListener\('pageshow', vpRearm\)/m, /document\.addEventListener\('visibilitychange', \(ev\) => \{ if \(document\.visibilityState === 'visible'\) vpRearm\(ev\); \}\)/,
+    /^addEventListener\('orientationchange', vpRearm\)/m, /document\.addEventListener\('focusout', \(\) => \{ vpHealArm = true; vpSettle\(\); \}\)/])
+    assert.ok(re.test(app), `wired: ${re}`);
 });
 
 test('CSS keeps the dock on the visible bottom, hides it for preview typing, and only the header goes when tight', async () => {
   const css = await read('public/studio.css');
   assert.ok(css.includes('html.kb-open .dock { bottom: max(0px, calc(100% - var(--vv-top, 0px) - var(--vvh, 100%))); }'));
   assert.ok(css.includes('html.kb-frame .dock { visibility: hidden; }'));
+  assert.ok(css.includes('html.vp-gap:not(.kb-open) .dock { bottom: calc(var(--kb, 0px) - var(--vp-gap, 0px));'), 'the dock extends into the strip');
+  assert.ok(css.includes('html.vp-gap:not(.kb-open) #stage { height: var(--vp-full, 100dvh); }'));
+  assert.ok(css.includes('html.vp-gap:not(.kb-open) { height: calc(100% + var(--vp-gap, 0px)); }'));
+  // the extension (and its 34px home-indicator padding) can never apply with the keyboard up, even with a stale class
+  for (const [sel] of css.matchAll(/html\.vp-gap[^{]*\{/g)) assert.ok(sel.startsWith('html.vp-gap:not(.kb-open)'), `guarded: ${sel}`);
   for (const [, sel] of css.matchAll(/html\.kb-tight ([^{]+)\{[^}]*(?:display:\s*none|visibility:\s*hidden)/g))
     assert.doesNotMatch(sel, /dock|composer|#input|composer-row/, `kb-tight never hides the composer (${sel.trim()})`);
 });

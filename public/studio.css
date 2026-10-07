@@ -20,8 +20,8 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
 #stage { padding: calc(108px + env(safe-area-inset-top)) max(32px, env(safe-area-inset-right)) calc(var(--dock-h) + 32px) max(32px, env(safe-area-inset-left)); scroll-padding-bottom: var(--dock-h); }
 .welcome { max-width: 980px; padding-top: 12px; }
 .eyebrow { font-size: 10px; line-height: 1.5; letter-spacing: .13em; margin-bottom: 20px; }
-.greeting { font-size: clamp(43px, 5.6vw, 76px); line-height: 1.04; margin-bottom: 20px; animation: none; }
-.welcome-copy { color: var(--ink-2); margin: 0 0 34px; font-size: 15px; line-height: 1.7; }
+.greeting { font-size: clamp(43px, 5vw, 68px); line-height: 1.04; margin-bottom: 16px; animation: none; }
+.welcome-copy { color: var(--ink-2); margin: 0 0 26px; font-size: 15px; line-height: 1.7; }
 .mobile-break { display: none; }
 .section-label { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 13px; }
 .section-label h2 { margin: 0; font: 500 11px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .11em; color: var(--ink-2); }
@@ -56,6 +56,14 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
 .drawer { padding-inline: 22px; }
 .drawer-description { margin: -3px 0 20px; color: var(--ink-2); font-size: 13px; }
 .drawer-head h3 { font-size: 36px; }
+.thread-new { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 46px; margin-bottom: 18px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--accent) 9%, var(--bg-2)); color: var(--ink); font-size: 14px; }
+.thread-new > span { color: var(--accent); font-size: 21px; }
+.thread-new:hover { background: color-mix(in srgb, var(--accent) 15%, var(--bg-2)); }
+.thread-search { position: relative; }
+.thread-search .search { margin-bottom: 0; padding-right: 46px; }
+.thread-search input::-webkit-search-cancel-button { display: none; }
+.thread-search .icon-btn { position: absolute; top: 50%; right: 2px; transform: translateY(-50%); font-size: 24px; color: var(--ink-2); }
+.thread-count { margin: 12px 0 4px; color: var(--ink-3); font-size: 12px; min-height: 18px; }
 .empty-note { text-align: center; padding: 42px 22px; font: 14px/1.65 var(--sans); color: var(--ink-2); }
 .empty-note strong { display: block; margin-bottom: 8px; font: 400 28px/1.2 var(--serif); color: var(--ink); }
 .empty-note .chip { display: inline-flex; align-items: center; min-height: 40px; margin-top: 18px; }
@@ -65,7 +73,7 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
 .thread-title, .thread-sub { display: block; }
 .thread .del { opacity: .7; }
 .settings-nav { display: flex; gap: 6px; flex-wrap: wrap; } /* padding: #settings .settings-nav in app.css */
-.settings-nav .chip { min-height: 38px; font-family: var(--sans); font-size: 13px; padding-inline: 14px; }
+.settings-nav .chip { flex: 1; justify-content: center; min-height: 40px; font-family: var(--sans); font-size: 13px; padding-inline: 14px; }
 .sheet-body { min-height: 360px; }
 .field-group h4 { font-size: 11px; }
 .field small { line-height: 1.6; }
@@ -95,7 +103,7 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   .studio-nav { position: fixed; display: flex; flex-direction: column; left: 0; top: calc(76px + env(safe-area-inset-top)); bottom: 0; width: var(--sidebar-w); padding: 28px 18px 24px; border-right: 1px solid var(--line); background: var(--bg); z-index: 20; overflow-y: auto; overscroll-behavior: contain; } /* scrolls when short windows push Your profile/Settings past the bottom */
   .nav-caption { font: 500 9px/1.5 var(--mono); letter-spacing: .14em; margin: 0 12px 16px; color: var(--ink-3); }
   .nav-new { display: flex; align-items: center; gap: 9px; padding: 12px; margin-bottom: 15px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 11px; font-size: 13px; }
-  .nav-new > span { color: var(--accent); font-size: 19px; line-height: 1; }
+  .nav-new > span[aria-hidden] { color: var(--accent); font-size: 19px; line-height: 1; }
   .nav-new kbd { display: none; }
   .nav-item { display: flex; gap: 12px; align-items: center; min-height: 44px; padding: 10px 12px; width: 100%; text-align: left; font-size: 13px; border-radius: 10px; color: var(--ink-2); }
   .nav-item svg { width: 17px; height: 17px; }
@@ -106,9 +114,43 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   .nav-note > span:last-child { font-size: 10px; }
   .nav-bottom { margin-top: auto; }
   .nav-local { display: block; margin: 20px 12px 0; color: var(--ink-3); font-size: 10px; }
+  .nav-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -8px 0 8px; }
+  .nav-head .nav-caption { margin-bottom: 0; }
+  .nav-collapse { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 9px; color: var(--ink-3); }
+  .nav-collapse svg { width: 18px; height: 18px; transition: transform .2s ease; }
+  .nav-collapse:hover { background: var(--surface-2); color: var(--ink); }
+  html.nav-anim :is(.studio-nav, #stage, .dock) { transition: width .2s ease, margin-left .2s ease, left .2s ease, padding .2s ease; } /* only while toggling: never fights the keyboard or toast transitions */
+  /* Collapsed (Ctrl+B or the panel button; remembered per browser): a 68px icon rail, names as tooltips */
+  html.nav-collapsed { --sidebar-w: 68px; }
+  html.nav-collapsed .studio-nav { padding-inline: 10px; overflow-x: hidden; }
+  html.nav-collapsed :is(.nav-caption, .nav-label, .nav-note, .nav-local) { display: none; }
+  html.nav-collapsed .nav-head { justify-content: center; margin-bottom: 14px; }
+  html.nav-collapsed .nav-collapse svg { transform: scaleX(-1); }
+  html.nav-collapsed :is(.nav-new, .nav-item) { justify-content: center; padding-inline: 0; gap: 0; }
   #stage { margin-left: var(--sidebar-w); padding-inline: clamp(32px, 5vw, 80px); }
   .dock { left: var(--sidebar-w); padding-inline: 40px; }
   .toast { left: calc(50% + var(--sidebar-w) / 2); }
+  @media (max-height: 900px) {
+    #stage { padding-top: calc(100px + env(safe-area-inset-top)); }
+    .welcome { padding-top: 0; }
+    .eyebrow { margin-bottom: 12px; }
+    .greeting { font-size: clamp(36px, 3.6vw, 52px); line-height: 1.12; margin-bottom: 12px; }
+    .greeting br { display: none; }
+    .greeting em::before { content: ' '; white-space: pre; }
+    .welcome-copy { margin-bottom: 20px; font-size: 14px; }
+    .tile, .tile:nth-child(n) { min-height: 138px; padding: 15px 17px; gap: 8px; }
+    .tile-icon { width: 28px; height: 28px; border-radius: 8px; }
+    .tile-desc { font-size: 12px; line-height: 1.45; }
+    .tile-try, .tile:nth-child(1) .tile-try { font-size: 11px; }
+    .legal-links { margin-top: 16px; }
+    @media (max-height: 760px) {
+      .welcome .eyebrow { display: none; }
+      .welcome-copy { margin-bottom: 12px; }
+      .section-label { margin-bottom: 10px; }
+      .bento { gap: 10px; }
+      .tile, .tile:nth-child(n) { min-height: 130px; padding-block: 13px; }
+    }
+  }
 }
 @media (max-width: 760px) {
   .top { padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right)); gap: 10px; }
@@ -117,7 +159,7 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   #stage { padding: calc(98px + env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) calc(var(--dock-h) + 24px) max(20px, env(safe-area-inset-left)); }
   .welcome { padding-top: 0; }
   .greeting { font-size: clamp(42px, 8vw, 60px); margin-bottom: 16px; }
-  .welcome-copy { margin-bottom: 28px; font-size: 14px; }
+  .welcome-copy { margin-bottom: 22px; font-size: 14px; }
   .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .tile, .tile:nth-child(n) { padding: 16px; min-height: 165px; }
   .tile-key { display: none; }
@@ -155,6 +197,7 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   /* Settings: full-height bottom sheet, 2×2 tabs, full-width Save */
   #settings { width: 100%; max-width: none; height: calc(var(--vvh, 100dvh) - env(safe-area-inset-top) - 8px); max-height: none; margin: auto 0 var(--kb, 0px); border-width: 1px 0 0; border-radius: 22px 22px 0 0; }
   #settings[open] { animation-name: sheetUp; }
+  html.vp-gap:not(.kb-open) #settings { height: calc(var(--vvh, 100dvh) + var(--vp-gap, 0px) - env(safe-area-inset-top) - 8px); margin-bottom: calc(0px - var(--vp-gap, 0px)); } /* iOS Home Screen app short window: the sheet reaches the screen's bottom (see the vp-gap rules below) */
   #settings .sheet-head { padding: 12px max(10px, env(safe-area-inset-right)) 4px max(20px, env(safe-area-inset-left)); }
   #settings .sheet-head h2 { font-size: 34px; }
   #settings .settings-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left)); }
@@ -221,9 +264,10 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   .brand-mark { width: 36px; height: 36px; border-radius: 10px; }
   .icon-btn { width: 38px; }
   .mobile-break { display: block; }
-  .greeting { font-size: 43px; }
-  .eyebrow { font-size: 9px; }
-  .tile, .tile:nth-child(n) { padding: 13px; min-height: 172px; gap: 10px; }
+  .greeting { font-size: clamp(32px, 10vw, 40px); margin-bottom: 12px; }
+  .eyebrow { font-size: 9px; margin-bottom: 12px; }
+  .welcome-copy { font-size: 13px; line-height: 1.6; margin-bottom: 20px; }
+  .tile, .tile:nth-child(n) { padding: 13px; min-height: 156px; gap: 10px; }
   .tile-top { gap: 8px; }
   .tile-icon { width: 27px; height: 27px; border-radius: 8px; }
   .tile-name, .tile:nth-child(1) .tile-name { font-size: 24px; }
@@ -349,7 +393,8 @@ body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs
   .lk-figure img { max-height: 40vh; }
 }
 /* keyboard state — classes/vars from syncViewport() in app.js */
-html.kb-open .dock { padding-bottom: 8px; } /* the keyboard covers the home indicator */
+html.kb-open .dock { padding-bottom: 4px; } /* the keyboard covers the home indicator: the composer sits right on the keyboard's bar */
+html.kb-open .options { padding-bottom: 8px; }
 /* glued to the bottom of what is on screen: % is the dock's own fixed box, so this needs no layout height from JS (equals --kb) */
 html.kb-open .dock { bottom: max(0px, calc(100% - var(--vv-top, 0px) - var(--vvh, 100%))); }
 html.kb-frame .dock { visibility: hidden; } /* typing in a Build preview: the composer would cover the field iOS just revealed */
@@ -358,12 +403,30 @@ html.kb-open .thread-list { padding-bottom: var(--kb, 0px); }
 html.kb-open .cv-grid { padding-bottom: calc(12px + var(--kb, 0px)); }
 html.kb-open .you-scroll { padding-bottom: calc(20px + var(--kb, 0px)); }
 html.kb-tight .top { opacity: 0; visibility: hidden; } /* <460px visible: rows go to the conversation */
+html.kb-tight #stage { padding-top: calc(env(safe-area-inset-top) + 12px); } /* …and so does the header's band: no empty strip where it was */
+/* With the header hidden nothing covers the status bar, so answers scrolled up ran under the clock: a solid band there
+   (fading out below it), pinned to the top of what's visible */
+html.kb-tight body::before { content: ''; position: fixed; left: 0; right: 0; top: var(--vv-top, 0px); height: calc(env(safe-area-inset-top) + 14px); background: linear-gradient(var(--bg) calc(100% - 14px), transparent); z-index: 29; pointer-events: none; }
+/* home screen while typing (<460px visible): the greeting alone, small enough to stay above the dock */
+html.kb-tight .welcome :is(.welcome-copy, .section-label, .bento, .legal-links) { display: none; }
+html.kb-tight .welcome .eyebrow { margin-bottom: 10px; }
+html.kb-tight .welcome .greeting { font-size: clamp(30px, 9vw, 44px); line-height: 1.04; margin-bottom: 0; }
 html.kb-open :is(#onboard, dialog.tok-dialog) { top: var(--vv-top, 0px); bottom: var(--kb, 0px); max-height: calc(var(--vvh, 100dvh) - 16px); }
 html.kb-open #onboard .sheet-body { max-height: calc(var(--vvh, 100dvh) - 16px); }
 html.kb-tight :is(.onboard-copy, .ob-by, .ob-brand) { display: none; } /* iOS twin of the max-height:500 rule (its layout viewport doesn't shrink) */
 html.kb-tight .allowance { display: none; } /* <460px visible: the composer keeps the rows */
 html.kb-tight #settings .settings-nav { display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-block: 2px 6px; } /* one row of tabs while typing: at 360x400 the middle grows 169 → 221px */
 html.kb-tight #settings .settings-nav .chip { flex: 1 0 auto; padding-inline: 10px; } /* all four tabs fit at 360px */
+/* iOS Home Screen app whose window ends a status-bar strip above the screen's bottom with no keyboard (viewport.js bottom
+   gap, WebKit 301994: 393×852 reports 793). --vp-gap is that strip, --vp-full the layout plus it; never set while the
+   keyboard is up (kb-open owns the dock then; :not(.kb-open) also guards a stale class) or anywhere else. Everything
+   pinned to the bottom extends into the strip. */
+html.vp-gap:not(.kb-open) { height: calc(100% + var(--vp-gap, 0px)); }
+html.vp-gap:not(.kb-open) #stage { height: var(--vp-full, 100dvh); }
+html.vp-gap:not(.kb-open) .dock { bottom: calc(var(--kb, 0px) - var(--vp-gap, 0px)); padding-bottom: max(34px, env(safe-area-inset-bottom, 0px)); } /* the short window may report no bottom inset: keep the home indicator clear */
+html.vp-gap:not(.kb-open) :is(.scrim, .drawer, .viewer) { bottom: calc(0px - var(--vp-gap, 0px)); }
+html.vp-gap:not(.kb-open) body > .toast { bottom: calc(var(--dock-h) - var(--vp-gap, 0px) + 16px); }
+html.vp-gap:not(.kb-open) body.overlay-open > .toast { bottom: calc(max(34px, env(safe-area-inset-bottom, 0px)) - var(--vp-gap, 0px) + 16px); }
 html.kb-open .lookup { display: none; } /* (0,2,1) beats .lookup[data-state='pill'] {display:flex}; lookup.js also closes the card on kb-open */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; }

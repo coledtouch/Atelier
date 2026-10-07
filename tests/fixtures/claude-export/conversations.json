@@ -1,0 +1,273 @@
+[
+ {
+  "uuid": "0f6e1a52-1111-4a1b-9a01-000000000001",
+  "name": "Sourdough starter schedule",
+  "summary": "",
+  "created_at": "2025-03-02T09:00:00.000000Z",
+  "updated_at": "2025-03-02T09:05:00.000000Z",
+  "chat_messages": [
+   {
+    "uuid": "a0000000-0000-4000-8000-000000000001",
+    "sender": "human",
+    "created_at": "2025-03-02T09:00:00.000000Z",
+    "updated_at": "2025-03-02T09:00:00.000000Z",
+    "text": "How often should I feed a rye sourdough starter kept at room temperature?",
+    "content": [
+     {
+      "type": "text",
+      "text": "How often should I feed a rye sourdough starter kept at room temperature?"
+     }
+    ],
+    "attachments": [],
+    "files": []
+   },
+   {
+    "uuid": "a0000000-0000-4000-8000-000000000002",
+    "sender": "assistant",
+    "created_at": "2025-03-02T09:00:20.000000Z",
+    "updated_at": "2025-03-02T09:00:20.000000Z",
+    "text": "IGNORED plain text (content blocks win)",
+    "content": [
+     {
+      "type": "thinking",
+      "thinking": "Rye ferments fast; warm kitchens speed it up."
+     },
+     {
+      "type": "text",
+      "text": "Feed it **twice a day** at room temperature, roughly every 12 hours, at 1:1:1 starter:flour:water."
+     }
+    ],
+    "attachments": [],
+    "files": []
+   },
+   {
+    "uuid": "a0000000-0000-4000-8000-000000000003",
+    "sender": "human",
+    "created_at": "2025-03-02T09:04:00.000000Z",
+    "updated_at": "2025-03-02T09:04:00.000000Z",
+    "text": "And if I keep it in the fridge?",
+    "content": [
+     {
+      "type": "text",
+      "text": "And if I keep it in the fridge?"
+     }
+    ],
+    "attachments": [],
+    "files": []
+   },
+   {
+    "uuid": "a0000000-0000-4000-8000-000000000004",
+    "sender": "assistant",
+    "created_at": "2025-03-02T09:04:30.000000Z",
+    "updated_at": "2025-03-02T09:04:30.000000Z",
+    "text": "In the fridge, once a week is enough. Let it warm up and feed it twice before baking.",
+    "content": [
+     {
+      "type": "text",
+      "text": "In the fridge, once a week is enough. Let it warm up and feed it twice before baking."
+     }
+    ],
+    "attachments": [],
+    "files": []
+   }
+  ]
+ },
+ {
+  "uuid": "0f6e1a52-2222-4a1b-9a01-000000000002",
+  "name": "Quarterly planning notes",
+  "created_at": "2025-06-10T14:00:00.000000Z",
+  "updated_at": "2025-06-10T14:30:00.000000Z",
+  "chat_messages": [
+   {
+    "uuid": "b0000000-0000-4000-8000-000000000001",
+    "sender": "human",
+    "created_at": "2025-06-10T14:00:00.000000Z",
+    "text": "Summarise the attached plan into three priorities for the studio.",
+    "attachments": [
+     {
+      "file_name": "q3-plan.txt",
+      "file_size": 120,
+      "file_type": "txt",
+      "extracted_content": "Q3: launch the tester programme, ship thread sync, cut video costs by a third."
+     }
+    ],
+    "files": [
+     {
+      "file_name": "whiteboard.png"
+     }
+    ]
+   },
+   {
+    "uuid": "b0000000-0000-4000-8000-000000000002",
+    "sender": "assistant",
+    "created_at": "2025-06-10T14:01:00.000000Z",
+    "text": "1. Launch the tester programme\n2. Ship thread sync\n3. Cut video costs by a third"
+   },
+   {
+    "uuid": "b0000000-0000-4000-8000-000000000003",
+    "sender": "human",
+    "created_at": "2025-06-10T14:30:00.000000Z",
+    "text": "Which of those is riskiest?"
+   }
+  ]
+ },
+ {
+  "uuid": "0f6e1a52-3333-4a1b-9a01-000000000003",
+  "name": "Empty chat",
+  "created_at": "2025-07-01T10:00:00.000000Z",
+  "updated_at": "2025-07-01T10:00:00.000000Z",
+  "chat_messages": []
+ },
+ {
+  "uuid": "0f6e1a52-4444-4a1b-9a01-000000000004",
+  "name": "Trip to Lisbon",
+  "created_at": "2025-09-20T08:00:00.000000Z",
+  "updated_at": "2025-09-20T08:10:00.000000Z",
+  "chat_messages": [
+   {
+    "uuid": "c0000000-0000-4000-8000-000000000001",
+    "sender": "assistant",
+    "created_at": "2025-09-20T08:00:00.000000Z",
+    "updated_at": "2025-09-20T08:00:00.000000Z",
+    "text": "Welcome back! Picking up your Lisbon plans.",
+    "content": [
+     {
+      "type": "text",
+      "text": "Welcome back! Picking up your Lisbon plans."
+     }
+    ],
+    "attachments": [],
+    "files": []
+   },
+   {
+    "uuid": "c0000000-0000-4000-8000-000000000002",
+    "sender": "human",
+    "created_at": "2025-09-20T08:01:00.000000Z",
+    "updated_at": "2025-09-20T08:01:00.000000Z",
+    "text": "Three days in Lisbon in October: what should I not miss?",
+    "content": [
+     {
+      "type": "text",
+      "text": "Three days in Lisbon in October: what should I not miss?"
+     }
+    ],
+    "attachments": [],
+    "files": []
+   },
+   {
+    "uuid": "c0000000-0000-4000-8000-000000000003",
+    "sender": "assistant",
+    "created_at": "2025-09-20T08:02:00.000000Z",
+    "updated_at": "2025-09-20T08:02:00.000000Z",
+    "text": "",
+    "content": [
+     {
+      "type": "tool_use",
+      "name": "web_search",
+      "input": {
+       "query": "Lisbon October events"
+      }
+     },
+     {
+      "type": "tool_result",
+      "content": [
+       {
+        "type": "text",
+        "text": "search results"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "text": "Belem and its custard tarts, the Alfama at dusk, and a day trip to Sintra."
+     }
+    ],
+    "attachments": [],
+    "files": []
+   },
+   {
+    "uuid": "c0000000-0000-4000-8000-000000000004",
+    "sender": "human",
+    "created_at": "2025-09-20T08:05:00.000000Z",
+    "updated_at": "2025-09-20T08:05:00.000000Z",
+    "text": "Is the tram 28 worth it?",
+    "content": [
+     {
+      "type": "text",
+      "text": "Is the tram 28 worth it?"
+     }
+    ],
+    "attachments": [],
+    "files": []
+   },
+   {
+    "uuid": "c0000000-0000-4000-8000-000000000005",
+    "sender": "human",
+    "created_at": "2025-09-20T08:06:00.000000Z",
+    "updated_at": "2025-09-20T08:06:00.000000Z",
+    "text": "Sorry, also: best time to visit Sintra?",
+    "content": [
+     {
+      "type": "text",
+      "text": "Sorry, also: best time to visit Sintra?"
+     }
+    ],
+    "attachments": [],
+    "files": []
+   },
+   {
+    "uuid": "c0000000-0000-4000-8000-000000000006",
+    "sender": "assistant",
+    "created_at": "2025-09-20T08:10:00.000000Z",
+    "updated_at": "2025-09-20T08:10:00.000000Z",
+    "text": "Tram 28 is fun early in the morning. Go to Sintra on a weekday, arriving before 9.",
+    "content": [
+     {
+      "type": "text",
+      "text": "Tram 28 is fun early in the morning. Go to Sintra on a weekday, arriving before 9."
+     }
+    ],
+    "attachments": [],
+    "files": []
+   }
+  ]
+ },
+ {
+  "uuid": "0f6e1a52-5555-4a1b-9a01-000000000005",
+  "name": "",
+  "created_at": "2024-11-05T18:00:00.000000Z",
+  "updated_at": "2024-11-05T18:01:00.000000Z",
+  "chat_messages": [
+   {
+    "uuid": "d0000000-0000-4000-8000-000000000001",
+    "sender": "human",
+    "created_at": "2024-11-05T18:00:00.000000Z",
+    "updated_at": "2024-11-05T18:00:00.000000Z",
+    "text": "Name ideas for a ceramics newsletter",
+    "content": [
+     {
+      "type": "text",
+      "text": "Name ideas for a ceramics newsletter"
+     }
+    ],
+    "attachments": [],
+    "files": []
+   },
+   {
+    "uuid": "d0000000-0000-4000-8000-000000000002",
+    "sender": "assistant",
+    "created_at": "2024-11-05T18:01:00.000000Z",
+    "updated_at": "2024-11-05T18:01:00.000000Z",
+    "text": "Kiln Notes, Glaze Days, The Wedging Table.",
+    "content": [
+     {
+      "type": "text",
+      "text": "Kiln Notes, Glaze Days, The Wedging Table."
+     }
+    ],
+    "attachments": [],
+    "files": []
+   }
+  ]
+ }
+]
