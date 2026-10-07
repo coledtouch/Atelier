@@ -6,7 +6,7 @@
 // The page asks for each batch after saving the one before, so only one batch is ever in flight; it cancels by
 // terminating the worker.
 import '/vendor/fflate.js'; // a UMD build: sets self.fflate
-import { readConversations, newestFirst, toThread, LIMITS } from './claude-import.js?v=74';
+import { readConversations, newestFirst, toThread, LIMITS } from './claude-import.js?v=75';
 
 let list = [], at = 0;
 self.onmessage = async (ev) => {
