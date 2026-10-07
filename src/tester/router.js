@@ -525,7 +525,6 @@ async function openaiImages(c) {
       if (typeof i?.image_url !== 'string' || i.image_url.length > LIMITS.image || !IMAGE_DATA.test(i.image_url)) return badRequest('Edit images must be base64 data up to 5 MB.');
     }
     out.images = imgs.map((i) => ({ image_url: i.image_url }));
-    if (['high', 'low'].includes(b.input_fidelity)) out.input_fidelity = b.input_fidelity;
     refs = imgs.length;
   }
   const cost = imageCost({ model, n, size: out.size, quality: out.quality, promptTokens: promptTokens(b.prompt), inputImages: refs });

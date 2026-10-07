@@ -7,21 +7,21 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=71';
-import * as Sync from './sync.js?v=71';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=71';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=71';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=71';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=71';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=71';
-import { initLookup } from './lookup.js?v=71';
-import { createRemix } from './remix-app.js?v=71';
-import { sendMode, looksLikeQuestion } from './remix.js?v=71';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=71';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=71';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=71';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=71';
-import * as ClaudeImport from './claude-import.js?v=71';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=72';
+import * as Sync from './sync.js?v=72';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=72';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=72';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=72';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=72';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=72';
+import { initLookup } from './lookup.js?v=72';
+import { createRemix } from './remix-app.js?v=72';
+import { sendMode, looksLikeQuestion } from './remix.js?v=72';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=72';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=72';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=72';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=72';
+import * as ClaudeImport from './claude-import.js?v=72';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -744,7 +744,7 @@ async function openaiImage(prompt, o, signal) {
   const edit = Boolean(o.image);
   // Testers: medium quality and always an explicit size, so the request can be priced (spec §6, addendum A7b).
   const body = { model: edit ? 'gpt-image-2.5-sunburst' : 'gpt-image-2.5-flare', prompt, n: 1, quality: S.tester ? 'medium' : 'high', output_format: 'jpeg' };
-  if (edit) Object.assign(body, { images: [{ image_url: o.image }], input_fidelity: 'high' }, S.tester ? { size: OPENAI_SIZES[o.aspect] || '1024x1024' } : {});
+  if (edit) Object.assign(body, { images: [{ image_url: o.image }] }, S.tester ? { size: OPENAI_SIZES[o.aspect] || '1024x1024' } : {});
   else body.size = OPENAI_SIZES[o.aspect] || '1024x1024';
   const j = await (await xfetch(`openai/images/${edit ? 'edits' : 'generations'}`, { body, signal })).json();
   const out = (j.data || []).map((d) => ({ src: d.b64_json ? `data:image/jpeg;base64,${d.b64_json}` : d.url })).filter((m) => m.src);
@@ -2051,7 +2051,7 @@ async function runImage(e, signal) {
 }
 
 async function runPremiumEdit(e, cfg, signal) {
-  e.meta = { model: cfg.id, note: 'edit' };
+  e.meta = { model: cfg.editId || cfg.id, note: 'edit' };
   e.media = []; e.expect = 1;
   e.stage = 'Retouching'; repaint(e);
   const img = await shrinkDataUrl(e.images[0], 1536, 1536, 3_000_000);
