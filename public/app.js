@@ -343,7 +343,7 @@ const rawDB = (() => {
     return [...bytes].map((n) => n.toString(16).padStart(2, '0')).join('');
   };
   const validInventory = (inventory) => {
-    if (!inventory || inventory.v !== 1 || !Array.isArray(inventory.hashes) || !inventory.hashes.every((pair) => Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'string' && /^[\w-]{1,120}$/.test(pair[0]) && /^[a-f\d]{64}$/.test(pair[1]))) throw new Error('Couldn’t verify this device’s older shared threads. Your current account is protected.');
+    if (!inventory || inventory.v !== 1 || !Array.isArray(inventory.hashes) || !inventory.hashes.every((pair) => Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'string' && /^[\w-]{1,120}$/.test(pair[0]) && /^[a-f\d]{64}$/.test(pair[1]))) throw Object.assign(new Error('Older shared-history recovery is unavailable on this device. Your current account can still save work.'), { code: 'legacy_boundary_invalid' });
     return inventory;
   };
   const freezeLegacy = () => (legacyReady ??= (async () => {
@@ -375,7 +375,10 @@ const rawDB = (() => {
   // "atelier-data" is new: tabs running older versions can hold or block the old "atelier" database,
   // so threads live here and are copied over from the old one when it's free (see migrateOldThreads).
   const tx = async (mode, fn, store = 'threads') => {
-    if (workspace === 'owner' && store === 'threads' && mode === 'readwrite') await freezeLegacy();
+    if (workspace === 'owner' && store === 'threads' && mode === 'readwrite') {
+      try { await freezeLegacy(); }
+      catch (err) { if (err?.code !== 'legacy_boundary_invalid') throw err; } // An existing corrupt marker stays closed, never recaptured.
+    }
     const db = await (store === 'kv' ? openDb('atelier-kv', 'kv') : openDb(threadDbName, 'threads', 'id'));
     return new Promise((res, rej) => {
       const t = db.transaction(store, mode);
@@ -5852,7 +5855,10 @@ remix = createRemix({
   if (params.toString() || location.hash.length > 1) history.replaceState(null, '', '/');
   applyTheme();
   renderWelcome();
-  rawDB.freezeLegacy().catch(storageError); // local metadata only; owner writes wait until the boundary is durable
+  rawDB.freezeLegacy().catch((err) => {
+    if (err?.code === 'legacy_boundary_invalid') toast(err.message, { error: true });
+    else storageError(err);
+  }); // local metadata only; owner writes wait until the boundary is durable
   const testerWorkspace = workspace.startsWith('tester:');
   const scopeHash = testerWorkspace ? [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(workspace)))].map((x) => x.toString(16).padStart(2, '0')).join('') : '';
   Sync.init({

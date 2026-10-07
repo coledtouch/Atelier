@@ -305,17 +305,32 @@ test('the immutable shared inventory survives local settings removal, scoped thr
   assert.deepEqual(stored.get(markerKey), before);
 });
 
-test('failed or invalid legacy inventory creation blocks every owner write path instead of silently recapturing private data', async () => {
+test('a corrupt existing inventory keeps recovery closed without blocking current owner saves or recapturing private work', async () => {
   const original = originalRow('shared'), broken = new Map([[originalKey(original.id), original], [markerKey, { v: 99, hashes: [] }]]);
   const owner = lifecycle({ passcode: 'owner-pass', storedValues: broken });
-  for (const operation of [() => owner.rawDB.put(originalRow('private')), () => owner.rawDB.putAll([originalRow('private')]), () => owner.rawDB.update('shared', (row) => ({ ...row, title: 'Private title' }))]) await assert.rejects(() => owner.settle(operation()), /Couldn’t verify/);
-  assert.deepEqual(broken.get(originalKey('shared')), original);
-  assert.ok(!broken.has(originalKey('private')));
+  const marker = structuredClone(broken.get(markerKey));
+  await owner.settle(owner.rawDB.put(originalRow('private-new')));
+  await owner.settle(owner.rawDB.putAll([originalRow('private-import')]));
+  await owner.settle(owner.rawDB.update('shared', (row) => ({ ...row, title: 'Private title' })));
+  assert.ok(broken.has(originalKey('private-new')));
+  assert.ok(broken.has(originalKey('private-import')));
+  assert.equal(broken.get(originalKey('shared')).title, 'Private title');
+  assert.deepEqual(broken.get(markerKey), marker);
+  const tester = lifecycle({ tester: person('person-a'), storedValues: broken });
+  for (let attempt = 0; attempt < 2; attempt++) await assert.rejects(() => tester.settle(tester.rawDB.legacyAll()), (err) => err.code === 'legacy_boundary_invalid');
+  const reopened = lifecycle({ passcode: 'owner-pass', storedValues: broken });
+  await assert.rejects(() => reopened.settle(reopened.rawDB.freezeLegacy()), (err) => err.code === 'legacy_boundary_invalid');
+  assert.deepEqual(broken.get(markerKey), marker);
+});
+
+test('inventory hashing failures block every owner write path instead of proceeding without a durable boundary', async () => {
+  const original = originalRow('shared');
   const hashingFailure = new Map([[originalKey(original.id), original]]);
   const failed = lifecycle({ passcode: 'owner-pass', storedValues: hashingFailure, cryptoOverride: { subtle: { digest: async () => { throw new Error('Hash unavailable'); } } } });
-  await assert.rejects(() => failed.settle(failed.rawDB.put(originalRow('private'))), /Hash unavailable/);
+  for (const operation of [() => failed.rawDB.put(originalRow('private')), () => failed.rawDB.putAll([originalRow('private')]), () => failed.rawDB.update('shared', (row) => ({ ...row, title: 'Private title' }))]) await assert.rejects(() => failed.settle(operation()), /Hash unavailable/);
   assert.ok(!hashingFailure.has(markerKey));
   assert.ok(!hashingFailure.has(originalKey('private')));
+  assert.deepEqual(hashingFailure.get(originalKey('shared')), original);
 });
 
 test('competing first-launch tabs preserve the first durable inventory even when a slower tab prepared a broader candidate', async () => {
