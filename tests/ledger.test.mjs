@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeLedger, PROFILE } from './tester-env.mjs';
+import { fakeR2 } from './fake-r2.mjs';
 import { chatWorstCase, chatActual, imageCost, veoCost, WEB_SEARCH_USD, VEO_CALL_RESERVE_CAP } from '../src/tester/prices.js';
 
 const { DEFAULTS, DAILY_UPLOADS, OVERRUN, REFUSED_TTL, dayKey, monthKey, resetsAt } = await import('../src/tester/ledger.js'); // after tester-env's module hook
@@ -8,7 +9,7 @@ const { DEFAULTS, DAILY_UPLOADS, OVERRUN, REFUSED_TTL, dayKey, monthKey, resetsA
 // The real Ledger class on an in-memory SQLite shim; `ledger.clock` is pinned so days and months are deterministic.
 const T0 = Date.parse('2026-10-15T12:00:00Z');
 function setup({ open = true, ...config } = {}) {
-  const L = makeLedger();
+  const L = makeLedger({ SYNC_BUCKET: fakeR2() });
   let now = T0;
   L.ledger.clock = () => now;
   L.at = (t) => { now = t; };

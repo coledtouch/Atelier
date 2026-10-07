@@ -39,6 +39,35 @@
   color-scheme: dark;
 }
 
+/* Compact supporting controls keep the prompt as the primary action. */
+.essential-options { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; flex-wrap: wrap; }
+.essential-options .opt { max-width: 138px; }
+.essential-options .chip { min-height: 32px; }
+.essential-note { color: var(--ink-3); font: 11px/1.4 var(--sans); flex-basis: 100%; }
+.composer-controls > .composer-control { flex: none; }
+.context-dialog .sheet-body, #threadMenuDialog .sheet-body { min-height: 0; gap: 14px; }
+.context-dialog .sheet-head h2 { font-size: 34px; }
+.context-file { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0; }
+.context-check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; }
+.context-check input { accent-color: var(--accent); width: 18px; height: 18px; }
+.context-dialog select { background: var(--bg-3); color: var(--ink); padding: 10px; border: 1px solid var(--line-2); border-radius: 9px; font: inherit; width: 100%; }
+.recent-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.thread-tools > .thread-pinned { margin: 0; }
+.thread-edit-body { padding: 8px 0; }
+.legacy-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.legacy-list label { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.legacy-list small { display: block; color: var(--ink-3); margin-top: 3px; }
+.legacy-list input { flex: none; accent-color: var(--accent); }
+@media (max-width: 600px) {
+  .composer-controls { flex-wrap: wrap; }
+  .essential-options { flex-basis: calc(100% - 152px); }
+  .essential-options .opt { max-width: 116px; font-size: 10px; }
+  .essential-options:has(.essential-note) { flex-basis: 100%; }
+  .context-dialog .sheet-foot { flex-wrap: wrap; }
+  .context-dialog .sheet-foot .chip { min-height: 44px; }
+  .thread-tools > button { min-height: 44px; }
+}
+
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
     --bg: #f3eee3; --bg-2: #ebe5d7; --bg-3: #e2dbcb;

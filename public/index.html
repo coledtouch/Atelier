@@ -28,9 +28,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=75" />
-  <link rel="stylesheet" href="/studio.css?v=75" />
-  <link rel="stylesheet" href="/remix.css?v=75" />
+  <link rel="stylesheet" href="/app.css?v=76" />
+  <link rel="stylesheet" href="/studio.css?v=76" />
+  <link rel="stylesheet" href="/feedback.css?v=76" />
+  <link rel="stylesheet" href="/remix.css?v=76" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -46,6 +47,7 @@
       <span class="brand-caption">PERSONAL STUDIO</span>
     </button>
     <div class="top-right">
+      <button class="studio-menu-btn" id="studioMenu" type="button" aria-haspopup="dialog" aria-controls="studioDialog" aria-label="Open Studio menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span>Studio</span></button>
       <button class="key-state" id="keyState" title="Connection status" aria-label="Connection status: checking"><span id="keyLabel">Checking</span></button>
       <button class="icon-btn" id="youBtn" aria-label="You" title="You — profile, voice & memory">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
@@ -71,6 +73,7 @@
     <div class="nav-bottom">
       <button class="nav-item" data-trigger="youBtn" title="Your profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span class="nav-label">Your profile</span></button>
       <button class="nav-item" data-trigger="settingsBtn" title="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg><span class="nav-label">Settings</span></button>
+      <button class="nav-item nav-feedback" id="feedbackBtn" type="button" title="Send feedback"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 13h5"/></svg><span class="nav-label">Send feedback</span></button>
       <span class="nav-local" id="navLocal">Threads saved on this device</span>
     </div>
   </nav>
@@ -81,7 +84,19 @@
       <p class="eyebrow" id="dateLine"></p>
       <h1 class="greeting"><span id="greetWord">Good evening</span><span class="greet-name" id="greetName"></span>.<br /><em>What are we making?</em></h1>
       <p class="welcome-copy">A thought, a first draft, something entirely new.<br class="mobile-break" /> Start anywhere. Make it yours.</p>
-      <div class="section-label"><h2>Explore your studio</h2><span>Six ways to get started</span></div>
+      <section class="first-use-goals" id="firstUseGoals" aria-labelledby="firstUseTitle">
+        <div class="section-label"><h2 id="firstUseTitle">Start with something small</h2><span>A first draft is a good beginning</span></div>
+        <div class="goal-grid">
+          <button type="button" class="goal-card" data-start-mode="ask" data-start-prompt="Help me write a clear, thoughtful first draft. Ask me what it’s for and who will read it."><span class="goal-icon" data-kind="ask" aria-hidden="true">↗</span><span><strong>Write something</strong><small>A message, a post, a fresh start</small></span><span class="goal-arrow" aria-hidden="true">→</span></button>
+          <button type="button" class="goal-card" data-start-mode="image" data-start-prompt="A quiet sunlit creative studio, warm natural materials, editorial photography, soft shadows, no text"><span class="goal-icon" data-kind="image" aria-hidden="true">✦</span><span><strong>Create an image</strong><small>Turn an idea into a picture</small></span><span class="goal-arrow" aria-hidden="true">→</span></button>
+          <button type="button" class="goal-card" data-start-mode="build" data-start-prompt="Build a beautiful, simple habit tracker with three daily habits, tappable checkboxes, and a warm, calm design."><span class="goal-icon" data-kind="build" aria-hidden="true">＋</span><span><strong>Build an app</strong><small>Make something you can use</small></span><span class="goal-arrow" aria-hidden="true">→</span></button>
+        </div>
+      </section>
+      <section class="continue-making" id="continueMaking" aria-labelledby="continueTitle" hidden>
+        <div class="section-label"><h2 id="continueTitle">Continue making</h2><button type="button" class="welcome-all-threads" data-trigger="threadsBtn">All threads <span aria-hidden="true">→</span></button></div>
+        <div class="recent-threads" id="recentThreads"></div>
+      </section>
+      <div class="section-label explore-label"><h2>Explore your studio</h2><span>Six ways to make it yours</span></div>
       <div class="bento" id="bento"></div>
       <p class="legal-links">Your ideas, all in one place. <a href="/privacy">Privacy</a> · <a href="/tos">Terms</a></p>
     </section>
@@ -117,6 +132,11 @@
             <svg class="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
           </button>
         </div>
+        <div class="composer-controls" id="composerControls">
+          <button class="composer-control" id="optionsToggle" type="button" aria-expanded="false" aria-controls="options"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg><span>Options</span><span class="control-chevron" aria-hidden="true">⌄</span></button>
+          <button class="composer-control" id="contextBtn" type="button" aria-haspopup="dialog" aria-controls="contextDialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5zM9 9h6M9 13h4"/></svg><span>Context</span></button>
+        </div>
+        <div class="composer-context" id="composerContext"><div class="context-chips" id="contextChips" aria-label="Context for this prompt"></div></div>
         <div class="options" id="options"></div>
       </div>
       <p class="composer-hint"><span>Enter to send <span aria-hidden="true">·</span> Shift + Enter for a new line</span><span>AI can make mistakes. Check important details.</span></p>
@@ -190,13 +210,14 @@
 
       <section class="you-card">
         <h4>Import your history</h4>
-        <p class="hint">Atelier reads what <i>you</i> wrote and distills who you are and how you write. Files are read in this browser; only your own messages (and, for Claude Code, your project folder names and prompt counts) are sent to an AI model for analysis. To keep your Claude chats themselves as threads, use Settings → Your data → Import Claude chats.</p>
+        <p class="hint">Learn your writing voice from your own messages. Files are read on this device; only your own messages (and, for Claude Code, your project folder names and prompt counts) are sent to an AI model for analysis.</p>
         <div class="row-actions" style="margin-top:10px">
           <label class="chip file-chip">ChatGPT export<input type="file" id="impChatgpt" accept=".zip,.json" aria-label="Import ChatGPT history" /></label>
           <label class="chip file-chip">Claude export<input type="file" id="impClaude" accept=".zip,.json" aria-label="Import Claude history" /></label>
           <button type="button" class="chip" id="impCode">Claude Code sessions…</button>
           <button type="button" class="chip" id="impCodeSync" hidden>↻ Re-sync Claude Code</button>
         </div>
+        <details class="settings-details import-help"><summary>How history imports work</summary><p class="hint">Atelier reads what <i>you</i> wrote and distills who you are and how you write. Only your own messages (and, for Claude Code, your project folder names and prompt counts) are sent to an AI model for analysis. To keep your Claude chats themselves as threads, use Settings → Your data → Import Claude chats.</p></details>
         <p class="hint" id="impStatus"></p>
         <ul class="src-list" id="srcList"></ul>
       </section>
@@ -204,6 +225,20 @@
   </aside>
 
   <div class="scrim" id="scrim" hidden></div>
+
+  <dialog class="sheet studio-menu" id="studioDialog" aria-labelledby="studioMenuTitle">
+    <div class="sheet-body">
+      <header class="sheet-head"><h2 id="studioMenuTitle"><em>Your studio</em></h2><button type="button" class="icon-btn" id="studioClose" aria-label="Close Studio menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
+      <nav class="studio-menu-list" aria-label="Studio">
+        <button type="button" class="studio-menu-item studio-menu-new" data-studio-target="new"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>New thread<small>A fresh place to make something</small></span><span aria-hidden="true">→</span></button>
+        <button type="button" class="studio-menu-item" data-studio-target="threads"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h12M4 17h9"/></svg><span>Threads<small>Pick up where you left off</small></span><span aria-hidden="true">→</span></button>
+        <button type="button" class="studio-menu-item" data-studio-target="library"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg><span>Library<small>Your images, videos and apps</small></span><span aria-hidden="true">→</span></button>
+        <button type="button" class="studio-menu-item" data-studio-target="me"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Your profile<small>Your voice and memory</small></span><span aria-hidden="true">→</span></button>
+        <button type="button" class="studio-menu-item" data-studio-target="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg><span>Settings<small>Make the studio feel like you</small></span><span aria-hidden="true">→</span></button>
+        <button type="button" class="studio-menu-item" data-studio-target="feedback"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 13h5"/></svg><span>Send feedback<small>A bug, an idea, or something unclear</small></span><span aria-hidden="true">→</span></button>
+      </nav>
+    </div>
+  </dialog>
 
   <!-- Settings -->
   <dialog class="sheet" id="settings" aria-labelledby="settingsTitle">
@@ -249,6 +284,9 @@
         </section>
 
         <section class="field-group owner-only">
+          <details class="settings-details" id="advancedDiagnostics">
+          <summary>Advanced diagnostics</summary>
+          <div class="settings-details-body">
           <h4>Available providers</h4>
           <p class="prov-status" id="provStatus"></p>
           <button type="button" class="chip" id="diagBtn" style="margin-top:10px">Check provider keys</button>
@@ -256,6 +294,8 @@
           <h4 style="margin-top:18px">Labs</h4>
           <button type="button" class="chip" id="labsRemixBtn" aria-pressed="true" title="Attach a clip in Video mode: Gemini plans an edit, you approve any cost, Atelier cuts it on this device">Remix videos in Video mode</button>
           <div class="prov-status" id="diagOut" aria-live="polite" style="margin-top:10px"></div>
+          </div>
+          </details>
         </section>
 
         <section class="field-group owner-only">
@@ -407,7 +447,7 @@
               <input type="checkbox" id="syncCell" />
               <span><span class="sync-cell-title">Download videos on mobile data</span><span class="hint">Off: videos over 10 MB upload and download only on Wi-Fi.</span></span>
             </label>
-            <p class="hint sync-foot">Threads you make as the owner sync privately through your Atelier server, behind your passcode. Settings, model choices and theme stay on each device. LinkedIn testers’ threads never leave their device.</p>
+            <p class="hint sync-foot">Threads sync privately through your Atelier server when you enable device sync. Owner access uses your passcode; LinkedIn testers use their own account. Older local threads are imported only when you select them. Settings, model choices and theme stay on each device.</p>
           </div>
           <p class="hint" style="margin-bottom:14px">Export your threads and creations for safekeeping. Imports add copies without replacing existing work. Profile, account connections and preferences are not included.</p>
           <div class="row-actions">
@@ -415,11 +455,12 @@
             <label class="chip file-chip">Import backup<input type="file" id="importInput" accept="application/json" aria-label="Import backup" /></label>
             <button type="button" class="chip" id="migrateBtn" hidden>Bring over older conversations</button>
           </div>
-          <p class="hint" style="margin:14px 0 8px"><b>Your Claude chats.</b> Bring your claude.ai conversations in as threads you can open, continue and search (the accounts agent can look through them too). On claude.ai, go to Settings → Privacy → Export data. The email links to several files: download <b>conversations-000.zip</b> (and any conversations-001.zip …) and choose it here, one at a time — not the manifest .json. The file is read on this device and nothing goes to an AI model while importing. Imported chats are stored as threads on this device and, for the owner, sync to your devices through Atelier’s private storage. Importing a newer export adds only what’s new.</p>
+          <p class="hint" style="margin:14px 0 8px"><b>Your Claude chats.</b> Bring your conversations in as threads you can open, continue and search. Files are read on this device without AI analysis.</p>
           <div class="row-actions">
             <label class="chip file-chip" id="impClaudeChatsLabel">Import Claude chats…<input type="file" id="impClaudeChats" accept=".zip,.json,application/zip,application/json" aria-label="Import Claude chats" /></label>
             <button type="button" class="chip" id="impClaudeCancel" hidden>Cancel import</button>
           </div>
+          <details class="settings-details import-help"><summary>Where to find your Claude export</summary><p class="hint">On claude.ai, go to Settings → Privacy → Export data. The email links to several files: download <b>conversations-000.zip</b> (and any conversations-001.zip …) and choose it here, one at a time — not the manifest .json. Imported chats are stored in your account on this device and sync privately to your other devices when device sync is enabled. Importing a newer export adds only what’s new. The accounts agent can search imported chats when you ask it to.</p></details>
           <p class="hint" id="claudeImpStatus" role="status" aria-live="polite"></p>
           <div class="danger-zone"><p class="hint"><b>Irreversible</b><span id="wipeHint">Clears threads, media, profile and saved sign-in on this device. Export your threads first.</span></p><button type="button" class="chip danger" id="wipeBtn">Clear this device</button></div>
         </section>
@@ -493,6 +534,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=75" type="module"></script>
+  <script src="/app.js?v=76" type="module"></script>
 </body>
 </html>

@@ -37,7 +37,7 @@ test('online navigation prefers the current server response', async () => {
 test('index.html asks for exactly the versioned shell files the worker precaches', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const versioned = [...html.matchAll(/(?:href|src)="(\/[\w.-]+\?v=[^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(versioned.sort(), ['/app.css', '/app.js', '/remix.css', '/studio.css'].map((p) => `${p}?v=${VERSION.slice('atelier-v'.length)}`));
+  assert.deepEqual(versioned.sort(), ['/app.css', '/app.js', '/feedback.css', '/remix.css', '/studio.css'].map((p) => `${p}?v=${VERSION.slice('atelier-v'.length)}`));
   const s = setup(); let done;
   s.handlers.install({ waitUntil: (p) => done = p }); await done;
   for (const u of versioned) assert.ok(s.cached.includes(u), `${u} is precached`);

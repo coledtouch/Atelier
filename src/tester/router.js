@@ -17,6 +17,8 @@ import { SUB, DAILY_UPLOADS } from './ledger.js';
 import { meter, openaiUsage, geminiUsage } from './usage.js';
 import { PROFILE_MAX_BYTES, getProfile, putProfile } from './profile.js';
 import { handleLookup } from '../lookup.js';
+import { TESTER_SYNC_ROUTES, testerSyncReady } from './sync.js';
+import { handleFeedback } from '../feedback.js';
 
 const KB = 1024, MB = 1024 * 1024;
 export const LIMITS = Object.freeze({
@@ -135,6 +137,8 @@ export const TESTER_ROUTES = Object.freeze([
   { method: 'GET', match: 'tester/me', run: me },
   { method: 'GET', match: 'tester/profile', run: profileGet },
   { method: 'PUT', match: 'tester/profile', run: profilePut },
+  ...TESTER_SYNC_ROUTES,
+  { method: 'POST', match: 'feedback', run: (c) => handleFeedback(c.req, c.env, { role: 'tester', sub: c.who.sub }) },
   // Look up (src/lookup.js): free — Wikipedia and Wikimedia only, no reserve(), no Ledger, no KV; LOOKUP_LIMIT per tester.
   { method: 'GET', match: 'lookup', run: (c) => handleLookup(c.req, c.env, c.url, { key: `t:${c.who.sub}` }) },
   { method: 'GET', match: 'lookup/img', run: (c) => handleLookup(c.req, c.env, c.url, { key: `t:${c.who.sub}` }) },
@@ -184,7 +188,7 @@ async function me(c) {
   return json({
     sub: c.who.sub, name: c.who.name, picture: c.who.picture, email: c.who.email,
     models: { chat: TESTER_MODELS.filter(ready), image: TESTER_IMAGE_MODELS.filter(ready), video: TESTER_VIDEO_MODELS.filter(ready), tts: voices },
-    features: { web: ready('anthropic:'), video: ready('gemini:'), veo: ready('gemini:'), helpers: true, profile: true, tts: voices.length > 0, dictation: dictation.length > 0 },
+    features: { web: ready('anthropic:'), video: ready('gemini:'), veo: ready('gemini:'), helpers: true, profile: true, sync: testerSyncReady(c.env), tts: voices.length > 0, dictation: dictation.length > 0 },
     allowance: { day: a.day, month: a.month },
     pool: { paused: a.paused, spotsLeft: a.spotsLeft, ...(a.preview ? { preview: true } : {}) },
   }, 200, allowanceHeader(a));

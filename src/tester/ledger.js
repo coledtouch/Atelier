@@ -55,9 +55,13 @@ const parseSubs = (v) => { try { const a = JSON.parse(v); return Array.isArray(a
 const intIn = (v, lo, hi) => Number.isSafeInteger(v) && v >= lo && v <= hi;
 
 export class Ledger extends DurableObject {
+  #syncEnv;
+  #cleanupContext;
   constructor(ctx, env) {
     super(ctx, env);
     this.storage = ctx.storage;
+    this.#syncEnv = env;
+    this.#cleanupContext = ctx;
     this.clock = () => Date.now();
     ctx.blockConcurrencyWhile(async () => {
       for (const s of SCHEMA) this.storage.sql.exec(s);
@@ -234,11 +238,30 @@ export class Ledger extends DurableObject {
       this.#run('DELETE FROM sessions WHERE exp <= ?', now);
       this.#run('DELETE FROM oauth_state WHERE exp <= ?', now);
       this.#run('DELETE FROM jobs WHERE created_at <= ?', now - JOB_TTL);
-      // Retention (privacy page): a tester's record, spend, sessions and profile go 90 days after last use.
-      for (const { sub } of this.#rows('SELECT sub FROM testers WHERE last_seen <= ?', now - RETAIN)) this.#forget(sub);
       // ...and a refused sign-in goes 7 days after the attempt, whether or not the owner ever looked at it.
       this.#lastRefused(now);
     });
+    // Retention includes the new private R2 namespace. Keep the record until its cloud data is gone, so a failed
+    // or partial R2 cleanup never becomes an orphan. Revocation alone does not delete work (the owner can restore it).
+    const { purgeTesterSync } = await import('./sync.js');
+    for (const { sub } of this.#rows('SELECT sub FROM testers WHERE last_seen <= ?', now - RETAIN)) {
+      try {
+        await this.#cleanupContext.blockConcurrencyWhile(async () => {
+          const current = this.#tester(sub);
+          if (!current || current.last_seen > now - RETAIN) return;
+          try {
+            const result = await purgeTesterSync(this.#syncEnv, sub);
+            if (result.complete) this.#tx(() => this.#forget(sub));
+          } catch {
+            // Catch inside the concurrency gate too: a storage outage must not reset the Durable Object.
+            console.warn('tester cloud retention cleanup will retry');
+          }
+        });
+      } catch {
+        // No subject, profile, path or error payload is logged. The next ten-minute alarm retries this record.
+        console.warn('tester cloud retention cleanup will retry');
+      }
+    }
     await this.storage.setAlarm(Date.now() + TICK);
   }
 

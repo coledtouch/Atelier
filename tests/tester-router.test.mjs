@@ -725,7 +725,7 @@ test('tester/me: identity, the metered model lists (no NVIDIA, no free models), 
   assert.deepEqual(Object.keys(j).sort(), ['allowance', 'email', 'features', 'models', 'name', 'picture', 'pool', 'sub']);
   assert.deepEqual(j.models, { chat: [...TESTER_MODELS], image: [...TESTER_IMAGE_MODELS], video: [...TESTER_VIDEO_MODELS], tts: ['atelier', 'cedar', 'sage', 'sulafat'] });
   for (const id of [...j.models.chat, ...j.models.image, ...j.models.video]) assert.match(id, /^(anthropic|openai|gemini|zai|deepseek|meta):/);
-  assert.deepEqual(j.features, { web: true, video: true, veo: true, helpers: true, profile: true, tts: true, dictation: true });
+  assert.deepEqual(j.features, { web: true, video: true, veo: true, helpers: true, profile: true, sync: false, tts: true, dictation: true });
   assert.deepEqual(j.allowance, { day: { spent: 0, reserved: 0, limit: 1_000_000 }, month: { spent: 0, reserved: 0, limit: 10_000_000 } });
   assert.deepEqual(j.pool, { paused: false, spotsLeft: 24 });
 });

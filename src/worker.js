@@ -11,6 +11,7 @@ import { identify, handleLinkedIn, signedOut, fail } from './tester/auth.js';
 import { testerRouter, testerAdmin } from './tester/router.js';
 import { handleTts } from './tts.js';
 import { handleSync } from './sync.js';
+import { handleFeedback } from './feedback.js';
 import { handleRunway, runwayDiag, RUNWAY_PROVIDER } from './runway.js';
 import { handleLookup } from './lookup.js';
 import { handleTranscribe } from './transcribe.js';
@@ -368,6 +369,10 @@ async function handleApi(req, env, url) {
   const who = await identify(req, env, passOk);
   if (who.kind === 'tester') return testerRouter(req, env, url, path, who, UPSTREAM);
   if (who.stale && !req.headers.get('x-app-pass')) return signedOut(); // an ended tester session, not a passcode problem
+  if (path === 'feedback') {
+    if (who.kind !== 'owner') return json({ error: 'Sign in to send feedback.' }, 401);
+    return handleFeedback(req, env, { role: 'owner' });
+  }
   if (path.startsWith('tester/')) return fail(401, 'tester_signin', 'Sign in with LinkedIn to use the tester routes.');
   // GET /api/testers, POST /api/testers/{revoke,restore,config} → the owner's Testers panel. Passcode only.
   if (path === 'testers' || path.startsWith('testers/')) {

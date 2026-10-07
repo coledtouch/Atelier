@@ -61,8 +61,8 @@ test('Cloudflare Web Analytics is disclosed whenever the CSP lets its beacon run
   assert.match(PRIVACY, /<b>In short:<\/b>[^<]*cookieless page-view counts/);
 });
 
-test('the legal pages keep the October 1, 2026 effective date', () => {
-  for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective October 1, 2026<\/p>/);
+test('the legal pages keep the October 7, 2026 effective date for optional tester sync and feedback', () => {
+  for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective October 7, 2026<\/p>/);
 });
 
 test('Google Fonts is disclosed while any page loads it: in Technical data, as a processor and in the short summary', async () => {
@@ -92,8 +92,9 @@ test('the Look-up cache is disclosed with the lifetimes src/lookup.js gives it, 
   const testers = /<h3 id="testers">([\s\S]*?)<\/ul>/.exec(PRIVACY)?.[1];
   assert.ok(testers, 'the tester section');
   assert.doesNotMatch(testers, /No prompts or outputs are stored on our servers\.<\/b>/, 'no unqualified promise');
-  // Not only Look up: learned facts (learnFrom → PUT /api/tester/profile) are model output kept on the server too.
-  assert.match(text(testers), /No prompts or outputs are stored on our servers , except your profile and memory \(next item, including facts Atelier notes from your conversations\) and a Look up answer, which repeats the few words you selected and is cached for up to a day \(see “Look-up cache” in section 6\)\./);
+  // The ledger never stores prompt text; profile, opt-in synced threads, feedback and Look up are separate stores.
+  assert.match(text(testers), /The ledger holds amounts and dates, not prompts or answers\./);
+  assert.match(text(testers), /Server-stored profile and memory, optional synced threads, voluntary feedback and the Look up cache are described separately below\./);
   assert.match(text(/<li><b>Look up<\/b> — free([\s\S]*?)<\/li>/.exec(testers)?.[1] || ''), /cached briefly at Cloudflare for you alone/);
   // The addendum records it as an exception to spec §10, next to the profile and memory (A6) — not the only one.
   const a83 = /### A8\.3([\s\S]*?)\n### /.exec(await read('docs/superpowers/specs/2026-09-30-atelier-tester-access-addendum.md'))?.[1] || '';
@@ -142,7 +143,7 @@ test('owner thread sync is disclosed as it behaves: images and videos sync, medi
   for (const it of items) {
     assert.doesNotMatch(it, /for now without|don’t sync|stay on the device where they were made/, 'no "media stays on the device" left');
     assert.match(it, /including their images and videos/);
-    assert.match(it, /LinkedIn testers’ threads are never uploaded/);
+    assert.match(it, /Tester sync uses a separate namespace and does not give testers access to the owner’s threads/);
   }
   assert.match(items[1], /The original of a video attached to a question isn’t synced \(only the frames and preview Atelier took from it are\)/);
   assert.match(items[1], /videos over 10 MB wait for Wi-Fi before they upload or download, unless the owner turns on “Download videos on mobile data”/);
@@ -152,7 +153,44 @@ test('owner thread sync is disclosed as it behaves: images and videos sync, medi
   assert.match(items[1], /except copies of images, videos and long texts \(over about 32 KB, such as long answers or pasted documents\), which remain in that private storage until a later clean-up removes the ones no thread uses/);
   const cache = text(/<li><b>Look-up cache \(Cloudflare\):<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
   assert.doesNotMatch(cache, /is the one exception|the only exception/);
-  assert.match(cache, /Together with your profile and memory \(section 2\) and the studio owner’s own synced threads \(see above\), it is an exception/);
+  assert.match(cache, /stored separately from your profile and memory, optional synced threads and voluntary feedback/);
   const del = text(/<li><b>Delete conversations and media:<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
-  assert.match(del, /Clear this device leaves the synced copies on the owner’s server: delete synced threads from the Threads drawer instead/);
+  assert.match(del, /Clear this device leaves synced copies in private cloud storage: delete synced threads from the Threads drawer instead/);
+});
+
+test('tester private sync disclosures match consent, account separation, quotas and the inactive-account purge', async () => {
+  const [CLIENT, SERVER, LEDGER] = await Promise.all([read('public/sync.js'), read('src/tester/sync.js'), read('src/tester/ledger.js')]);
+  // This Worker module also imports cloudflare: APIs. Read its constant as source, as with the OAuth scopes above.
+  assert.match(SERVER, /export const TESTER_SYNC_QUOTA_BYTES = 1024 \*\* 3;/, 'update the disclosed 1 GiB cloud limit if it changes');
+  assert.match(CLIENT, /const requireConsent = accountTester \|\| Boolean\(deps\.requireConsent\)/);
+  assert.match(CLIENT, /if \(requireConsent\) \{ await askOwner\(\); return; \}/, 'a verified tester must still choose whether to sync');
+  assert.match(CLIENT, /eng\.answer\(accountTester \? 'off' : 'new'\)/, 'closing tester consent leaves private sync off');
+  assert.match(SERVER, /SYNC_BUCKET: c\.env\?\.SYNC_BUCKET \? await testerSyncBucket\(c\.env\.SYNC_BUCKET, c\.who\.sub\)/);
+  assert.match(LEDGER, /RETAIN = 90 \* DAY/);
+  assert.match(LEDGER, /await purgeTesterSync\(this\.#syncEnv, sub\);[\s\S]*?if \(result\.complete\) this\.#tx\(\(\) => this\.#forget\(sub\)\)/, 'purge cloud data before forgetting the tester record');
+  assert.match(LEDGER, /tester cloud retention cleanup will retry/);
+  const testers = text(/<h3 id="testers">([\s\S]*?)<\/ul>/.exec(PRIVACY)?.[1] || '');
+  for (const words of ['off until you explicitly enable it', 'browser database for your LinkedIn account', 'private Cloudflare R2 storage namespace', '1 GiB cloud-storage limit', 'previous shared browser database stay local unless you explicitly select and import them']) assert.ok(testers.includes(words), words);
+  const retention = text(/<li><b>Tester thread sync:<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
+  for (const words of ['off until you explicitly enable private sync', 'imported chats', 'Turning sync off in Settings → Your data stops new transfers but keeps existing cloud copies', 'Clear this device removes local data only', 'same LinkedIn account', 'restored for 30 days', '90 days of inactivity', 'retries it before deleting the tester record']) assert.ok(retention.includes(words), words);
+  const imported = text(/<li id="claude-chats">([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
+  assert.match(imported, /imported threads sync to your other devices when thread sync is enabled/);
+  assert.doesNotMatch(PRIVACY, /testers’ threads are never uploaded|a tester’s imported chats never leave the device/);
+  assert.match(text(TOS), /Private thread sync is off until you explicitly enable it/);
+  assert.match(text(TOS), /private tester cloud-sync namespace is purged before the expired record is deleted/);
+});
+
+test('voluntary feedback disclosures match the optional diagnostics, screenshot cap and storage expiry', async () => {
+  const { FEEDBACK_LIMITS, cleanFeedbackDiagnostics } = await import('../src/feedback.js');
+  assert.equal(FEEDBACK_LIMITS.screenshot, 350 * 1024);
+  assert.equal(FEEDBACK_LIMITS.days, 90);
+  assert.deepEqual(cleanFeedbackDiagnostics({ mode: 'ask', version: '76', online: true, viewport: { width: 393, height: 852 }, prompt: 'private text', account: { email: 'private@example.test' } }), { mode: 'ask', version: '76', online: true, viewport: { width: 393, height: 852 } });
+  const source = await read('src/feedback.js');
+  assert.match(source, /expirationTtl: FEEDBACK_LIMITS\.days \* 86400/, 'each submission expires independently of best-effort trimming');
+  const submission = text(/<li id="feedback">([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
+  for (const words of ['if you choose Send feedback', 'studio owner', 'may choose to attach', 'under 350 KB', 'active mode, app version, online status and screen size', 'Prompts, conversation contents and private connected-account details are not automatically collected', 'Review your message and screenshot before submitting']) assert.ok(submission.includes(words), words);
+  const retention = text(/<li><b>Voluntary feedback:<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
+  for (const words of ['up to 90 days after submission', 'expiry set when each submission is saved', 'Only the studio owner can read']) assert.ok(retention.includes(words), words);
+  assert.match(text(TOS), /Feedback is voluntary/);
+  assert.match(text(TOS), /submissions are kept for up to 90 days/);
 });

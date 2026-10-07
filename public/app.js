@@ -7,21 +7,22 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=75';
-import * as Sync from './sync.js?v=75';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=75';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=75';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=75';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=75';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=75';
-import { initLookup } from './lookup.js?v=75';
-import { createRemix } from './remix-app.js?v=75';
-import { sendMode, looksLikeQuestion } from './remix.js?v=75';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=75';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=75';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=75';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=75';
-import * as ClaudeImport from './claude-import.js?v=75';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=76';
+import * as Sync from './sync.js?v=76';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=76';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=76';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=76';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=76';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=76';
+import { initLookup } from './lookup.js?v=76';
+import { createRemix } from './remix-app.js?v=76';
+import { sendMode, looksLikeQuestion } from './remix.js?v=76';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=76';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=76';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=76';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=76';
+import * as ClaudeImport from './claude-import.js?v=76';
+import { createFeedback } from './feedback.js?v=76';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -227,6 +228,34 @@ const S = {
 let server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, runway: false, ...LS.get('server', {}) };
 // A tester device starts in tester mode from its last /api/tester/me (boot checks it again). The owner passcode always wins.
 if (!S.settings.passcode) S.tester = normalizeMe(LS.get('tester', null));
+// Each page is bound to one workspace. A role change reloads before another
+// workspace can be read, while already-started writes retain their original DB.
+const workspaceOf = () => S.settings.passcode ? 'owner' : S.tester ? `tester:${S.tester.sub}` : 'guest';
+const workspace = workspaceOf();
+const threadDbName = workspace === 'owner' ? 'atelier-data' : workspace === 'guest' ? 'atelier-guest' : `atelier-account-${encodeURIComponent(workspace.slice(7))}`;
+const workspaceKey = (key) => workspace === 'owner' ? key : `${key}:${workspace}`;
+let accountReloading = false;
+function reloadWorkspace(external = false) {
+  if (accountReloading) return true;
+  if (!external && workspaceOf() === workspace) return false;
+  accountReloading = true;
+  if (!external) saveSettings();
+  stopAll(); Sync.suspend(); clearTimeout(persistTimer); S.thread = null;
+  if (!external) { try { sessionStorage.setItem('atelier.accountResume', '1'); } catch {} }
+  location.reload();
+  return true;
+}
+function onAccountStorage(ev) {
+  if (ev.key !== null && !['atelier.settings', 'atelier.tester'].includes(ev.key)) return;
+  const passcode = LS.get('settings', {})?.passcode || '';
+  const tester = passcode ? null : normalizeMe(LS.get('tester', null));
+  const latest = passcode ? 'owner' : tester ? `tester:${tester.sub}` : 'guest';
+  if (latest === workspace && passcode === S.settings.passcode) return;
+  // Never write this tab's stale preferences back over the newly selected account.
+  S.settings.passcode = passcode; S.tester = tester;
+  reloadWorkspace(true);
+}
+window.addEventListener('storage', onAccountStorage);
 // This browser was used in LinkedIn tester mode — also when that tester signed out (sign-out leaves both keys holding
 // "null"; an owner-only browser never writes either). Captured before an owner sign-in changes them: owner thread sync
 // then asks before uploading the threads already here (public/sync.js, the #syncFirst dialog).
@@ -298,7 +327,7 @@ const rawDB = (() => {
   // "atelier-data" is new: tabs running older versions can hold or block the old "atelier" database,
   // so threads live here and are copied over from the old one when it's free (see migrateOldThreads).
   const tx = async (mode, fn, store = 'threads') => {
-    const db = await (store === 'kv' ? openDb('atelier-kv', 'kv') : openDb('atelier-data', 'threads', 'id'));
+    const db = await (store === 'kv' ? openDb('atelier-kv', 'kv') : openDb(threadDbName, 'threads', 'id'));
     return new Promise((res, rej) => {
       const t = db.transaction(store, mode);
       const out = fn(t.objectStore(store));
@@ -309,6 +338,10 @@ const rawDB = (() => {
     });
   };
   return {
+    legacyAll: async () => {
+      const db = await openDb('atelier-data', 'threads', 'id');
+      return new Promise((res, rej) => { const tx = db.transaction('threads', 'readonly'), q = tx.objectStore('threads').getAll(); tx.oncomplete = () => res(q.result); tx.onerror = () => rej(tx.error); });
+    },
     all: () => tx('readonly', (s) => s.getAll()),
     get: (id) => tx('readonly', (s) => s.get(id)),
     put: (t) => tx('readwrite', (s) => s.put(t)),
@@ -337,7 +370,7 @@ const DB = Sync.wrapDb(rawDB);
 let migrating = null, migrateQuiet = false; // quiet: the Settings button reports the outcome itself
 let copying = null, movedNow = 0; // the copy in progress (one at a time), and what this session's copy brought over
 const MIGRATE_OPEN_MS = 15000, MIGRATE_TOAST_GAP = 864e5; // slow phones can take seconds to open it; nag at most daily
-const migrationPending = () => !LS.get('migratedV3', false);
+const migrationPending = () => workspace === 'owner' && !LS.get('migratedV3', false);
 function migrateOldThreads() {
   if (!migrationPending()) return Promise.resolve(0);
   return (migrating ??= (async () => {
@@ -418,6 +451,7 @@ function patchStream({ replaced = [], added = [], removed = [] } = {}) {
 // Threads copied in after the boot stopped waiting (it waits 2 s): refresh whichever list is showing them.
 function threadsArrived() {
   refreshClaudeCount();
+  renderRecentThreads();
   if (!$('#threadsDrawer').hidden) renderThreads();
   if (!$('#libraryDrawer').hidden) renderLibrary();
 }
@@ -431,7 +465,7 @@ let persistTimer;
 function persist(now = false) {
   clearTimeout(persistTimer);
   const thread = S.thread;
-  const go = () => { if (thread?.entries.length) { thread.updatedAt = Date.now(); DB.put(thread).catch(storageError); if (thread === S.thread) LS.set('lastThread', thread.id); } };
+  const go = () => { if (thread?.entries.length && !accountReloading) { thread.updatedAt = Date.now(); DB.put(thread).catch(storageError); if (thread === S.thread) LS.set(workspaceKey('lastThread'), thread.id); } };
   now ? go() : (persistTimer = setTimeout(go, 400));
 }
 function storageError(err) { console.error(err); toast('Couldn’t save your work on this device. Export a backup from Settings before closing.', { error: true }); }
@@ -1849,7 +1883,7 @@ function refreshClaudeCount() {
   return DB.keys().then((ks) => { claudeChats = ks.filter((k) => typeof k === 'string' && k.startsWith(ClaudeImport.PREFIX)).length; }, () => {});
 }
 const agentTools = () => (S.tester ? [] : [...TOOLS.list, ...(browserAvailable() ? BROWSER_TOOLS : []), ...(claudeChats ? ClaudeImport.CLAUDE_TOOLS : [])]);
-const wantsAgent = (e) => agentTools().length > 0 && (e.params?.tools || AGENT_HINT.test(e.prompt) || (browserAvailable() && BROWSER_HINT.test(e.prompt)) || (claudeChats > 0 && CLAUDE_HINT.test(e.prompt)));
+const wantsAgent = (e) => e.params?.accountAccess !== 'off' && agentTools().length > 0 && (e.params?.tools || AGENT_HINT.test(e.prompt) || (browserAvailable() && BROWSER_HINT.test(e.prompt)) || (claudeChats > 0 && CLAUDE_HINT.test(e.prompt)));
 // claude_history_search / claude_history_read over this device's imported chats (the open one as it is on screen).
 async function runClaudeTool(name, args) {
   if (S.tester) return { ok: false, error: 'Not available.' };
@@ -2334,7 +2368,7 @@ async function nameThread(e, thread) {
   if (!feat('helpers')) return; // the title stays the prompt's first words
   try {
     const t = helperAnswer(await completeChat({ model: modelFor('fast'), role: 'fast', max_tokens: 800, temperature: 0.3, extra: noThink, messages: [{ role: 'system', content: SYS.title() }, { role: 'user', content: e.prompt }] }), 'title', 8);
-    if (t && t.length < 60 && thread && await DB.get(thread.id)) { thread.title = t.replace(/^["'#\s]+|["'.\s]+$/g, ''); await DB.put(thread); }
+    if (t && t.length < 60 && thread && !manualTitles.has(thread.id) && !accountReloading && await DB.get(thread.id)) { thread.title = t.replace(/^["'#\s]+|["'.\s]+$/g, ''); await DB.put(thread); renderRecentThreads(); }
   } catch {}
 }
 
@@ -2605,7 +2639,7 @@ function renderOptions() {
       if (!imageModel('')) { h = '<span class="opt-note keep">Images aren’t in your tester plan right now</span>'; break; }
       h = selectOpt('', 'model', [['', `Auto · ${imageModel('').label}`], ...IMAGE_MODELS.filter((m) => modelReady(m.id)).map((m) => [m.id, m.label])], o.model)
         + '<span class="opt-sep"></span>'
-        + Object.keys(ASPECTS).map((a) => `<button class="chip ${o.aspect === a ? 'on' : ''}" data-set="aspect" data-v="${a}">${a}</button>`).join('')
+        + selectOpt('Shape', 'aspect', Object.keys(ASPECTS).map((a) => [a, a]), o.aspect)
         + '<span class="opt-sep"></span>'
         + selectOpt('', 'count', [[1, '×1'], [2, '×2'], [4, '×4']], o.count)
         + `<button class="chip ${o.enhance ? 'on' : ''}" data-toggle="enhance" title="Let an LLM enrich your prompt"><span aria-hidden="true">✦</span> Enhance</button>`
@@ -2660,6 +2694,7 @@ function renderOptions() {
   }
   if (S.mode !== 'build') buildPlaceholder('');
   box.innerHTML = h;
+  renderComposerControls();
   $$('button', box).forEach((b) => b.setAttribute('aria-pressed', b.classList.contains('on')));
   if (box.dataset.for !== S.mode) { box.dataset.for = S.mode; box.scrollLeft = 0; }
   syncRunwayHint();
@@ -2716,6 +2751,7 @@ $('#options').addEventListener('change', (ev) => {
   }
   // update the pill in place — re-rendering would destroy the focused select
   const val = $('.opt-val', s.parentElement); if (val) { val.textContent = s.selectedOptions[0]?.text || ''; s.parentElement.title = val.textContent; }
+  renderComposerControls();
 });
 // A tap on the Runway hint keeps the composer focused (the phone keyboard stays up), like the Send button.
 $('#options').addEventListener('pointerdown', (ev) => { if (ev.target.closest('[data-runway-hint]') && document.activeElement === input) ev.preventDefault(); });
@@ -3020,7 +3056,7 @@ function renderAttachments() {
   const n = S.attachments.length, box = $('#attachments'), refocus = document.activeElement?.matches('#attachments [data-video]');
   box.innerHTML = S.video ? videoChip(S.video) : S.attachments.map((a, i) => `<div class="att"><img src="${esc(a.src)}" alt="Attached image ${i + 1}" /><button type="button" data-i="${i}" aria-label="Remove image ${i + 1}">${ICON.x}</button></div>`).join('') + (n ? `<span class="att-note">${esc(attNote(n))}</span>` : '');
   if (refocus) $('[data-video]', box)?.focus({ preventScroll: true }); // the chip is rebuilt once the video has been read
-  syncPlaceholder(); syncDock(); setBusy();
+  syncPlaceholder(); syncDock(); setBusy(); renderContextChips();
 }
 
 // ── composer video (S.video): one per message, never mixed with photos ──
@@ -3393,7 +3429,120 @@ function renderWelcome() {
       <span class="tile-desc">${descriptions[k]}</span>
       <span class="tile-try">${examples[k]}</span></button>`;
   }).join('');
+  renderRecentThreads();
 }
+let recentSeq = 0;
+const pinnedThreads = new Set(LS.get(workspaceKey('pinnedThreads'), []));
+const manualTitles = new Set();
+async function renderRecentThreads() {
+  const seq = ++recentSeq, rows = await allThreads();
+  if (seq !== recentSeq || accountReloading) return;
+  const hasWork = rows.length > 0;
+  $('#continueMaking').hidden = !hasWork;
+  $('#firstUseGoals').hidden = hasWork;
+  $('#welcome').classList.toggle('returning', hasWork);
+  const recent = [...rows.filter((t) => pinnedThreads.has(t.id)), ...rows.filter((t) => !pinnedThreads.has(t.id))].slice(0, 3);
+  $('#recentThreads').innerHTML = recent.map((t) => {
+    const kind = t.entries.at(-1)?.kind || 'ask', at = ClaudeImport.listAt(t);
+    return `<button type="button" class="recent-thread" data-recent-thread="${esc(t.id)}" style="--accent:var(--c-${MODE_KEYS.includes(kind) ? kind : 'ask'})"><span class="recent-title">${esc(t.title || 'Untitled')}</span><span class="recent-meta"><span class="recent-mode">${esc(MODES[kind]?.label || 'Thread')}${pinnedThreads.has(t.id) ? ' · Pinned' : ''}</span><span>${esc(Sync.agoText(at))}</span></span></button>`;
+  }).join('');
+}
+async function openThread(id) {
+  persist(true);
+  const t = liveThreads.get(id) || recoverThread(await DB.get(id));
+  if (!t || accountReloading) return toast('That thread is no longer on this device. Refresh the list.', { error: true });
+  if (t.id !== S.thread?.id) reader.stop();
+  S.thread = t; renderThread(); closeDrawers(); renderOptions();
+  LS.set(workspaceKey('lastThread'), t.id);
+  requestAnimationFrame(() => scrollDown(true, true));
+}
+$('#recentThreads').addEventListener('click', (ev) => { const b = ev.target.closest('[data-recent-thread]'); if (b) openThread(b.dataset.recentThread).catch(storageError); });
+$('#firstUseGoals').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-start-mode]'); if (!b) return;
+  setMode(b.dataset.startMode);
+  if (!input.value.trim()) input.value = b.dataset.startPrompt;
+  autosize(); input.focus({ preventScroll: true });
+});
+
+// Everyday controls stay visible; the full model/options strip is one tap away.
+$('#composerControls').insertAdjacentHTML('afterbegin', '<div class="essential-options" id="essentialOptions" aria-label="Prompt options"></div>');
+let optionsOpen = LS.get('composerOptionsOpen', false) === true;
+function setOptionsOpen(on) {
+  optionsOpen = Boolean(on); LS.set('composerOptionsOpen', optionsOpen);
+  $('#composer').classList.toggle('options-open', optionsOpen);
+  $('#optionsToggle').setAttribute('aria-expanded', String(optionsOpen));
+  $('#optionsToggle span').textContent = optionsOpen ? 'Less' : 'Options';
+  syncDock();
+}
+$('#optionsToggle').onclick = () => setOptionsOpen(!optionsOpen);
+$('#composer').classList.toggle('options-open', optionsOpen);
+$('#optionsToggle').setAttribute('aria-expanded', String(optionsOpen));
+$('#optionsToggle span').textContent = optionsOpen ? 'Less' : 'Options';
+function renderComposerControls() {
+  const box = $('#essentialOptions'); if (!box) return;
+  const advanced = $('#options'), model = $('[data-opt="model"]', advanced);
+  let h = model ? `<button type="button" class="chip model-summary" data-show-options title="Choose a model">${model.value ? 'Custom model' : 'Auto'}</button>` : '';
+  const essential = S.video && S.mode === 'video' ? [] : ({ image: ['aspect'], video: ['aspect', 'secs'], ideas: ['count'], build: ['style'] }[S.mode] || []);
+  for (const key of essential) {
+    const select = $(`[data-opt="${key}"]`, advanced);
+    if (select) h += select.closest('label').outerHTML.replace(/data-opt=/g, 'data-essential-opt=');
+  }
+  if (S.mode === 'video') {
+    const note = $('.opt-note', advanced);
+    if (note) h += `<span class="essential-note">${esc(note.textContent)}</span>`;
+    for (const sel of ['[data-rx-choice]', '[data-ask-about]']) {
+      const b = $(sel, advanced); if (b) h += `<button type="button" class="chip" data-show-options>${esc(b.textContent)}</button>`;
+    }
+  }
+  box.innerHTML = h;
+  // outerHTML retains the original selected attribute; copy the live select value.
+  $$('[data-essential-opt]', box).forEach((s) => { s.value = $(`[data-opt="${s.dataset.essentialOpt}"]`, advanced).value; });
+  renderContextChips();
+}
+$('#essentialOptions').addEventListener('click', (ev) => { if (ev.target.closest('[data-show-options]')) { setOptionsOpen(true); $('[data-opt="model"]', $('#options'))?.focus({ preventScroll: true }); } });
+$('#essentialOptions').addEventListener('change', (ev) => {
+  const select = ev.target.closest('[data-essential-opt]'); if (!select) return;
+  const key = select.dataset.essentialOpt, value = select.value, original = $(`[data-opt="${key}"]`, $('#options'));
+  if (!original) return; original.value = value; original.dispatchEvent(new Event('change', { bubbles: true }));
+  $(`[data-essential-opt="${key}"]`, $('#essentialOptions'))?.focus({ preventScroll: true });
+});
+document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog" id="contextDialog" aria-labelledby="contextTitle"><div class="sheet-body"><header class="sheet-head"><h2 id="contextTitle">Your <em>context</em></h2><button type="button" class="icon-btn" data-context-close aria-label="Close context">${ICON.x}</button></header><p class="hint">What Atelier can use for your next prompt. Earlier messages in this thread provide conversation context.</p><div id="contextDetails"></div><div class="sheet-foot"><button type="button" class="chip" data-context-profile>Manage profile &amp; memory</button><button type="button" class="btn-primary" data-context-close>Done</button></div></div></dialog>`);
+function renderContextChips() {
+  const chips = [], o = S.opts[S.mode] || S.opts.ask, writing = S.mode === 'ask' && o.voice;
+  if (S.attachments.length) chips.push(`${S.attachments.length} ${S.attachments.length === 1 ? 'image attached' : 'images attached'}`);
+  if (S.video) chips.push('Video attached');
+  if (writing) chips.push('Your writing style');
+  if (S.mode === 'ask' && o.web && providerReady('anthropic') && feat('web')) chips.push('Web enabled');
+  if (agentTools().length && (S.mode === 'ask' || S.mode === 'code')) chips.push(o.accountAccess === 'off' ? 'Tools off' : o.tools ? 'Tools enabled' : 'Tools available');
+  if (ME?.bio || ME?.learned || ME?.memory?.length) chips.push('Profile & memory');
+  $('#contextChips').innerHTML = chips.slice(0, 3).map((text) => `<button type="button" class="context-chip" data-context-open>${esc(text)}</button>`).join('');
+  $('#composerContext').hidden = !chips.length;
+  if ($('#contextDialog')?.open) renderContextDetails();
+}
+function renderContextDetails() {
+  const o = S.opts.ask, tools = agentTools().length > 0;
+  const focused = document.activeElement;
+  const focusKey = focused?.closest('#contextDetails') ? focused.dataset.contextToggle || focused.id : '';
+  const available = [...CONNECTORS.filter(([key]) => TOOLS.services?.[key]).map(([, name]) => name), ...(browserAvailable() ? ['Browser'] : [])];
+  $('#contextDetails').innerHTML = `<section class="field-group"><h4>Attached to this prompt</h4>${S.video ? `<p>${esc(S.video.name || 'Video')}</p><button type="button" class="chip" data-context-video>Remove video</button>` : S.attachments.length ? S.attachments.map((_, i) => `<div class="context-file"><span>Image ${i + 1}</span><button type="button" class="chip" data-context-remove="${i}">Remove</button></div>`).join('') : '<p class="hint">No files attached. Use the attachment button to add a photo or video.</p>'}</section><section class="field-group"><h4>Profile &amp; memory</h4><p class="hint">${ME.bio || ME.learned || ME.memory.length ? `Your profile and ${ME.memory.length} remembered ${ME.memory.length === 1 ? 'fact' : 'facts'} personalize answers. Review or remove them in your profile.` : 'Your profile is empty. Add details when you want more personal answers.'}</p></section>${S.mode === 'ask' ? `<section class="field-group"><h4>Writing &amp; research</h4><label class="context-check"><input type="checkbox" data-context-toggle="voice"${o.voice ? ' checked' : ''} /> Write in my voice</label>${providerReady('anthropic') && feat('web') ? `<label class="context-check"><input type="checkbox" data-context-toggle="web"${o.web ? ' checked' : ''} /> Enable web research</label>` : ''}</section>` : ''}${tools && (S.mode === 'ask' || S.mode === 'code') ? `<section class="field-group"><h4>Connected tools</h4><p class="hint">${esc(available.join(', ') || 'Your connected tools')} are available. External changes still require your approval.</p><label class="field"><span>Tool access for this mode</span><select id="contextToolAccess"><option value="auto">When my request needs them</option><option value="always">Always available</option><option value="off">Off for this mode</option></select></label></section>` : ''}`;
+  const s = $('#contextToolAccess'); if (s) { const cur = S.opts[S.mode]; s.value = cur.accountAccess === 'off' ? 'off' : cur.tools ? 'always' : 'auto'; }
+  if (focusKey) ($(`[data-context-toggle="${CSS.escape(focusKey)}"]`, $('#contextDetails')) || (focusKey === 'contextToolAccess' ? s : null))?.focus({ preventScroll: true });
+}
+function openContext() { renderContextDetails(); $('#contextDialog').showModal(); }
+$('#contextBtn').onclick = openContext;
+$('#contextChips').addEventListener('click', openContext);
+$('#contextDialog').addEventListener('click', (ev) => {
+  if (ev.target.closest('[data-context-close]')) return $('#contextDialog').close();
+  if (ev.target.closest('[data-context-profile]')) { $('#contextDialog').close(); $('#youBtn').click(); return; }
+  const remove = ev.target.closest('[data-context-remove]');
+  if (remove) { S.attachments.splice(+remove.dataset.contextRemove, 1); renderAttachments(); renderContextDetails(); }
+  if (ev.target.closest('[data-context-video]')) { clearComposerVideo(); renderContextDetails(); }
+});
+$('#contextDialog').addEventListener('change', (ev) => {
+  const t = ev.target.closest('[data-context-toggle]');
+  if (t) { S.opts.ask[t.dataset.contextToggle] = t.checked; saveOpts(); renderOptions(); }
+  if (ev.target.id === 'contextToolAccess') { const o = S.opts[S.mode]; o.accountAccess = ev.target.value; o.tools = ev.target.value === 'always'; saveOpts(); renderOptions(); }
+});
 $('#bento').addEventListener('click', (ev) => {
   const t = ev.target.closest('.tile');
   if (!t) return;
@@ -3454,6 +3603,7 @@ async function renderThreads() {
   $('#clearThreadSearch').hidden = !q;
   if (q) all = all.filter((t) => [t.title, ...t.entries.flatMap((e) => [e.prompt, e.text, e.app?.title,
     ...(e.ideas || []).flatMap((idea) => [idea.title, idea.pitch])])].join(' ').toLowerCase().includes(q));
+  all = [...all.filter((t) => pinnedThreads.has(t.id)), ...all.filter((t) => !pinnedThreads.has(t.id))];
   $('#threadCount').textContent = q ? `${all.length} ${all.length === 1 ? 'matching thread' : 'matching threads'}` : `${all.length} saved ${all.length === 1 ? 'thread' : 'threads'}`;
   const list = $('#threadList');
   if (!all.length) { list.innerHTML = `<li class="empty-note"><strong>${q ? 'No matching threads' : 'A fresh page awaits'}</strong>${q ? 'Try another word or clear your search.' : 'Your conversations will appear here after you send your first prompt.'}</li>`; return; }
@@ -3461,13 +3611,13 @@ async function renderThreads() {
   const group = (at) => (at >= today ? 'Today' : at >= today - day ? 'Yesterday' : at >= today - 6 * day ? 'This week' : 'Earlier');
   let last = '', h = '';
   for (const t of all) {
-    const at = ClaudeImport.listAt(t), fromClaude = ClaudeImport.isClaudeThread(t), g = group(at);
+    const at = ClaudeImport.listAt(t), fromClaude = ClaudeImport.isClaudeThread(t), pinned = pinnedThreads.has(t.id), g = pinned ? 'Pinned' : group(at);
     if (g !== last) { h += `<li class="thread-group">${g}</li>`; last = g; }
     const kinds = [...new Set(t.entries.map((e) => e.kind))].slice(0, 6);
     h += `<li class="thread ${S.thread?.id === t.id ? 'on' : ''}" data-id="${esc(t.id)}"><button class="thread-open" aria-current="${S.thread?.id === t.id ? 'true' : 'false'}">
       <span class="thread-dots">${kinds.map((k) => `<i style="--accent:var(--c-${k})"></i>`).join('')}${remix?.activeThreads().has(t.id) ? '<i class="rx-live" style="--accent:var(--c-video)" title="Filming"></i>' : ''}</span>
       <span class="thread-body"><span class="thread-title">${esc(t.title || 'Untitled')}</span><span class="thread-sub">${fromClaude ? '<span class="thread-tag">from Claude</span>' : ''}${t.entries.length} ${t.entries.length === 1 ? 'entry' : 'entries'} · ${new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric', ...(new Date(at).getFullYear() !== new Date().getFullYear() && { year: 'numeric' }) })}${esc(Sync.badge(t))}</span></span></button>
-      <button class="icon-btn del" data-del="${esc(t.id)}" aria-label="Delete ${esc(t.title || 'untitled thread')}">${ICON.trash}</button></li>`;
+      <span class="thread-tools"><button type="button" class="icon-btn${pinned ? ' thread-pinned' : ''}" data-pin="${esc(t.id)}" aria-pressed="${pinned}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${esc(t.title || 'untitled thread')}"><svg viewBox="0 0 24 24"><path d="m8 3 8 0-1 6 3 4H6l3-4zM12 13v8"/></svg></button><button type="button" class="icon-btn" data-thread-menu="${esc(t.id)}" aria-label="Options for ${esc(t.title || 'untitled thread')}"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span></li>`;
   }
   list.innerHTML = h;
 }
@@ -3478,27 +3628,50 @@ $('#clearThreadSearch').onclick = () => {
   renderThreads();
 };
 $('#drawerNewThread').onclick = () => { closeDrawers(false); startFresh(); };
+document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog" id="threadMenuDialog" aria-labelledby="threadMenuTitle"><form class="sheet-body" id="threadMenuForm"><div class="sheet-head"><h2 id="threadMenuTitle">Your <em>thread</em></h2><button type="button" class="icon-btn" data-thread-close aria-label="Close thread options">${ICON.x}</button></div><div class="thread-edit-body"><label class="field"><span>Thread name</span><input id="threadName" maxlength="120" required autocomplete="off" /></label><p class="hint">Renaming keeps all of your conversation. Pins are saved for this account on this device.</p><p class="hint bad" id="threadMenuError" role="alert"></p></div><div class="sheet-foot"><button type="button" class="chip danger" id="threadMenuDelete">Delete thread</button><button type="submit" class="btn-primary">Save name</button></div></form></dialog>`);
+let menuThreadId = null;
+$('#threadMenuDialog [data-thread-close]').onclick = () => $('#threadMenuDialog').close();
+$('#threadMenuForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault(); const id = menuThreadId, title = $('#threadName').value.trim();
+  if (!title) return $('#threadName').focus();
+  const b = ev.submitter; if (b?.disabled) return; if (b) b.disabled = true;
+  try {
+    const t = liveThreads.get(id) || (S.thread?.id === id ? S.thread : await DB.get(id));
+    if (!t) throw new Error('This thread is no longer on this device.');
+    manualTitles.add(id); t.title = title; t.updatedAt = Date.now(); await DB.put(t);
+    if (S.thread?.id === id) S.thread.title = title;
+    $('#threadMenuDialog').close(); renderThreads(); renderRecentThreads(); toast('Thread renamed');
+  } catch (err) { $('#threadMenuError').textContent = netText(err); }
+  finally { if (b) b.disabled = false; }
+});
+async function deleteSavedThread(id) {
+  if (S.busy) return toast('Wait for generation to finish before deleting a thread.');
+  if (remix?.activeThreads().has(id) && !confirm(remix.deleteWarning(id))) return;
+  if (!confirm(Sync.on() ? await Sync.deleteCopy(id) : 'Delete this thread?')) return;
+  const wasOpen = S.thread?.id === id;
+  if (wasOpen) { clearTimeout(persistTimer); S.thread = null; }
+  await Sync.deleteThread(id); remix?.forgetThread(id);
+  pinnedThreads.delete(id); LS.set(workspaceKey('pinnedThreads'), [...pinnedThreads]);
+  if (wasOpen) startFresh();
+  renderThreads(); renderRecentThreads(); $('#threadMenuDialog').close();
+}
+$('#threadMenuDelete').onclick = () => deleteSavedThread(menuThreadId).catch((err) => { $('#threadMenuError').textContent = netText(err); });
 $('#threadList').addEventListener('click', async (ev) => {
-  const del = ev.target.closest('[data-del]');
-  if (del) {
-    ev.stopPropagation();
-    if (S.busy) return toast('Wait for generation to finish before deleting a thread.');
-    const id = del.dataset.del;
-    if (remix?.activeThreads().has(id) && !confirm(remix.deleteWarning(id))) return; // a shot still filming (billed)
-    if (!confirm(Sync.on() ? await Sync.deleteCopy(id) : 'Delete this thread?')) return;
-    const wasOpen = S.thread?.id === id;
-    if (wasOpen) { clearTimeout(persistTimer); S.thread = null; } // else startFresh's persist() puts it straight back
-    await Sync.deleteThread(id);
-    remix?.forgetThread(id);
-    if (wasOpen) startFresh();
-    return renderThreads();
+  const pin = ev.target.closest('[data-pin]');
+  if (pin) {
+    const id = pin.dataset.pin; pinnedThreads.has(id) ? pinnedThreads.delete(id) : pinnedThreads.add(id);
+    LS.set(workspaceKey('pinnedThreads'), [...pinnedThreads]); await renderThreads(); renderRecentThreads();
+    $(`[data-pin="${CSS.escape(id)}"]`, $('#threadList'))?.focus({ preventScroll: true }); return;
+  }
+  const more = ev.target.closest('[data-thread-menu]');
+  if (more) {
+    menuThreadId = more.dataset.threadMenu;
+    $('#threadName').value = $('.thread-title', more.closest('.thread')).textContent;
+    $('#threadMenuError').textContent = ''; $('#threadMenuDialog').showModal(); $('#threadName').focus(); $('#threadName').select(); return;
   }
   const li = ev.target.closest('.thread');
   if (!li) return;
-  persist(true);
-  const t = liveThreads.get(li.dataset.id) || recoverThread(await DB.get(li.dataset.id));
-  if (t && t.id !== S.thread?.id) reader.stop(); // Read aloud belongs to the thread on screen
-  if (t) { S.thread = t; renderThread(); closeDrawers(); renderOptions(); requestAnimationFrame(() => scrollDown(true, true)); LS.set('lastThread', t.id); }
+  await openThread(li.dataset.id);
 });
 
 let libFilter = 'all', libItems = [], libLoaded = false, libToken = 0;
@@ -4086,8 +4259,9 @@ $('#settings').addEventListener('close', () => { if (previewing) reader.stop(); 
 // A focused field in an open dialog stays visible as the on-screen keyboard resizes the viewport.
 vv?.addEventListener('resize', () => { const f = document.activeElement; if (f?.matches?.('input:not([type=range], [type=radio], [type=checkbox]), textarea') && f.closest('dialog[open]')) requestAnimationFrame(() => f.scrollIntoView({ block: 'nearest' })); });
 $('#settingsForm').temperature.oninput = (ev) => { $('#tempVal').textContent = ev.target.value; };
-$('#settingsForm').addEventListener('submit', (ev) => {
+$('#settingsForm').addEventListener('submit', async (ev) => {
   if (ev.submitter?.value !== 'save') return;
+  ev.preventDefault();
   // The owner's Testers fields go with this Save too: limits edited there, and a sub typed into the preview field.
   const lim = tpEdited(), sub = !S.tester && S.settings.passcode ? $('#tpSub')?.value.trim() : '';
   if (lim?.error) {
@@ -4100,7 +4274,7 @@ $('#settingsForm').addEventListener('submit', (ev) => {
   const f = ev.target;
   const s = S.settings;
   s.passcode = f.passcode.value.trim();
-  DB.kvSet('passcode', s.passcode).catch(() => {});
+  await DB.kvSet('passcode', s.passcode).catch(() => {});
   s.temperature = +f.temperature.value;
   s.theme = $('input[name=theme]:checked', f)?.value || 'auto';
   // Only a choice that differs from the role's default is stored: a Save never pins an implicit “Automatic” for whoever
@@ -4109,7 +4283,10 @@ $('#settingsForm').addEventListener('submit', (ev) => {
   s.lookup = lk === lookupDefault() ? '' : lk; if (lk === 'off') lookup.close('off');
   MODEL_ROLES.forEach(([k]) => { s.models[k] = f['m_' + k].value.trim().replace(/^(anthropic|openai|gemini|zai|deepseek|meta):/i, (p) => p.toLowerCase()); });
   saveQuickLaunch(f);
-  saveSettings(); syncRole(); applyTheme(); renderOptions(); renderWelcome(); checkKey(); loadTools(); pullMe();
+  saveSettings();
+  if (reloadWorkspace()) return;
+  $('#settings').close();
+  syncRole(); applyTheme(); renderOptions(); renderWelcome(); checkKey(); loadTools(); pullMe();
   syncClip(); // the Video model pin decides clip vs frames
   retitleReads(); // a passcode added or cleared changes which voice Read aloud uses
   if (lim) testersPost('config', lim.body, null).then((ok) => { if (ok) { toast('Saved · tester limits updated'); loadTesters(); } });
@@ -4173,7 +4350,9 @@ $('#importInput').onchange = async (ev) => {
   try {
     if (f.size > BACKUP_MAX) throw new Error(`Choose a backup smaller than ${BACKUP_MAX / 1048576} MB.`);
     const threads = prepareImport(JSON.parse(await f.text()), uid);
+    if (S.tester && Sync.on() && !confirm(`Import ${threads.length} threads into your LinkedIn account? They will sync to your other devices. Import only conversations that belong to you.`)) { ev.target.value = ''; return; }
     await DB.putAll(threads);
+    renderRecentThreads();
     if (!Sync.noteImported(threads.length)) toast(`Imported ${threads.length} threads. Your existing work is unchanged.`);
   } catch (err) { toast(err instanceof SyntaxError ? 'That file isn’t valid JSON. Nothing was imported.' : err.message, { error: true }); }
   ev.target.value = '';
@@ -4349,7 +4528,51 @@ const CONNECTORS = [
   ['railway', 'Railway', 'RAILWAY_API_TOKEN'],
 ];
 // One Settings → Connections row: dot · name · action on line 1, STATUS + detail and account chips below.
-const connRow = ({ key = '', on, name, state, detail = '', accts = '', action = '' }) => `<li class="conn${on ? ' on' : ''}"${key ? ` data-row="${key}"` : ''}><span class="dot" aria-hidden="true"></span><b>${name}</b>${action}<span class="conn-info"><span class="conn-state">${state}</span>${detail ? `<span class="conn-detail">${detail}</span>` : ''}</span>${accts ? `<span class="accts">${accts}</span>` : ''}</li>`;
+const connRow = ({ key = '', on, name, state, detail = '', accts = '', action = '' }) => {
+  const status = connectionStatus(on, state);
+  return `<li class="conn${on ? ' on' : ''}" data-connection-status="${status}"${key ? ` data-row="${key}"` : ''}><span class="dot" aria-hidden="true"></span><b>${name}</b>${action}<span class="conn-info"><span class="conn-state">${state}</span>${detail ? `<span class="conn-detail">${detail}</span>` : ''}</span>${accts ? `<span class="accts">${accts}</span>` : ''}</li>`;
+};
+function connectionStatus(on, state) { return /expired|error|rejected|reconnect|failed|no credits/i.test(state) ? 'attention' : on ? 'connected' : 'available'; }
+function regroupConnections() {
+  const list = $('#connList'), rows = $$('.conn', list), focused = document.activeElement;
+  $$('.conn-group-title', list).forEach((h) => h.remove());
+  for (const status of ['connected', 'attention', 'available']) {
+    const group = rows.filter((row) => row.dataset.connectionStatus === status);
+    if (!group.length) continue;
+    const label = { connected: 'Connected', attention: 'Needs attention', available: 'Available' }[status];
+    list.insertAdjacentHTML('beforeend', `<li class="conn-group-title"><span class="conn-status-label${status === 'attention' ? ' attention' : ''}">${label}</span><span class="conn-group-count">${group.length}</span></li>`);
+    group.forEach((row) => list.append(row));
+  }
+  if (list.contains(focused)) focused.focus({ preventScroll: true });
+}
+// Legacy shared storage has no reliable account identity. Nothing from it is
+// uploaded automatically; users explicitly choose their own conversations.
+$('#exportBtn').closest('.field-group').insertAdjacentHTML('beforeend', '<div id="legacyThreadsSection" hidden><p class="hint" style="margin-top:16px"><b>Before this update.</b> Older conversations stay in this device’s original local store. Choose only your own threads to bring into this account.</p><button type="button" class="chip" id="legacyThreadsBtn">Review older local threads</button></div>');
+$('#legacyThreadsSection').hidden = !workspace.startsWith('tester:');
+document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog" id="legacyThreadsDialog" aria-labelledby="legacyTitle"><form class="sheet-body" id="legacyThreadsForm"><header class="sheet-head"><h2 id="legacyTitle">Older <em>threads</em></h2><button type="button" class="icon-btn" id="legacyClose" aria-label="Close older threads">${ICON.x}</button></header><p class="hint" id="legacyWarning"></p><ul class="legacy-list" id="legacyThreadsList"></ul><p class="hint bad" id="legacyError" role="alert"></p><div class="sheet-foot"><button type="button" class="chip" id="legacyCancel">Cancel</button><button type="submit" class="btn-primary" id="legacyImport" disabled>Copy selected threads</button></div></form></dialog>`);
+let legacyThreads = [];
+$('#legacyClose').onclick = $('#legacyCancel').onclick = () => $('#legacyThreadsDialog').close();
+$('#legacyThreadsBtn').onclick = async () => {
+  $('#legacyWarning').textContent = `This local store may contain another person’s work. Select only conversations that belong to you. Original threads stay here; selected copies join your current account${Sync.on() ? ' and upload to your private cloud storage' : ' on this device'}.`;
+  $('#legacyError').textContent = ''; $('#legacyImport').disabled = true;
+  $('#legacyThreadsList').innerHTML = '<li class="hint" role="status">Reading this device’s older threads…</li>';
+  $('#legacyThreadsDialog').showModal();
+  try {
+    legacyThreads = await DB.legacyAll();
+    $('#legacyThreadsList').innerHTML = legacyThreads.length ? legacyThreads.map((t, i) => `<li><label><input type="checkbox" value="${i}" /><span>${esc(t.title || 'Untitled')}<small>${t.entries?.length || 0} entries · ${esc(String(t.entries?.[0]?.prompt || '').slice(0, 100))}</small></span></label></li>`).join('') : '<li class="hint">No older conversations are saved in this local store.</li>';
+  } catch (err) { $('#legacyError').textContent = netText(err); }
+};
+$('#legacyThreadsList').addEventListener('change', () => { $('#legacyImport').disabled = !$('#legacyThreadsList input:checked'); });
+$('#legacyThreadsForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault(); const indices = $$('#legacyThreadsList input:checked').map((c) => +c.value), b = $('#legacyImport');
+  if (!indices.length || b.disabled) return; b.disabled = true;
+  try {
+    const threads = prepareImport({ app: 'atelier', v: 1, threads: indices.map((i) => legacyThreads[i]) }, uid);
+    await DB.putAll(threads); $('#legacyThreadsDialog').close(); renderRecentThreads();
+    if (!Sync.noteImported(threads.length)) toast(`Copied ${threads.length} threads into this account.`);
+  } catch (err) { $('#legacyError').textContent = netText(err); }
+  finally { b.disabled = !$('#legacyThreadsList input:checked'); }
+});
 const acctChip = (label, btnHtml = '') => `<span class="acct" title="${esc(label)}"><span class="acct-name">${esc(label)}</span>${btnHtml}</span>`;
 let connSeq = 0;
 async function renderConnections() {
@@ -4359,7 +4582,13 @@ async function renderConnections() {
   // and the browser relay answer, the Runway row says it is still checking, and only that row is filled in later.
   const rwAccount = server.runway && S.settings.passcode ? runwayAccount({ apiHeaders }) : null;
   let rwAcct = null, rwBack = !rwAccount, drawn = false;
-  const rwRow = () => runwayConnection({ configured: Boolean(server.runway), passcode: Boolean(S.settings.passcode), account: rwAcct });
+  const rwRow = () => {
+    const row = runwayConnection({ configured: Boolean(server.runway), passcode: Boolean(S.settings.passcode), account: rwAcct });
+    if (!server.runway) row.detail = 'This connection hasn’t been enabled for this studio yet.';
+    else if (rwAcct?.code === 'runway_key') row.detail = 'Reconnect Runway in your studio hosting settings.';
+    else if (rwAcct?.ok && rwAcct.creditBalance === 0) row.state = 'No credits';
+    return row;
+  };
   rwAccount?.then((a) => a, () => null).then((a) => {
     rwAcct = a; rwBack = true;
     const li = drawn && seq === connSeq && $('#connList [data-row="runway"]');
@@ -4368,6 +4597,7 @@ async function renderConnections() {
     li.classList.toggle('on', rw.on);
     $('.conn-state', li).textContent = rw.state;
     $('.conn-detail', li).textContent = rw.detail;
+    li.dataset.connectionStatus = connectionStatus(rw.on, rw.state); regroupConnections();
   });
   await loadTools();
   const sv = TOOLS.services || {};
@@ -4395,9 +4625,13 @@ async function renderConnections() {
       rows.push(connRow({ on, name, state: accts.length ? `Connected · ${accts.length}` : 'Not connected',
         accts: accts.map((a) => acctChip(a.label, a.source === 'app' ? `<button type="button" data-conn="tok-off" data-svc="${k}" data-id="${esc(a.id)}" data-label="${esc(a.label)}" aria-label="Remove ${esc(a.label)}">${ICON.x}</button>` : '')).join(''),
         action: S.settings.passcode ? `<button type="button" class="chip" data-conn="tok-on" data-svc="${k}">+ Add account</button>` : '' }));
-    } else rows.push(connRow({ on, name, state: on ? 'Connected' : 'Not set up', detail: on ? '' : S.settings.passcode ? `set ${how}` : 'needs the server passcode' }));
+    } else rows.push(connRow({ on, name, state: on ? 'Connected' : 'Available', detail: on ? '' : 'This connection hasn’t been enabled for this studio yet.' }));
   }
-  $('#connList').innerHTML = rows.join('');
+  $('#connList').innerHTML = ['connected', 'attention', 'available'].map((status) => {
+    const group = rows.filter((row) => row.includes(`data-connection-status="${status}"`));
+    const label = { connected: 'Connected', attention: 'Needs attention', available: 'Available' }[status];
+    return group.length ? `<li class="conn-group-title"><span class="conn-status-label${status === 'attention' ? ' attention' : ''}">${label}</span><span class="conn-group-count">${group.length}</span></li>${group.join('')}` : '';
+  }).join('');
   $('#connList').removeAttribute('aria-busy');
   drawn = true;
 }
@@ -4627,6 +4861,7 @@ $('#onboardForm').addEventListener('submit', async (ev) => {
   saveSettings(); syncRole(); renderWelcome(); renderOptions(); updateKeyState(true);
   LS.set('signedIn', Date.now()); LS.set('owner', true); LS.set('outReason', '');
   DB.kvSet('passcode', pass).catch(() => {});
+  if (reloadWorkspace()) return;
   $('#onboard').close();
   if (!Sync.firstRunAhead()) toast('You’re in'); // else thread sync's first-run message follows at once and says it
   resumeLaunch(); // a launch that arrived signed out: prefill and arm (never start the mic or send)
@@ -4638,6 +4873,7 @@ $('#onboardForm').addEventListener('submit', async (ev) => {
 // Owner = passcode (x-app-pass). Tester = the __Host-atelier_tester cookie set after LinkedIn sign-in. Every model call a
 // tester makes is metered against their day/month allowance and the shared monthly pool (spec 2026-09-30 §8, addendum A3).
 function syncRole() {
+  if (reloadWorkspace()) return;
   document.body.classList.toggle('tester', Boolean(S.tester));
   document.body.classList.toggle('owner', Boolean(S.settings.passcode) && !S.tester);
   // Quick launch state belongs to one role: sign-out or an owner/tester switch forgets the launch key, the pending launch,
@@ -4658,6 +4894,7 @@ function setTester(raw) {
     // as privacy §2 and terms §3 promise (an earlier person's “Automatic” would send selections without a tap).
     if (!S.settings.passcode && S.settings.lookup) { S.settings.lookup = ''; saveSettings(); }
     if (t) LS.set('outReason', '');
+    if (reloadWorkspace()) return;
     reader.clearCache(); // sign-out or another account: no Read aloud clip of theirs stays on this device
     deadProviders.clear(); ME = loadMe(); setSync('');
     if (!$('#youDrawer').hidden) renderYou();
@@ -4759,7 +4996,7 @@ function renderTesterAccess() {
   box.innerHTML = `<div class="ta-id">${avatar(t.picture, t.name)}<p class="ta-who"><b>${esc(t.name || 'LinkedIn tester')}</b><span>${esc(t.email || 'Signed in with LinkedIn')}</span></p><button type="button" class="chip" data-ta="out">Sign out</button></div>
     <div class="ta-meters">${meter('Today', left.day, a.day.limit, 'day')}${meter('This month', left.month, a.month.limit, 'month')}${left.pool != null ? `<p class="ta-row ta-pool"><span>Shared tester pool</span><span><b>${money(left.pool)}</b> left this month</span></p>` : ''}</div>
     ${t.pool.preview ? '<p class="hint ta-paused">Preview access: tester sign-in is paused for everyone else.</p>' : t.pool.paused ? '<p class="hint ta-paused">Tester access is paused right now, so new requests are on hold.</p>' : ''}
-    <p class="hint">Each request holds a cautious estimate, then settles to what the provider reports, so the numbers can tick back up after a reply. Threads stay on this device; your You profile is saved to your tester account.</p>`;
+    <p class="hint">Each request holds a cautious estimate, then settles to what the provider reports, so the numbers can tick back up after a reply. Threads are private to this account on this device. Enable private device sync in Your data to continue elsewhere; your You profile is saved to your tester account.</p>`;
   const names = (list) => [...new Set(list.filter(Boolean))].map(esc).join(', ');
   const chat = names(t.models.chat.filter(modelReady).map(modelLabel));
   const imgs = names(t.models.image.map((id) => IMAGE_MODELS.find((m) => m.id === id)?.label));
@@ -4775,7 +5012,7 @@ function welcomeTester() {
   const dlg = document.createElement('dialog');
   dlg.className = 'tok-dialog tester-welcome';
   dlg.setAttribute('aria-labelledby', 'twTitle');
-  dlg.innerHTML = `<form method="dialog"><p class="eyebrow">LinkedIn tester</p><h3 id="twTitle">Welcome${first ? `, <em>${esc(first)}</em>` : ''}.</h3><p class="hint">You have <b>${money(t.allowance.day.limit)}</b> a day and <b>${money(t.allowance.month.limit)}</b> a month on paid models — Claude, GPT, Gemini and others (Z.ai, DeepSeek, Meta) for answers, code, ideas and apps, plus images and Veo video. The line above the prompt shows what’s left.</p><p class="hint">Your threads stay on this device. Your You profile is saved to your tester account.</p><div class="row"><button class="btn-primary" value="ok">Start making</button></div></form>`;
+  dlg.innerHTML = `<form method="dialog"><p class="eyebrow">LinkedIn tester</p><h3 id="twTitle">Welcome${first ? `, <em>${esc(first)}</em>` : ''}.</h3><p class="hint">You have <b>${money(t.allowance.day.limit)}</b> a day and <b>${money(t.allowance.month.limit)}</b> a month on paid models — Claude, GPT, Gemini and others (Z.ai, DeepSeek, Meta) for answers, code, ideas and apps, plus images and Veo video. The line above the prompt shows what’s left.</p><p class="hint">Your threads are private to your account on this device. Enable device sync in Settings → Your data to continue on another device. Your You profile is saved to your tester account.</p><div class="row"><button class="btn-primary" value="ok">Start making</button></div></form>`;
   document.body.append(dlg);
   dlg.addEventListener('close', () => { dlg.remove(); if (!COARSE.matches) input.focus({ preventScroll: true }); resumeLaunch(); });
   dlg.showModal();
@@ -4919,6 +5156,7 @@ $('#testersPanel').addEventListener('keydown', (ev) => {
 const ME_DEFAULT = { bio: '', learned: '', style: '', samples: '', memory: [], sources: {}, updatedAt: 0 };
 // A tester's You is cached under its own key, and only for the tester it belongs to.
 function loadMe() {
+  if (workspace === 'guest') return { ...ME_DEFAULT, memory: [], sources: {} };
   if (S.tester) { const saved = LS.get('meTester', null); return { ...ME_DEFAULT, ...(saved?.sub === S.tester.sub ? saved : {}) }; }
   const me = { ...ME_DEFAULT, ...LS.get('me', {}) };
   if (!me.bio && S.settings.about) me.bio = S.settings.about; // carry over the old Settings field
@@ -5277,13 +5515,27 @@ function startFresh() {
   renderThread();
   renderWelcome();
   renderOptions();
-  LS.set('lastThread', null);
+  LS.set(workspaceKey('lastThread'), null);
   input.placeholder = MODES[S.mode].ph;
   stage.scrollTo({ top: 0, behavior: 'instant' });
   input.focus({ preventScroll: true });
 }
 $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
+
+const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || '76'}`, online: navigator.onLine !== false }), toast });
+$('#feedbackBtn').onclick = () => feedback.open();
+$('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };
+$('#studioClose').onclick = () => $('#studioDialog').close();
+$('#studioDialog').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-studio-target]'); if (!b) return;
+  $('#studioDialog').close();
+  if (b.dataset.studioTarget === 'feedback') return feedback.open();
+  const targets = { new: 'newBtn', threads: 'threadsBtn', library: 'libraryBtn', me: 'youBtn', settings: 'settingsBtn' };
+  const id = targets[b.dataset.studioTarget]; if (id) $('#' + id).click();
+});
+$('#settingsScroll').insertAdjacentHTML('beforeend', '<section class="field-group owner-only" id="feedbackSection"><h4>Feedback</h4><p class="hint">Reports and suggestions from your testers.</p><button type="button" class="chip" id="feedbackInboxBtn">Read feedback</button><div id="feedbackInbox" hidden></div></section>');
+$('#feedbackInboxBtn').onclick = () => { $('#feedbackInbox').hidden = false; feedback.showInbox($('#feedbackInbox')); };
 
 // Keyboard and focus behavior shared by the desktop and compact layouts.
 $$('[data-trigger]').forEach(b => { b.onclick = () => $('#' + b.dataset.trigger).click(); });
@@ -5309,7 +5561,7 @@ modesNav.addEventListener('keydown', ev => {
   if (next === null) return;
   ev.preventDefault(); setMode(MODE_KEYS[next]); $(`#mode-${MODE_KEYS[next]}`).focus();
 });
-const settingsGroups = { Connections: 'connections', Models: 'models', 'Available providers': 'models', 'Your data': 'data' };
+const settingsGroups = { Connections: 'connections', Models: 'models', 'Available providers': 'models', 'Your data': 'data', Feedback: 'data' };
 function selectSettings(panel) {
   $$('#settingsForm .field-group').forEach(section => { section.hidden = (settingsGroups[$('h4', section)?.textContent] || 'general') !== panel; });
   $$('[data-settings]').forEach(b => { b.classList.toggle('on', b.dataset.settings === panel); b.setAttribute('aria-pressed', b.dataset.settings === panel); });
@@ -5549,14 +5801,21 @@ remix = createRemix({
   if (params.toString() || location.hash.length > 1) history.replaceState(null, '', '/');
   applyTheme();
   renderWelcome();
+  const testerWorkspace = workspace.startsWith('tester:');
+  const scopeHash = testerWorkspace ? [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(workspace)))].map((x) => x.toString(16).padStart(2, '0')).join('') : '';
   Sync.init({
-    rawDB, uid, toast,
+    rawDB, uid, toast, account: testerWorkspace ? 'tester' : 'owner', scope: testerWorkspace ? `tester-${scopeHash}` : undefined,
     // The passcode as stored now (not this tab's copy): every Atelier tab's sync sends the same one, so a tab with an
     // older copy never gets refused and pauses the others.
     apiHeaders: () => { const h = apiHeaders(), p = LS.get('settings', null)?.passcode; if (typeof p === 'string') { if (p) h['x-app-pass'] = p; else delete h['x-app-pass']; } return h; },
     // The owner as the stored settings say now: a tab whose passcode was cleared in another tab (say, for a LinkedIn
     // tester signing in there) stops syncing instead of uploading what that tab writes.
-    isOwner: () => { const p = LS.get('settings', null)?.passcode; return Boolean(typeof p === 'string' ? p : S.settings.passcode) && !S.tester; },
+    isOwner: () => {
+      if (accountReloading || workspaceOf() !== workspace) return false;
+      const p = LS.get('settings', null)?.passcode;
+      if (testerWorkspace) return !p && S.tester?.sub === workspace.slice(7) && S.tester.features.sync === true && LS.get('tester', null)?.sub === S.tester.sub;
+      return workspace === 'owner' && Boolean(typeof p === 'string' ? p : S.settings.passcode) && !S.tester;
+    },
     isTester: () => Boolean(S.tester),
     hasTesterTraces: () => testerTrace || lsHas('tester') || lsHas('meTester'),
     getOpen: () => S.thread, isLive: (id) => liveThreads.has(id), onApplied: syncApplied,
@@ -5582,7 +5841,7 @@ remix = createRemix({
   await Promise.race([migrateOldThreads().catch(() => false), sleep(2000)]);
 
   // resume the last thread if it was recent (6h) — never let a slow/blocked IndexedDB stall startup
-  const lastId = LS.get('lastThread', null);
+  const lastId = LS.get(workspaceKey('lastThread'), null);
   if (lastId && !shared) {
     const t = await Promise.race([DB.get(lastId).catch(() => null), sleep(1500).then(() => null)]);
     if (t && Date.now() - t.updatedAt < 6 * 36e5) { S.thread = recoverThread(t); renderThread(); renderOptions(); requestAnimationFrame(() => scrollDown(true, true)); }
@@ -5592,7 +5851,7 @@ remix = createRemix({
 
   if (!S.settings.passcode) {
     const backup = await Promise.race([DB.kvGet('passcode').catch(() => null), sleep(1500).then(() => null)]);
-    if (typeof backup === 'string' && backup) { S.settings.passcode = backup; saveSettings(); console.info('[atelier] passcode restored from backup'); }
+    if (typeof backup === 'string' && backup) { S.settings.passcode = backup; saveSettings(); if (reloadWorkspace()) return; console.info('[atelier] passcode restored from backup'); }
     else if (SIGNIN_NOTES[LS.get('outReason', '')]) signinReason = LS.get('outReason', ''); // signed out on purpose, or the session ended
     else if (LS.get('signedIn', 0) || (await Promise.race([DB.all().then((t) => t.length).catch(() => 0), sleep(1500).then(() => 0)]))) signinReason = 'cleared';
   }
@@ -5607,9 +5866,10 @@ remix = createRemix({
     const cached = Boolean(S.tester);
     if (cached) checkKey(); else { updateKeyState(null); openOnboard(SIGNIN_NOTES[testerResult] && testerResult !== 'welcome' ? testerResult : signinReason); }
     loadTester().then((st) => {
-      if (st === 'ok' && S.tester) {
+      if (st === 'ok' && S.tester && !accountReloading) {
         if ($('#onboard').open) $('#onboard').close();
         updateKeyState(null); health.then(() => pullMe());
+        if (S.tester.features.sync) Sync.verified();
         if (testerResult === 'welcome') welcomeTester(); else if (!cached) resumeLaunch(); // a session found now is a sign-in
       } else if (st === 'none') {
         if (cached) testerSignedOut('expired');
@@ -5619,7 +5879,10 @@ remix = createRemix({
   }
   // Already signed in (passcode or a cached tester): a stash left by an earlier signed-out launch is stale, because
   // replays only follow a sign-in (H10, H12, H15). Then this launch: start/arm/send per launch.js, or, signed out, stash.
-  if (hasCredentials()) takePendingLaunch(LS, Date.now());
+  let accountResume = false;
+  try { accountResume = sessionStorage.getItem('atelier.accountResume') === '1'; sessionStorage.removeItem('atelier.accountResume'); } catch {}
+  if (hasCredentials() && accountResume) resumeLaunch();
+  else if (hasCredentials()) takePendingLaunch(LS, Date.now());
   runLaunch(launch).then(() => {
     if (!asideDraft || input.value.includes(asideDraft.text)) return;
     // Sent: the draft comes back as it was. Not sent (no key, signed out, a held send): it goes back in front of the request.

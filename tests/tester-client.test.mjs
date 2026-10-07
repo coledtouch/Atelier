@@ -42,12 +42,15 @@ test('normalizeMe keeps a clean tester record and rejects anything else', () => 
   const t = normalizeMe(ME({ models: { chat: ['anthropic:claude-opus-5-5', '<script>', 42], image: [], video: ['gemini:veo-3.1-lite-generate-preview'] }, picture: 'javascript:alert(1)' }));
   assert.deepEqual(t.models.chat, ['anthropic:claude-opus-5-5']);
   assert.equal(t.picture, '');
-  assert.deepEqual(t.features, { web: true, video: true, veo: true, helpers: true, profile: true, tts: true, dictation: true });
+  assert.deepEqual(t.features, { web: true, video: true, veo: true, helpers: true, profile: true, tts: true, dictation: true, sync: false });
   assert.equal(t.left, null);
-  // A feature switched off on the server takes its models with it; missing flags default to on.
+  // A feature switched off on the server takes its models with it; legacy model flags default to on.
   const noVeo = normalizeMe(ME({ features: { veo: false } }));
   assert.deepEqual(noVeo.models.video, []);
   assert.equal(noVeo.features.web, true);
+  // Cloud sync is different: an old cache or an unconfigured server must never offer it by default.
+  for (const flag of [undefined, false, 'true', 1]) assert.equal(normalizeMe(ME({ features: { sync: flag } })).features.sync, false);
+  assert.equal(normalizeMe(ME({ features: { sync: true } })).features.sync, true);
   // Dictation (/api/transcribe): the server's me() reports features.dictation; off when no dictation model has its key.
   assert.equal(normalizeMe(ME({ features: { dictation: false } })).features.dictation, false);
   // Read aloud voices: bare ids pass, junk is dropped, tts off takes them away; they are never chat/image/video models.
@@ -190,7 +193,12 @@ test('tester mode never reaches owner surfaces from the client: app.js gates the
   assert.match(app, /function canvaOn\(\) \{ return !S\.tester &&/);
   assert.match(app, /if \(!S\.settings\.passcode \|\| S\.tester \|\| !server\.nvidia\) return;/, 'loadTools is owner-only');
   assert.match(html, /<button type="button" class="chip owner-only" data-settings="connections"/);
-  assert.match(html, /<section class="field-group owner-only">\s*<h4>Available providers<\/h4>/);
+  const ownerSections = [...html.matchAll(/<section class="field-group owner-only">([\s\S]*?)<\/section>/g)].map((match) => match[1]);
+  const diagnostics = ownerSections.find((section) => section.includes('id="advancedDiagnostics"'));
+  assert.ok(diagnostics, 'advanced diagnostics stays inside an owner-only section');
+  assert.match(diagnostics, /<summary>Advanced diagnostics<\/summary>/);
+  assert.match(diagnostics, /<h4>Available providers<\/h4>/);
+  assert.match(diagnostics, /id="provStatus"/);
   assert.match(html, /<section class="field-group owner-only">\s*<h4>Connections<\/h4>/);
   assert.match(html, /class="model-grid owner-only" id="modelFields"/);
   assert.match(html, /class="chip owner-only" id="refreshModels"/);

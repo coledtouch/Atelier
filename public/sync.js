@@ -50,8 +50,8 @@ import {
   FORMAT, MEDIA_SYNC, MEDIA_HELD, TRANSIENT, syncId, validDate, isRev, sha256hex, utf8, utf8Length, fromBase64, base64Length, jsonClone, dehydrate,
   hydrate, mediaKinds, gateHeld, refsOf, refValue, reborn, bornOf, forkEntry, checkView, checkPulledEntry, newRecord, planPull, planPush, pushBodies,
   planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder, fullPrint, blobKind,
-} from './sync-merge.js?v=75';
-import { validateBackup } from './data-safety.js?v=75';
+} from './sync-merge.js?v=76';
+import { validateBackup } from './data-safety.js?v=76';
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 // The owner's choices and the engine's timing, kept together so they are easy to change.
@@ -87,7 +87,15 @@ export const SYNC_CLIENT = Object.freeze({
 // Wi-Fi rule (and Download now) can be checked on a desktop.
 export const CELLULAR_FLAG = 'atelier.syncCellular';
 export const SYNC_BASE = '/api/sync/';
+export const TESTER_SYNC_BASE = '/api/tester/sync/';
 const RUN_LOCK = 'atelier-run:', LEADER_LOCK = 'atelier-sync-leader';
+// Account keys come from a verified identity, never from a prompt or an editable display name. The owner keeps
+// the original names so existing devices resume their saved sync settings and outbox without a migration.
+export function syncNamespace(account = 'owner', scope = '') {
+  if (account === 'owner') return { store: 'atelier-sync', channel: 'atelier-sync', leader: LEADER_LOCK, run: RUN_LOCK };
+  if (!/^[A-Za-z0-9_-]{1,96}$/.test(scope)) throw new TypeError('Sync needs a safe, stable account scope.');
+  return { store: `atelier-sync:${scope}`, channel: `atelier-sync:${scope}`, leader: `${LEADER_LOCK}:${scope}`, run: `${RUN_LOCK}${scope}:` };
+}
 
 // ── copy (ui_spec; the app's curly apostrophe) ──
 export const COPY = Object.freeze({
@@ -102,16 +110,17 @@ export const COPY = Object.freeze({
   deleteUnsynced: ' Changes made here since it last synced can’t be restored.',
   off: 'Off — new changes stay on this device. Your synced threads stay on your server.',
   passcode: 'Paused — your passcode wasn’t accepted. Re-enter it under General.',
+  signIn: 'Paused — sign in to your LinkedIn account again to resume sync.',
   unconfigured: 'Sync isn’t set up on the server yet.',
   disabled: 'Sync is switched off on the server.',
   upgrade: 'Update Atelier on this device to keep syncing.',
   storage: 'Couldn’t save synced changes on this device — its storage may be full.',
   threadTrouble: 'Some threads couldn’t be downloaded — trying again shortly.',
-  footnote: 'Threads you make as the owner sync privately through your Atelier server, behind your passcode. Settings, model choices and theme stay on each device. LinkedIn testers’ threads never leave their device.',
-  wipeSynced: 'Clears threads, media, profile and saved sign-in on this device. Your synced threads stay on your server and download again when you sign in with your passcode.',
+  footnote: 'Threads sync privately to your studio account when sync is enabled. LinkedIn testers choose whether to enable private sync; otherwise their threads stay on this device. Settings, model choices and theme stay on each device.',
+  wipeSynced: 'Clears threads, media, profile and saved sign-in on this device. Your synced threads stay on your server and download again when you sign in to the same account.',
   wipeConfirm: 'Clear Atelier threads, media, profile and saved sign-in on this device? Your synced threads stay on your Atelier server and download again when you sign in. Connected accounts stay too. This can’t be undone on this device.',
   // …while anything is only on this device (images and videos in phase 1, threads that don't sync, unsynced changes)
-  wipeSyncedLocal: 'Clears threads, media, profile and saved sign-in on this device. Export your threads first: images, videos and anything else that’s only on this device can’t be brought back. Synced threads stay on your server and download again when you sign in with your passcode.',
+  wipeSyncedLocal: 'Clears threads, media, profile and saved sign-in on this device. Export your threads first: images, videos and anything else that’s only on this device can’t be brought back. Synced threads stay on your server and download again when you sign in to the same account.',
   wipeConfirmLocal: 'Clear Atelier threads, media, profile and saved sign-in on this device? Export your threads first: what’s only on this device can’t be brought back. Your synced threads stay on your Atelier server and download again when you sign in. Connected accounts stay too.',
   navSynced: 'Threads synced across your devices', navPaused: 'Thread sync paused', navLocal: 'Threads saved on this device',
   removeSynced: 'Remove the threads that are already on your server from this browser? They stay on your server and download again when sync resumes. Threads with images, videos or changes that are only on this device stay here.',
@@ -147,8 +156,8 @@ export function statusLine(s, now = Date.now()) {
   if (!s || !s.on) return s?.owner ? COPY.off : '';
   const p = s.paused;
   if (p) {
-    if (p.reason === 'passcode') return COPY.passcode;
-    if (p.reason === 'lockout') return `Paused — too many wrong passcodes from this network. Trying again at ${clock(p.until || now)}.`;
+    if (p.reason === 'passcode') return s.account === 'tester' ? COPY.signIn : COPY.passcode;
+    if (p.reason === 'lockout') return s.account === 'tester' ? `Paused — too many sign-in attempts. Trying again at ${clock(p.until || now)}.` : `Paused — too many wrong passcodes from this network. Trying again at ${clock(p.until || now)}.`;
     if (p.reason === 'unconfigured') return COPY.unconfigured;
     if (p.reason === 'disabled') return COPY.disabled;
     if (p.reason === 'upgrade') return COPY.upgrade;
@@ -376,12 +385,18 @@ export function patchInPlace(target, source, ids = [], removed = [], { title = f
 //   online(), visible(), toast(msg), dropThumbs(entryIds), persistStorage(), idle(fn), media (MEDIA_SYNC),
 //   validate (validateBackup), base ('/api/sync/'), random, debug }
 export function createSync(deps = {}) {
+  const account = deps.account || 'owner';
+  const names = syncNamespace(account, deps.scope);
+  const accountTester = account === 'tester';
+  const requireConsent = accountTester || Boolean(deps.requireConsent);
   const db = deps.db;
   const store = deps.store || memoryStore();
   const noop = () => {};
   const apiHeaders = deps.apiHeaders || (() => ({}));
-  const isOwner = deps.isOwner || (() => true);
-  const isTester = deps.isTester || (() => false);
+  // This legacy predicate means "this account is verified and allowed to sync". Non-owner accounts must supply it;
+  // a scope alone is not evidence that a LinkedIn cookie or the server's sync feature has been verified.
+  const isOwner = deps.isOwner || (() => account === 'owner');
+  const isTester = accountTester ? (() => false) : (deps.isTester || (() => false));
   const getOpen = deps.getOpen || (() => null);
   const isLive = deps.isLive || (() => false);
   const onApplied = deps.onApplied || deps.onThreads || noop;
@@ -395,7 +410,7 @@ export function createSync(deps = {}) {
   const timers = deps.timers || { setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (t) => clearTimeout(t) };
   const online = deps.online || (() => true), visible = deps.visible || (() => true);
   const toast = deps.toast || noop, dropThumbs = deps.dropThumbs || noop;
-  const media = deps.media || MEDIA_SYNC, validate = deps.validate || validateBackup, base = deps.base || SYNC_BASE;
+  const media = deps.media || MEDIA_SYNC, validate = deps.validate || validateBackup, base = accountTester ? TESTER_SYNC_BASE : (deps.base || SYNC_BASE);
   const mediaTag = `${media.image ? 1 : 0}${media.video ? 1 : 0}`; // cfg.media: the media kinds this device last synced
   const B = Object.freeze({ ...SYNC_CLIENT, ...(deps.budget || {}) }); // the phone budget (tests shrink its sizes)
   const idle = deps.idle || ((fn) => timers.setTimeout(fn, 0));
@@ -406,6 +421,7 @@ export function createSync(deps = {}) {
   let cfg = null, loaded = null, leader = false, stopped = true, releaseLeader = null, leaderAbort = null;
   let proven = false; // the owner proved the passcode in this tab (verified / enable): it may start when settings say on
   let forgotten = false; // Clear this device ran (here or in another tab): this engine never writes again
+  let detached = false; // the account changed: local saves can finish, but this engine never restarts or sends again
   const recs = new Map(), dirty = new Map(), localOnly = new Set(), hidden = new Set(), deleting = new Map(), inbound = new Map(), qKeys = new Set();
   const held = new Map(), deferred = new Set(), pullAfter = new Set(), heldMedia = new Map();
   const mediaMemo = new Map(); // `${thread}\u0001${entry}\u0001${path}` → {s, h}: media hashed this session (exact string)
@@ -539,8 +555,8 @@ export function createSync(deps = {}) {
     if (await store.delIf(`d:${id}`, s).catch(() => false)) { if (dirty.get(id) === s) dirty.delete(id); }
     else { const cur = await store.get(`d:${id}`).catch(() => undefined); if (cur === undefined) dirty.delete(id); else dirty.set(id, cur); }
   }
-  const post = (msg) => { if (forgotten && !msg.forget) return; try { channel?.postMessage(msg); } catch {} };
-  const enabled = () => Boolean(cfg?.enabled) && isOwner();
+  const post = (msg) => { if (detached || (forgotten && !msg.forget)) return; try { channel?.postMessage(msg); } catch {} };
+  const enabled = () => !detached && Boolean(cfg?.enabled) && isOwner();
   const active = () => !stopped && !forgotten && leader && enabled();
   // The thread as IndexedDB holds it: what every plan reads and every merge writes. (An open copy's unsaved change is
   // saved by the app soon after, which marks the thread again.)
@@ -733,7 +749,7 @@ export function createSync(deps = {}) {
     const p = lv && 'paused' in lv ? lv.paused || null : pausedNow();
     const st = !cfg?.enabled ? 'off' : p ? 'paused' : !online() ? 'offline' : (lv?.state || (phase === 'syncing' ? 'syncing' : lastError ? 'error' : 'idle'));
     return {
-      owner: isOwner(), tester: isTester(), on: Boolean(cfg?.enabled), asked: Boolean(cfg?.asked), mode: cfg?.mode || 'all', state: st, paused: p,
+      owner: isOwner(), tester: isTester(), account, on: Boolean(cfg?.enabled), asked: Boolean(cfg?.asked), mode: cfg?.mode || 'all', state: st, paused: p,
       errorKind: st === 'error' ? (lv ? lv.errorKind || null : lastError) : null,
       progress: lv ? lv.progress : progress, lastOkAt: Math.max(cfg?.lastOkAt || 0, lv?.lastOkAt || 0), retryAt,
       ...c, server: lv?.server || server, quotaFull: lv ? Boolean(lv.quotaFull) : quotaFull,
@@ -812,7 +828,7 @@ export function createSync(deps = {}) {
     if (!locks?.request) { becomeLeader(); return; }
     const ctl = new AbortController();
     leaderAbort = ctl;
-    locks.request(LEADER_LOCK, { signal: ctl.signal }, () => {
+    locks.request(names.leader, { signal: ctl.signal }, () => {
       if (leaderAbort === ctl) leaderAbort = null;
       if (stopped) return undefined;
       becomeLeader();
@@ -828,7 +844,7 @@ export function createSync(deps = {}) {
     kick('leader');
   }
   function start() {
-    if (!stopped || forgotten) return;
+    if (!stopped || forgotten || detached) return;
     stopped = false;
     campaign();
     schedulePoll();
@@ -844,7 +860,7 @@ export function createSync(deps = {}) {
   }
   async function onMessage(ev) {
     const m = ev && typeof ev === 'object' && 'data' in ev ? ev.data : ev;
-    if (!m || typeof m !== 'object' || forgotten) return;
+    if (!m || typeof m !== 'object' || forgotten || detached) return;
     if (m.forget) { cleared(); return; }
     // A tester-mode tab's threads never upload: every tab learns it at once (the leader reads 'lo:' again too).
     if (Array.isArray(m.localOnly)) for (const id of m.localOnly) if (syncId(id)) localOnly.add(id);
@@ -951,11 +967,13 @@ export function createSync(deps = {}) {
   // 403 owner_only / tester_* (a tester cookie answered for a wrong passcode) → pause + Halt; 429 → lockout pause +
   // Halt; 503 unconfigured/disabled → hourly pause + Halt; other 5xx → Retry unless allowed.
   async function api(method, path, { json, body, type, headers = {}, keepalive = false, allow = null, bytes = false, blob = false, timeout = SYNC_CLIENT.requestTimeoutMs, signal = null } = {}) {
-    if (forgotten) throw new Halt('cleared');
+    if (forgotten || detached) throw new Halt(forgotten ? 'cleared' : 'account changed');
     const p = pausedNow();
     if (p && HARD.has(p.reason)) throw new Halt(p.reason);
     const h = { ...(apiHeaders() || {}), ...headers };
-    if (!h['x-app-pass']) { await pauseFor('passcode'); throw new Halt('no passcode'); }
+    if (accountTester) {
+      for (const k of Object.keys(h)) if (k.toLowerCase() === 'x-app-pass') delete h[k];
+    } else if (!h['x-app-pass']) { await pauseFor('passcode'); throw new Halt('no passcode'); }
     // A write that can change the thread list (a push, a delete, a restore — even one whose answer never arrives) makes
     // the cached index stale, though the list may later return to exactly what it was (the server losing a thread this
     // device just pushed): the next index read is a full one, so pullAll notices the loss (serverLost) instead of
@@ -963,7 +981,7 @@ export function createSync(deps = {}) {
     // listWrites counts them, so an index read already in flight when one starts (a restore from Recently deleted runs
     // outside the cycle) doesn't put back the ETag of a list from before that write.
     if (method !== 'GET' && (path.startsWith('thread/') || path.startsWith('trash/'))) { indexEtag = null; listWrites++; }
-    const init = { method, headers: h, cache: 'no-store' };
+    const init = { method, headers: h, cache: 'no-store', ...(accountTester ? { credentials: 'same-origin' } : {}) };
     if (json !== undefined) { init.body = JSON.stringify(json); h['content-type'] = 'application/json'; }
     else if (body !== undefined) { init.body = body; h['content-type'] = type; }
     else delete h['content-type'];
@@ -1021,7 +1039,7 @@ export function createSync(deps = {}) {
     const set = new Set();
     try {
       const q = await locks?.query?.();
-      for (const l of [...(q?.held || []), ...(q?.pending || [])]) if (typeof l?.name === 'string' && l.name.startsWith(RUN_LOCK)) set.add(l.name.slice(RUN_LOCK.length));
+      for (const l of [...(q?.held || []), ...(q?.pending || [])]) if (typeof l?.name === 'string' && l.name.startsWith(names.run)) set.add(l.name.slice(names.run.length));
     } catch { set.unknown = true; } // the locks couldn't be read: nobody may be called an orphan from this
     return set;
   }
@@ -2168,7 +2186,7 @@ export function createSync(deps = {}) {
   // sync turns on as it would anywhere else. → 'ask' | 'on'
   async function askOwner() {
     const n = (await db.keys().catch(() => [])).length;
-    if (n === 0) { await enable('all'); firstToast(); return 'on'; }
+    if (n === 0 && !requireConsent) { await enable('all'); firstToast(); return 'on'; }
     if (deps.onAsk) safe(() => deps.onAsk(n));
     emit();
     return 'ask';
@@ -2176,22 +2194,24 @@ export function createSync(deps = {}) {
   // The first-run message (once a session): it says where progress is, so "Bringing in…" isn't shown after it.
   function firstToast() { toldFirst = true; toast(COPY.firstEnable); }
   // An owner sign-in about to turn sync on with its first-run message (app.js leaves out its own "You're in" then).
-  const firstRunAhead = () => Boolean(SYNC_CLIENT.autoEnable && loaded && !cfg?.asked && !hasTraces() && testerMarks !== true && isOwner());
+  const firstRunAhead = () => Boolean(!requireConsent && SYNC_CLIENT.autoEnable && loaded && !cfg?.asked && !hasTraces() && testerMarks !== true && isOwner());
   // The first-sync question answered here — or closed (only new threads). Another tab may have answered it already:
   // that choice stands. → true when this answer was taken.
   async function answer(mode) {
     await ready();
     await refreshCfg();
     if (cfg?.asked) { emit(); return false; }
+    if (mode === 'off') { await disable(); return true; }
     await enable(mode);
     return true;
   }
   async function verified() {
-    if (!isOwner() || forgotten) return;
+    if (!isOwner() || forgotten || detached) return;
     await ready();
     await refreshCfg();
     proven = true;
     if (!cfg?.asked) {
+      if (requireConsent) { await askOwner(); return; }
       if (await tracesFound()) { await askOwner(); return; }
       if (!SYNC_CLIENT.autoEnable) { emit(); return; }
       await enable('all');
@@ -2206,11 +2226,11 @@ export function createSync(deps = {}) {
   }
   // The Settings switch turned on: asks first wherever verified() would (tester traces), else turns sync on.
   async function turnOn() {
-    if (!isOwner() || forgotten) return 'no';
+    if (!isOwner() || forgotten || detached) return 'no';
     await ready();
     await refreshCfg();
     proven = true;
-    if (!cfg?.asked && (await tracesFound())) return askOwner();
+    if (!cfg?.asked && (requireConsent || (await tracesFound()))) return askOwner();
     await enable(cfg?.mode || 'all');
     return 'on';
   }
@@ -2230,7 +2250,7 @@ export function createSync(deps = {}) {
   }
   function kick(reason = 'kick') {
     if (reason === 'offline') { emitSoon(); return null; } // every tab reads its own navigator.onLine: the status says so at once
-    if (stopped || forgotten || !cfg?.enabled || !isOwner()) return null;
+    if (stopped || forgotten || detached || !cfg?.enabled || !isOwner()) return null;
     if (!leader) { post({ kick: reason }); return null; }
     if (reason === 'online' || reason === 'now') retryBlobs(); // back online, or Sync now: failed downloads go again
     const t = now();
@@ -2499,7 +2519,7 @@ export function createSync(deps = {}) {
     ownRuns.add(entryId); // a refresh of the open copy never touches it while it generates here
     if (!locks?.request) return () => { ownRuns.delete(entryId); };
     let release = null, done = false;
-    locks.request(`${RUN_LOCK}${entryId}`, () => (done ? undefined : new Promise((res) => { release = res; }))).catch(() => {});
+    locks.request(`${names.run}${entryId}`, () => (done ? undefined : new Promise((res) => { release = res; }))).catch(() => {});
     return () => { done = true; ownRuns.delete(entryId); release?.(); };
   }
   function dropState() {
@@ -2530,7 +2550,7 @@ export function createSync(deps = {}) {
   }
 
   return {
-    load: ready, start, stop, verified, enable, disable, turnOn, answer, hasTraces: tracesFound, firstRunAhead,
+    load: ready, start, stop, destroy: () => { detached = true; stop(); channel?.removeEventListener?.('message', heard); if (channel && channel.onmessage === heard) channel.onmessage = null; }, verified, enable, disable, turnOn, answer, hasTraces: tracesFound, firstRunAhead,
     pause: (reason) => pauseFor(reason === 'lockout' ? 'lockout' : reason, reason === 'lockout' ? now() + SYNC_CLIENT.lockoutMs : 0),
     kick, run, cycle: (opts) => run({ pull: true, ...opts }), pullNow: () => run({ pull: true }), pushNow: () => run({ pull: false }),
     pushThread: (id) => serial(() => pushThread(id)), pullThread: (id, opts) => serial(() => pullThread(id, {}, opts)),
@@ -2566,7 +2586,7 @@ export function createSync(deps = {}) {
 export const createEngine = createSync;
 
 // ── the browser singleton (app.js) ──
-let engine = null, ui = null, bootDeps = null;
+let engine = null, ui = null, bootDeps = null, disconnect = null;
 const early = [];
 const inflight = new Set();
 // The DB wrapper: every successful put marks its threads dirty (and localOnly in tester mode) — no hashing on this hot
@@ -2576,18 +2596,23 @@ const inflight = new Set();
 // get tells the engine what each thread object read (noteRead), and put saves through it (saveThread), so the open
 // thread is refreshed in place when another tab saves it, and a save never writes an older copy over another tab's work.
 export function wrapDb(rawDB) {
-  const note = (ids, objs) => { if (engine) engine.noteWrite(ids, objs); else early.push(...ids); };
+  // Capture the engine when an operation starts. A put completing after sign-out must never mark the next account's
+  // outbox or refresh its open thread. Early writes are tied to their raw database for the same reason.
+  const current = () => (bootDeps?.rawDB === rawDB ? engine : null);
+  const note = (eng, ids, objs) => { if (eng) eng.noteWrite(ids, objs); else early.push({ rawDB, ids }); };
   const track = (p) => { inflight.add(p); p.then(() => inflight.delete(p), () => inflight.delete(p)); return p; };
-  const intent = (ids) => { engine?.intent(ids).catch(() => {}); };
-  const saving = (ts) => ts.map((t) => engine?.noteSaving(t)); // committed: each snapshot counts once the write has landed
-  const failed = (ts) => (err) => { for (const t of ts) engine?.noteSaveFailed(t); throw err; };
+  const intent = (eng, ids) => { eng?.intent(ids).catch(() => {}); };
   return {
     ...rawDB,
-    get: (id) => rawDB.get(id).then((t) => { engine?.noteRead(t); return t; }),
-    put: (t) => { intent([t?.id]); return track((engine ? engine.saveThread(t) : rawDB.put(t)).then((r) => { note([t?.id], [t]); return r; })); },
-    putAll: (threads) => { intent(threads.map((t) => t?.id)); const snaps = saving(threads); return track(rawDB.putAll(threads).then((r) => { threads.forEach((t, i) => engine?.noteSaved(t, snaps[i])); note(threads.map((t) => t?.id), threads); return r; }, failed(threads))); },
-    del: (id) => rawDB.del(id).then((r) => { engine?.noteHidden(id); return r; }),
-    clear: () => { engine?.stop(); return rawDB.clear(); },
+    get: (id) => { const eng = current(); return rawDB.get(id).then((t) => { eng?.noteRead(t); return t; }); },
+    put: (t) => { const eng = current(); intent(eng, [t?.id]); return track((eng ? eng.saveThread(t) : rawDB.put(t)).then((r) => { note(eng, [t?.id], [t]); return r; })); },
+    putAll: (threads) => {
+      const eng = current(); intent(eng, threads.map((t) => t?.id));
+      const snaps = threads.map((t) => eng?.noteSaving(t));
+      return track(rawDB.putAll(threads).then((r) => { threads.forEach((t, i) => eng?.noteSaved(t, snaps[i])); note(eng, threads.map((t) => t?.id), threads); return r; }, (err) => { for (const t of threads) eng?.noteSaveFailed(t); throw err; }));
+    },
+    del: (id) => { const eng = current(); return rawDB.del(id).then((r) => { eng?.noteHidden(id); return r; }); },
+    clear: () => { const eng = current(); eng?.stop(); return rawDB.clear(); },
   };
 }
 // Called once at boot. deps: { rawDB, uid, apiHeaders, isOwner, isTester, hasTesterTraces, getOpen, isLive, onApplied,
@@ -2595,30 +2620,48 @@ export function wrapDb(rawDB) {
 export function init(deps) {
   if (engine) return engine;
   bootDeps = deps;
-  const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('atelier-sync') : null;
+  const names = syncNamespace(deps.account || 'owner', deps.scope);
+  const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel(names.channel) : null;
   // The first-run message says where progress is: "synced" never replaces it before it could be read.
   let firstAt = 0;
   const toast = (msg, o) => {
+    if (engine !== created) return;
     if (msg === COPY.firstEnable) firstAt = Date.now();
     const wait = msg === COPY.firstDone && firstAt ? firstAt + FIRST_TOAST_MS - Date.now() : 0;
-    if (wait > 0) setTimeout(() => deps.toast?.(msg, o), wait); else deps.toast?.(msg, o);
+    if (wait > 0) setTimeout(() => { if (engine === created) deps.toast?.(msg, o); }, wait); else deps.toast?.(msg, o);
   };
-  engine = createSync({
-    ...deps, toast, db: deps.rawDB, store: idbStore(), fetch: (...a) => fetch(...a), locks: navigator.locks || null, channel,
+  const created = createSync({
+    ...deps, toast, db: deps.rawDB, store: deps.store || idbStore(names.store), fetch: (...a) => fetch(...a), locks: navigator.locks || null, channel,
+    getOpen: () => (engine === created ? deps.getOpen?.() || null : null),
+    onApplied: (change) => { if (engine === created) (deps.onApplied || deps.onThreads)?.(change); },
+    onCleared: () => { if (engine === created) deps.onCleared?.(); },
     online: () => navigator.onLine !== false, visible: () => document.visibilityState === 'visible',
     persistStorage: () => navigator.storage?.persist?.().catch(() => {}),
     connection: () => navigator.connection || null,
     forceCellular: () => { try { return localStorage.getItem(CELLULAR_FLAG) === '1'; } catch { return false; } },
     estimate: typeof navigator.storage?.estimate === 'function' ? () => navigator.storage.estimate() : null,
     idle: (fn) => (typeof requestIdleCallback === 'function' ? requestIdleCallback(() => fn(), { timeout: 3000 }) : setTimeout(fn, 200)),
-    onStatus: (s) => { ui?.render(s); deps.onStatus?.(s); },
-    onAsk: (n) => ui?.ask(n),
+    onStatus: (s) => { if (engine !== created) return; ui?.render(s); deps.onStatus?.(s); },
+    onAsk: (n) => { if (engine === created) ui?.ask(n); },
   });
-  if (early.length) engine.noteWrite(early.splice(0));
-  navigator.connection?.addEventListener?.('change', () => engine.netChanged());
+  engine = created;
+  const ownEarly = early.splice(0).filter((write) => write.rawDB === deps.rawDB).flatMap((write) => write.ids);
+  if (ownEarly.length) engine.noteWrite(ownEarly);
+  const networkChanged = () => created.netChanged();
+  navigator.connection?.addEventListener?.('change', networkChanged);
+  disconnect = () => { navigator.connection?.removeEventListener?.('change', networkChanged); channel?.close?.(); };
   ui = bindUi(engine, deps);
-  engine.load().then(() => engine.emit(), () => {});
+  created.load().then(() => { if (engine === created) created.emit(); }, () => {});
   return engine;
+}
+// Stop the old account before the app reloads into another one. Successful writes already in flight may still save
+// to their original database, but can no longer trigger old UI or send a request under the new identity.
+export function suspend() {
+  if (engine?.destroy) engine.destroy(); else engine?.stop();
+  ui?.destroy?.();
+  disconnect?.();
+  engine = null; ui = null; bootDeps = null; disconnect = null;
+  early.length = 0;
 }
 const FIRST_TOAST_MS = 6000;
 const warnOut = (err) => console.warn('[atelier] sync:', err?.message || err);
@@ -2639,7 +2682,7 @@ export const badge = (thread) => engine?.badge(thread) || '';
 export const deleteCopy = (id) => (engine ? engine.deleteCopy(id) : Promise.resolve('Delete this thread?'));
 export const deleteThread = (id) => (engine ? engine.deleteThread(id) : bootDeps?.rawDB?.del(id));
 export const pendingCount = () => (engine ? engine.pendingCount().catch(() => 0) : Promise.resolve(0));
-export const forget = () => (engine ? engine.forget() : idbStore().destroy());
+export const forget = () => (engine ? engine.forget() : idbStore(syncNamespace(bootDeps?.account || 'owner', bootDeps?.scope).store).destroy());
 export const noteImported = (n) => Boolean(engine?.noteImported(n));
 export const status = () => engine?.status() || null;
 export function holdRunLock(entryId) {
@@ -2647,7 +2690,8 @@ export function holdRunLock(entryId) {
   const L = globalThis.navigator?.locks;
   if (!L?.request || !syncId(entryId)) return () => {};
   let release = null, done = false;
-  L.request(`${RUN_LOCK}${entryId}`, () => (done ? undefined : new Promise((res) => { release = res; }))).catch(() => {});
+  const names = syncNamespace(bootDeps?.account || 'owner', bootDeps?.scope);
+  L.request(`${names.run}${entryId}`, () => (done ? undefined : new Promise((res) => { release = res; }))).catch(() => {});
   return () => { done = true; release?.(); };
 }
 
@@ -2655,22 +2699,26 @@ export function holdRunLock(entryId) {
 // integration notes). Every element is optional: a missing one is skipped. (Exported for tests, with a stand-in doc.) ──
 export function bindUi(eng, deps, doc = globalThis.document) {
   const $ = (s) => doc.querySelector(s);
+  const accountTester = deps.account === 'tester';
+  const listeners = [];
+  const listen = (target, type, fn) => { if (!target?.addEventListener) return; target.addEventListener(type, fn); listeners.push([target, type, fn]); };
   const el = {
     block: $('#syncBlock'), toggle: $('#syncToggle'), status: $('#syncStatus'), counts: $('#syncCounts'), now: $('#syncNow'),
     trash: $('#syncTrash'), older: $('#syncUploadOld'), forget: $('#syncForget'), nav: $('#navLocal'), wipe: $('#wipeHint'),
-    first: $('#syncFirst'), firstBody: $('#syncFirstBody'), firstNew: $('#syncFirstNew'), firstAll: $('#syncFirstAll'), firstExport: $('#syncFirstExport'),
+    first: $('#syncFirst'), firstTitle: $('#syncFirstTitle'), firstBody: $('#syncFirstBody'), firstNew: $('#syncFirstNew'), firstAll: $('#syncFirstAll'), firstExport: $('#syncFirstExport'),
     trashDialog: $('#trashDialog'), trashList: $('#trashList'), trashClose: $('#trashClose'), note: $('#syncNote'),
     dlNow: $('#syncDownloadNow'), cellRow: $('#syncCellRow'), cell: $('#syncCell'),
   };
   const wipeDefault = el.wipe?.textContent || '', navDefault = el.nav?.textContent || COPY.navLocal;
-  let last = null, answered = false;
+  let last = null, answered = false, destroyed = false;
   const toast = deps.toast || (() => {});
   function render(s = eng.status()) {
+    if (destroyed) return;
     last = s;
     const refused = ['passcode', 'lockout'].includes(s.paused?.reason); // nothing is sent until the passcode is proven
     if (el.block) el.block.hidden = s.tester || !(s.owner || s.on);
     if (el.toggle) { el.toggle.checked = s.on; el.toggle.disabled = !s.owner; }
-    if (el.status) el.status.textContent = statusLine(s);
+    if (el.status) el.status.textContent = statusLine(accountTester ? { ...s, account: 'tester' } : s);
     if (el.counts) { const c = countsLine(s); el.counts.textContent = c; el.counts.hidden = !c; }
     if (el.now) { el.now.hidden = !s.on; el.now.disabled = s.state === 'syncing' || s.state === 'offline' || refused; }
     if (el.trash) { el.trash.hidden = !s.on || refused; el.trash.textContent = s.server?.trash ? `Recently deleted (${s.server.trash})` : 'Recently deleted'; }
@@ -2689,6 +2737,7 @@ export function bindUi(eng, deps, doc = globalThis.document) {
   // #syncNote over the open thread: "2 items in this thread are still downloading · Waiting for Wi-Fi" + Download now.
   let noteKey = '';
   function renderNote() {
+    if (destroyed) return;
     const n = el.note;
     if (!n) return;
     const tid = deps.getOpen?.()?.id;
@@ -2712,17 +2761,18 @@ export function bindUi(eng, deps, doc = globalThis.document) {
     n.replaceChildren(...kids);
   }
   // "Up to date · synced 2 min ago" stays true while Settings is open.
-  setInterval(() => { if (last && el.block && !el.block.hidden && el.block.offsetParent) render(eng.status()); }, 30_000)?.unref?.();
-  el.toggle?.addEventListener('change', () => {
+  const refreshTimer = setInterval(() => { if (last && el.block && !el.block.hidden && el.block.offsetParent) render(eng.status()); }, 30_000);
+  refreshTimer?.unref?.();
+  listen(el.toggle, 'change', () => {
     // On: the engine asks first on a browser with tester traces (the switch stays off until the owner chooses).
     if (el.toggle.checked) eng.turnOn().then(() => render(), warnOut);
     else eng.disable().catch(warnOut);
   });
-  el.now?.addEventListener('click', () => { eng.kick('now'); });
-  el.dlNow?.addEventListener('click', () => { eng.downloadNow()?.catch?.(warnOut); });
-  el.cell?.addEventListener('change', () => { eng.setCellular(el.cell.checked).catch(warnOut); });
-  el.older?.addEventListener('click', () => { eng.uploadOlder().catch(warnOut); });
-  el.forget?.addEventListener('click', async () => {
+  listen(el.now, 'click', () => { eng.kick('now'); });
+  listen(el.dlNow, 'click', () => { eng.downloadNow()?.catch?.(warnOut); });
+  listen(el.cell, 'change', () => { eng.setCellular(el.cell.checked).catch(warnOut); });
+  listen(el.older, 'click', () => { eng.uploadOlder().catch(warnOut); });
+  listen(el.forget, 'click', async () => {
     if (!confirm(COPY.removeSynced)) return;
     const r = await eng.removeSynced().catch((err) => { toast(err.message || 'Couldn’t remove them. Try again.', { error: true }); return null; });
     if (!r) return;
@@ -2733,18 +2783,26 @@ export function bindUi(eng, deps, doc = globalThis.document) {
   // First-sync dialog: shown once, only on a browser with tester traces. Closing it without a choice = new threads only
   // (unless another tab answered it meanwhile: eng.answer leaves that choice alone).
   async function ask(n) {
-    if (!el.first) return eng.answer('new');
+    if (destroyed) return;
+    if (!el.first) return eng.answer(accountTester ? 'off' : 'new');
     answered = false;
-    if (el.firstBody) el.firstBody.textContent = `This browser was also used for LinkedIn tester sign-in, so ${n === 1 ? 'the thread here' : `some of the ${n} threads here`} may not be yours. Choose what to upload. Threads from your other devices download either way.`;
-    if (el.firstAll) el.firstAll.textContent = n === 1 ? 'Upload the thread' : `Upload all ${n} threads`;
+    if (accountTester) {
+      if (el.firstTitle) el.firstTitle.textContent = 'Sync your threads?';
+      if (el.firstBody) el.firstBody.textContent = 'Sync threads privately to this LinkedIn account? Your threads and creations will be stored in Atelier’s private storage so you can continue on another device. You can turn sync off in Settings → Your data.';
+      if (el.firstNew) el.firstNew.textContent = 'Keep on this device';
+      if (el.firstAll) el.firstAll.textContent = 'Enable private sync';
+    } else {
+      if (el.firstBody) el.firstBody.textContent = `This browser was also used for LinkedIn tester sign-in, so ${n === 1 ? 'the thread here' : `some of the ${n} threads here`} may not be yours. Choose what to upload. Threads from your other devices download either way.`;
+      if (el.firstAll) el.firstAll.textContent = n === 1 ? 'Upload the thread' : `Upload all ${n} threads`;
+    }
     if (!el.first.open) el.first.showModal();
     el.firstNew?.focus();
   }
   const choose = (mode) => { answered = true; el.first?.close(); eng.answer(mode).catch(warnOut); };
-  el.firstNew?.addEventListener('click', () => choose('new'));
-  el.firstAll?.addEventListener('click', () => choose('all'));
-  el.firstExport?.addEventListener('click', () => { doc.querySelector('#exportBtn')?.click(); });
-  el.first?.addEventListener('close', () => { if (!answered) { answered = true; eng.answer('new').catch(warnOut); } });
+  listen(el.firstNew, 'click', () => choose(accountTester ? 'off' : 'new'));
+  listen(el.firstAll, 'click', () => choose('all'));
+  listen(el.firstExport, 'click', () => { doc.querySelector('#exportBtn')?.click(); });
+  listen(el.first, 'close', () => { if (!answered) { answered = true; eng.answer(accountTester ? 'off' : 'new').catch(warnOut); } });
 
   // Recently deleted.
   async function openTrash() {
@@ -2783,8 +2841,14 @@ export function bindUi(eng, deps, doc = globalThis.document) {
     }));
   }
   function row(text) { const li = doc.createElement('li'); li.className = 'trash-empty hint'; li.textContent = text; return li; }
-  el.trash?.addEventListener('click', openTrash);
-  el.trashClose?.addEventListener('click', () => el.trashDialog?.close());
-  el.trashDialog?.addEventListener('click', (ev) => { if (ev.target === el.trashDialog) el.trashDialog.close(); });
-  return { render, ask, openTrash, renderNote };
+  listen(el.trash, 'click', openTrash);
+  listen(el.trashClose, 'click', () => el.trashDialog?.close());
+  listen(el.trashDialog, 'click', (ev) => { if (ev.target === el.trashDialog) el.trashDialog.close(); });
+  return { render, ask, openTrash, renderNote, destroy() {
+    destroyed = true; answered = true;
+    clearInterval(refreshTimer);
+    for (const [target, type, fn] of listeners) target.removeEventListener?.(type, fn);
+    if (el.first?.open) el.first.close();
+    if (el.trashDialog?.open) el.trashDialog.close();
+  } };
 }

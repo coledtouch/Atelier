@@ -41,9 +41,9 @@ export function sqlCtx() {
 }
 
 // A real Ledger + its namespace binding. ns.calls lists every RPC method called through the binding.
-export function makeLedger() {
+export function makeLedger(env = {}) {
   const shim = sqlCtx();
-  const ledger = new Ledger(shim.ctx, {});
+  const ledger = new Ledger(shim.ctx, env);
   const calls = [];
   const stub = new Proxy({}, {
     get(_, name) {

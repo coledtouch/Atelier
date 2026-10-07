@@ -3,32 +3,85 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { Readable } from 'node:stream';
+import { handleFeedback } from '../src/feedback.js';
+import { cleanProfile, EMPTY_PROFILE } from '../src/tester/profile.js';
 const root = resolve('public');
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
-// REVIEW_SYNC=1: the real src/sync.js over one in-memory R2 (tests/fake-r2.mjs), shared by every browser profile on
-// this port; restarting the fixture empties it. workerRequest gives a body with a Content-Length the known length the
+// REVIEW_SYNC=1 enables owner sync; REVIEW_TESTER=<subject> enables simulated tester sign-in and private sync.
+// Both run the real src/sync.js over separate account buckets in memory (tests/fake-r2.mjs), shared by every browser
+// profile on this port; restarting empties them. workerRequest gives a body with a Content-Length the known length the
 // Workers runtime would (the strict fake, like R2, refuses a stream without one).
-let syncEnv = null;
-async function reviewSync(req, res, url) {
+const syncEnvs = new Map(), profiles = new Map(), feedback = new Map();
+const fixtureTester = process.env.REVIEW_TESTER || '';
+let testerActive = Boolean(fixtureTester);
+const feedbackEnv = { ATELIER_KV: {
+  async get(key) { return feedback.get(key) || null; },
+  async put(key, value) { feedback.set(key, value); },
+  async delete(key) { feedback.delete(key); },
+  async list({ prefix = '', limit = 1000 } = {}) { return { keys: [...feedback.keys()].filter((key) => key.startsWith(prefix)).sort().slice(0, limit).map((name) => ({ name })) }; },
+} };
+const fixtureMe = () => ({
+  sub: fixtureTester, name: 'Review tester', email: 'review@example.test', picture: '',
+  models: { chat: ['anthropic:claude-sonnet-5-5', 'openai:gpt-6.1-sol'], image: ['openai:gpt-image-2.5-flare', 'openai:gpt-image-2.5-sunburst'], video: ['gemini:veo-3.1-lite-generate-preview'], tts: ['atelier'] },
+  features: { web: true, video: true, veo: true, helpers: true, profile: true, tts: true, dictation: true, sync: true },
+  allowance: { day: { spent: 0, reserved: 0, limit: 5_000_000 }, month: { spent: 0, reserved: 0, limit: 50_000_000 }, pool: { spent: 0, reserved: 0, limit: 100_000_000 } },
+  pool: { paused: false, preview: false, spotsLeft: 24 },
+});
+const fixtureIdentity = (req) => req.headers['x-app-pass'] === 'review-only' ? { role: 'owner' } : testerActive ? { role: 'tester', sub: fixtureTester } : null;
+function workerRequest(req, url) {
+  const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : Readable.toWeb(req);
+  return new Request(url.href, { method: req.method, headers: Object.entries(req.headers).filter(([, v]) => typeof v === 'string'), body, ...(body ? { duplex: 'half' } : {}) });
+}
+async function writeResponse(res, response) {
+  res.statusCode = response.status;
+  response.headers.forEach((v, k) => res.setHeader(k, v));
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (response.body) for await (const chunk of response.body) res.write(chunk);
+  res.end();
+}
+async function reviewSync(req, res, url, account = 'owner') {
   const [{ handleSync }, { fakeR2, workerRequest }] = await Promise.all([import('../src/sync.js'), import('../tests/fake-r2.mjs')]);
-  syncEnv ||= { SYNC_BUCKET: fakeR2(), SYNC_QUOTA_BYTES: '53687091200' };
+  if (!syncEnvs.has(account)) syncEnvs.set(account, { SYNC_BUCKET: fakeR2(), SYNC_QUOTA_BYTES: account === 'owner' ? '53687091200' : '1073741824' });
+  const syncEnv = syncEnvs.get(account);
   const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : Readable.toWeb(req);
   const headers = Object.entries(req.headers).filter(([, v]) => typeof v === 'string');
-  const r = await handleSync(workerRequest(url.href, { method: req.method, headers, body, ...(body ? { duplex: 'half' } : {}) }), syncEnv, url, url.pathname.slice('/api/'.length));
-  res.statusCode = r.status;
-  r.headers.forEach((v, k) => res.setHeader(k, v));
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  if (r.body) for await (const chunk of r.body) res.write(chunk);
-  res.end();
+  const suffix = url.pathname.startsWith('/api/tester/sync/') ? url.pathname.slice('/api/tester/sync/'.length) : url.pathname.replace(/^\/api\/sync\/?/, '');
+  const r = await handleSync(workerRequest(url.href, { method: req.method, headers, body, ...(body ? { duplex: 'half' } : {}) }), syncEnv, suffix);
+  return writeResponse(res, r);
 }
 createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   res.setHeader('Cache-Control', 'no-store');
   if (url.pathname.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
-    if (url.pathname === '/api/health') return res.end(JSON.stringify({ server: { nvidia: true, ...(process.env.REVIEW_STT ? { openai: true } : {}) } }));
-    if (req.headers['x-app-pass'] !== 'review-only') { res.statusCode = 401; return res.end('{"error":"Wrong passcode"}'); }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (url.pathname === '/api/health') return res.end(JSON.stringify({ server: { nvidia: true, ...(process.env.REVIEW_STT || fixtureTester ? { openai: true } : {}), ...(fixtureTester ? { anthropic: true, gemini: true } : {}) } }));
+    if (url.pathname === '/api/li/spots') return res.end('{"spotsLeft":24,"cap":25,"paused":false}');
+    // REVIEW_TESTER=<subject> is a local, simulated session. No LinkedIn call or production cookie is used.
+    if (url.pathname === '/api/li/start' && fixtureTester) { testerActive = true; res.statusCode = 303; res.setHeader('Location', '/?tester=welcome'); return res.end(); }
+    if (url.pathname === '/api/li/logout' && req.method === 'POST') { testerActive = false; res.statusCode = 204; return res.end(); }
+    if (url.pathname === '/api/tester/me') { if (!testerActive) { res.statusCode = 401; return res.end('{"error":"No local tester session.","code":"tester_signin"}'); } return res.end(JSON.stringify(fixtureMe())); }
+    const identity = fixtureIdentity(req);
+    if (!identity) { res.statusCode = 401; return res.end('{"error":"Wrong passcode"}'); }
+    if (url.pathname === '/api/feedback') return writeResponse(res, await handleFeedback(workerRequest(req, url), feedbackEnv, identity));
+    if (url.pathname === '/api/tester/profile') {
+      if (identity.role !== 'tester') { res.statusCode = 403; return res.end('{"error":"Use the local tester session."}'); }
+      if (req.method === 'GET') return res.end(JSON.stringify(profiles.get(identity.sub) || EMPTY_PROFILE));
+      if (req.method === 'PUT') {
+        const parts = []; for await (const chunk of req) parts.push(chunk);
+        let profile;
+        try { profile = cleanProfile(JSON.parse(Buffer.concat(parts).toString())); } catch {}
+        if (!profile) { res.statusCode = 400; return res.end('{"error":"Bad profile."}'); }
+        profiles.set(identity.sub, profile); return res.end('{"ok":true}');
+      }
+      res.statusCode = 405; return res.end('{"error":"Use GET or PUT."}');
+    }
+    if (url.pathname.startsWith('/api/tester/sync/')) {
+      if (identity.role !== 'tester') { res.statusCode = 403; return res.end('{"error":"Use the local tester session."}'); }
+      return reviewSync(req, res, url, `tester:${identity.sub}`);
+    }
     if (url.pathname === '/api/sync' || url.pathname.startsWith('/api/sync/')) {
+      if (identity.role !== 'owner') { res.statusCode = 403; return res.end('{"error":"Use the local owner passcode."}'); }
       if (!process.env.REVIEW_SYNC) { res.statusCode = 503; return res.end('{"error":"Sync isn’t set up on the server yet.","code":"sync_unconfigured"}'); }
       return reviewSync(req, res, url);
     }
@@ -50,7 +103,10 @@ createServer(async (req, res) => {
       const title = url.searchParams.get('title') || 'Domus Aurea';
       return res.end(JSON.stringify({ v: 1, found: true, kind: 'article', via: search ? 'search' : q.includes('(') ? 'inner' : 'title', lang: 'en', dir: 'ltr', query: raw, title, description: 'Roman palace (fixture)', extract: 'Local fixture summary. No Wikipedia call was made. A third sentence checks the three-line clamp on phones and the four-line clamp on desktop.', trimmed: true, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`, image: q.includes('plain') ? null : img, others: search ? [{ title: 'Palace Tomb', description: 'Fixture alternative' }, { title: 'Nero', description: 'Roman emperor' }] : [], license: lic }));
     }
-    if (url.pathname === '/api/me') return res.end('{}');
+    if (url.pathname === '/api/me') {
+      if (identity.role !== 'owner') { res.statusCode = 403; return res.end('{"error":"Use the local owner passcode."}'); }
+      return res.end('{}');
+    }
     if (url.pathname === '/api/tools') return res.end('{"services":{},"list":[]}');
     if (url.pathname === '/api/relay/status') return res.end('{"online":false}');
     if (url.pathname === '/api/transcribe' && req.method === 'POST') { // dictation stub: REVIEW_STT=ok | busy | down | format | slow | empty
@@ -97,4 +153,4 @@ createServer(async (req, res) => {
     res.setHeader('Content-Type', mime[extname(file)] || 'application/octet-stream');
     res.end(await readFile(file));
   } catch { res.statusCode = 404; res.end('Not found'); }
-}).listen(Number(process.env.REVIEW_PORT) || 8791, '127.0.0.1', () => console.log(`Isolated review: http://127.0.0.1:${Number(process.env.REVIEW_PORT) || 8791} — passcode: review-only`)); // REVIEW_PORT: a second fixture beside :8791
+}).listen(Number(process.env.REVIEW_PORT) || 8791, '127.0.0.1', () => console.log(`Isolated review: http://127.0.0.1:${Number(process.env.REVIEW_PORT) || 8791} — passcode: review-only${fixtureTester ? ` — simulated tester: ${fixtureTester}` : ''}`)); // REVIEW_PORT: a second fixture beside :8791

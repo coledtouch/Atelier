@@ -11,8 +11,8 @@
 // fakes (tests/remix-render.test.mjs); the real engine is checked in the browser (scripts/remix-browser-check.mjs).
 // Memory: at most one decoded sample per active item is open (≤ 3 during a crossfade), each is closed as soon as the
 // next one replaces it, and VideoSource.add() is awaited per frame (encoder backpressure).
-import { frameAt as graphFrame, sampleTimes, keepPackets } from './remix-graph.js?v=75';
-import { composeFrame, canvasToDataUrl, makeCanvas } from './remix-draw.js?v=75';
+import { frameAt as graphFrame, sampleTimes, keepPackets } from './remix-graph.js?v=76';
+import { composeFrame, canvasToDataUrl, makeCanvas } from './remix-draw.js?v=76';
 
 export const MEDIABUNNY_URL = './vendor/mediabunny.js';
 export const H264_PROFILES = Object.freeze(['avc1.640028', 'avc1.4d0028', 'avc1.420028']); // High, Main, Baseline @ 4.0
