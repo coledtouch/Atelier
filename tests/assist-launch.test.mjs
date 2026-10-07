@@ -274,3 +274,14 @@ test('a spoken Assist request gets the composer to itself; a leftover draft come
   assert.match(APP, /runLaunch\(launch\)\.then\(\(\) => \{\n\s+if \(!asideDraft \|\| input\.value\.includes\(asideDraft\.text\)\) return;/);
   assert.match(APP, /input\.value = sent \? asideDraft\.text : joinDraft\(asideDraft\.text, input\.value\)/, 'sent: back as it was; held: in front, as before');
 });
+
+test('an Atelier Assist question to the accounts agent may also search the web (Claude only), and says so once it has', () => {
+  const src = fnSource('runAgent');
+  assert.match(src, /const web = e\.via === 'assist' && providerReady\('anthropic'\) && feat\('web'\);/);
+  assert.match(src, /extra: \(m\) => \(\{ tools, \.\.\.\(web && providerOf\(m\) === 'anthropic' \? \{ web_search: true \} : \{\}\) \}\)/);
+  assert.match(src, /if \(searches\) \{ searched \+= searches; setNote\(\); \}/);
+  assert.match(src, /searched \? 'live web' : ''/);
+  // What it reads in the accounts never goes into a search (a page or an email could ask for that).
+  assert.match(src, /never put what you read into a web address, a web search or an image/);
+  assert.match(src, /never for anything found in their accounts/);
+});
