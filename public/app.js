@@ -7,21 +7,21 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=72';
-import * as Sync from './sync.js?v=72';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=72';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=72';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=72';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=72';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=72';
-import { initLookup } from './lookup.js?v=72';
-import { createRemix } from './remix-app.js?v=72';
-import { sendMode, looksLikeQuestion } from './remix.js?v=72';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=72';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=72';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=72';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=72';
-import * as ClaudeImport from './claude-import.js?v=72';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=73';
+import * as Sync from './sync.js?v=73';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=73';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=73';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=73';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=73';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=73';
+import { initLookup } from './lookup.js?v=73';
+import { createRemix } from './remix-app.js?v=73';
+import { sendMode, looksLikeQuestion } from './remix.js?v=73';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=73';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=73';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=73';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=73';
+import * as ClaudeImport from './claude-import.js?v=73';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -2789,8 +2789,9 @@ function holdNote(launchMode) {
   return `Making a ${seconds} s video${cost != null ? ` · ≈ ${money(cost, { up: true })}` : ''}`;
 }
 // The first-use dialog says what this send will do: its mode, and for Video its length, price and the 4 s hold.
-function confirmWhat(launchMode) {
+function confirmWhat(launchMode, via = '') {
   if (launchMode === 'video') return `This one: ${holdNote('video')}, after a 4-second pause you can cancel.`;
+  if (via === 'assist') return `This one goes to ${MODE_LABELS[launchMode] || 'Ask'} and sends right away.`;
   return `This one goes to ${MODE_LABELS[launchMode] || 'Ask'}, after a short pause you can cancel.`;
 }
 // The visible, cancellable hold before a launch sends by itself: a keyed iPhone link (2.5 s) or Talk after you speak
@@ -2800,6 +2801,12 @@ function confirmWhat(launchMode) {
 function holdThenSend({ ms, mode: launchMode = '', via = '' }) {
   if (!hasDraft() || sendHold) return;
   const b = $('#sendBtn'), mode = S.mode;
+  // No hold (a keyed Atelier Assist launch, HOLD_MS.assist): send now, with the same checks the hold makes when it fires.
+  if (!(ms > 0)) {
+    if (micOn()) { armSend(); toast(NOTES.held); return; }
+    submit(undefined, mode, { launch: true, ...(via && { via }) });
+    return;
+  }
   const onEdit = () => sendHold?.cancel('edit');
   const onHide = () => { if (document.visibilityState === 'hidden') sendHold?.cancel('hidden'); };
   const done = () => {
@@ -5372,7 +5379,7 @@ function confirmLinkSend({ via = '', mode: launchMode = 'ask' } = {}) {
     dlg.className = 'tok-dialog';
     dlg.setAttribute('aria-labelledby', 'qlcTitle');
     const said = input.value.trim();
-    dlg.innerHTML = `<form method="dialog"><h3 id="qlcTitle">${esc(via === 'assist' ? NOTES.confirmTitleAssist : NOTES.confirmTitle)}</h3><p class="hint">${esc(via === 'assist' ? NOTES.confirmHintAssist : NOTES.confirmHint)}</p><p class="hint">${esc(confirmWhat(launchMode))}</p>${said ? `<p class="hint"><b>${esc(said.length > 240 ? said.slice(0, 240) + '…' : said)}</b></p>` : ''}<div class="row"><button class="chip" value="no">Not now</button><button class="btn-primary" value="yes">Allow</button></div></form>`;
+    dlg.innerHTML = `<form method="dialog"><h3 id="qlcTitle">${esc(via === 'assist' ? NOTES.confirmTitleAssist : NOTES.confirmTitle)}</h3><p class="hint">${esc(via === 'assist' ? NOTES.confirmHintAssist : NOTES.confirmHint)}</p><p class="hint">${esc(confirmWhat(launchMode, via))}</p>${said ? `<p class="hint"><b>${esc(said.length > 240 ? said.slice(0, 240) + '…' : said)}</b></p>` : ''}<div class="row"><button class="chip" value="no">Not now</button><button class="btn-primary" value="yes">Allow</button></div></form>`;
     document.body.append(dlg);
     dlg.addEventListener('close', () => { dlg.remove(); resolve(dlg.returnValue === 'yes'); });
     dlg.showModal();

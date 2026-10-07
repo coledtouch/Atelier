@@ -33,7 +33,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.accessibility.AccessibilityManager
-import android.view.animation.LinearInterpolator
 import android.view.animation.PathInterpolator
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -65,8 +64,8 @@ import kotlin.math.roundToInt
 /**
  * Atelier Assist: a small card over whatever is on screen. The "A" hovers and pulses while you talk, the words appear
  * as you say them with a chip for the mode they suggest (Ask, Code, Image, Video, Ideas, Build), and when you stop, this
- * app's own Atelier (its Trusted Web Activity, [AtelierLauncherActivity]) opens in that mode with your words (sent after Atelier's own visible, cancellable hold once the
- * app is paired; otherwise in the box for you to send).
+ * app's own Atelier (its Trusted Web Activity, [AtelierLauncherActivity]) opens in that mode with your words (sent at once once the app is paired, Video after a 4 s cancellable hold;
+ * otherwise in the box for you to send).
  *
  * Launched by ACTION_ASSIST (the digital-assistant gesture: Samsung's side-key press and hold, the corner swipe). The
  * launcher icon is the full Atelier app now ([AtelierLauncherActivity]); this card has its own task affinity so the
@@ -75,8 +74,8 @@ import kotlin.math.roundToInt
  * unlock first, and the card closes if that is cancelled. ACTION_ASSIST can carry the previous app's assist data: only
  * the keyboard hint is read, the rest is dropped unread.
  *
- * States: listening → thinking → a 1.2 s "Opening in …" window (any touch on the card holds it, so the chip can change
- * the mode) → opening. Typing is the same card with a text field. Tap outside, Back or × cancels. The card closes when
+ * States: listening → thinking → opening, as soon as the words are final (tap the chip while you talk to change the
+ * mode). Typing is the same card with a text field. Tap outside, Back or × cancels. The card closes when
  * it goes out of sight, except on the setup page (the owner may be copying the link in Atelier) and during system
  * round trips it started (unlock, permission settings, digital-assistant settings).
  *
@@ -122,7 +121,7 @@ class AssistActivity : ComponentActivity(), Listener.Events {
 
     /**
      * The card was started by the system (the assistant gesture), the home screen or this app: it may open Atelier by
-     * itself after the 1.2 s. Started by any other app, it waits for the owner's Open tap, so an app can't make it
+     * itself as soon as you stop talking. Started by any other app, it waits for the owner's Open tap, so an app can't make it
      * turn played-back speech into a keyed send.
      */
     private var ownerLaunch = false
@@ -375,11 +374,12 @@ class AssistActivity : ComponentActivity(), Listener.Events {
         heard = text
         guess = ModeClassifier.classify(text)
         tick()
+        // Opens Atelier at once, like a phone assistant: the words were on the card while you spoke.
         // "Make an image" and nothing else: wait for the owner (Open still works: Atelier opens in that mode). With TalkBack
-        // (touch exploration) the 1.2 s window is too short to hear and change: it waits for Open too.
+        // (touch exploration) there was no chance to hear and change it: it waits for Open too.
         // Started by another app (not the system, home screen or this app): wait for Open too.
         val emptyCommand = chosen == null && guess.explicit && guess.prompt.isBlank()
-        if (emptyCommand || touchExploring() || !ownerLaunch) setPhase(Phase.HELD) else startCountdown()
+        if (emptyCommand || touchExploring() || !ownerLaunch) setPhase(Phase.HELD) else go(text)
     }
 
     override fun onFailed(error: Listener.Failure) {
@@ -399,14 +399,6 @@ class AssistActivity : ComponentActivity(), Listener.Events {
     // ───────────────────────── review, typing, hand-off ─────────────────────────
 
     private val countdown = Runnable { if (phase == Phase.REVIEW) go(heard) }
-
-    private fun startCountdown() {
-        setPhase(Phase.REVIEW)
-        progress.animate().cancel()
-        progress.scaleX = 0f
-        progress.animate().scaleX(1f).setDuration(REVIEW_MS).setInterpolator(LinearInterpolator()).start()
-        main.postDelayed(countdown, REVIEW_MS)
-    }
 
     private fun cancelCountdown() {
         main.removeCallbacks(countdown)
@@ -1310,7 +1302,6 @@ class AssistActivity : ComponentActivity(), Listener.Events {
         const val PREF_LEGACY_CLEARED = "legacyWebDataCleared"
         const val LATE_UNLOCK_MS = 5_000L
         const val MIC_INSTANT_MS = 600L
-        const val REVIEW_MS = 1_200L
         const val OPEN_DELAY_MS = 140L
         const val TYPE_DEBOUNCE_MS = 120L
         const val MAX_CARD_DP = 420

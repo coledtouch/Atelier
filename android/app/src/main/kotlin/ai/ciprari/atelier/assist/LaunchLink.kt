@@ -11,7 +11,7 @@ package ai.ciprari.atelier.assist
  * - `start` is one of launch.js LAUNCH_MODES (Mode.id). `via=assist` is a label only: anyone can write it.
  * - The key and `send=1` ride in the fragment, which never reaches the server, a Referer or Worker logs. Atelier sends
  *   without a tap only when the key matches the one that browser made, the owner confirmed it once, and its other gates
- *   pass (signed in, idle, empty composer, at most one keyed send per 15 s, a visible cancellable hold). Without a key the
+ *   pass (signed in, idle, empty composer, at most one keyed send per 15 s; Video also holds 4 s, cancellable). Without a key the
  *   words are only prefilled and the owner taps Send.
  * - `q` is always LAST: launch.js takes everything after `q=` verbatim and decodes its %XX runs, so &, = and # in what was
  *   said survive. Spaces are %20 (launch.js does not turn + into a space).
@@ -34,7 +34,7 @@ object LaunchLink {
 
     fun isKey(s: String?): Boolean = s != null && KEY.matches(s)
 
-    /** The launch URL for [mode] with [prompt]; keyed (sends after Atelier's hold) only with a well-formed [key]. */
+    /** The launch URL for [mode] with [prompt]; keyed (sends without a tap) only with a well-formed [key]. */
     fun build(mode: Mode, prompt: String, key: String?): String {
         val q = clean(prompt)
         val sb = StringBuilder(ORIGIN.length + 64 + q.length * 3)
