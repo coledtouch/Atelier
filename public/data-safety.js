@@ -1,5 +1,5 @@
-import { validVideo } from './video.js?v=77';
-import { validRemix, recoverRemix } from './remix.js?v=77';
+import { validVideo } from './video.js?v=78';
+import { validRemix, recoverRemix } from './remix.js?v=78';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);

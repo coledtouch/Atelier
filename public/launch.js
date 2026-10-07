@@ -539,7 +539,11 @@ export async function applyLaunch(plan, deps = {}) {
   const prefill = (p) => {
     const cur = String(call('getText') ?? '');
     if (!cur.includes(p.text)) call('setText', joinDraft(cur, p.text));
-    call('showSource', p.label, { own: Boolean(p.own) });
+    // own unmarks the whole composer (app.js showSource → setMark('')), so it holds only when nothing else is there:
+    // an empty composer, or just this text (boot already put it in). Stranger text already in it (an unkeyed link or a
+    // share, a restored link draft) keeps its mark, and the keyed words then share it.
+    const alone = !cur.trim() || cur.trim() === String(p.text).trim();
+    call('showSource', p.label, { own: Boolean(p.own) && alone });
     did.push(`prefill:${p.from}`);
   };
 

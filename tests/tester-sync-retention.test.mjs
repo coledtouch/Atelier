@@ -25,6 +25,8 @@ async function retentionSetup({ pageSize = 1000 } = {}) {
   await bucket.put('t/thread.json', 'owner thread');
   return { env, bucket, shim, ledger, old, fresh, oldBucket, freshBucket };
 }
+// Every key of one tester: testers/<hash>/ (threads, media, usage) and the dedicated trash and history prefixes.
+const accountKeys = async (bucket, sub) => { const h = await sha256(sub); return [`testers/${h}/`, `testers-x/${h}/`, `testers-v/${h}/`].flatMap((p) => bucket.keys(p)); };
 const present = (shim, sub) => shim.db.prepare('SELECT * FROM testers WHERE sub = ?').get(sub);
 
 test('the retention alarm removes expired cloud threads and then the record, preserving other users and owner', async () => {
@@ -32,7 +34,7 @@ test('the retention alarm removes expired cloud threads and then the record, pre
   await ledger.alarm();
   assert.equal(present(shim, old.sub), undefined);
   assert.equal(ledger.getProfile(old.sub), null);
-  assert.deepEqual(bucket.keys(`testers/${await sha256(old.sub)}/`), []);
+  assert.deepEqual((await accountKeys(bucket, old.sub)), []);
   assert.ok(present(shim, fresh.sub));
   assert.equal(ledger.getProfile(fresh.sub), '{"bio":"fresh"}');
   assert.equal(await (await freshBucket.get('t/thread.json')).text(), 'fresh thread');
@@ -48,11 +50,11 @@ test('failed R2 deletion keeps the identifying record and profile for the next a
   await ledger.alarm();
   assert.ok(present(shim, old.sub));
   assert.equal(ledger.getProfile(old.sub), '{"bio":"old"}');
-  assert.equal(bucket.keys(`testers/${await sha256(old.sub)}/`).length, 5);
+  assert.equal((await accountKeys(bucket, old.sub)).length, 5);
   assert.ok(shim.alarm() > Date.now());
   await ledger.alarm();
   assert.equal(present(shim, old.sub), undefined);
-  assert.deepEqual(bucket.keys(`testers/${await sha256(old.sub)}/`), []);
+  assert.deepEqual((await accountKeys(bucket, old.sub)), []);
 });
 
 test('bounded cleanup keeps its record after a partial pass and finishes on the next alarm', async () => {
@@ -60,10 +62,10 @@ test('bounded cleanup keeps its record after a partial pass and finishes on the 
   for (let i = 0; i < 9; i++) await oldBucket.put(`t/extra-${i}.json`, 'old extra');
   await ledger.alarm();
   assert.ok(present(shim, old.sub));
-  assert.equal(bucket.keys(`testers/${await sha256(old.sub)}/`).length, 4);
+  assert.equal((await accountKeys(bucket, old.sub)).length, 4);
   await ledger.alarm();
   assert.equal(present(shim, old.sub), undefined);
-  assert.deepEqual(bucket.keys(`testers/${await sha256(old.sub)}/`), []);
+  assert.deepEqual((await accountKeys(bucket, old.sub)), []);
 });
 
 test('purge uses pages and deletion batches of at most 1,000 without skipping keys after deletion', async () => {
@@ -82,7 +84,7 @@ test('revocation retains cloud work for restoration until the 90-day inactivity 
   ledger.revoke(fresh.sub);
   await ledger.alarm();
   assert.ok(present(shim, fresh.sub));
-  assert.equal(bucket.keys(`testers/${await sha256(fresh.sub)}/`).length, 1);
+  assert.equal((await accountKeys(bucket, fresh.sub)).length, 1);
 });
 
 test('an account renewed before entering the cleanup gate is rechecked and preserved', async () => {
@@ -93,7 +95,7 @@ test('an account renewed before entering the cleanup gate is rechecked and prese
   };
   await ledger.alarm();
   assert.ok(present(shim, old.sub));
-  assert.equal(bucket.keys(`testers/${await sha256(old.sub)}/`).length, 5);
+  assert.equal((await accountKeys(bucket, old.sub)).length, 5);
 });
 
 test('a missing R2 binding keeps the expired identifying record until storage returns', async () => {
@@ -102,14 +104,28 @@ test('a missing R2 binding keeps the expired identifying record until storage re
   assert.deepEqual(await purgeTesterSync(env, old.sub), { complete: false, removed: 0 });
   await ledger.alarm();
   assert.ok(present(shim, old.sub));
-  assert.equal(bucket.keys(`testers/${await sha256(old.sub)}/`).length, 5);
+  assert.equal((await accountKeys(bucket, old.sub)).length, 5);
   env.SYNC_BUCKET = bucket;
   await ledger.alarm();
   assert.equal(present(shim, old.sub), undefined);
-  assert.deepEqual(bucket.keys(`testers/${await sha256(old.sub)}/`), []);
+  assert.deepEqual((await accountKeys(bucket, old.sub)), []);
 });
 
 test('cleanup validates identity and page bounds before touching storage', async () => {
   await assert.rejects(purgeTesterSync({ SYNC_BUCKET: fakeR2() }, '../owner'), /identity/);
   await assert.rejects(purgeTesterSync({ SYNC_BUCKET: fakeR2() }, PROFILE(9014).sub, { maxPages: 0 }), /limit/);
+});
+
+test('the 90-day purge covers testers/, testers-x/ and testers-v/, including trash and history kept before the split', async () => {
+  const bucket = fakeR2({ pageSize: 2 }), sub = PROFILE(9013).sub, other = PROFILE(9014).sub, h = await sha256(sub);
+  const scoped = await testerSyncBucket(bucket, sub);
+  for (const k of ['t/a.json', 'b/aa/aabb', 'u/usage.json', 'x/a/1800000000000.json', 'v/a/1.json', 'v/a/2.json']) await scoped.put(k, 'work');
+  await bucket.put(`testers/${h}/x/a/1700000000000.json`, 'pre-split trash'); await bucket.put(`testers/${h}/v/a/0.json`, 'pre-split history');
+  assert.deepEqual([bucket.keys(`testers-x/${h}/`).length, bucket.keys(`testers-v/${h}/`).length], [1, 2]);
+  await (await testerSyncBucket(bucket, other)).put('x/b/1800000000000.json', 'another tester');
+  await bucket.put('x/owner/1800000000000.json', 'owner trash'); await bucket.put('v/owner/1.json', 'owner history');
+  assert.deepEqual(await purgeTesterSync({ SYNC_BUCKET: bucket }, sub), { complete: true, removed: 8 });
+  assert.deepEqual(await accountKeys(bucket, sub), []);
+  assert.equal((await accountKeys(bucket, other)).length, 1);
+  assert.deepEqual([...bucket.keys('x/'), ...bucket.keys('v/')], ['x/owner/1800000000000.json', 'v/owner/1.json']);
 });

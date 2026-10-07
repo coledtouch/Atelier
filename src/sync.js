@@ -5,8 +5,11 @@
 //   x/<id>/<ms>.json    trash: the document just before a delete removed entries (listed/restorable for 30 days)
 //   v/<id>/<rev>.json   history: the previous document, at most once per thread per 15 minutes and before a restore
 //   u/usage.json        a cached sum of b/ sizes for the SYNC_QUOTA_BYTES cap, with how many are images and videos
-// worker.js calls handleSync only after the deny-by-default tester router and its own passOk check, so every request
-// here is the owner's. This module never reads cookies, LEDGER or ATELIER_KV, imports nothing but the shared pure
+//   u/r/<ms>-<uuid>     testers only: a write's size reservation (see reserveRoom)
+// worker.js calls handleSync only after the deny-by-default tester router and its own passOk check: the owner's
+// requests with the owner's bucket, a tester's (src/tester/sync.js) with a bucket view scoped to that tester. A tester
+// view also sets SYNC_COUNT_ALL (every stored byte counts toward the cap: t/, x/ and v/ as well as b/, with the
+// reservations below) and SYNC_MAX_THREADS; the owner's requests never set either, so owner sync is unchanged. This module never reads cookies, LEDGER or ATELIER_KV, imports nothing but the shared pure
 // core, and never answers 429 (to the client that status means passcodeGuard's IP lockout).
 import {
   FORMAT, LIMITS, BLOB_TYPES, HASH_RE, normalizeType, canonical, sha256hex, utf8Length, checkPush, checkDelete,
@@ -26,6 +29,8 @@ export const SYNC_OPTIONS = Object.freeze({
   // while concurrent unconditional writes to one key (a blob two uploads send at once, u/usage.json) can throw 10058.
   casAttempts: 5, rateLimitWaitMs: 1100, retryAfterSec: 2,
   trashListMax: 500, headParallel: 25,
+  // Testers: a reservation counts until a usage recount this much newer covers its write (an upload can't take longer).
+  reserveWindowMs: 30 * MIN,
 });
 // Clock and waits, replaceable by tests. jitter(attempt): the wait before compare-and-swap retry n grows with n
 // (50-300 ms, then 100-600 ms, …), so writers that keep colliding on one thread spread out.
@@ -37,6 +42,14 @@ const TRASH_KEY = /^x\/([\w-]{1,120})\/(\d{13})\.json$/;
 const docKey = (id) => `t/${id}.json`;
 const blobKey = (hash) => `b/${hash.slice(0, 2)}/${hash}`;
 const USAGE = 'u/usage.json';
+const RESERVE = 'u/r/';
+const reservedAt = (key) => Number(key.slice(RESERVE.length, RESERVE.length + 13)) || 0;
+// Whether a reservation still adds to a usage count taken at usageAt (see reserveRoom). In flight: until reserveWindowMs
+// after it was made (an upload can't take longer). Done (customMetadata done: when its write finished): only when it
+// finished after that count began listing (it may be missing from the count), with a minute's grace for clock skew
+// between Worker instances. Anything else is covered by the count, or was abandoned.
+const SKEW_MS = MIN;
+const reservationCounts = (o, usageAt) => (o.customMetadata?.done != null ? int(o.customMetadata.done) >= usageAt - SKEW_MS : reservedAt(o.key) >= usageAt - SYNC_OPTIONS.reserveWindowMs);
 const JSON_TYPE = { contentType: 'application/json' };
 
 const HEADERS = { 'content-type': 'application/json', 'cache-control': 'private, no-store' };
@@ -67,6 +80,8 @@ const busy = () => fail(503, 'sync_busy', {}, { 'retry-after': String(SYNC_OPTIO
 const switchedOff = (v) => v != null && !['', '0', 'false', 'off', 'no'].includes(String(v).trim().toLowerCase());
 const int = (v) => (Number.isSafeInteger(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
 const quotaOf = (env) => { const q = Number(env.SYNC_QUOTA_BYTES); return Number.isFinite(q) && q > 0 ? q : SYNC_OPTIONS.quotaBytes; };
+const countsAll = (env) => env?.SYNC_COUNT_ALL === true; // a tester's view (src/tester/sync.js)
+const threadCap = (env) => { const n = Number(env?.SYNC_MAX_THREADS); return Number.isSafeInteger(n) && n > 0 ? Math.min(n, LIMITS.threads) : LIMITS.threads; };
 const isRateLimit = (err) => /\b10058\b|too many requests|reduce your concurrent request rate|rate.?limit/i.test(String(err?.message || err));
 const isDigestError = (err) => /\b10037\b|checksum|digest/i.test(String(err?.message || err));
 
@@ -160,18 +175,67 @@ async function countThreads(bucket, stopAt) {
   return n;
 }
 // u/usage.json {bytes, blobs, images, videos, at}: recomputed from list('b/') (customMetadata t: the blob's type) when
-// older than maxAge, otherwise trusted.
+// older than maxAge, otherwise trusted. all (testers): bytes is every stored object (t/, b/, x/, v/; not u/), the cache
+// says so (all: 1, so an older b/-only one is never trusted), and the recount drops reservations it covers.
 const kindOf = (t) => (/^image\//.test(t || '') ? 'images' : /^video\//.test(t || '') ? 'videos' : null);
-async function getUsage(bucket, now, maxAge) {
+async function getUsage(bucket, now, maxAge, all = false) {
   let u = null;
   try { const o = await bucket.get(USAGE); if (o) u = JSON.parse(await o.text()); } catch {}
-  if (u && ['bytes', 'blobs', 'images', 'videos', 'at'].every((k) => Number.isFinite(u[k])) && now - u.at < maxAge && now >= u.at) return u;
+  if (u && ['bytes', 'blobs', 'images', 'videos', 'at'].every((k) => Number.isFinite(u[k])) && now - u.at < maxAge && now >= u.at && (!all || u.all === 1)) return u;
   let bytes = 0, blobs = 0;
-  const kinds = { images: 0, videos: 0 };
-  for await (const o of listAll(bucket, 'b/', true)) { bytes += o.size || 0; blobs++; const k = kindOf(o.customMetadata?.t); if (k) kinds[k]++; }
-  u = { bytes, blobs, ...kinds, at: now };
+  const kinds = { images: 0, videos: 0 }, stale = [];
+  for await (const o of listAll(bucket, all ? '' : 'b/', true)) {
+    if (o.key.startsWith('u/')) { if (o.key.startsWith(RESERVE) && !reservationCounts(o, now)) stale.push(o.key); continue; }
+    bytes += o.size || 0;
+    if (!o.key.startsWith('b/')) continue;
+    blobs++; const k = kindOf(o.customMetadata?.t); if (k) kinds[k]++;
+  }
+  u = { bytes, blobs, ...kinds, at: now, ...(all ? { all: 1 } : {}) };
   try { await bucket.put(USAGE, JSON.stringify(u), { httpMetadata: JSON_TYPE }); } catch {}
+  if (stale.length) try { await bucket.delete(stale.slice(0, 1000)); } catch {} // the rest go at the next recount
   return u;
+}
+// Testers: the stored bytes now, as {usage, pending}: the (cached) count plus the reservations it doesn't cover yet.
+async function testerUsage(bucket, now, maxAge) {
+  const usage = await getUsage(bucket, now, maxAge, true);
+  let pending = 0;
+  for await (const o of listAll(bucket, RESERVE, true)) if (reservationCounts(o, usage.at)) pending += int(o.customMetadata?.n);
+  return { usage, pending };
+}
+// Testers: room for n more bytes under the cap, robust to concurrent writes. R2 has no atomic counter, so a write first
+// stores its reservation (u/r/<ms>-<uuid>, customMetadata n), then reads the count and every reservation that count
+// doesn't cover (reservationCounts). Put-then-list: of two concurrent writers at least the later lister sees the other,
+// so together they can't pass the cap. Over it: the reservation goes, 507. After the write, commit() stamps when it
+// finished (done), so the reservation keeps counting until a recount that began after it, which lists the object
+// itself; release() removes one whose write never happened. A new object may briefly count twice: never under.
+// force: count it, but never refuse (a delete: at the cap a tester can still delete threads).
+async function reserveRoom({ env, bucket }, n, force = false) {
+  const at = SYNC_TIMING.now(), key = `${RESERVE}${String(at).padStart(13, '0')}-${crypto.randomUUID()}`;
+  const release = async () => { try { await bucket.delete(key); } catch {} };
+  // A failed stamp leaves it in flight: still counted, until reserveWindowMs (conservative).
+  const commit = async () => { try { await bucket.put(key, '', { customMetadata: { n: String(n), done: String(SYNC_TIMING.now()) } }); } catch {} };
+  await bucket.put(key, '', { customMetadata: { n: String(n) } });
+  if (force) return { release, commit };
+  const { usage, pending } = await testerUsage(bucket, at, SYNC_OPTIONS.usagePutMaxAgeMs);
+  const quota = quotaOf(env);
+  if (usage.bytes + pending > quota) { await release(); return { response: fail(507, 'quota', { quota, bytes: usage.bytes + pending - n }) }; }
+  return { release, commit };
+}
+// A tester's reservation around one compare-and-swap write (a no-op for the owner): need(n) reserves once per request
+// (a 507 response, or null); settle(response) commits it once a write was attempted (if it didn't land, the next recount
+// simply doesn't find it), or gives it back when none was.
+function roomFor(ctx) {
+  let held = null, tried = false;
+  return {
+    async need(n, force = false) {
+      if (!countsAll(ctx.env)) return null;
+      held ??= await reserveRoom(ctx, n, force);
+      if (held.response) return held.response;
+      tried = true;
+      return null;
+    },
+    async settle(response) { if (held?.release) await (tried ? held.commit() : held.release()); return response; },
+  };
 }
 // Encoded title for trash customMetadata, cut on a character boundary to ≤ 600 characters.
 function trashTitle(title) {
@@ -255,7 +319,8 @@ async function getThread({ bucket, id, url }) {
 
 // POST thread/:id — push a delta. body.born names the lineage its bases belong to: against a document re-created since
 // (another born), no base replaces anything (applyPush answers a conflict; the pusher's restarted rules settle it).
-async function postThread({ req, bucket, id }) {
+async function postThread(ctx) {
+  const { req, env, bucket, id } = ctx;
   const { big, body } = await readJson(req, LIMITS.pushBody);
   if (big) return fail(413, 'too_large');
   const bad = checkPush(body);
@@ -265,22 +330,26 @@ async function postThread({ req, bucket, id }) {
     if (utf8Length(c) > LIMITS.entry) return fail(413, 'too_large', { id: e.id });
     if (await sha256hex(c) !== e.h) return fail(400, 'hash_mismatch', { id: e.id });
   }
-  const heads = new Map();
-  return casLoop(bucket, id, async (cur) => {
+  const heads = new Map(), cap = threadCap(env), room = roomFor(ctx);
+  return room.settle(await casLoop(bucket, id, async (cur) => {
     const out = applyPush(cur ? cur.doc : null, body, SYNC_TIMING.now(), id);
     if (out.error) return { response: fail(413, 'thread_too_large') };
     const answer = (etag) => json({ ...out.response, etag });
     if (!out.changed) return { response: answer(cur ? cur.etag : null) };
-    if (!cur && (await countThreads(bucket, LIMITS.threads)) >= LIMITS.threads) return { response: fail(413, 'too_many_threads') };
+    if (!cur && (await countThreads(bucket, cap)) >= cap) return { response: fail(413, 'too_many_threads') };
     const missing = await missingBlobs(bucket, newRefs(cur?.doc, out.doc, out.changedIds), heads);
     if (missing.length) return { response: fail(409, 'missing_blobs', { missing }) };
+    // The document replaces the old one (whose copy may go to v/), so it grows the stored bytes by at most its size.
+    const full = await room.need(utf8Length(out.json));
+    if (full) return { response: full };
     return { write: out.doc, json: out.json, done: answer };
-  });
+  }));
 }
 
 // DELETE thread/:id — {v, seen: {entryId: rev}}. The pre-image goes to x/<id>/<first attempt ms>.json before each
 // write that removes anything, so the trash object always matches the delete that landed.
-async function deleteThread({ req, bucket, id }) {
+async function deleteThread(ctx) {
+  const { req, bucket, id } = ctx;
   const { big, body } = await readJson(req, LIMITS.deleteBody);
   if (big) return fail(413, 'too_large');
   if (checkDelete(body)) return fail(400, 'bad_shape');
@@ -290,13 +359,17 @@ async function deleteThread({ req, bucket, id }) {
   // got there first, or ours landed with its response lost) keeps it, since a duplicate pre-image restores nothing twice.
   let trashed = false;
   const dropTrash = async () => { if (trashed) { trashed = false; try { await bucket.delete(trashKey); } catch {} } };
-  return casLoop(bucket, id, async (cur) => {
+  const room = roomFor(ctx);
+  return room.settle(await casLoop(bucket, id, async (cur) => {
     if (!cur) { await dropTrash(); return { response: fail(404, 'not_found') }; }
     // seen describes the lineage the deleter knew (body.born); revisions of another lineage are unrelated, so a
     // delete across a re-creation removes nothing (kept > 0 tells the deleter to pull the thread back).
     const out = applyDelete(cur.doc, reborn(body.born, bornOf(cur.doc)) ? {} : body.seen, SYNC_TIMING.now());
     if (!out.changed) return { response: json({ v: FORMAT, rev: cur.doc.rev, etag: cur.etag, deleted: out.deleted, kept: out.kept.length, removed: 0, trashKey: null }) };
     const removes = out.removed.length > 0;
+    // Testers: the trash copy holds the old document and the new one replaces it, so the growth is the new one's size.
+    // Counted at once, never refused: a tester at the cap can still delete.
+    await room.need(utf8Length(out.json), true);
     return {
       write: out.doc, json: out.json, snapshot: false,
       before: async () => {
@@ -307,7 +380,7 @@ async function deleteThread({ req, bucket, id }) {
       },
       done: (etag) => json({ v: FORMAT, rev: out.doc.rev, etag, deleted: out.deleted, kept: out.kept.length, removed: out.removed.length, trashKey: removes ? trashKey : null }),
     };
-  }, ({ uncertain }) => (uncertain ? null : dropTrash()));
+  }, ({ uncertain }) => (uncertain ? null : dropTrash())));
 }
 
 // GET trash → {v, items: [{key, id, title, deletedAt, n}]}: younger than trashDays, newest first, at most 500.
@@ -323,7 +396,8 @@ async function getTrash({ bucket, now }) {
 }
 
 // POST trash/restore {key} → {v, id, rev, restored, title}. A v/ snapshot first, then the write, then the x/ key goes.
-async function postRestore({ req, bucket, now }) {
+async function postRestore(ctx) {
+  const { req, bucket, now } = ctx;
   const { big, body } = await readJson(req, LIMITS.restoreBody);
   if (big) return fail(413, 'too_large');
   const m = typeof body?.key === 'string' ? TRASH_KEY.exec(body.key) : null;
@@ -337,13 +411,16 @@ async function postRestore({ req, bucket, now }) {
     try { await bucket.delete(key); } catch {}
     return json({ v: FORMAT, id, rev: doc.rev, etag, restored: restored.length, title: doc.title });
   };
-  return casLoop(bucket, id, async (cur) => {
+  const room = roomFor(ctx);
+  return room.settle(await casLoop(bucket, id, async (cur) => {
     if (!cur) return { response: fail(404, 'not_found') };
     const out = applyRestore(cur.doc, snap, SYNC_TIMING.now());
     if (out.error) return { response: fail(413, 'thread_too_large') };
     if (!out.changed) return { response: await finish(cur.doc, [], cur.etag) };
+    const full = await room.need(utf8Length(out.json)); // the old document moves to v/; the new one is the growth
+    if (full) return { response: full };
     return { write: out.doc, json: out.json, snapshot: 'always', done: (etag) => finish(out.doc, out.restored, etag) };
-  });
+  }));
 }
 
 // POST blobs/missing {hashes} → {v, missing}
@@ -358,7 +435,8 @@ async function postMissing({ req, bucket }) {
 // PUT blob/:hash — raw bytes streamed into R2 (never buffered: 128 MB isolate), checked by R2 against the hash. Pass
 // req.body itself: Content-Length is required above, which gives it the known length R2's put() insists on (a stream
 // piped through anything else has none, and put() throws a TypeError).
-async function putBlob({ req, env, bucket, hash, now }) {
+async function putBlob(ctx) {
+  const { req, env, bucket, hash, now } = ctx;
   const type = normalizeType(req.headers.get('content-type'));
   if (!BLOB_TYPES.includes(type)) return fail(415, 'bad_type');
   const declared = (req.headers.get('content-length') || '').trim();
@@ -367,12 +445,15 @@ async function putBlob({ req, env, bucket, hash, now }) {
   if (length > LIMITS.blob) return fail(413, 'too_large');
   const key = blobKey(hash);
   if (await bucket.head(key)) return json({ v: FORMAT, exists: true });
-  const usage = await getUsage(bucket, now, SYNC_OPTIONS.usagePutMaxAgeMs);
+  const all = countsAll(env), room = all ? await reserveRoom(ctx, length) : null;
+  if (room?.response) return room.response;
+  const usage = all ? null : await getUsage(bucket, now, SYNC_OPTIONS.usagePutMaxAgeMs);
   const quota = quotaOf(env);
-  if (usage.bytes + length > quota) return fail(507, 'quota', { quota, bytes: usage.bytes });
+  if (usage && usage.bytes + length > quota) return fail(507, 'quota', { quota, bytes: usage.bytes });
   try {
     await bucket.put(key, req.body ?? new Uint8Array(0), { sha256: hash, httpMetadata: { contentType: type }, customMetadata: { t: type } });
   } catch (err) {
+    await room?.release(); // nothing of this upload was stored
     if (isDigestError(err)) return fail(400, 'hash_mismatch');
     // Two uploads of one blob at once (two devices, or a retry racing its first try): R2 can refuse one with 10058.
     // b/ objects are content-addressed and written only with R2's sha256 check, so one there now is this exact blob;
@@ -380,6 +461,7 @@ async function putBlob({ req, env, bucket, hash, now }) {
     if (isRateLimit(err)) return (await bucket.head(key).catch(() => null)) ? json({ v: FORMAT, exists: true }) : busy();
     throw err;
   }
+  if (all) { await room.commit(); return json({ v: FORMAT, created: true }, 201); } // counted by its reservation until a recount lists it
   const k = kindOf(type);
   try { await bucket.put(USAGE, JSON.stringify({ ...usage, bytes: usage.bytes + length, blobs: usage.blobs + 1, ...(k ? { [k]: usage[k] + 1 } : {}) }), { httpMetadata: JSON_TYPE }); } catch {} // corrected at the next recount
   return json({ v: FORMAT, created: true }, 201);
@@ -405,6 +487,7 @@ async function getStatus({ env, bucket, now }) {
   let threads = 0, deleted = 0, trash = 0;
   for await (const o of listAll(bucket, 't/', true)) if (o.key.endsWith('.json')) { if (o.customMetadata?.del === '1') deleted++; else threads++; }
   for await (const o of listAll(bucket, 'x/', false)) { const m = TRASH_KEY.exec(o.key); if (m && now - Number(m[2]) < SYNC_OPTIONS.trashDays * DAY) trash++; }
-  const u = await getUsage(bucket, now, SYNC_OPTIONS.usageStatusMaxAgeMs);
+  const t = countsAll(env) ? await testerUsage(bucket, now, SYNC_OPTIONS.usageStatusMaxAgeMs) : null;
+  const u = t ? { ...t.usage, bytes: t.usage.bytes + t.pending } : await getUsage(bucket, now, SYNC_OPTIONS.usageStatusMaxAgeMs);
   return json({ v: FORMAT, threads, deleted, trash, blobs: u.blobs, images: u.images, videos: u.videos, bytes: u.bytes, quota: quotaOf(env), at: u.at });
 }

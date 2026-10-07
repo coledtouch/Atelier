@@ -21,26 +21,33 @@ const composerSource = between(APP, 'function renderComposerControls()', "$('#es
 const person = (sub, extra = {}) => normalizeMe({ sub, name: `Name ${sub}`, models: { chat: ['anthropic:claude-sonnet-5-5'] }, ...extra });
 const defer = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 
-function lifecycle({ passcode = '', tester = null, storedValues, cryptoOverride } = {}) {
-  const events = [], opened = [], pending = [], values = storedValues || new Map(), timers = new Map(), settings = new Map(), listeners = {};
+// storedValues: IndexedDB rows shared between pages (one browser profile); lsValues: its localStorage, likewise.
+// failOpen(name) → true: that database's open fails; failPut(name) → an Error: a put there aborts its transaction with it.
+function lifecycle({ passcode = '', tester = null, storedValues, lsValues, cryptoOverride, failOpen = () => false, failPut = () => null } = {}) {
+  const events = [], opened = [], pending = [], values = storedValues || new Map(), timers = new Map(), settings = lsValues || new Map(), listeners = {};
   const S = { settings: { passcode, name: tester?.name || '', lookup: '' }, tester, thread: { id: 'current', entries: [{ id: 'entry', text: 'Saved reply' }] } };
-  settings.set('settings', structuredClone(S.settings)); settings.set('tester', structuredClone(tester));
+  if (!lsValues) { settings.set('settings', structuredClone(S.settings)); settings.set('tester', structuredClone(tester)); }
   class Request { constructor(result) { this.result = result; } }
   const indexedDB = {
     open(name) {
       opened.push(name);
       const request = {};
+      if (failOpen(name)) { pending.push(() => { request.error = new Error(`Couldn’t open ${name}`); request.onerror(); }); return request; }
       pending.push(() => {
         request.result = { close() {}, objectStoreNames: { contains: () => true }, transaction(store) {
           const transaction = { objectStore() { return {
-            put(value, key) { values.set(`${name}:${store}:${key || value.id}`, structuredClone(value)); events.push(`write:${name}`); return new Request(value.id); },
+            put(value, key) {
+              const err = failPut(name);
+              if (err) { transaction.error = err; transaction.abort(); return new Request(undefined); }
+              values.set(`${name}:${store}:${key ?? value.id}`, structuredClone(value)); events.push(`write:${name}`); return new Request(value.id);
+            },
             get(key) { const request = new Request(structuredClone(values.get(`${name}:${store}:${key}`))); queueMicrotask(() => request.onsuccess?.()); return request; },
             getAll() { return new Request([...values.entries()].filter(([key]) => key.startsWith(`${name}:${store}:`)).map(([, value]) => structuredClone(value))); },
-            getAllKeys() { return new Request([...values.keys()].filter((key) => key.startsWith(`${name}:${store}:`)).map((key) => key.split(':').at(-1))); },
+            getAllKeys() { const prefix = `${name}:${store}:`, request = new Request([...values.keys()].filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length))); queueMicrotask(() => request.onsuccess?.()); return request; },
             delete(key) { values.delete(`${name}:${store}:${key}`); return new Request(undefined); },
             clear() { for (const key of values.keys()) if (key.startsWith(`${name}:${store}:`)) values.delete(key); return new Request(undefined); },
           }; } };
-          transaction.abort = () => { transaction.aborted = true; queueMicrotask(() => transaction.onabort?.()); };
+          transaction.abort = () => { if (transaction.aborted) return; transaction.aborted = true; queueMicrotask(() => transaction.onabort?.()); };
           setImmediate(() => { if (!transaction.aborted) transaction.oncomplete?.(); });
           return transaction;
         } };
@@ -79,7 +86,9 @@ function lifecycle({ passcode = '', tester = null, storedValues, cryptoOverride 
     if (error) throw error;
     return result;
   };
-  return { ...api, S, events, opened, values, settings, timers, settle, dispatchStorage: (key) => listeners.storage?.({ key }), flushOpen: () => { while (pending.length) pending.shift()(); }, flushTimers: () => { for (const fn of timers.values()) fn(); timers.clear(); } };
+  // Resolves once the page has reloaded (the reload waits for the flush of the open thread).
+  const reloaded = () => settle(new Promise((resolve) => { const check = () => (events.includes('reload') ? resolve() : setImmediate(check)); check(); }));
+  return { ...api, S, events, opened, values, settings, timers, settle, reloaded, dispatchStorage: (key) => listeners.storage?.({ key }), flushOpen: () => { while (pending.length) pending.shift()(); }, flushTimers: () => { for (const fn of timers.values()) fn(); timers.clear(); } };
 }
 
 test('owner, guest and individual tester workspaces open distinct thread databases and retain independent navigation keys', async () => {
@@ -107,32 +116,55 @@ test('a delayed thread write remains bound to its original account even when ano
   assert.ok(!page.values.has('atelier-account-person-b:threads:account-a-work'));
 });
 
-test('account transition stops runs and sync, cancels pending saves, clears the visible thread and reloads once', () => {
+test('account transition stops runs, saves the debounced edit into the old workspace, suspends sync, clears the visible thread and reloads once', async () => {
   const page = lifecycle({ tester: person('person-a') });
-  page.persist();
+  page.S.thread.entries[0].text = 'Edited 100 ms ago'; page.persist(); // still inside the 400 ms debounce
   assert.equal(page.timers.size, 1);
   page.S.tester = person('person-b');
   assert.equal(page.reloadWorkspace(), true);
   assert.equal(page.reloadWorkspace(), true); // repeated callers still exit while the navigation is pending
   assert.equal(page.reloading(), true);
   assert.equal(page.S.thread, null);
-  assert.equal(page.timers.size, 0);
   assert.equal(page.settings.get('atelier.accountResume'), '1');
+  assert.ok(!page.events.includes('reload'), 'the reload waits for the save');
+  await page.reloaded();
+  assert.equal(page.values.get('atelier-account-person-a:threads:current').entries[0].text, 'Edited 100 ms ago');
+  assert.deepEqual(page.opened, ['atelier-account-person-a'], 'never the next account’s database');
   assert.equal(page.events.filter((event) => event === 'reload').length, 1);
-  assert.ok(page.events.indexOf('stop-runs') < page.events.indexOf('reload'));
-  assert.ok(page.events.indexOf('suspend-sync') < page.events.indexOf('reload'));
-  assert.ok(page.events.indexOf('save-settings') < page.events.indexOf('reload'));
+  for (const before of ['stop-runs', 'write:atelier-account-person-a', 'suspend-sync', 'save-settings']) assert.ok(page.events.indexOf(before) < page.events.indexOf('reload'), before);
+  assert.ok(page.events.indexOf('stop-runs') < page.events.indexOf('suspend-sync'));
+  page.flushTimers(); // the 2 s fallback finds the page already reloading
+  assert.equal(page.events.filter((event) => event === 'reload').length, 1);
+  assert.equal(page.events.filter((event) => event.startsWith('write:')).length, 1);
+});
+
+test('a save that never finishes holds the reload for at most 2 s', () => {
+  const page = lifecycle({ tester: person('person-a') });
+  page.S.tester = person('person-b');
+  page.reloadWorkspace(); // the open never completes (no flushOpen)
+  assert.ok(!page.events.includes('reload'));
   page.flushTimers();
+  assert.equal(page.events.filter((event) => event === 'reload').length, 1);
+});
+
+test('with nothing to save the reload is immediate', () => {
+  const page = lifecycle({ tester: person('person-a') });
+  page.S.thread = { id: 'empty', entries: [] };
+  page.S.tester = person('person-b'); page.reloadWorkspace();
+  assert.equal(page.events.filter((event) => event === 'reload').length, 1);
   assert.equal(page.opened.length, 0);
 });
 
-test('even an already queued persist callback cannot save after the account has begun reloading', () => {
+test('even an already queued persist callback cannot save after the account has begun reloading', async () => {
   const page = lifecycle({ tester: person('person-a') });
   page.persist(); const callback = [...page.timers.values()][0];
   page.S.tester = null; page.reloadWorkspace(); callback();
   page.S.thread = { id: 'late-run', entries: [{ id: 'late', text: 'Late provider callback' }] };
   page.persist(true);
-  assert.equal(page.opened.length, 0);
+  await page.reloaded();
+  assert.ok(page.values.has('atelier-account-person-a:threads:current'), 'the flush itself saved the open thread');
+  assert.equal(page.events.filter((event) => event.startsWith('write:')).length, 1, 'the queued callback and the late run saved nothing');
+  assert.ok(![...page.values.keys()].some((key) => key.includes('late-run')));
 });
 
 test('refreshing the same tester preserves its workspace, while changing tester identity reloads before reading profile or repainting options', () => {
@@ -162,7 +194,7 @@ test('tester continuity is offered only when the server explicitly enables it, i
   assert.equal(person('person-a').features.sync, false);
 });
 
-test('a cross-tab owner-to-tester switch clears cached owner credentials and suspends work without overwriting the newly stored account', () => {
+test('a cross-tab owner-to-tester switch clears cached owner credentials and suspends work without overwriting the newly stored account', async () => {
   const page = lifecycle({ passcode: 'cached-owner-pass' });
   page.persist();
   const latestSettings = { passcode: '', name: 'New tester', theme: 'paper' };
@@ -173,7 +205,9 @@ test('a cross-tab owner-to-tester switch clears cached owner credentials and sus
   assert.equal(page.S.settings.passcode, '');
   assert.equal(page.S.tester.sub, 'person-b');
   assert.equal(page.S.thread, null);
-  assert.equal(page.timers.size, 0);
+  await page.reloaded();
+  assert.ok(page.values.has('atelier-data:threads:current'), 'the pending owner edit lands in the owner’s own database');
+  assert.ok(!page.opened.some((name) => name.startsWith('atelier-account-')), 'never in the new tester’s');
   assert.ok(page.events.includes('stop-runs'));
   assert.ok(page.events.includes('suspend-sync'));
   assert.ok(!page.events.includes('save-settings'));
@@ -323,14 +357,87 @@ test('a corrupt existing inventory keeps recovery closed without blocking curren
   assert.deepEqual(broken.get(markerKey), marker);
 });
 
-test('inventory hashing failures block every owner write path instead of proceeding without a durable boundary', async () => {
-  const original = originalRow('shared');
-  const hashingFailure = new Map([[originalKey(original.id), original]]);
-  const failed = lifecycle({ passcode: 'owner-pass', storedValues: hashingFailure, cryptoOverride: { subtle: { digest: async () => { throw new Error('Hash unavailable'); } } } });
-  for (const operation of [() => failed.rawDB.put(originalRow('private')), () => failed.rawDB.putAll([originalRow('private')]), () => failed.rawDB.update('shared', (row) => ({ ...row, title: 'Private title' }))]) await assert.rejects(() => failed.settle(operation()), /Hash unavailable/);
-  assert.ok(!hashingFailure.has(markerKey));
-  assert.ok(!hashingFailure.has(originalKey('private')));
-  assert.deepEqual(hashingFailure.get(originalKey('shared')), original);
+// Every owner write path, each saving something private (the last one runs after the others).
+const ownerWrites = (page) => [
+  () => page.rawDB.put(originalRow('private-put', 'Private owner work')),
+  () => page.rawDB.putAll([originalRow('private-import', 'Private import')]),
+  () => page.rawDB.update('shared', (row) => ({ ...row, title: 'Private title' })),
+  () => page.rawDB.del('private-put'),
+];
+async function assertOwnerWritesLand(page, stored) {
+  for (const operation of ownerWrites(page)) await page.settle(operation());
+  assert.ok(stored.has(originalKey('private-import')));
+  assert.ok(!stored.has(originalKey('private-put')), 'the delete went through');
+  assert.equal(stored.get(originalKey('shared')).title, 'Private title');
+}
+// A tester page in the same browser profile: recovery is closed, so neither the original nor private rows are offered.
+async function assertRecoveryClosed(stored, ls) {
+  const tester = lifecycle({ tester: person('person-a'), storedValues: stored, lsValues: ls });
+  await assert.rejects(() => tester.settle(tester.rawDB.legacyAll()), (err) => err.code === 'legacy_boundary_closed');
+}
+
+test('inventory hashing failures never block an owner save: recovery closes for good and the failure is cached, not re-hashed on every save', async () => {
+  const original = originalRow('shared'), stored = new Map([[originalKey(original.id), original]]), ls = new Map();
+  let digests = 0;
+  const failed = lifecycle({ passcode: 'owner-pass', storedValues: stored, lsValues: ls, cryptoOverride: { subtle: { digest: async () => { digests++; throw new Error('Hash unavailable'); } } } });
+  await assertOwnerWritesLand(failed, stored);
+  assert.equal(digests, 1, 'one attempt, then the cached failure (backoff): no rehash storm');
+  assert.ok(ls.get('sharedHistoryUnguarded') > 0, 'the browser remembers that a save went ahead without a boundary');
+  assert.deepEqual(stored.get(markerKey), { v: 0, closed: true });
+  await assert.rejects(() => failed.settle(failed.rawDB.freezeLegacy()), /Hash unavailable/);
+  assert.equal(digests, 1);
+  await assertRecoveryClosed(stored, ls);
+  // A later owner page with working crypto never recaptures the private rows: the closed marker stands, saves still work.
+  const reopened = lifecycle({ passcode: 'owner-pass', storedValues: stored, lsValues: ls });
+  await assert.rejects(() => reopened.settle(reopened.rawDB.freezeLegacy()), (err) => err.code === 'legacy_boundary_closed');
+  await reopened.settle(reopened.rawDB.put(originalRow('after-reopen')));
+  assert.ok(stored.has(originalKey('after-reopen')));
+  assert.deepEqual(stored.get(markerKey), { v: 0, closed: true });
+});
+
+test('a metadata database that won’t open never blocks owner saves; it is retried only after a backoff, and then closes recovery', async () => {
+  const original = originalRow('shared'), stored = new Map([[originalKey(original.id), original]]), ls = new Map();
+  let broken = true;
+  const page = lifecycle({ passcode: 'owner-pass', storedValues: stored, lsValues: ls, failOpen: (name) => broken && name === 'atelier-shared-history-v76' });
+  await assertOwnerWritesLand(page, stored);
+  const metaOpens = () => page.opened.filter((name) => name === 'atelier-shared-history-v76').length;
+  assert.equal(metaOpens(), 2, 'the freeze and one closing attempt; the later saves reuse the cached failure');
+  assert.ok(ls.get('sharedHistoryUnguarded') > 0);
+  assert.ok(!stored.has(markerKey));
+  await assertRecoveryClosed(stored, ls); // even before any marker could be stored: the flag alone keeps it closed
+  // After the backoff the metadata database opens again: no inventory is taken of rows written meanwhile.
+  broken = false;
+  const realNow = Date.now;
+  Date.now = () => realNow() + 2 * 36e5;
+  try { await assert.rejects(() => page.settle(page.rawDB.freezeLegacy()), (err) => err.code === 'legacy_boundary_closed'); }
+  finally { Date.now = realNow; }
+  assert.deepEqual(stored.get(markerKey), { v: 0, closed: true });
+  await assertRecoveryClosed(stored, new Map()); // the stored marker alone, even with this browser's localStorage gone
+});
+
+test('a full disk while storing the inventory never blocks owner saves and keeps recovery closed', async () => {
+  const original = originalRow('shared'), stored = new Map([[originalKey(original.id), original]]), ls = new Map();
+  let digests = 0;
+  const quota = () => Object.assign(new Error('The quota has been exceeded.'), { name: 'QuotaExceededError' });
+  const counting = { subtle: { digest: async (...args) => { digests++; return globalThis.crypto.subtle.digest(...args); } } };
+  const page = lifecycle({ passcode: 'owner-pass', storedValues: stored, lsValues: ls, cryptoOverride: counting, failPut: (name) => (name === 'atelier-shared-history-v76' ? quota() : null) });
+  await assertOwnerWritesLand(page, stored);
+  assert.equal(digests, 1, 'hashed once; the failure is cached');
+  assert.ok(!stored.has(markerKey), 'nothing could be stored there');
+  assert.ok(ls.get('sharedHistoryUnguarded') > 0);
+  await assertRecoveryClosed(stored, ls);
+});
+
+test('a freeze still hashing when another tab saves unguarded stores a closed marker, never its candidate', async () => {
+  const shared = originalRow('shared'), stored = new Map([[originalKey(shared.id), shared]]), ls = new Map(), hold = defer(), started = defer();
+  const paused = { subtle: { digest: async (...args) => { started.resolve(); await hold.promise; return globalThis.crypto.subtle.digest(...args); } } };
+  const slow = lifecycle({ passcode: 'owner-pass', storedValues: stored, lsValues: ls, cryptoOverride: paused });
+  const freezing = slow.settle(slow.rawDB.freezeLegacy());
+  await started.promise;
+  ls.set('sharedHistoryUnguarded', Date.now()); // another tab's save went ahead without a boundary meanwhile
+  hold.resolve();
+  await assert.rejects(() => freezing, (err) => err.code === 'legacy_boundary_closed');
+  assert.deepEqual(stored.get(markerKey), { v: 0, closed: true });
 });
 
 test('competing first-launch tabs preserve the first durable inventory even when a slower tab prepared a broader candidate', async () => {
@@ -352,4 +459,57 @@ test('competing first-launch tabs preserve the first durable inventory even when
   assert.deepEqual(inventoryB.hashes.map(([id]) => id), ['shared']);
   const tester = lifecycle({ tester: person('person-a'), storedValues: stored });
   assert.deepEqual((await tester.settle(tester.rawDB.legacyAll())).map((row) => row.id), ['shared']);
+});
+
+// ── atelier-kv is per workspace: a tester never reads or clears the owner's keys (remix drafts, the passcode backup) ──
+const wipeKeySource = between(APP, '// The atelier.* localStorage keys Clear this device removes', "$('#wipeBtn').onclick");
+const wipeSource = between(APP, "$('#wipeBtn').onclick", 'function applyTheme()');
+
+test('key/value data is scoped per workspace; the owner keeps its original unscoped keys readable', async () => {
+  const stored = new Map(), ls = new Map();
+  // What an owner device holds from before this release: unscoped keys.
+  stored.set('atelier-kv:kv:rx:ops', { owner: true }); stored.set('atelier-kv:kv:ccHandle', 'folder'); stored.set('atelier-kv:kv:passcode', 'owner-pass');
+  const owner = lifecycle({ passcode: 'owner-pass', storedValues: stored, lsValues: ls });
+  const tester = lifecycle({ tester: person('person-a'), storedValues: stored, lsValues: ls });
+  const other = lifecycle({ tester: person('person-b'), storedValues: stored, lsValues: ls });
+  assert.deepEqual(await owner.settle(owner.rawDB.kvGet('rx:ops')), { owner: true }, 'existing owner data stays readable');
+  await tester.settle(tester.rawDB.kvSet('rx:ops', { tester: 'a' }));
+  await other.settle(other.rawDB.kvSet('rx:ops', { tester: 'b' }));
+  assert.deepEqual(await tester.settle(tester.rawDB.kvGet('rx:ops')), { tester: 'a' });
+  assert.equal(await tester.settle(tester.rawDB.kvGet('passcode')), undefined, 'a tester page never reads the owner passcode backup');
+  assert.equal(await tester.settle(tester.rawDB.kvGet('ccHandle')), undefined);
+  assert.deepEqual(await tester.settle(tester.rawDB.kvKeys()), ['rx:ops']);
+  assert.deepEqual((await owner.settle(owner.rawDB.kvKeys())).sort(), ['ccHandle', 'passcode', 'rx:ops'], 'no other workspace’s keys');
+  // A tester's Clear this device (kvClear) removes only its own keys.
+  await tester.settle(tester.rawDB.kvClear());
+  assert.deepEqual(await tester.settle(tester.rawDB.kvKeys()), []);
+  assert.deepEqual(await other.settle(other.rawDB.kvGet('rx:ops')), { tester: 'b' });
+  assert.deepEqual(await owner.settle(owner.rawDB.kvGet('rx:ops')), { owner: true });
+  assert.equal(await owner.settle(owner.rawDB.ownerPasscodeGet()), 'owner-pass');
+  // The owner's own Clear this device leaves other accounts' keys alone too.
+  await owner.settle(owner.rawDB.kvClear());
+  assert.deepEqual(await owner.settle(owner.rawDB.kvKeys()), []);
+  assert.deepEqual(await other.settle(other.rawDB.kvGet('rx:ops')), { tester: 'b' });
+});
+
+test('Clear this device on a tester page keeps the owner’s keys, migration flags and older database; the owner’s clears all', () => {
+  const keys = ['atelier.settings', 'atelier.opts', 'atelier.tester', 'atelier.meTester', 'atelier.draft', 'atelier.lastThread:tester:person-a', 'atelier.pinnedThreads:tester:person-a',
+    'atelier.migratedV3', 'atelier.migrateToastAt', 'atelier.owner', 'atelier.signedIn', 'atelier.me', 'atelier.lastThread', 'atelier.pinnedThreads', 'atelier.lastThread:tester:person-b', 'atelier.lastThread:guest',
+    'atelier.sharedHistoryUnguarded', 'other.app'];
+  const wipes = (workspace, settings = {}) => new Function('workspace', 'LS', `${wipeKeySource}; return wipesKey;`)(workspace, { get: (k, d) => (k === 'settings' ? settings : d) });
+  const tester = keys.filter(wipes('tester:person-a'));
+  assert.deepEqual(tester, ['atelier.settings', 'atelier.opts', 'atelier.tester', 'atelier.meTester', 'atelier.draft', 'atelier.lastThread:tester:person-a', 'atelier.pinnedThreads:tester:person-a']);
+  assert.ok(!keys.filter(wipes('tester:person-a', { passcode: 'owner-pass' })).includes('atelier.settings'), 'settings that now hold an owner passcode stay');
+  assert.deepEqual(keys.filter(wipes('guest')), ['atelier.settings', 'atelier.opts', 'atelier.tester', 'atelier.meTester', 'atelier.draft', 'atelier.lastThread:guest']);
+  assert.deepEqual(keys.filter(wipes('owner')), keys.filter((k) => k.startsWith('atelier.') && k !== 'atelier.sharedHistoryUnguarded'));
+  // Only the owner's own Clear this device deletes the old "atelier" database (unmigrated owner threads).
+  assert.match(wipeSource, /if \(workspace === 'owner'\) await new Promise\(\(res, rej\) => \{ const r = indexedDB\.deleteDatabase\('atelier'\)/);
+  assert.equal(wipeSource.match(/deleteDatabase\(/g).length, 1);
+  assert.match(wipeSource, /Object\.keys\(localStorage\)\.filter\(wipesKey\)/);
+});
+
+test('the owner passcode backup is restored only on a signed-out page no tester has used, and only an owner sign-in writes it', () => {
+  assert.match(APP, /const restorable = workspace === 'guest' && !testerTrace;\s+const backup = restorable \? await Promise\.race\(\[DB\.ownerPasscodeGet\(\)/);
+  assert.doesNotMatch(APP, /kv(Get|Set)\('passcode'/, 'the backup is never a workspace-scoped key');
+  assert.match(APP, /if \(s\.passcode \|\| workspace === 'owner'\) await DB\.ownerPasscodeSet\(s\.passcode\)/, 'a tester’s Settings never clears it');
 });

@@ -242,7 +242,8 @@ const DEFS = [
   { name: 'browser_open', service: 'browser' }, { name: 'browser_read', service: 'browser' }, { name: 'browser_tabs', service: 'browser' },
   { name: 'gmail_search', service: 'gmail' }, { name: 'browser_click', service: 'browser', write: true },
 ].map((d) => ({ type: 'function', function: { name: d.name }, 'x-write': Boolean(d.write), 'x-label': d.name, 'x-service': d.service }));
-function agentRig({ e, batches, approve = () => true }) {
+// searches[n]: the web searches Claude reports during turn n (onDelta's searches), alongside that turn's tool calls.
+function agentRig({ e, batches, approve = () => true, searches = [], extra = {} }) {
   const calls = { asked: [], ext: [], tool: [] };
   let n = 0, id = 0;
   const vars = {
@@ -250,11 +251,12 @@ function agentRig({ e, batches, approve = () => true }) {
     browserAvailable: () => true, historyFor: () => [], agentTools: () => DEFS, uid: () => `s${++id}`, modelFor: () => 'anthropic:claude-sonnet-5-5',
     streamChat: async (o) => {
       const batch = batches[n++] || [];
-      o.onDelta({ content: batch.length ? '' : 'done', reasoning: '', tool_calls: batch.map(([name, args], index) => ({ index, id: `c${n}${index}`, function: { name, arguments: JSON.stringify(args) } })) });
+      o.onDelta({ content: batch.length ? '' : 'done', reasoning: '', searches: searches[n - 1] || 0, tool_calls: batch.map(([name, args], index) => ({ index, id: `c${n}${index}`, function: { name, arguments: JSON.stringify(args) } })) });
     },
     awaitApproval: async (step) => { calls.asked.push([step.name, step.args, step.status]); return approve(step); },
     extCall: async (cmd, args, ms, approved) => { calls.ext.push([cmd, args, approved]); return { ok: 1 }; },
     callTool: async (name, args, approved) => { calls.tool.push([name, args, approved]); return { ok: true, result: [] }; },
+    ...extra,
   };
   vars.asksFirst = evalIn(vars, `return (${constSource('asksFirst').replace(/^asksFirst = /, '').replace(/;$/, '')});`);
   const { runAgent } = lift(vars, 'runAgent');
@@ -286,6 +288,35 @@ test('runAgent: on a link or share turn every tool waits for approval (backstop:
   await r.run();
   assert.deepEqual(r.calls.asked.map(([name]) => name), ['gmail_search', 'browser_tabs', 'browser_read']);
   assert.deepEqual(r.calls.tool, [['gmail_search', { q: 'verification code' }, false]], 'still not sent as an approved write');
+});
+
+test('runAgent: once Claude has searched the web in a run, every later account tool waits for approval, and the card says why', async () => {
+  const e = { kind: 'ask', prompt: 'what is the weather, and anything from my inbox about the trip?', params: {}, via: 'assist' };
+  const web = { providerReady: () => true, feat: () => true, providerOf: () => 'anthropic' };
+  // Turn 1: a Gmail read before any search runs as usual. Turn 2: Claude searched (a page could now steer it), then
+  // asks for Gmail and a browser tab: both wait. Turn 3: still after the search, a declined read never runs.
+  const r = agentRig({ e, extra: web, searches: [0, 1, 0], approve: (step) => step.name !== 'browser_tabs',
+    batches: [[['gmail_search', { q: 'trip' }]], [['gmail_search', { q: 'passport number' }], ['browser_read', { tabId: 2 }]], [['browser_tabs', {}]]] });
+  await r.run();
+  assert.deepEqual(r.calls.asked.map(([name, , status]) => [name, status]), [['gmail_search', 'awaiting'], ['browser_read', 'awaiting'], ['browser_tabs', 'awaiting']]);
+  assert.deepEqual(e.steps.map((s) => [s.name, Boolean(s.confirm), Boolean(s.afterWeb), s.status]), [
+    ['gmail_search', false, false, 'done'], ['gmail_search', true, true, 'done'], ['browser_read', true, true, 'done'], ['browser_tabs', true, true, 'declined']]);
+  // approved reads still run as reads (never sent as an approved write); the declined one never ran
+  assert.deepEqual(r.calls.tool, [['gmail_search', { q: 'trip' }, false], ['gmail_search', { q: 'passport number' }, false]]);
+  assert.deepEqual(r.calls.ext, [['read', { tabId: 2 }, false]]);
+  assert.match(e.meta.note, /live web/);
+  // A run without a search keeps its reads approval-free.
+  const plain = { kind: 'ask', prompt: 'my inbox', params: {}, via: 'assist' };
+  const p = agentRig({ e: plain, extra: web, batches: [[['gmail_search', { q: 'x' }]], [['gmail_search', { q: 'y' }]]] });
+  await p.run();
+  assert.deepEqual(p.calls.asked, []);
+  // The approval card says why it asks.
+  const vars = { esc: (s) => String(s), SERVICE_ICON: {}, LONG_FIELDS: new Set(['body']) };
+  vars.urlHost = evalIn(vars, `return (${constSource('urlHost').replace(/^urlHost = /, '').replace(/;$/, '')});`);
+  const { renderSteps } = lift(vars, 'renderSteps');
+  const card = renderSteps({ steps: [{ id: 's9', status: 'awaiting', confirm: true, afterWeb: true, service: 'gmail', label: 'Search Gmail', args: { q: 'passport number' } }] });
+  assert.match(card, /Asked after a web search: a page can try to steer what the assistant does next, so anything that reads or changes your accounts now waits for your OK\./);
+  assert.doesNotMatch(renderSteps({ steps: [{ id: 's8', status: 'awaiting', write: true, service: 'gmail', label: 'Send', args: {} }] }), /Asked after a web search/);
 });
 
 test('the agent is told tool results are untrusted whether or not a browser is connected, and which tools ask first', () => {

@@ -7,22 +7,22 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=77';
-import * as Sync from './sync.js?v=77';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=77';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=77';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=77';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=77';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=77';
-import { initLookup } from './lookup.js?v=77';
-import { createRemix } from './remix-app.js?v=77';
-import { sendMode, looksLikeQuestion } from './remix.js?v=77';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=77';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=77';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=77';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=77';
-import * as ClaudeImport from './claude-import.js?v=77';
-import { createFeedback } from './feedback.js?v=77';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=78';
+import * as Sync from './sync.js?v=78';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=78';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=78';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=78';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=78';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=78';
+import { initLookup } from './lookup.js?v=78';
+import { createRemix } from './remix-app.js?v=78';
+import { sendMode, looksLikeQuestion } from './remix.js?v=78';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=78';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=78';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=78';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=78';
+import * as ClaudeImport from './claude-import.js?v=78';
+import { createFeedback } from './feedback.js?v=78';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -238,11 +238,21 @@ let accountReloading = false;
 function reloadWorkspace(external = false) {
   if (accountReloading) return true;
   if (!external && workspaceOf() === workspace) return false;
-  accountReloading = true;
   if (!external) saveSettings();
-  stopAll(); Sync.suspend(); clearTimeout(persistTimer); S.thread = null;
+  // Runs stop first, then the open thread is saved now: an edit or a result still inside persist's 400 ms debounce
+  // would otherwise be lost (tester cookie expiry, a sign-in/out in another tab, a passcode change). The save goes to
+  // THIS page's database (threadDbName is fixed when the page loads), before sync is suspended so it is still marked
+  // for upload; from here on nothing else is written. The reload waits for that save, at most 2 s.
+  stopAll();
+  const flushed = persist(true);
+  accountReloading = true;
+  Sync.suspend(); clearTimeout(persistTimer); S.thread = null;
   if (!external) { try { sessionStorage.setItem('atelier.accountResume', '1'); } catch {} }
-  location.reload();
+  if (!flushed) location.reload();
+  else {
+    let gone = false; const reload = () => { if (!gone) { gone = true; location.reload(); } };
+    setTimeout(reload, 2000); flushed.then(reload, reload);
+  }
   return true;
 }
 function onAccountStorage(ev) {
@@ -326,7 +336,22 @@ const rawDB = (() => {
   }));
   // This immutable inventory describes only the original shared store before this release. Its small metadata DB
   // survives account-scoped wipes and localStorage.clear; subsequent private owner writes can never be recaptured.
-  let legacyReady;
+  // A freeze that fails for any other reason (meta DB won't open, quota, no crypto.subtle, hashing out of memory) never
+  // blocks an owner save: the save goes ahead and the boundary closes for good instead (unguarded() below), so rows
+  // written without a durable inventory can never be offered to another account. The failure is cached with a growing
+  // backoff, so autosaves don't re-read and re-hash every thread on each keystroke.
+  let legacyReady, legacyRetryAt = 0, legacyFails = 0;
+  const LEGACY_CLOSED = new Set(['legacy_boundary_invalid', 'legacy_boundary_closed']); // final answers: never retried
+  const UNGUARDED = 'sharedHistoryUnguarded'; // global localStorage flag (not workspace-scoped): any tab may be freezing
+  const closedErr = () => Object.assign(new Error('Older shared-history recovery is closed on this device after a storage error. Your current account can still save work.'), { code: 'legacy_boundary_closed' });
+  // Best effort, in order: the localStorage flag at once (synchronous, seen by every tab before the write lands), then a
+  // closed marker in the meta DB when it has no inventory yet. A valid inventory written earlier still wins: it predates
+  // this write, so the write can't be in it (freezeLegacy checks the flag again before it stores a new inventory).
+  const unguarded = () => {
+    if (LS.get(UNGUARDED, 0)) return;
+    LS.set(UNGUARDED, Date.now());
+    openDb('atelier-shared-history-v76', 'meta').then((meta) => storeClosed(meta)).catch(() => {});
+  };
   const readAll = (db, store) => new Promise((res, rej) => {
     const t = db.transaction(store, 'readonly'), q = t.objectStore(store).getAll();
     t.oncomplete = () => res(q.result || []); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('Couldn’t read older threads'));
@@ -343,16 +368,33 @@ const rawDB = (() => {
     return [...bytes].map((n) => n.toString(16).padStart(2, '0')).join('');
   };
   const validInventory = (inventory) => {
+    if (inventory?.closed === true) throw closedErr();
     if (!inventory || inventory.v !== 1 || !Array.isArray(inventory.hashes) || !inventory.hashes.every((pair) => Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'string' && /^[\w-]{1,120}$/.test(pair[0]) && /^[a-f\d]{64}$/.test(pair[1]))) throw Object.assign(new Error('Older shared-history recovery is unavailable on this device. Your current account can still save work.'), { code: 'legacy_boundary_invalid' });
     return inventory;
   };
-  const freezeLegacy = () => (legacyReady ??= (async () => {
+  // A closed marker is stored only where no inventory exists yet (the same check-and-put transaction as a new inventory).
+  const storeClosed = (meta) => new Promise((res) => {
+    const t = meta.transaction('meta', 'readwrite'), s = t.objectStore('meta'), q = s.get('baseline');
+    q.onsuccess = () => { if (q.result === undefined) s.put({ v: 0, closed: true }, 'baseline'); };
+    t.oncomplete = t.onerror = t.onabort = () => res();
+  });
+  const freezeLegacy = () => {
+    if (legacyReady && legacyRetryAt && Date.now() >= legacyRetryAt) { legacyReady = null; legacyRetryAt = 0; }
+    return (legacyReady ??= freezeOnce().then((inventory) => { legacyFails = 0; return inventory; }, (err) => {
+      // Cached either way: a final answer for good, anything else for 30 s, 1 min, 2 min … up to an hour.
+      if (!LEGACY_CLOSED.has(err?.code)) legacyRetryAt = Date.now() + Math.min(36e5, 3e4 * 2 ** legacyFails++);
+      throw err;
+    }));
+  };
+  const freezeOnce = async () => {
     const meta = await openDb('atelier-shared-history-v76', 'meta');
     const stored = await new Promise((res, rej) => {
       const t = meta.transaction('meta', 'readonly'), q = t.objectStore('meta').get('baseline');
       t.oncomplete = () => res(q.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('Couldn’t read the shared-thread boundary'));
     });
     if (stored !== undefined) return validInventory(stored);
+    // An owner save already went ahead without an inventory: what is in the store now may be private work.
+    if (LS.get(UNGUARDED, 0)) { await storeClosed(meta); throw closedErr(); }
     const original = await openDb('atelier-data', 'threads', 'id'), rows = await readAll(original, 'threads'), hashes = [];
     // Hash one thread at a time: histories with media never allocate all their encoded copies at once.
     for (const thread of rows) {
@@ -361,23 +403,34 @@ const rawDB = (() => {
     }
     const candidate = { v: 1, hashes };
     // Another first-launch tab may have frozen its inventory already. That original boundary always wins, including
-    // when this tab read owner rows after the other tab finished freezing and started writing private work.
+    // when this tab read owner rows after the other tab finished freezing and started writing private work. An owner
+    // save that went ahead unguarded while this tab hashed closes it instead (its rows may be in this candidate).
     return new Promise((res, rej) => {
       const t = meta.transaction('meta', 'readwrite'), s = t.objectStore('meta'), q = s.get('baseline');
-      let chosen;
+      let chosen, closed = null;
       q.onsuccess = () => {
-        try { chosen = q.result === undefined ? candidate : validInventory(q.result); if (q.result === undefined) s.put(candidate, 'baseline'); }
-        catch (err) { rej(err); t.abort(); }
+        try {
+          if (q.result === undefined && LS.get(UNGUARDED, 0)) { closed = closedErr(); s.put({ v: 0, closed: true }, 'baseline'); return; }
+          chosen = q.result === undefined ? candidate : validInventory(q.result); if (q.result === undefined) s.put(candidate, 'baseline');
+        } catch (err) { rej(err); t.abort(); }
       };
-      t.oncomplete = () => res(chosen); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('Couldn’t preserve the shared-thread boundary'));
+      t.oncomplete = () => (closed ? rej(closed) : res(chosen)); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('Couldn’t preserve the shared-thread boundary'));
     });
-  })().catch((err) => { legacyReady = null; throw err; }));
+  };
+  // Key/value data ("atelier-kv") is per workspace too. The owner keeps its original, unscoped keys (rx:* remix drafts,
+  // ccHandle, the passcode backup), so nothing needs migrating; every other workspace prefixes its own with
+  // ws/<workspace>/ (no owner key starts with ws/). kvKeys answers this workspace's names, unprefixed.
+  const KV_SCOPE = 'ws/';
+  const kvKey = (k) => (workspace === 'owner' ? k : `${KV_SCOPE}${workspace}/${k}`);
+  const kvMine = (k) => typeof k === 'string' && (workspace === 'owner' ? !k.startsWith(KV_SCOPE) : k.startsWith(kvKey('')));
+  const kvName = (k) => (workspace === 'owner' ? k : k.slice(kvKey('').length));
   // "atelier-data" is new: tabs running older versions can hold or block the old "atelier" database,
   // so threads live here and are copied over from the old one when it's free (see migrateOldThreads).
   const tx = async (mode, fn, store = 'threads') => {
     if (workspace === 'owner' && store === 'threads' && mode === 'readwrite') {
+      // Never blocks the save: a corrupt or closed marker stays closed (never recaptured); any other failure closes it.
       try { await freezeLegacy(); }
-      catch (err) { if (err?.code !== 'legacy_boundary_invalid') throw err; } // An existing corrupt marker stays closed, never recaptured.
+      catch (err) { if (!LEGACY_CLOSED.has(err?.code)) unguarded(); }
     }
     const db = await (store === 'kv' ? openDb('atelier-kv', 'kv') : openDb(threadDbName, 'threads', 'id'));
     return new Promise((res, rej) => {
@@ -406,11 +459,17 @@ const rawDB = (() => {
     // One readwrite transaction: fn(current) → a thread to put, null to delete it, undefined to leave it (sync merges).
     update: (id, fn) => tx('readwrite', (s) => { const q = s.get(id); q.onsuccess = () => { const next = fn(q.result); if (next === null) s.delete(id); else if (next) s.put(next); }; return q; }),
     clear: () => tx('readwrite', (s) => s.clear()),
-    kvGet: (k) => tx('readonly', (s) => s.get(k), 'kv'),
-    kvSet: (k, v) => tx('readwrite', (s) => s.put(v, k), 'kv'),
-    kvDel: (k) => tx('readwrite', (s) => s.delete(k), 'kv'),
-    kvKeys: () => tx('readonly', (s) => s.getAllKeys(), 'kv'),
-    kvClear: () => tx('readwrite', s => s.clear(), 'kv'),
+    kvGet: (k) => tx('readonly', (s) => s.get(kvKey(k)), 'kv'),
+    kvSet: (k, v) => tx('readwrite', (s) => s.put(v, kvKey(k)), 'kv'),
+    kvDel: (k) => tx('readwrite', (s) => s.delete(kvKey(k)), 'kv'),
+    kvKeys: () => tx('readonly', (s) => s.getAllKeys(), 'kv').then((keys) => (keys || []).filter(kvMine).map(kvName)),
+    // This workspace's keys only (one transaction): a tester's Clear this device never touches the owner's rx:* drafts,
+    // Claude Code folder or passcode backup, nor another account's.
+    kvClear: () => tx('readwrite', (s) => { const q = s.getAllKeys(); q.onsuccess = () => { for (const k of q.result || []) if (kvMine(k)) s.delete(k); }; }, 'kv'),
+    // The owner's passcode backup (restored at boot after the browser dropped localStorage) is the owner's own key in
+    // every workspace: written by an owner sign-in, read only by a signed-out page (boot), never cleared by another account.
+    ownerPasscodeGet: () => tx('readonly', (s) => s.get('passcode'), 'kv'),
+    ownerPasscodeSet: (v) => tx('readwrite', (s) => s.put(v, 'passcode'), 'kv'),
   };
 })();
 // Every thread write goes through here: a put marks the thread for owner thread sync (public/sync.js), del hides it
@@ -519,8 +578,15 @@ let persistTimer;
 function persist(now = false) {
   clearTimeout(persistTimer);
   const thread = S.thread;
-  const go = () => { if (thread?.entries.length && !accountReloading) { thread.updatedAt = Date.now(); DB.put(thread).catch(storageError); if (thread === S.thread) LS.set(workspaceKey('lastThread'), thread.id); } };
-  now ? go() : (persistTimer = setTimeout(go, 400));
+  // → the save's promise (settled either way), or undefined when there was nothing to save; persist(true) returns it.
+  const go = () => {
+    if (!thread?.entries.length || accountReloading) return;
+    thread.updatedAt = Date.now(); const saved = DB.put(thread).catch(storageError);
+    if (thread === S.thread) LS.set(workspaceKey('lastThread'), thread.id);
+    return saved;
+  };
+  if (now) return go();
+  persistTimer = setTimeout(go, 400);
 }
 function storageError(err) { console.error(err); toast('Couldn’t save your work on this device. Export a backup from Settings before closing.', { error: true }); }
 
@@ -1626,7 +1692,7 @@ async function run(e) {
       if (isTesterCode(err.code)) e.budget = budgetOf(err);
       if (err.status === 401) updateKeyState(false);
       if (err.code === 'tester_signin') testerSignedOut('expired');
-      else if (err.status === 401 && /passcode/i.test(e.error)) { Sync.pause('passcode'); S.settings.passcode = ''; saveSettings(); syncRole(); DB.kvSet('passcode', '').catch(() => {}); signinReason = 'rejected'; openOnboard('rejected'); }
+      else if (err.status === 401 && /passcode/i.test(e.error)) { Sync.pause('passcode'); S.settings.passcode = ''; saveSettings(); syncRole(); DB.ownerPasscodeSet('').catch(() => {}); signinReason = 'rejected'; openOnboard('rejected'); }
     }
   } finally {
     e.pending = false;
@@ -2037,8 +2103,11 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
       try { args = JSON.parse(call.function.arguments || '{}'); } catch {}
       const step = { id: uid(), name: call.function.name, label: def?.['x-label'] || call.function.name, service: def?.['x-service'], args, write: Boolean(def?.['x-write']), status: 'running' };
       // A read that waits for the OK too (it isn't sent as approved): a page load the model chose, and — should a link or
-      // share turn ever get here (runChat keeps them out) — every tool on it.
-      if (!step.write && (e.untrusted || asksFirst(step.name, args))) step.confirm = true;
+      // share turn ever get here (runChat keeps them out) — every tool on it. Once Claude has searched the web in this
+      // run, every later account tool waits too: a page it read could steer it to open your mail and carry what it read
+      // out in its next search query, so nothing from your accounts is read without your OK (st.afterWeb says why).
+      if (!step.write && (e.untrusted || searched > 0 || asksFirst(step.name, args))) step.confirm = true;
+      if (searched > 0) step.afterWeb = true;
       e.steps.push(step);
       let result;
       if (step.write || step.confirm) {
@@ -2081,6 +2150,7 @@ function renderSteps(e) {
         <div class="ac-head"><span class="svc">${SERVICE_ICON[st.service] || '•'}</span><b>${esc(st.label)}</b><span class="ac-tag">needs your OK</span></div>
         ${st.service === 'browser' && st.confirm ? `<p class="ac-target">${st.args?.url ? `Loads <b>${esc(urlHost(st.args.url))}</b> in your browser, signed in as you — anything in the address reaches that site.<br><span>${esc(st.args.url)}</span>` : 'Reads one of your open tabs.'}</p>`
           : st.service === 'browser' ? `<p class="ac-target">${st.target && !st.target.error ? `${esc(st.target.tag)}${st.target.type ? ` (${esc(st.target.type)})` : ''} <b>“${esc(st.target.label || 'unlabeled')}”</b> on <b>${esc(st.target.page || '')}</b><br><span>${esc(st.target.url || '')}</span>` : '<b>Couldn’t read the target element — decline unless you’re sure.</b>'}</p>` : ''}
+        ${st.afterWeb ? '<p class="ac-target">Asked after a web search: a page can try to steer what the assistant does next, so anything that reads or changes your accounts now waits for your OK.</p>' : ''}
         <div class="ac-fields">${Object.entries(st.args || {}).map(([k, v]) => `<label><span>${esc(k)}</span>${LONG_FIELDS.has(k) || String(v).length > 80
           ? `<textarea data-arg="${esc(k)}" rows="${Math.min(12, Math.max(3, String(v).split('\n').length + 1))}">${esc(v)}</textarea>`
           : `<input data-arg="${esc(k)}" value="${esc(Array.isArray(v) ? v.join(', ') : v)}" />`}</label>`).join('')}</div>
@@ -4328,7 +4398,8 @@ $('#settingsForm').addEventListener('submit', async (ev) => {
   const f = ev.target;
   const s = S.settings;
   s.passcode = f.passcode.value.trim();
-  await DB.kvSet('passcode', s.passcode).catch(() => {});
+  // A page that isn't the owner's (a tester's Settings) never clears the owner's passcode backup; typing one in signs in.
+  if (s.passcode || workspace === 'owner') await DB.ownerPasscodeSet(s.passcode).catch(() => {});
   s.temperature = +f.temperature.value;
   s.theme = $('input[name=theme]:checked', f)?.value || 'auto';
   // Only a choice that differs from the role's default is stored: a Save never pins an implicit “Automatic” for whoever
@@ -4543,6 +4614,19 @@ $('#migrateBtn').onclick = async (ev) => {
     : r > 0 ? `Brought over ${r} conversation${r === 1 ? '' : 's'}` : 'Nothing older to bring over', { error: r === 'busy' || r === 'error' });
   syncMigrateBtn();
 };
+// The atelier.* localStorage keys Clear this device removes. The owner's removes them all. Any other workspace removes its
+// own (keys scoped to it, and the shared preferences and session keys that hold no owner data), never the owner's
+// migration flags, sign-in markers, profile cache or navigation keys, another account's scoped keys, settings that now
+// hold an owner passcode (signed in from another tab), or the older-thread boundary flag (it protects the owner's rows).
+const OWNER_LS_KEEP = new Set(['migratedV3', 'migrateToastAt', 'owner', 'signedIn', 'me', 'lastThread', 'pinnedThreads']);
+function wipesKey(k) {
+  if (!k.startsWith('atelier.') || k === 'atelier.sharedHistoryUnguarded') return false;
+  if (workspace === 'owner') return true;
+  const name = k.slice('atelier.'.length);
+  if (OWNER_LS_KEEP.has(name)) return false;
+  if (name.includes(':')) return name.endsWith(`:${workspace}`); // workspaceKey(): this account's, or another's
+  return !(name === 'settings' && LS.get('settings', {})?.passcode);
+}
 $('#wipeBtn').onclick = async () => {
   if (S.busy) return toast('Stop generation before clearing this device.');
   // With sync on: everything only this device has (unsynced changes, images and videos, threads that don't sync) is
@@ -4555,12 +4639,13 @@ $('#wipeBtn').onclick = async () => {
     await reader.clearCache(); // Read aloud clips (Cache Storage 'atelier-tts'); its localStorage keys go with atelier.* below
     if (S.tester) await fetch('/api/li/logout', { method: 'POST' }).catch(() => {}); // "saved sign-in" includes the tester session
     remix?.wipe(); // stop filming jobs and drop pending remix drafts: nothing writes rx:* after kvClear
-    await Sync.forget(); await DB.clear(); await DB.kvClear(); // forget: the sync state goes, nothing is deleted on the server
-    // Prevent the legacy migration from restoring erased conversations on reload.
-    await new Promise((res, rej) => { const r = indexedDB.deleteDatabase('atelier'); r.onsuccess = res; r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('Close other Atelier tabs and try clearing this device again.')); });
+    await Sync.forget(); await DB.clear(); await DB.kvClear(); // forget: the sync state goes, nothing is deleted on the server; this workspace's threads and kv keys only
+    // Prevent the legacy migration from restoring erased conversations on reload. The old "atelier" database holds the
+    // owner's not-yet-copied threads: only the owner's own Clear this device may delete it.
+    if (workspace === 'owner') await new Promise((res, rej) => { const r = indexedDB.deleteDatabase('atelier'); r.onsuccess = res; r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('Close other Atelier tabs and try clearing this device again.')); });
     clearTimeout(draftT); drafts.stop(); sendHold?.cancel('quiet'); input.value = ''; // no draft is written back on pagehide
     await self.caches?.delete(SHARE_CACHE).catch(() => {}); // a pending share (sw.js) is device data too
-    Object.keys(localStorage).filter(k => k.startsWith('atelier.')).forEach(k => localStorage.removeItem(k));
+    Object.keys(localStorage).filter(wipesKey).forEach(k => localStorage.removeItem(k));
     location.reload();
   } catch (err) { toast(err.message || 'Couldn’t clear this device. Please try again.', { error: true }); }
 };
@@ -4914,7 +4999,7 @@ $('#onboardForm').addEventListener('submit', async (ev) => {
   if (S.tester) setTester(null);
   saveSettings(); syncRole(); renderWelcome(); renderOptions(); updateKeyState(true);
   LS.set('signedIn', Date.now()); LS.set('owner', true); LS.set('outReason', '');
-  DB.kvSet('passcode', pass).catch(() => {});
+  DB.ownerPasscodeSet(pass).catch(() => {});
   if (reloadWorkspace()) return;
   $('#onboard').close();
   if (!Sync.firstRunAhead()) toast('You’re in'); // else thread sync's first-run message follows at once and says it
@@ -5577,7 +5662,9 @@ function startFresh() {
 $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
 
-const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || '76'}`, online: navigator.onLine !== false }), toast });
+// The build feedback reports when app.js was loaded without its ?v= (scripts/bump-version.mjs moves it with sw.js VERSION).
+const APP_BUILD = '78';
+const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || APP_BUILD}`, online: navigator.onLine !== false }), toast });
 $('#feedbackBtn').onclick = () => feedback.open();
 $('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };
 $('#studioClose').onclick = () => $('#studioDialog').close();
@@ -5857,8 +5944,8 @@ remix = createRemix({
   renderWelcome();
   rawDB.freezeLegacy().catch((err) => {
     if (err?.code === 'legacy_boundary_invalid') toast(err.message, { error: true });
-    else storageError(err);
-  }); // local metadata only; owner writes wait until the boundary is durable
+    else console.warn('[atelier] older-thread boundary:', err?.message || err); // saves still work (rawDB tx), recovery stays closed
+  }); // local metadata only; an owner write waits for it, but never fails because of it
   const testerWorkspace = workspace.startsWith('tester:');
   const scopeHash = testerWorkspace ? [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(workspace)))].map((x) => x.toString(16).padStart(2, '0')).join('') : '';
   Sync.init({
@@ -5908,7 +5995,10 @@ remix = createRemix({
   refreshClaudeCount(); // imported Claude chats: the accounts agent offers its history tools while there are any
 
   if (!S.settings.passcode) {
-    const backup = await Promise.race([DB.kvGet('passcode').catch(() => null), sleep(1500).then(() => null)]);
+    // The owner's passcode backup comes back only on a signed-out page of a browser no tester has used (the owner's
+    // localStorage was dropped): never on a tester page, and never where a tester signed in or out (testerTrace).
+    const restorable = workspace === 'guest' && !testerTrace;
+    const backup = restorable ? await Promise.race([DB.ownerPasscodeGet().catch(() => null), sleep(1500).then(() => null)]) : null;
     if (typeof backup === 'string' && backup) { S.settings.passcode = backup; saveSettings(); if (reloadWorkspace()) return; console.info('[atelier] passcode restored from backup'); }
     else if (SIGNIN_NOTES[LS.get('outReason', '')]) signinReason = LS.get('outReason', ''); // signed out on purpose, or the session ended
     else if (LS.get('signedIn', 0) || (await Promise.race([DB.all().then((t) => t.length).catch(() => 0), sleep(1500).then(() => 0)]))) signinReason = 'cleared';
@@ -5946,7 +6036,9 @@ remix = createRemix({
     // Sent: the draft comes back as it was. Not sent (no key, signed out, a held send): it goes back in front of the request.
     const sent = !input.value.trim();
     input.value = sent ? asideDraft.text : joinDraft(asideDraft.text, input.value); autosize(); drafts.restored();
-    if (sent && asideDraft.src) showSource(asideDraft.src === 'share' ? NOTES.shared : NOTES.link);
+    // A link or share draft gets its mark back either way: put back in front of an unsent own-key request, it marks the
+    // whole composer again (the request's own prefill had cleared it), so stranger text never reaches the accounts agent.
+    if (asideDraft.src) showSource(asideDraft.src === 'share' ? NOTES.shared : NOTES.link);
   });
   const connected = params.get('connected');
   if (connected) {

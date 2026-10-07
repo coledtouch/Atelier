@@ -5,7 +5,7 @@ import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { VERSION_RE, bumpSw, bumpHtml, bumpImports, bumpFiles, versionOf, validN } from '../scripts/bump-version.mjs';
+import { VERSION_RE, BUILD_RE, bumpSw, bumpHtml, bumpImports, bumpBuild, bumpFiles, versionOf, validN } from '../scripts/bump-version.mjs';
 
 const read = (p) => readFile(new URL(`../public/${p}`, import.meta.url), 'utf8');
 
@@ -65,6 +65,13 @@ test('module imports: versioned ones move, unversioned ones gain ?v=, nothing el
   assert.equal(bumpImports("import {\n  a,\n} from './x.js';", 9), "import {\n  a,\n} from './x.js?v=9';");
 });
 
+test('app.js APP_BUILD: the feedback fallback build moves with the rest, and nothing else does', () => {
+  const src = "const APP_BUILD = '76';\nconst x = '76'; // const APP_BUILD = 'other'\n";
+  assert.equal(bumpBuild(src, 78), src.replace("const APP_BUILD = '76';", "const APP_BUILD = '78';"));
+  assert.equal(bumpBuild(bumpBuild(src, 78), 78), bumpBuild(src, 78), 'idempotent');
+  assert.ok(BUILD_RE.test("const APP_BUILD = '7';"));
+});
+
 test('version numbers: positive integers only', () => {
   for (const ok of [1, 53, '53', 999999]) assert.ok(validN(ok), String(ok));
   for (const bad of [0, '053', '', 'v53', '5.3', -1, 1_000_000, undefined]) assert.ok(!validN(bad), String(bad));
@@ -76,11 +83,11 @@ test('bumpFiles rewrites a public folder in one step, and a second run changes n
     const url = pathToFileURL(dir + '/');
     await writeFile(new URL('sw.js', url), "const VERSION = 'atelier-v52';\n");
     await writeFile(new URL('index.html', url), '<script src="/app.js?v=52" type="module"></script>\n');
-    await writeFile(new URL('app.js', url), "import { a } from './a.js?v=52';\r\nimport { b } from './b.js';\r\n");
+    await writeFile(new URL('app.js', url), "import { a } from './a.js?v=52';\r\nimport { b } from './b.js';\r\nconst APP_BUILD = '52';\r\n");
     await writeFile(new URL('a.js', url), 'export const a = 1;\n');
     await writeFile(new URL('notes.txt', url), "from './a.js'\n");
     assert.deepEqual(await bumpFiles('53', url), ['app.js', 'index.html', 'sw.js']);
-    assert.equal(await readFile(new URL('app.js', url), 'utf8'), "import { a } from './a.js?v=53';\r\nimport { b } from './b.js?v=53';\r\n");
+    assert.equal(await readFile(new URL('app.js', url), 'utf8'), "import { a } from './a.js?v=53';\r\nimport { b } from './b.js?v=53';\r\nconst APP_BUILD = '53';\r\n");
     assert.equal(await readFile(new URL('notes.txt', url), 'utf8'), "from './a.js'\n", 'only .js files and index.html');
     assert.deepEqual(await bumpFiles(53, url), [], 'idempotent');
     await assert.rejects(bumpFiles('x', url), /version number/);
@@ -90,6 +97,11 @@ test('bumpFiles rewrites a public folder in one step, and a second run changes n
 test('the repo is consistent: bumping to the current VERSION would change nothing the app loads', async () => {
   const n = versionOf(await read('sw.js'));
   assert.equal(bumpHtml(await read('index.html'), n), await read('index.html'));
+  // feedback's fallback version: no hardcoded number left behind by a bump
+  const app = await read('app.js');
+  assert.ok(BUILD_RE.test(app), 'app.js has const APP_BUILD');
+  assert.equal(bumpBuild(app, n), app, `app.js APP_BUILD is ${n}`);
+  assert.doesNotMatch(app, /searchParams\.get\('v'\) \|\| '\d+'/, 'no hardcoded version fallback');
   const specs = (s) => [...s.matchAll(/\b(?:from|import)\s*\(?\s*['"]\.\/[^'"\n]+['"]/g)].map((m) => m[0]);
   const seen = new Set(), todo = ['app.js'];
   while (todo.length) {

@@ -131,6 +131,16 @@ async function readJson(req, cap) {
   } catch { return { big: false, body: null }; }
 }
 
+// ── POST /api/feedback: a per-tester rate limit (LI_LIMIT, keyed fb:<sub>: the binding's 20 a minute), as for read aloud
+// and dictation, ahead of src/feedback.js (each submission is a KV write and a list of the inbox).
+const FEEDBACK_RATE_RETRY_AFTER = '60';
+async function feedback(c) {
+  let limited = false;
+  if (c.env.LI_LIMIT) { try { limited = !(await c.env.LI_LIMIT.limit({ key: `fb:${c.who.sub}` })).success; } catch {} }
+  if (limited) return fail(429, 'feedback_busy', 'You’ve sent a lot of feedback in the last minute. Keep your message and try again shortly.', {}, { 'retry-after': FEEDBACK_RATE_RETRY_AFTER });
+  return handleFeedback(c.req, c.env, { role: 'tester', sub: c.who.sub });
+}
+
 // ── the allow-list ──
 const VIDEO = (method, route) => ({ method, match: `video/${route}`, run: video });
 export const TESTER_ROUTES = Object.freeze([
@@ -138,7 +148,7 @@ export const TESTER_ROUTES = Object.freeze([
   { method: 'GET', match: 'tester/profile', run: profileGet },
   { method: 'PUT', match: 'tester/profile', run: profilePut },
   ...TESTER_SYNC_ROUTES,
-  { method: 'POST', match: 'feedback', run: (c) => handleFeedback(c.req, c.env, { role: 'tester', sub: c.who.sub }) },
+  { method: 'POST', match: 'feedback', run: feedback },
   // Look up (src/lookup.js): free — Wikipedia and Wikimedia only, no reserve(), no Ledger, no KV; LOOKUP_LIMIT per tester.
   { method: 'GET', match: 'lookup', run: (c) => handleLookup(c.req, c.env, c.url, { key: `t:${c.who.sub}` }) },
   { method: 'GET', match: 'lookup/img', run: (c) => handleLookup(c.req, c.env, c.url, { key: `t:${c.who.sub}` }) },

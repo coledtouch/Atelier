@@ -6,7 +6,7 @@ import { FORMAT, dehydrate, sha256hex } from '../public/sync-merge.js';
 import { SYNC_TIMING } from '../src/sync.js';
 import { COOKIE } from '../src/tester/auth.js';
 
-const { TESTER_SYNC_QUOTA_BYTES, testerSyncBucket, handleTesterSync } = await import('../src/tester/sync.js');
+const { TESTER_SYNC_QUOTA_BYTES, TESTER_SYNC_MAX_THREADS, testerSyncBucket, handleTesterSync } = await import('../src/tester/sync.js');
 
 async function setup(extra = {}) {
   resetTesterCaches();
@@ -78,13 +78,14 @@ test('trash restore and history are scoped even when thread IDs match', async ()
   assert.equal((await call(env, a.token, 'POST', 'trash/restore', { key: `testers/${await sha256(a.sub)}/${trash.items[0].key}` })).status, 400);
   assert.equal((await call(env, a.token, 'POST', 'trash/restore', { key: trash.items[0].key })).status, 200);
   assert.equal((await (await call(env, b.token, 'GET', 'thread/same-thread')).json()).entries[0].d.text, 'Private B');
-  assert.ok(bucket.keys(`testers/${await sha256(a.sub)}/v/`).length > 0);
+  assert.ok(bucket.keys(`testers-v/${await sha256(a.sub)}/v/same-thread/`).length > 0, 'history under its own lifecycle prefix');
+  assert.equal(bucket.keys(`testers/${await sha256(a.sub)}/v/`).length, 0);
   assert.equal(bucket.keys('v/').length, 0);
 });
 
 test('tester quota and cached usage are separate from another tester and owner', async () => {
   const { env, bucket, a, b } = await setup({ SYNC_QUOTA_BYTES: 50 * 1024 ** 3 });
-  await bucket.put(`testers/${await sha256(a.sub)}/u/usage.json`, JSON.stringify({ bytes: TESTER_SYNC_QUOTA_BYTES, blobs: 1, images: 1, videos: 0, at: SYNC_TIMING.now() }));
+  await bucket.put(`testers/${await sha256(a.sub)}/u/usage.json`, JSON.stringify({ bytes: TESTER_SYNC_QUOTA_BYTES, blobs: 1, images: 1, videos: 0, at: SYNC_TIMING.now(), all: 1 }));
   const bytes = new Uint8Array([7]), hash = await sha256hex(bytes);
   const full = await blobCall(env, a.token, 'PUT', hash, bytes);
   assert.equal(full.status, 507);
@@ -186,4 +187,166 @@ test('feedback routing accepts the verified tester and owner, blocks foreign ori
   const inbox = await (await api(env, 'feedback', {}, { pass: 'pw' })).json();
   assert.equal(inbox.entries.length, 2);
   assert.deepEqual(inbox.entries.map((item) => item.role).sort(), ['owner', 'tester']);
+});
+
+// ── cost limits (testers only): every stored byte counts, reservations hold concurrent writes, 500 threads, a rate limit ──
+const usageKey = async (sub) => `testers/${await sha256(sub)}/u/usage.json`;
+const setUsage = async (bucket, sub, bytes) => bucket.put(await usageKey(sub), JSON.stringify({ bytes, blobs: 0, images: 0, videos: 0, at: SYNC_TIMING.now(), all: 1 }));
+// Bytes a tester stores, from the bucket itself (all three prefixes; u/ bookkeeping excluded).
+async function storedBytes(bucket, sub) {
+  const h = await sha256(sub);
+  return [`testers/${h}/`, `testers-x/${h}/`, `testers-v/${h}/`].flatMap((p) => bucket.keys(p)).filter((k) => !k.startsWith(`testers/${h}/u/`)).reduce((n, k) => n + bucket.objects.get(k).bytes.byteLength, 0);
+}
+
+test('the tester quota counts thread documents, trash and history as well as media, and status shows writes at once', async () => {
+  const { env, bucket, a } = await setup();
+  assert.equal((await call(env, a.token, 'POST', 'thread/counted', await pushBody('A long enough answer '.repeat(20)))).status, 200);
+  const doc = await (await call(env, a.token, 'GET', 'thread/counted')).json();
+  assert.equal((await call(env, a.token, 'DELETE', 'thread/counted', { v: FORMAT, seen: { 'same-entry': doc.entries[0].rev }, born: doc.born })).status, 200);
+  const bytes = new Uint8Array([1, 2, 3, 4, 5]), hash = await sha256hex(bytes);
+  assert.equal((await blobCall(env, a.token, 'PUT', hash, bytes)).status, 201);
+  const h = await sha256(a.sub);
+  assert.ok(bucket.keys(`testers-x/${h}/x/counted/`).length === 1, 'the trash copy exists');
+  const status = await (await call(env, a.token, 'GET', 'status')).json();
+  assert.ok(status.bytes >= await storedBytes(bucket, a.sub), 'thread, trash and media all counted');
+  assert.ok(status.bytes > bytes.byteLength + 400);
+  assert.equal(status.quota, TESTER_SYNC_QUOTA_BYTES);
+  // The owner's count is unchanged: media only.
+  assert.equal((await api(env, 'sync/thread/owner-doc', { method: 'POST', body: await pushBody('Owner text') }, { pass: 'pw' })).status, 200);
+  assert.equal((await (await api(env, 'sync/status', {}, { pass: 'pw' })).json()).bytes, 0);
+});
+
+test('near the cap a thread push is refused (507) like media, and reservations count uploads the cached usage hasn’t seen', async () => {
+  const { env, a } = await setup();
+  await setUsage(env.SYNC_BUCKET, a.sub, TESTER_SYNC_QUOTA_BYTES - 10);
+  const push = await call(env, a.token, 'POST', 'thread/too-much', await pushBody('More than ten bytes of text'));
+  assert.equal(push.status, 507);
+  assert.equal((await push.json()).code, 'quota');
+  const four = new Uint8Array([1, 2, 3, 4]), eight = new Uint8Array(8).fill(9);
+  assert.equal((await blobCall(env, a.token, 'PUT', await sha256hex(four), four)).status, 201);
+  assert.equal((await blobCall(env, a.token, 'PUT', await sha256hex(eight), eight)).status, 507, '4 + 8 > 10 although the cached count still says 10 bytes are free');
+  const status = await (await call(env, a.token, 'GET', 'status')).json();
+  assert.equal(status.bytes, TESTER_SYNC_QUOTA_BYTES - 6, 'the committed upload shows at once');
+});
+
+test('concurrent tester uploads can never pass the cap together', async () => {
+  for (let round = 0; round < 5; round++) {
+    const { env, bucket, a } = await setup();
+    await setUsage(bucket, a.sub, TESTER_SYNC_QUOTA_BYTES - 6);
+    const blobs = [new Uint8Array([1, 1, 1, 1]), new Uint8Array([2, 2, 2, 2]), new Uint8Array([3, 3, 3, 3])];
+    const results = await Promise.all(blobs.map(async (b) => (await blobCall(env, a.token, 'PUT', await sha256hex(b), b)).status));
+    assert.ok(results.filter((st) => st === 201).length <= 1, `round ${round}: ${results}`);
+    assert.ok(results.every((st) => st === 201 || st === 507));
+    // A refused upload leaves no reservation behind.
+    const h = await sha256(a.sub);
+    assert.equal(bucket.keys(`testers/${h}/u/r/`).length, results.filter((st) => st === 201).length);
+  }
+});
+
+test('testers sync at most 500 threads; the owner’s limit is unchanged', async () => {
+  const { env, bucket, a } = await setup();
+  assert.equal(TESTER_SYNC_MAX_THREADS, 500);
+  const scoped = await testerSyncBucket(bucket, a.sub);
+  for (let i = 0; i < 500; i++) { await scoped.put(`t/seed-${i}.json`, '{}'); await bucket.put(`t/seed-${i}.json`, '{}'); }
+  const r = await call(env, a.token, 'POST', 'thread/one-more', await pushBody('One more'));
+  assert.equal(r.status, 413);
+  assert.equal((await r.json()).code, 'too_many_threads');
+  assert.equal((await api(env, 'sync/thread/one-more', { method: 'POST', body: await pushBody('Owner one more') }, { pass: 'pw' })).status, 200);
+});
+
+test('tester sync writes and status recounts are rate limited per tester (LI_LIMIT sync:<sub>) with a retryable 503; reads and the owner are not', async () => {
+  const { env, bucket, a } = await setup();
+  const keys = []; let allow = true;
+  env.LI_LIMIT = { async limit({ key }) { keys.push(key); return { success: allow }; } };
+  assert.equal((await call(env, a.token, 'POST', 'thread/limited', await pushBody('first'))).status, 200);
+  assert.deepEqual(keys, [`sync:${a.sub}`]);
+  allow = false;
+  const before = bucket.keys().length;
+  const r = await call(env, a.token, 'POST', 'thread/limited', await pushBody('second', 0));
+  assert.equal(r.status, 503);
+  assert.equal(r.headers.get('retry-after'), '20');
+  assert.equal((await r.json()).code, 'sync_busy', 'the client retries a 503 sync_busy; a 429 would pause it as a lockout');
+  assert.equal(bucket.keys().length, before, 'nothing stored');
+  const bytes = new Uint8Array([5]);
+  assert.equal((await blobCall(env, a.token, 'PUT', await sha256hex(bytes), bytes)).status, 503);
+  assert.equal((await call(env, a.token, 'GET', 'status')).status, 503);
+  keys.length = 0;
+  assert.equal((await call(env, a.token, 'GET', 'index')).status, 200);
+  assert.equal((await call(env, a.token, 'GET', 'thread/limited')).status, 200);
+  assert.equal((await call(env, a.token, 'POST', 'blobs/missing', { hashes: [] })).status, 200);
+  assert.equal((await api(env, 'sync/thread/owner', { method: 'POST', body: await pushBody('owner') }, { pass: 'pw' })).status, 200);
+  assert.deepEqual(keys, [], 'reads and owner sync never consult the tester limit');
+  env.LI_LIMIT = { async limit() { throw new Error('down'); } };
+  assert.equal((await call(env, a.token, 'POST', 'thread/limited-2', await pushBody('limiter down'))).status, 200, 'a limiter outage fails open, as for read aloud');
+});
+
+test('tester feedback is rate limited per tester (LI_LIMIT fb:<sub>) before anything is stored', async () => {
+  const { env, a } = await setup();
+  env.ATELIER_KV.list = async ({ prefix, limit }) => ({ keys: [...env.ATELIER_KV.m.keys()].filter((key) => key.startsWith(prefix)).sort().slice(0, limit).map((name) => ({ name })) });
+  const keys = []; let allow = true;
+  env.LI_LIMIT = { async limit({ key }) { keys.push(key); return { success: allow }; } };
+  const request = { method: 'POST', headers: { 'content-type': 'application/json' }, body: { kind: 'bug', message: 'Something broke.' } };
+  assert.equal((await api(env, 'feedback', request, { cookie: a.token })).status, 201);
+  allow = false;
+  const r = await api(env, 'feedback', request, { cookie: a.token });
+  assert.equal(r.status, 429);
+  assert.equal((await r.json()).code, 'feedback_busy');
+  assert.ok(r.headers.get('retry-after'));
+  assert.deepEqual(keys, [`fb:${a.sub}`, `fb:${a.sub}`]);
+  assert.equal(env.ATELIER_KV.m.size, 1);
+});
+
+test('tester trash and history live under their own lifecycle prefixes (testers-x/, testers-v/), never the owner’s x/ and v/', async () => {
+  const { env, bucket, a } = await setup();
+  const h = await sha256(a.sub);
+  await call(env, a.token, 'POST', 'thread/split', await pushBody('First'));
+  const doc = await (await call(env, a.token, 'GET', 'thread/split')).json();
+  await call(env, a.token, 'DELETE', 'thread/split', { v: FORMAT, seen: { 'same-entry': doc.entries[0].rev }, born: doc.born });
+  const trash = await (await call(env, a.token, 'GET', 'trash')).json();
+  assert.equal(trash.items.length, 1);
+  assert.equal(bucket.keys(`testers-x/${h}/x/split/`).length, 1);
+  assert.equal(bucket.keys(`testers/${h}/x/`).length, 0);
+  assert.equal((await call(env, a.token, 'POST', 'trash/restore', { key: trash.items[0].key })).status, 200);
+  assert.ok(bucket.keys(`testers-v/${h}/v/split/`).length > 0, 'the snapshot before the restore');
+  assert.equal(bucket.keys(`testers-x/${h}/`).length, 0, 'the restored trash item is gone');
+  assert.deepEqual([...bucket.keys('x/'), ...bucket.keys('v/')], [], 'nothing at the owner’s root prefixes');
+  for (const k of bucket.keys()) assert.ok(/^(testers|testers-x|testers-v)\//.test(k), k);
+});
+
+test('trash written before the split (testers/<hash>/x/) is still listed, restored and then removed', async () => {
+  const { env, bucket, a } = await setup();
+  const h = await sha256(a.sub);
+  await call(env, a.token, 'POST', 'thread/old', await pushBody('Written under v77'));
+  const doc = await (await call(env, a.token, 'GET', 'thread/old')).json();
+  await call(env, a.token, 'DELETE', 'thread/old', { v: FORMAT, seen: { 'same-entry': doc.entries[0].rev }, born: doc.born });
+  // Move the trash object to where v76/v77 kept it.
+  const [now] = bucket.keys(`testers-x/${h}/`), obj = await bucket.get(now), rel = now.slice(`testers-x/${h}/`.length);
+  await bucket.put(`testers/${h}/${rel}`, await obj.text(), { customMetadata: obj.customMetadata });
+  await bucket.delete(now);
+  const trash = await (await call(env, a.token, 'GET', 'trash')).json();
+  assert.deepEqual(trash.items.map((i) => i.key), [rel]);
+  assert.equal((await call(env, a.token, 'POST', 'trash/restore', { key: rel })).status, 200);
+  assert.equal((await (await call(env, a.token, 'GET', 'thread/old')).json()).entries[0].d.text, 'Written under v77');
+  assert.equal(bucket.keys(`testers/${h}/x/`).length, 0, 'the pre-split copy is deleted after the restore');
+});
+
+test('a whole-account listing pages across all three prefixes with an account-bound cursor', async () => {
+  const { bucket, a, b } = await setup(); // pageSize 1
+  const scoped = await testerSyncBucket(bucket, a.sub), other = await testerSyncBucket(bucket, b.sub);
+  for (const k of ['t/a.json', 'b/aa/aa', 'x/a/1800000000000.json', 'v/a/1.json']) await scoped.put(k, 'x');
+  await bucket.put(`testers/${await sha256(a.sub)}/x/a/1700000000000.json`, 'pre-split'); // v77 trash
+  await other.put('t/b.json', 'y'); await bucket.put('x/owner/1.json', 'owner');
+  const walk = async (prefix) => {
+    const seen = [];
+    let page = await scoped.list({ prefix, limit: 1 });
+    for (;;) {
+      seen.push(...page.objects.map((o) => o.key));
+      if (!page.truncated) return seen.sort();
+      await assert.rejects(other.list({ prefix, limit: 1, cursor: page.cursor }), /cursor/);
+      page = await scoped.list({ prefix, limit: 1, cursor: page.cursor });
+    }
+  };
+  assert.deepEqual(await walk(''), ['b/aa/aa', 't/a.json', 'v/a/1.json', 'x/a/1700000000000.json', 'x/a/1800000000000.json']);
+  assert.deepEqual(await walk('x/'), ['x/a/1700000000000.json', 'x/a/1800000000000.json'], 'the new prefix, then the pre-split copies');
+  assert.deepEqual(await walk('t/'), ['t/a.json']);
 });

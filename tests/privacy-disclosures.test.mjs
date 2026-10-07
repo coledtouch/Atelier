@@ -173,6 +173,18 @@ test('tester private sync disclosures match consent, account separation, quotas 
   for (const words of ['off until you explicitly enable it', 'browser database for your LinkedIn account', 'private Cloudflare R2 storage namespace', '1 GiB cloud-storage limit', 'previous shared browser database stay local unless you explicitly select and import them']) assert.ok(testers.includes(words), words);
   const retention = text(/<li><b>Tester thread sync:<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
   for (const words of ['off until you explicitly enable private sync', 'imported chats', 'Turning sync off in Settings → Your data stops new transfers but keeps existing cloud copies', 'Clear this device removes local data only', 'same LinkedIn account', 'restored for 30 days', '90 days of inactivity', 'retries it before deleting the tester record']) assert.ok(retention.includes(words), words);
+  // What a tester's cloud storage keeps: no lifecycle rule or clean-up removes blobs, trash (x/) or history (v/) before the
+  // 90-day purge, and the 1 GiB counts all of it (src/sync.js SYNC_COUNT_ALL), with at most 500 threads.
+  const SYNC_CORE = await read('src/sync.js');
+  assert.match(SERVER, /export const TESTER_SYNC_MAX_THREADS = 500;/, 'update the disclosed 500-thread limit');
+  assert.match(SERVER, /SYNC_COUNT_ALL: true,/, 'the tester quota no longer counts everything: update "counts everything kept there"');
+  assert.doesNotMatch(SYNC_CORE, /bucket\.delete\(blobKey|delete\(`b\/|delete\(`v\//, 'blobs or history are deleted now: update the tester retention wording');
+  assert.doesNotMatch(retention, /until clean-up/, 'there is no clean-up before the 90-day purge');
+  for (const words of ['1 GiB limit that counts everything kept there', 'up to 500 threads', 'Copies of images, videos and long texts (over about 32 KB) aren’t removed when a thread is deleted', 'until the entire tester cloud namespace is removed', 'are removed 30 days after they were saved']) assert.ok(retention.includes(words), words);
+  // "removed 30 days after they were saved" rests on R2 lifecycle rules (30 days) on these two prefixes, which only hold
+  // tester trash (x/) and history (v/): keep the mapping, or update the wording.
+  assert.match(SERVER, /const split = \{ x: `testers-x\/\$\{hash\}\/`, v: `testers-v\/\$\{hash\}\/` \};/);
+  assert.match(text(TOS), /1 GiB cloud-storage limit \(which also counts deleted threads’ saved copies and earlier versions\) and up to 500 threads/);
   const imported = text(/<li id="claude-chats">([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
   assert.match(imported, /imported threads sync to your other devices when thread sync is enabled/);
   assert.doesNotMatch(PRIVACY, /testers’ threads are never uploaded|a tester’s imported chats never leave the device/);
