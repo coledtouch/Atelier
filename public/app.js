@@ -324,9 +324,58 @@ const rawDB = (() => {
     r.onerror = () => { delete dbs[name]; rej(r.error); };
     r.onblocked = () => toast('Close your other Atelier tabs so your work can be saved');
   }));
+  // This immutable inventory describes only the original shared store before this release. Its small metadata DB
+  // survives account-scoped wipes and localStorage.clear; subsequent private owner writes can never be recaptured.
+  let legacyReady;
+  const readAll = (db, store) => new Promise((res, rej) => {
+    const t = db.transaction(store, 'readonly'), q = t.objectStore(store).getAll();
+    t.oncomplete = () => res(q.result || []); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('Couldn’t read older threads'));
+  });
+  const legacyHash = async (thread) => {
+    let json;
+    try {
+      json = JSON.stringify(thread, (_key, value) => {
+        if (value && typeof value === 'object' && !Array.isArray(value) && ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw new Error('Unsupported legacy data');
+        return value;
+      });
+    } catch { return null; } // Non-JSON/corrupt rows are never offered as another account's import.
+    const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(json)));
+    return [...bytes].map((n) => n.toString(16).padStart(2, '0')).join('');
+  };
+  const validInventory = (inventory) => {
+    if (!inventory || inventory.v !== 1 || !Array.isArray(inventory.hashes) || !inventory.hashes.every((pair) => Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'string' && /^[\w-]{1,120}$/.test(pair[0]) && /^[a-f\d]{64}$/.test(pair[1]))) throw new Error('Couldn’t verify this device’s older shared threads. Your current account is protected.');
+    return inventory;
+  };
+  const freezeLegacy = () => (legacyReady ??= (async () => {
+    const meta = await openDb('atelier-shared-history-v76', 'meta');
+    const stored = await new Promise((res, rej) => {
+      const t = meta.transaction('meta', 'readonly'), q = t.objectStore('meta').get('baseline');
+      t.oncomplete = () => res(q.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('Couldn’t read the shared-thread boundary'));
+    });
+    if (stored !== undefined) return validInventory(stored);
+    const original = await openDb('atelier-data', 'threads', 'id'), rows = await readAll(original, 'threads'), hashes = [];
+    // Hash one thread at a time: histories with media never allocate all their encoded copies at once.
+    for (const thread of rows) {
+      if (!thread || typeof thread.id !== 'string' || !/^[\w-]{1,120}$/.test(thread.id)) continue;
+      const hash = await legacyHash(thread); if (hash) hashes.push([thread.id, hash]);
+    }
+    const candidate = { v: 1, hashes };
+    // Another first-launch tab may have frozen its inventory already. That original boundary always wins, including
+    // when this tab read owner rows after the other tab finished freezing and started writing private work.
+    return new Promise((res, rej) => {
+      const t = meta.transaction('meta', 'readwrite'), s = t.objectStore('meta'), q = s.get('baseline');
+      let chosen;
+      q.onsuccess = () => {
+        try { chosen = q.result === undefined ? candidate : validInventory(q.result); if (q.result === undefined) s.put(candidate, 'baseline'); }
+        catch (err) { rej(err); t.abort(); }
+      };
+      t.oncomplete = () => res(chosen); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('Couldn’t preserve the shared-thread boundary'));
+    });
+  })().catch((err) => { legacyReady = null; throw err; }));
   // "atelier-data" is new: tabs running older versions can hold or block the old "atelier" database,
   // so threads live here and are copied over from the old one when it's free (see migrateOldThreads).
   const tx = async (mode, fn, store = 'threads') => {
+    if (workspace === 'owner' && store === 'threads' && mode === 'readwrite') await freezeLegacy();
     const db = await (store === 'kv' ? openDb('atelier-kv', 'kv') : openDb(threadDbName, 'threads', 'id'));
     return new Promise((res, rej) => {
       const t = db.transaction(store, mode);
@@ -338,9 +387,11 @@ const rawDB = (() => {
     });
   };
   return {
+    freezeLegacy,
     legacyAll: async () => {
-      const db = await openDb('atelier-data', 'threads', 'id');
-      return new Promise((res, rej) => { const tx = db.transaction('threads', 'readonly'), q = tx.objectStore('threads').getAll(); tx.oncomplete = () => res(q.result); tx.onerror = () => rej(tx.error); });
+      const inventory = await freezeLegacy(), baseline = new Map(inventory.hashes), db = await openDb('atelier-data', 'threads', 'id'), rows = await readAll(db, 'threads'), shared = [];
+      for (const thread of rows) if (baseline.has(thread?.id) && await legacyHash(thread) === baseline.get(thread.id)) shared.push(thread);
+      return shared;
     },
     all: () => tx('readonly', (s) => s.getAll()),
     get: (id) => tx('readonly', (s) => s.get(id)),
@@ -5801,6 +5852,7 @@ remix = createRemix({
   if (params.toString() || location.hash.length > 1) history.replaceState(null, '', '/');
   applyTheme();
   renderWelcome();
+  rawDB.freezeLegacy().catch(storageError); // local metadata only; owner writes wait until the boundary is durable
   const testerWorkspace = workspace.startsWith('tester:');
   const scopeHash = testerWorkspace ? [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(workspace)))].map((x) => x.toString(16).padStart(2, '0')).join('') : '';
   Sync.init({

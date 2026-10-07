@@ -21,8 +21,8 @@ const composerSource = between(APP, 'function renderComposerControls()', "$('#es
 const person = (sub, extra = {}) => normalizeMe({ sub, name: `Name ${sub}`, models: { chat: ['anthropic:claude-sonnet-5-5'] }, ...extra });
 const defer = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 
-function lifecycle({ passcode = '', tester = null } = {}) {
-  const events = [], opened = [], pending = [], values = new Map(), timers = new Map(), settings = new Map(), listeners = {};
+function lifecycle({ passcode = '', tester = null, storedValues, cryptoOverride } = {}) {
+  const events = [], opened = [], pending = [], values = storedValues || new Map(), timers = new Map(), settings = new Map(), listeners = {};
   const S = { settings: { passcode, name: tester?.name || '', lookup: '' }, tester, thread: { id: 'current', entries: [{ id: 'entry', text: 'Saved reply' }] } };
   settings.set('settings', structuredClone(S.settings)); settings.set('tester', structuredClone(tester));
   class Request { constructor(result) { this.result = result; } }
@@ -34,13 +34,14 @@ function lifecycle({ passcode = '', tester = null } = {}) {
         request.result = { close() {}, objectStoreNames: { contains: () => true }, transaction(store) {
           const transaction = { objectStore() { return {
             put(value, key) { values.set(`${name}:${store}:${key || value.id}`, structuredClone(value)); events.push(`write:${name}`); return new Request(value.id); },
-            get(key) { return new Request(values.get(`${name}:${store}:${key}`)); },
+            get(key) { const request = new Request(structuredClone(values.get(`${name}:${store}:${key}`))); queueMicrotask(() => request.onsuccess?.()); return request; },
             getAll() { return new Request([...values.entries()].filter(([key]) => key.startsWith(`${name}:${store}:`)).map(([, value]) => structuredClone(value))); },
             getAllKeys() { return new Request([...values.keys()].filter((key) => key.startsWith(`${name}:${store}:`)).map((key) => key.split(':').at(-1))); },
             delete(key) { values.delete(`${name}:${store}:${key}`); return new Request(undefined); },
             clear() { for (const key of values.keys()) if (key.startsWith(`${name}:${store}:`)) values.delete(key); return new Request(undefined); },
           }; } };
-          queueMicrotask(() => transaction.oncomplete?.());
+          transaction.abort = () => { transaction.aborted = true; queueMicrotask(() => transaction.onabort?.()); };
+          setImmediate(() => { if (!transaction.aborted) transaction.oncomplete?.(); });
           return transaction;
         } };
         request.onsuccess();
@@ -50,7 +51,7 @@ function lifecycle({ passcode = '', tester = null } = {}) {
   };
   const node = { hidden: true, open: false, contains: () => false, classList: { contains: () => false } };
   const deps = {
-    S, indexedDB, IDBRequest: Request, IDBKeyRange: { bound: () => ({}) },
+    S, indexedDB, IDBRequest: Request, IDBKeyRange: { bound: () => ({}) }, crypto: cryptoOverride || globalThis.crypto,
     Sync: { wrapDb: (db) => db, suspend: () => events.push('suspend-sync') },
     stopAll: () => events.push('stop-runs'), toast: () => {},
     setTimeout: (fn) => { const id = timers.size + 1; timers.set(id, fn); return id; }, clearTimeout: (id) => { timers.delete(id); events.push('cancel-persist'); },
@@ -69,7 +70,16 @@ function lifecycle({ passcode = '', tester = null } = {}) {
     ${workspaceSource}\n${rawDbSource}\n${persistSource}\n${rolesSource}
     return { workspace, threadDbName, workspaceKey, rawDB, persist, reloadWorkspace, syncRole, setTester, reloading: () => accountReloading };`);
   const api = create(...Object.values(deps));
-  return { ...api, S, events, opened, values, settings, timers, dispatchStorage: (key) => listeners.storage?.({ key }), flushOpen: () => { while (pending.length) pending.shift()(); }, flushTimers: () => { for (const fn of timers.values()) fn(); timers.clear(); } };
+  const settle = async (promise) => {
+    let done = false, result, error;
+    promise.then((value) => { result = value; done = true; }, (err) => { error = err; done = true; });
+    const until = Date.now() + 5000;
+    while (!done && Date.now() < until) { while (pending.length) pending.shift()(); await new Promise(setImmediate); }
+    if (!done) throw new Error('Lifecycle fixture did not finish its storage operation');
+    if (error) throw error;
+    return result;
+  };
+  return { ...api, S, events, opened, values, settings, timers, settle, dispatchStorage: (key) => listeners.storage?.({ key }), flushOpen: () => { while (pending.length) pending.shift()(); }, flushTimers: () => { for (const fn of timers.values()) fn(); timers.clear(); } };
 }
 
 test('owner, guest and individual tester workspaces open distinct thread databases and retain independent navigation keys', async () => {
@@ -80,8 +90,8 @@ test('owner, guest and individual tester workspaces open distinct thread databas
   assert.equal(new Set(pages.map((page) => page.workspaceKey('pinnedThreads'))).size, 4);
   for (const page of pages) {
     const write = page.rawDB.put({ id: 'same-id', title: page.workspace, entries: [] });
-    page.flushOpen(); await write;
-    assert.deepEqual(page.opened, [page.threadDbName]);
+    await page.settle(write);
+    assert.deepEqual(page.opened, page.workspace === 'owner' ? ['atelier-shared-history-v76', page.threadDbName] : [page.threadDbName]);
     assert.equal(page.values.get(`${page.threadDbName}:threads:same-id`).title, page.workspace);
   }
 });
@@ -91,7 +101,7 @@ test('a delayed thread write remains bound to its original account even when ano
   const pending = page.rawDB.put({ id: 'account-a-work', entries: [] });
   page.S.tester = person('person-b');
   assert.equal(page.reloadWorkspace(), true);
-  page.flushOpen(); await pending;
+  await page.settle(pending);
   assert.deepEqual(page.opened, ['atelier-account-person-a']);
   assert.ok(page.values.has('atelier-account-person-a:threads:account-a-work'));
   assert.ok(!page.values.has('atelier-account-person-b:threads:account-a-work'));
@@ -248,4 +258,83 @@ test('the compact composer preserves a user’s current choices when it copies c
     original.value = String(item.initial); render();
     assert.equal(clones.find((clone) => clone.dataset.essentialOpt === item.key).value, String(item.initial));
   }
+});
+
+const originalRow = (id, text = 'Original shared history') => ({ id, title: id, createdAt: 1000, updatedAt: 1000, entries: [{ id: `entry-${id}`, kind: 'ask', prompt: text, text: 'Original reply' }] });
+const originalKey = (id) => `atelier-data:threads:${id}`;
+const markerKey = 'atelier-shared-history-v76:meta:baseline';
+
+test('older-thread review freezes only original rows and never exposes subsequent owner writes, including historically dated cloud imports', async () => {
+  const original = originalRow('shared'), stored = new Map([[originalKey(original.id), original]]);
+  const owner = lifecycle({ passcode: 'owner-pass', storedValues: stored });
+  await owner.settle(owner.rawDB.put(originalRow('private-new', 'Private owner work')));
+  await owner.settle(owner.rawDB.putAll([originalRow('private-old-dates', 'Private historical cloud import')]));
+  const inventory = stored.get(markerKey);
+  assert.deepEqual(inventory.hashes.map(([id]) => id), ['shared']);
+  assert.ok(!JSON.stringify(inventory).includes('Original shared history'));
+  assert.ok(!JSON.stringify(inventory).includes('Private owner work'));
+  const tester = lifecycle({ tester: person('person-a'), storedValues: stored });
+  assert.deepEqual((await tester.settle(tester.rawDB.legacyAll())).map((row) => row.id), ['shared']);
+  assert.deepEqual((await owner.settle(owner.rawDB.all())).map((row) => row.id).sort(), ['private-new', 'private-old-dates', 'shared']);
+});
+
+test('an owner sync merge or edit cannot remain eligible by retaining an original thread ID and old timestamps', async () => {
+  const original = originalRow('shared'), stored = new Map([[originalKey(original.id), original]]);
+  const owner = lifecycle({ passcode: 'owner-pass', storedValues: stored });
+  await owner.settle(owner.rawDB.update('shared', (current) => ({ ...current, entries: [...current.entries, { id: 'new-private-entry', kind: 'ask', prompt: 'Private new request', text: 'Private reply' }] })));
+  const tester = lifecycle({ tester: person('person-a'), storedValues: stored });
+  assert.deepEqual(await tester.settle(tester.rawDB.legacyAll()), []);
+  assert.equal(stored.get(originalKey('shared')).updatedAt, 1000);
+  assert.equal(stored.get(originalKey('shared')).entries.length, 2);
+});
+
+test('the immutable shared inventory survives local settings removal, scoped thread clearing and the ordinary KV wipe', async () => {
+  const original = originalRow('shared'), stored = new Map([[originalKey(original.id), original]]);
+  const owner = lifecycle({ passcode: 'owner-pass', storedValues: stored });
+  await owner.settle(owner.rawDB.freezeLegacy());
+  await owner.settle(owner.rawDB.put(originalRow('private-owner')));
+  const before = structuredClone(stored.get(markerKey));
+  const tester = lifecycle({ tester: person('person-a'), storedValues: stored });
+  await tester.settle(tester.rawDB.put(originalRow('tester-local')));
+  await tester.settle(tester.rawDB.kvSet('local-preference', 'value'));
+  await tester.settle(tester.rawDB.clear());
+  await tester.settle(tester.rawDB.kvClear());
+  tester.settings.clear();
+  const reopened = lifecycle({ tester: person('person-b'), storedValues: stored });
+  assert.deepEqual((await reopened.settle(reopened.rawDB.legacyAll())).map((row) => row.id), ['shared']);
+  assert.deepEqual(stored.get(markerKey), before);
+});
+
+test('failed or invalid legacy inventory creation blocks every owner write path instead of silently recapturing private data', async () => {
+  const original = originalRow('shared'), broken = new Map([[originalKey(original.id), original], [markerKey, { v: 99, hashes: [] }]]);
+  const owner = lifecycle({ passcode: 'owner-pass', storedValues: broken });
+  for (const operation of [() => owner.rawDB.put(originalRow('private')), () => owner.rawDB.putAll([originalRow('private')]), () => owner.rawDB.update('shared', (row) => ({ ...row, title: 'Private title' }))]) await assert.rejects(() => owner.settle(operation()), /Couldn’t verify/);
+  assert.deepEqual(broken.get(originalKey('shared')), original);
+  assert.ok(!broken.has(originalKey('private')));
+  const hashingFailure = new Map([[originalKey(original.id), original]]);
+  const failed = lifecycle({ passcode: 'owner-pass', storedValues: hashingFailure, cryptoOverride: { subtle: { digest: async () => { throw new Error('Hash unavailable'); } } } });
+  await assert.rejects(() => failed.settle(failed.rawDB.put(originalRow('private'))), /Hash unavailable/);
+  assert.ok(!hashingFailure.has(markerKey));
+  assert.ok(!hashingFailure.has(originalKey('private')));
+});
+
+test('competing first-launch tabs preserve the first durable inventory even when a slower tab prepared a broader candidate', async () => {
+  const shared = originalRow('shared'), stored = new Map([[originalKey(shared.id), shared]]);
+  const holdA = defer(), holdB = defer(), startedA = defer(), startedB = defer();
+  const pausedCrypto = (started, hold) => ({ subtle: { digest: async (...args) => { started.resolve(); await hold.promise; return globalThis.crypto.subtle.digest(...args); } } });
+  const a = lifecycle({ passcode: 'owner-pass', storedValues: stored, cryptoOverride: pausedCrypto(startedA, holdA) });
+  const freezeA = a.settle(a.rawDB.freezeLegacy());
+  await startedA.promise;
+  stored.set(originalKey('later-original-row'), originalRow('later-original-row'));
+  const b = lifecycle({ passcode: 'owner-pass', storedValues: stored, cryptoOverride: pausedCrypto(startedB, holdB) });
+  const freezeB = b.settle(b.rawDB.freezeLegacy());
+  await startedB.promise;
+  holdA.resolve(); const inventoryA = await freezeA;
+  const writingOwner = lifecycle({ passcode: 'owner-pass', storedValues: stored });
+  await writingOwner.settle(writingOwner.rawDB.put(originalRow('new-private-owner')));
+  holdB.resolve(); const inventoryB = await freezeB;
+  assert.deepEqual(inventoryB, inventoryA);
+  assert.deepEqual(inventoryB.hashes.map(([id]) => id), ['shared']);
+  const tester = lifecycle({ tester: person('person-a'), storedValues: stored });
+  assert.deepEqual((await tester.settle(tester.rawDB.legacyAll())).map((row) => row.id), ['shared']);
 });
