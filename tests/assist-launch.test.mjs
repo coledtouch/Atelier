@@ -266,3 +266,11 @@ test('own key: a keyed launch prefill is the owner’s own; a wrong key or no ke
 test('own key: app.js showSource leaves an own prefill unmarked and marks the rest', () => {
   assert.match(APP, /function showSource\(msg, \{ own = false \} = \{\}\) \{[^\n]*srcKind = own \? '' : msg === NOTES\.shared \? 'share' : 'link'; setMark\(srcKind\)/);
 });
+
+test('a spoken Assist request gets the composer to itself; a leftover draft comes back after the launch', () => {
+  // Without this, a draft (say, words the in-app mic picked up) holds the request back ('draft' gate) and rides along.
+  assert.match(APP, /const asideDraft = launch\.via === 'assist' && launch\.send && launch\.text && launch\.mode !== 'video' && draft\.text/);
+  assert.match(APP, /if \(draft\.text && !input\.value\.trim\(\) && !asideDraft\)/, 'the draft is not put in front of the request at boot');
+  assert.match(APP, /runLaunch\(launch\)\.then\(\(\) => \{\n\s+if \(!asideDraft \|\| input\.value\.includes\(asideDraft\.text\)\) return;/);
+  assert.match(APP, /input\.value = sent \? asideDraft\.text : joinDraft\(asideDraft\.text, input\.value\)/, 'sent: back as it was; held: in front, as before');
+});
