@@ -2,24 +2,21 @@
 // One pipeline serves the owner (worker.js, after the passcode check) and testers (src/tester/router.js, which passes
 // hooks that reserve and settle in the Ledger). The client sends only {voice, text} or {voice, preview: true}. The model,
 // the voice brief and the audio format are server constants here, and voice ids are an allow-list (TTS_VOICES).
-// Provider errors are mapped to our own codes and never passed through (OpenAI's 401 bodies quote part of the key), no
+// Provider errors are mapped to our own codes and never passed through (error bodies can quote part of the key), no
 // upstream header is copied onto the response, and the text being read is never logged.
-// Design: tts-design.json (2026-09-30). Default voice: OpenAI gpt-4o-mini-tts (snapshot pinned), voice "marin".
+// Design: tts-design.json (2026-09-30). Every AI voice is Google Gemini speech (generateContent, audio back as WAV):
+//   atelier (the default)  gemini-3.8-flash-tts (GA 2026-09-22), prebuilt voice Achernar ("Soft"), the soft GEMINI_STYLE
+//   sulafat                gemini-3.8-flash-lite-tts, prebuilt voice Sulafat
+// OpenAI's gpt-4o-mini-tts retires 2027-01-06 with no /v1/audio/speech successor, so its voices (marin as 'atelier',
+// cedar, sage) were dropped in v80; a saved 'cedar' or 'sage' reads as 'atelier' (RETIRED_VOICES).
+// Docs: https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash-tts  https://ai.google.dev/gemini-api/docs/speech-generation
 import { GEMINI_BASE } from './gemini.js';
-import { meter, openaiUsage } from './tester/usage.js';
 
-// Bump TTS_BRIEF_V whenever TTS_BRIEF or anything that changes how a voice sounds (its model, provider voice or style)
+// Bump TTS_BRIEF_V whenever anything that changes how a voice sounds (its model, provider voice or GEMINI_STYLE)
 // changes: clients key their cached clips on it, and the server's cached Settings previews roll over with it. Editing
 // PREVIEW_TEXT needs no bump (previews are keyed on PREVIEW_ID, its hash), only the copy in public/readaloud.js.
-export const TTS_BRIEF_V = 1;
-export const TTS_BRIEF = [
-  'Voice: warm, soft and close, like a thoughtful studio companion reading a note aloud across a quiet worktable.',
-  'Tone: calm, kind and quietly confident; sincere, never salesy, theatrical or announcer-like.',
-  'Pacing: unhurried and even, a touch slower than conversation, with natural pauses at commas, between sentences and before each list item.',
-  'Intonation: gentle and natural; sentences settle softly at the end, with no exaggerated emphasis or upspeak.',
-  'Pronunciation: clear and relaxed; read numbers, dates, units and names plainly.',
-  'Emotion: present and warm, with the faint hint of a smile.',
-].join('\n');
+// 1: OpenAI gpt-4o-mini-tts marin and its spoken brief. 2 (v80): Gemini 3.8 Flash TTS, Achernar, with GEMINI_STYLE.
+export const TTS_BRIEF_V = 2;
 /** The Settings "Preview" line (the client never sends preview text). */
 export const PREVIEW_TEXT = 'Hello, I’m the voice of Atelier. Whenever you’d like a rest from the screen, I’ll read your answers aloud, calmly and at your pace.';
 /** A short hash of a preview line (FNV-1a over its UTF-16 code units, 8 hex digits). */
@@ -86,20 +83,21 @@ export function ttsCeilingUnits(text) {
 
 export const TTS_LIMITS = Object.freeze({
   bodyBytes: 16_384, // the whole JSON request
-  ownerChars: 4_000, // per request (OpenAI's hard limit is 4,096); the client sends one segment at a time
+  ownerChars: 4_000, // per request; the client sends one segment (at most 900 spoken units) at a time
   testerChars: 1_000, // per request, in spoken units (spokenUnits): plain prose is one unit per character
   maxAudioBytes: 8 * 1024 * 1024, // decoded audio per request
   timeoutMs: 30_000, // until the provider starts answering
 });
 
-const OPENAI_TTS_MODEL = 'gpt-4o-mini-tts-2025-12-15'; // pinned snapshot: the brand voice can't change between deploys
+const GEMINI_FLASH_TTS_MODEL = 'gemini-3.8-flash-tts'; // the Atelier voice
 const GEMINI_TTS_MODEL = 'gemini-3.8-flash-lite-tts';
 const GEMINI_STYLE = 'warm, soft and calm; unhurried and gentle, speaking a little slowly, like a thoughtful friend reading aloud';
 const PCM_BYTES_PER_SECOND = 48_000; // Gemini speech: 24 kHz, 16-bit, mono
 const GEMINI_AUDIO_TOKENS_PER_SECOND = 25; // published; prices.js bills by it
 /**
  * Gemini output is bounded at the source: generationConfig.maxOutputTokens = as many audio tokens as fit in
- * TTS_LIMITS.maxAudioBytes (4,369: 174.8 s at the published 25/s, about 137 s at the ≈ 32/s Sulafat really speaks). Google bills what it generates, so a longer answer must not be produced
+ * TTS_LIMITS.maxAudioBytes (4,369, under both models' 16,384-token output limit: 174.8 s at the published 25/s, about
+ * 137 s at the ≈ 32/s Sulafat really speaks). Google bills what it generates, so a longer answer must not be produced
  * only to be thrown away; tester reservations use this bound as their ceiling (prices.js ttsWorstCase maxAudioTokens).
  */
 export const GEMINI_MAX_OUTPUT_TOKENS = Math.floor(TTS_LIMITS.maxAudioBytes / PCM_BYTES_PER_SECOND * GEMINI_AUDIO_TOKENS_PER_SECOND);
@@ -109,17 +107,20 @@ export const GEMINI_MAX_OUTPUT_TOKENS = Math.floor(TTS_LIMITS.maxAudioBytes / PC
  * client-only option and is not served here. To change the default voice, edit the 'atelier' row (and bump TTS_BRIEF_V).
  */
 export const TTS_VOICES = deepFreeze({
-  atelier: { provider: 'openai', model: OPENAI_TTS_MODEL, voice: 'marin' },
-  cedar: { provider: 'openai', model: OPENAI_TTS_MODEL, voice: 'cedar' },
-  sage: { provider: 'openai', model: OPENAI_TTS_MODEL, voice: 'sage' },
+  atelier: { provider: 'gemini', model: GEMINI_FLASH_TTS_MODEL, voice: 'Achernar', style: GEMINI_STYLE, maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS },
   sulafat: { provider: 'gemini', model: GEMINI_TTS_MODEL, voice: 'Sulafat', style: GEMINI_STYLE, maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS },
 });
 export const TTS_VOICE_IDS = Object.freeze(Object.keys(TTS_VOICES));
-/** The prices.js id a voice is metered under, e.g. 'openai:gpt-4o-mini-tts-2025-12-15'. */
+/**
+ * Retired voice ids → the voice that reads in their place (public/readaloud.js has the same map; a test keeps them in
+ * step). The OpenAI voices went with gpt-4o-mini-tts, and 'atelier' is the nearest soft voice. A client still on an
+ * older version may send one, so the server takes it too.
+ */
+export const RETIRED_VOICES = Object.freeze({ cedar: 'atelier', sage: 'atelier' });
+/** The prices.js id a voice is metered under, e.g. 'gemini:gemini-3.8-flash-tts'. */
 export const ttsPriceId = (voice) => `${voice.provider}:${voice.model}`;
 
-const PROVIDER_KEYS = Object.freeze({ openai: 'OPENAI_API_KEY', gemini: 'GEMINI_API_KEY' });
-const OPENAI_SPEECH = 'https://api.openai.com/v1/audio/speech';
+const PROVIDER_KEYS = Object.freeze({ gemini: 'GEMINI_API_KEY' });
 const PREVIEW_MAX_AGE = 30 * 86_400;
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 const ANGLES = /[<>＜＞]/g; // Gemini reads <...> as a sound cue (<sigh>, <laugh>, <short pause>)
@@ -139,14 +140,15 @@ const redact = (s) => String(s ?? '')
 // ── request ──
 /**
  * Checks a parsed request body → {ok: true, voiceId, voice, text, units, ceiling, preview} | {ok: false, status, code,
- * error}. Only `voice`, `text` and `preview` are read; every other field is ignored. The owner's cap is in characters
- * (OpenAI's limit is), a tester's in spoken units (spokenUnits, which the client segments by). ceiling
- * (ttsCeilingUnits) is what a tester's reservation is priced on and held to.
+ * error}. Only `voice`, `text` and `preview` are read; every other field is ignored. A retired voice id (RETIRED_VOICES)
+ * reads as its stand-in, and voiceId is then the stand-in's. The owner's cap is in characters, a tester's in spoken
+ * units (spokenUnits, which the client segments by). ceiling (ttsCeilingUnits) is what a tester's reservation is priced
+ * on and held to.
  */
 export function validateTts(body, { tester = false } = {}) {
   const bad = (status, code, error) => ({ ok: false, status, code, error });
   if (!body || typeof body !== 'object' || Array.isArray(body)) return bad(400, 'bad_request', 'Send JSON {voice, text} or {voice, preview: true}.');
-  const voiceId = body.voice;
+  const voiceId = typeof body.voice === 'string' && Object.hasOwn(RETIRED_VOICES, body.voice) ? RETIRED_VOICES[body.voice] : body.voice;
   if (typeof voiceId !== 'string' || !Object.hasOwn(TTS_VOICES, voiceId)) return bad(400, 'bad_request', `Unknown voice. Use one of: ${TTS_VOICE_IDS.join(', ')}.`);
   const voice = TTS_VOICES[voiceId];
   if (body.preview === true) return { ok: true, voiceId, voice, text: PREVIEW_TEXT, units: spokenUnits(PREVIEW_TEXT), ceiling: ttsCeilingUnits(PREVIEW_TEXT), preview: true };
@@ -188,146 +190,10 @@ async function readSized(stream, cap, countTo = cap) {
 // Reads a byte stream into one Uint8Array, or null once it passes `cap` bytes.
 const readCapped = async (stream, cap) => (await readSized(stream, cap)).bytes;
 
-function b64bytes(s) {
-  if (typeof Uint8Array.fromBase64 === 'function') return Uint8Array.fromBase64(s);
-  const bin = atob(s);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-// ── MP3 length, counted from the frame headers as the bytes go past ──
-// Layer III bit rates in kbit/s by header index ([MPEG-1], [MPEG-2 and 2.5]; 0 = free format), sample rates by version.
-const MP3_KBPS = [[0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320], [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160]];
-const MP3_RATES = { 3: [44_100, 48_000, 32_000], 2: [22_050, 24_000, 16_000], 0: [11_025, 12_000, 8_000] };
-const MP3_MAX_BYTES_PER_SECOND = 40_000; // 320 kbit/s, the highest MP3 rate: any MP3 lasts at least bytes / this
-// A Layer III frame header at b[i..i+3] → {length (bytes, header included), seconds} | null.
-function mp3Frame(b, i) {
-  if (b[i] !== 0xff || (b[i + 1] & 0xe0) !== 0xe0) return null;
-  const version = (b[i + 1] >> 3) & 3, layer = (b[i + 1] >> 1) & 3;
-  if (version === 1 || layer !== 1) return null; // a reserved version, or not Layer III
-  const kbps = MP3_KBPS[version === 3 ? 0 : 1][b[i + 2] >> 4], rate = MP3_RATES[version][(b[i + 2] >> 2) & 3];
-  if (!kbps || !rate) return null; // free format, a bad bit rate or a reserved sample rate
-  const samples = version === 3 ? 1152 : 576;
-  return { length: Math.floor((samples / 8) * kbps * 1000 / rate) + ((b[i + 2] >> 1) & 1), seconds: samples / rate };
-}
-/**
- * How long an MP3 byte stream plays, fed in pieces split anywhere: push(bytes) walks the frame headers (after an ID3v2
- * tag), skipping to the next 0xFF past anything that isn't one. seconds() → the frames' length, and never less than the
- * bytes at 320 kbit/s, so the clock runs even on a stream it can't parse. It doesn't depend on the provider's bit rate.
- */
-export function mp3Clock() {
-  let skip = 0, frames = 0, total = 0, first = true, carry = new Uint8Array(0);
-  return {
-    push(chunk) {
-      total += chunk.byteLength;
-      let b = chunk, i = 0;
-      if (carry.length) { b = new Uint8Array(carry.length + chunk.byteLength); b.set(carry); b.set(chunk, carry.length); }
-      for (;;) {
-        if (skip) { const s = Math.min(skip, b.length - i); skip -= s; i += s; if (skip) break; }
-        if (first) {
-          if (b.length - i < 10) break;
-          first = false;
-          if (b[i] === 0x49 && b[i + 1] === 0x44 && b[i + 2] === 0x33) { // "ID3": a syncsafe size, plus a footer if flagged
-            skip = 10 + (((b[i + 6] & 0x7f) << 21) | ((b[i + 7] & 0x7f) << 14) | ((b[i + 8] & 0x7f) << 7) | (b[i + 9] & 0x7f)) + (b[i + 5] & 0x10 ? 10 : 0);
-            continue;
-          }
-        }
-        if (b.length - i < 4) break;
-        const f = mp3Frame(b, i);
-        if (f) { frames += f.seconds; skip = f.length; continue; }
-        const next = b.indexOf(0xff, i + 1);
-        i = next < 0 ? b.length : next;
-      }
-      carry = b.slice(i);
-    },
-    seconds: () => Math.max(frames, total / MP3_MAX_BYTES_PER_SECOND),
-  };
-}
-const overTime = () => new Error('the audio ran past the reading time this request reserved');
-
-// ── OpenAI: SSE → mp3 bytes ──
-/**
- * OpenAI speech SSE (`data: {"type":"speech.audio.delta","audio":"<base64>"}` … `speech.audio.done`) → the raw mp3
- * bytes. Lines may be split anywhere across chunks and end in LF or CRLF. Deltas after speech.audio.done are ignored
- * (the stream is still read to its end, so the usage tap sees it). Errors on an error event, on undecodable audio,
- * once the decoded audio passes maxBytes or plays longer than maxSeconds (mp3Clock; a tester's reservation, since
- * OpenAI speech has no output bound), or when the stream ends without any audio. `clock` may be passed in so the caller
- * can read how much audio was timed after the stream stops (a cut-off tester stream is settled on it).
- */
-export function sseToAudio(maxBytes = TTS_LIMITS.maxAudioBytes, maxSeconds = Infinity, clock = maxSeconds < Infinity ? mp3Clock() : null) {
-  const dec = new TextDecoder();
-  let buf = '', total = 0, done = false;
-  const line = (raw, ctrl) => {
-    const l = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-    if (!l.startsWith('data:')) return;
-    const d = l.slice(5).trim();
-    if (!d || d === '[DONE]') return;
-    let j;
-    try { j = JSON.parse(d); } catch { return; }
-    if (j?.type === 'speech.audio.delta') {
-      if (done || typeof j.audio !== 'string' || !j.audio) return;
-      let bytes;
-      try { bytes = b64bytes(j.audio); } catch { throw new Error('undecodable audio from the provider'); }
-      total += bytes.byteLength;
-      if (total > maxBytes) throw new Error('the audio is longer than one read-aloud request allows');
-      if (clock) { clock.push(bytes); if (clock.seconds() > maxSeconds + 1e-6) throw overTime(); }
-      ctrl.enqueue(bytes);
-    } else if (j?.type === 'speech.audio.done') {
-      done = true;
-    } else if (j?.type === 'error' || j?.error) {
-      throw new Error(`provider error event: ${redact(j?.error?.message || j?.error?.code || j?.message || 'unknown')}`);
-    }
-  };
-  return new TransformStream({
-    transform(chunk, ctrl) {
-      buf += dec.decode(chunk, { stream: true });
-      let i;
-      while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); line(l, ctrl); }
-      // base64 is 4/3 of the audio; a line far past that can only be garbage
-      if (buf.length > maxBytes * 2) throw new Error('an oversized event from the provider');
-    },
-    flush(ctrl) {
-      buf += dec.decode();
-      if (buf) line(buf, ctrl);
-      buf = '';
-      if (!total) throw new Error('the provider returned no audio');
-    },
-  });
-}
-
-// Passes bytes through unchanged, erroring past maxBytes or maxSeconds (used if OpenAI answers with plain audio instead
-// of SSE). `clock` as in sseToAudio.
-function capBytes(maxBytes, maxSeconds = Infinity, clock = maxSeconds < Infinity ? mp3Clock() : null) {
-  let total = 0;
-  return new TransformStream({
-    transform(chunk, ctrl) {
-      total += chunk.byteLength;
-      if (total > maxBytes) throw new Error('the audio is longer than one read-aloud request allows');
-      if (clock) { clock.push(chunk); if (clock.seconds() > maxSeconds + 1e-6) throw overTime(); }
-      ctrl.enqueue(chunk);
-    },
-    flush() { if (!total) throw new Error('the provider returned no audio'); },
-  });
-}
-
 async function timed(url, init) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(new Error('the voice provider did not answer in time')), TTS_LIMITS.timeoutMs);
   try { return await fetch(url, { ...init, signal: ctl.signal, redirect: 'manual' }); } finally { clearTimeout(t); }
-}
-
-/** The JSON body sent to OpenAI: model, brief and format are server constants. */
-export const openaiSpeechBody = (voice, text) => ({
-  model: voice.model, voice: voice.voice, input: text, instructions: TTS_BRIEF, response_format: 'mp3', stream_format: 'sse',
-});
-/** POST /v1/audio/speech (SSE) → the upstream Response (body unread). */
-export function openaiSpeech({ key, voice, text }) {
-  return timed(OPENAI_SPEECH, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', accept: 'text/event-stream' },
-    body: JSON.stringify(openaiSpeechBody(voice, text)),
-  });
 }
 
 // ── Gemini: unary generateContent → WAV ──
@@ -557,7 +423,7 @@ async function cacheGet(key) {
   try {
     const hit = await cache.match(key);
     const type = hit?.headers.get('content-type');
-    if (!hit?.ok || (type !== 'audio/mpeg' && type !== 'audio/wav')) return null;
+    if (!hit?.ok || type !== 'audio/wav') return null; // an older mp3 preview (OpenAI) is a miss
     const bytes = new Uint8Array(await hit.arrayBuffer());
     return bytes.length ? { bytes, type } : null;
   } catch { return null; }
@@ -585,14 +451,10 @@ const audioResponse = (body, type, voiceId, headers = {}) => new Response(body, 
  *     headers|null}
  *     (chars: the text's length; units: its spoken length, spokenUnits; ceiling: ttsCeilingUnits, a ceiling on its
  *     reading time; voice.maxOutputTokens bounds Gemini's audio)
- *     limits: {seconds} cuts OpenAI audio off once it plays longer (the response errors and the upstream is
- *     cancelled: this bounds what is heard); {outputTokens} lowers Gemini's maxOutputTokens.
+ *     limits: {outputTokens} lowers Gemini's maxOutputTokens (a tester's reserved audio tokens).
  *     settle(result): null = keep the full reservation (failed, unknown); {billed: false} = nothing was billed;
- *     {usage, seconds?} = the provider's report (usage may be null when a finished stream reported none);
- *     {usage, stopped: true} = a tester's OpenAI stream that stopped (cut off, hung up or broken) after the provider
- *     reported usage (speech.audio.done, the last event: the complete bill); {usage: null, stopped: true, seconds} =
- *     one that stopped before it, after audio was timed (seconds, mp3Clock). Either: no less than the reservation, and
- *     no less than the reported bill or the timed audio (this bounds what is billed).
+ *     {usage, seconds} = the provider's report (Gemini usageMetadata, null when the answer had none; the seconds of
+ *     audio it made).
  */
 export const OWNER_HOOKS = Object.freeze({
   tester: false,
@@ -603,7 +465,7 @@ export const OWNER_HOOKS = Object.freeze({
       async settle(r) {
         if (r && 'usage' in r) {
           const u = r.usage || {};
-          const inTok = u.input_tokens ?? u.promptTokenCount ?? 0, outTok = u.output_tokens ?? u.candidatesTokenCount ?? 0;
+          const inTok = u.promptTokenCount ?? 0, outTok = u.candidatesTokenCount ?? 0;
           if ((r.usage && outTok > 0) || r.seconds > 0) console.log('tts', voiceId, 'tokens in', inTok, 'out', outTok, ...(r.seconds != null ? ['seconds', Math.round(r.seconds * 10) / 10] : []));
           else console.warn('tts', voiceId, 'finished without usage');
         }
@@ -612,7 +474,6 @@ export const OWNER_HOOKS = Object.freeze({
     };
   },
 });
-const NO_USAGE = Object.freeze({ push() {}, result: () => null });
 const RETRY_AFTER = /^[\w ,:+-]{1,40}$/;
 
 async function upstreamFailed(res, m, v) {
@@ -624,35 +485,6 @@ async function upstreamFailed(res, m, v) {
     return fail(429, 'tts_busy', 'Read aloud is busy right now. Try again in a moment.', ra && RETRY_AFTER.test(ra) ? { 'retry-after': ra } : {});
   }
   return unavailable();
-}
-
-async function viaOpenAI(key, v, m, cacheKey) {
-  const up = await openaiSpeech({ key, voice: v.voice, text: v.text });
-  if (!up.ok) return upstreamFailed(up, m, v);
-  if (!up.body) { await m.settle(null); return unavailable(); }
-  const plain = /^(audio\/|application\/octet-stream)/i.test(up.headers.get('content-type') || '');
-  const parser = plain ? NO_USAGE : openaiUsage();
-  const maxSeconds = m.limits?.seconds > 0 ? m.limits.seconds : Infinity;
-  let settled = null;
-  // meter: onEnd(usage, complete) runs once. A complete stream settles from its usage. A stopped one (cut off at
-  // maxSeconds, hung up or broken) keeps the full reservation, or more if OpenAI had already reported a bigger bill
-  // (speech.audio.done arrived, then the stream broke or was cut in that same chunk: the usage is the whole bill, so the
-  // seconds aren't sent) or, before any usage, if the audio already timed (clock, the same one that cuts it off) costs
-  // more at the reserved token rate: OpenAI sends usage only at the end, so a stream cut early never reports it. A
-  // stream that finishes without usage (plain audio/mpeg, which never carries it, or a speech.audio.done without it)
-  // settles like a stopped one: max(the reservation, the audio it timed), so it never pays less than a cut-off stream
-  // with the same audio. The owner has no clock, so that case still reaches the hooks as {usage: null}.
-  const clock = maxSeconds < Infinity ? mp3Clock() : null;
-  const metered = meter(up.body, parser, async (usage, complete) => {
-    settled = await m.settle(complete && usage ? { usage } : usage ? { usage, stopped: true }
-      : clock ? { usage: null, stopped: true, seconds: clock.seconds() } : complete ? { usage: null } : null);
-  });
-  const audio = metered.pipeThrough(plain ? capBytes(TTS_LIMITS.maxAudioBytes, maxSeconds, clock) : sseToAudio(TTS_LIMITS.maxAudioBytes, maxSeconds, clock));
-  if (!cacheKey) return audioResponse(audio, 'audio/mpeg', v.voiceId, m.headers);
-  const bytes = await readCapped(audio, TTS_LIMITS.maxAudioBytes); // a stream error throws: the reservation stands
-  if (!bytes?.length) throw new Error('the provider returned no audio');
-  await cachePut(cacheKey, bytes, 'audio/mpeg');
-  return audioResponse(bytes, 'audio/mpeg', v.voiceId, settled || m.headers);
 }
 
 async function viaGemini(key, v, m, cacheKey) {
@@ -675,8 +507,8 @@ async function viaGemini(key, v, m, cacheKey) {
 
 /**
  * POST /api/tts. Validation runs before anything is reserved or any provider is called.
- * → 200 audio/mpeg (OpenAI voices, streamed; a preview arrives whole) or audio/wav (Gemini), with x-tts-voice and
- *   x-tts-brief; or JSON {error, code}: 400 bad_request, 413 too_large, 429 tts_busy (retry-after kept),
+ * → 200 audio/wav, with x-tts-voice (the voice that read it: a retired id answers as its stand-in) and x-tts-brief;
+ *   or JSON {error, code}: 400 bad_request, 413 too_large, 429 tts_busy (retry-after kept),
  *   502 tts_unavailable, 503 tts_unavailable (owner: no key). Tester hooks add their own refusals (402, 401, 403, 503).
  */
 export async function handleTts(req, env, hooks = OWNER_HOOKS) {
@@ -700,7 +532,7 @@ export async function handleTts(req, env, hooks = OWNER_HOOKS) {
   const m = await h.reserve({ voiceId: v.voiceId, voice: v.voice, chars: v.text.length, units: v.units, ceiling: v.ceiling, preview: v.preview });
   if (m.res) return m.res;
   try {
-    return await (v.voice.provider === 'gemini' ? viaGemini : viaOpenAI)(key, v, m, cacheKey);
+    return await viaGemini(key, v, m, cacheKey);
   } catch (err) {
     console.warn('tts failed', v.voice.provider, v.voiceId, redact(err?.message || err));
     await m.settle(null); // whatever the provider did is unknown: the full reservation stands (no-op if already settled)

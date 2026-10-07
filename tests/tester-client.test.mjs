@@ -11,7 +11,7 @@ import { veoCost as serverVeoCost, PRICES, TESTER_MODELS, TESTER_IMAGE_MODELS, T
 
 const ME = (over = {}) => ({
   sub: 'abc-123', name: 'Ada Lovelace', picture: 'https://media.licdn.com/dms/image/x.jpg', email: 'ada@example.com',
-  models: { chat: ['anthropic:claude-opus-5-5', 'gemini:gemini-3.8-flash'], image: ['openai:gpt-image-2.5-flare'], video: ['gemini:veo-3.1-lite-generate-preview'], tts: ['atelier', 'cedar', 'sage'] },
+  models: { chat: ['anthropic:claude-opus-5-5', 'gemini:gemini-3.8-flash'], image: ['openai:gpt-image-2.5-flare'], video: ['gemini:gemini-omni-1.1-flash'], tts: ['atelier', 'cedar', 'sage'] },
   features: { web: true, video: true, veo: true, helpers: true, profile: true, tts: true, dictation: true },
   allowance: { day: { spent: 150_000, reserved: 50_000, limit: 1_000_000 }, month: { spent: 2_000_000, reserved: 0, limit: 10_000_000 } },
   pool: { paused: false, spotsLeft: 12 }, ...over,
@@ -25,8 +25,9 @@ test('the client Veo prices match src/tester/prices.js for every tester video mo
       assert.equal(veoCost(model, seconds, resolution), serverVeoCost({ model, seconds, resolution }), `${model} ${seconds}s ${resolution}`);
     }
   }
-  assert.equal(veoCost('gemini:veo-3.1-generate-preview', 4, '720p'), null, 'Veo standard is not offered to testers');
-  assert.equal(veoCost('gemini:veo-3.1-lite-generate-preview', 4, '4k'), null);
+  // Veo 3.1 (shut down on the Gemini API 2026-10-22) is gone; Runway video is never priced for testers.
+  for (const id of ['gemini:veo-3.1-generate-preview', 'gemini:veo-3.1-lite-generate-preview', 'gemini:veo-3.1-fast-generate-preview', 'runway:veo3.1', 'runway:gen4.5']) assert.equal(veoCost(id, 4, '720p'), null, id);
+  assert.equal(veoCost('gemini:gemini-omni-1.1-flash', 4, '8k'), null);
 });
 
 test('no NVIDIA or free model is ever listed for testers (addendum A7b), so the client never offers one', () => {
@@ -39,7 +40,7 @@ test('no NVIDIA or free model is ever listed for testers (addendum A7b), so the 
 
 test('normalizeMe keeps a clean tester record and rejects anything else', () => {
   for (const bad of [null, 'x', [], {}, { sub: '' }, { sub: 7 }]) assert.equal(normalizeMe(bad), null);
-  const t = normalizeMe(ME({ models: { chat: ['anthropic:claude-opus-5-5', '<script>', 42], image: [], video: ['gemini:veo-3.1-lite-generate-preview'] }, picture: 'javascript:alert(1)' }));
+  const t = normalizeMe(ME({ models: { chat: ['anthropic:claude-opus-5-5', '<script>', 42], image: [], video: ['gemini:gemini-omni-1.1-flash'] }, picture: 'javascript:alert(1)' }));
   assert.deepEqual(t.models.chat, ['anthropic:claude-opus-5-5']);
   assert.equal(t.picture, '');
   assert.deepEqual(t.features, { web: true, video: true, veo: true, helpers: true, profile: true, tts: true, dictation: true, sync: false });
@@ -70,7 +71,7 @@ test('normalizeMe keeps a clean tester record and rejects anything else', () => 
   assert.deepEqual(normalizeMe(ME({ models: { ...ME().models, tts: [] } })).models.tts, [], 'an empty list from /me stays empty');
   assert.equal(normalizeMe(ME({ models: { ...ME().models, tts: 'atelier' } })).models.tts, null, 'not a list: unknown');
   assert.ok(![...allowedIds(normalizeMe(ME()))].includes('atelier'));
-  assert.deepEqual([...allowedIds(t)].sort(), ['anthropic:claude-opus-5-5', 'gemini:veo-3.1-lite-generate-preview']);
+  assert.deepEqual([...allowedIds(t)].sort(), ['anthropic:claude-opus-5-5', 'gemini:gemini-omni-1.1-flash']);
   assert.equal(allowedIds(null).size, 0);
   // The Ledger's allowance may carry the pool and the paused/preview flags.
   const pooled = normalizeMe(ME({ pool: undefined, allowance: { ...ME().allowance, pool: { spent: 40_000_000, reserved: 1_000_000, limit: 100_000_000 }, paused: true, preview: true } }));
@@ -119,18 +120,18 @@ test('resets: the UTC day and calendar month, a 402 resetsAt in any common shape
   assert.equal(resetIn(NaN, now), '');
 });
 
-test('Veo: only the lengths and resolutions whose worst case fits what is left, and never above $1', () => {
-  const lite = 'gemini:veo-3.1-lite-generate-preview', fast = 'gemini:veo-3.1-fast-generate-preview';
-  assert.deepEqual(veoShape({ aspect: '16:9hd', secs: 4 }), { seconds: 8, resolution: '1080p' });
+test('Omni video: only the lengths and resolutions whose worst case fits what is left, and never above $1', () => {
+  const omni = 'gemini:gemini-omni-1.1-flash';
+  // HD is 1080p at the chosen length (Veo's HD was always 8 s); everything else 720p.
+  assert.deepEqual(veoShape({ aspect: '16:9hd', secs: 4 }), { seconds: 4, resolution: '1080p' });
   assert.deepEqual(veoShape({ aspect: '9:16', secs: 4 }), { seconds: 4, resolution: '720p' });
+  assert.deepEqual(veoShape({}), { seconds: 6, resolution: '720p' });
   const full = { day: 1_000_000, month: 10_000_000, pool: null };
-  assert.deepEqual(veoChoices(lite, full), { secs: [4, 6, 8], hd: true, cheapest: 250_000, room: 1_000_000 });
-  // Fast: 8 s at 720p is exactly $1.00 (fits), 8 s at 1080p reserves $1.20 (never offered).
-  assert.deepEqual(veoChoices(fast, full).secs, [4, 6, 8]);
-  assert.equal(veoChoices(fast, full).hd, false);
-  assert.deepEqual(veoChoices(lite, { day: 400_000, month: 9_000_000, pool: null }), { secs: [4, 6], hd: false, cheapest: 250_000, room: 400_000 });
-  assert.deepEqual(veoChoices(lite, { day: 100_000, month: 9_000_000, pool: null }).secs, []);
-  assert.deepEqual(veoChoices(lite, { day: 900_000, month: 9_000_000, pool: 260_000 }).secs, [4]);
+  // 720p: 4 s $0.5068, 6 s $0.7602 fit the $1.00 cap; 8 s reserves $1.0136 (never offered). 1080p 4 s is $1.0136 too.
+  assert.deepEqual(veoChoices(omni, full), { secs: [4, 6], hd: false, hdSecs: [], cheapest: 506_800, room: 1_000_000 });
+  assert.deepEqual(veoChoices(omni, { day: 600_000, month: 9_000_000, pool: null }).secs, [4]);
+  assert.deepEqual(veoChoices(omni, { day: 100_000, month: 9_000_000, pool: null }).secs, []);
+  assert.deepEqual(veoChoices(omni, { day: 900_000, month: 9_000_000, pool: 510_000 }).secs, [4]);
 });
 
 test('tester clip limits: 200 MB and 3 min (addendum A2); frames stand in past that', () => {

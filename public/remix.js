@@ -1,16 +1,18 @@
 // Video Remix (Video mode + an attached clip): the pure core. Gemini watches the clip and returns an edit plan (JSON);
 // this module turns that reply into a safe, normalised plan, snaps its cut points to what the footage really does, keeps
-// the original soundtrack in sync, prices the generated inserts (Veo, or Runway for the owner), and checks what a
+// the original soundtrack in sync, prices the generated inserts (Gemini Omni, or Runway for the owner), and checks what a
 // thread may store. No DOM, no network, no app state: app.js / remix-app.js call it, tests/remix.test.mjs covers it.
 // Design of record: the Video Remix design (planSchema, pipeline, costAndTesters). Notable choices made here:
 //   - Generated inserts are provider-neutral: a timeline item of type 'shot' (legacy 'veo' is accepted) places part of
-//     a plan shot; which model films it (Veo 3.1 Lite/Fast/Standard, Runway Gen-4.5/Gen-4 Turbo) is the user's choice
-//     in e.remix.shots, never Gemini's.
+//     a plan shot; which model films it (Gemini Omni Flash; for the owner also Runway Gen-4.5/Gen-4 Turbo/Veo 3.1) is
+//     the user's choice in e.remix.shots, never Gemini's. Veo 3.1 on the Gemini API shuts down 2026-10-22: a saved shot
+//     that names a retired Veo id is read as Omni (omni.js migrateVideoId; migrateRemix rewrites it).
 //   - Plan strings are untrusted (on-screen text in the footage can steer Gemini): they are cleaned and capped here and
 //     must still be escaped wherever they are shown. No plan field ever reaches a URL, a tool or a model id.
-import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=79';
-import { quote as runwayQuote, RUNWAY_MODELS } from './runway.js?v=79';
-import { stripThink } from './context.js?v=79';
+import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=80';
+import { quote as runwayQuote, RUNWAY_MODELS } from './runway.js?v=80';
+import { stripThink } from './context.js?v=80';
+import { OMNI_ID, migrateVideoId } from './omni.js?v=80';
 
 export const REMIX_V = 1;
 export const LIMITS = Object.freeze({
@@ -19,6 +21,9 @@ export const LIMITS = Object.freeze({
   cutWindow: 1.0, promptMax: 1200, shotPromptMax: 3800, minBox: 20,
 });
 export const VEO_SECONDS = Object.freeze([4, 6, 8]);
+// Omni films 3–10 s; remix inserts use 4/6/8/10. Testers: 4/6/8 (the tester route takes only those), and only the
+// lengths whose reserve fits VEO_CAP (4 s and 6 s at 720p).
+export const OMNI_SHOT_SECONDS = Object.freeze([4, 6, 8, 10]);
 export const BRAND = '#0E0D0B';
 export const ACCENTS = Object.freeze({ lime: '#C8F25A', ivory: '#ECE6D9', pink: '#FF6FA8', cyan: '#5EE6D0', lavender: '#9FB0FF', amber: '#FFC94A' });
 // Card and text presets, at 1080 px wide (scale by W/1080). remix-draw.js renders them; the review UI names them.
@@ -35,23 +40,27 @@ export const GLOW = Object.freeze({ color: '#5EE6D0', alpha: 0.38, sigma: 6 });
 // Text bands on the 0–1000 grid (ymin, ymax) — where a text layer may sit.
 export const BANDS = Object.freeze({ upper: Object.freeze([80, 250]), center: Object.freeze([420, 580]), lower_third: Object.freeze([740, 880]), lower: Object.freeze([820, 950]) });
 
-// Owner prices (USD per generated second). Mirrors src/tester/prices.js (tests/remix.test.mjs keeps them equal); Lite
-// and Fast are the same table testers reserve from (tester.js VEO_PER_SECOND), Standard is owner-only.
-export const OWNER_VEO_USD = Object.freeze({
-  ...VEO_PER_SECOND,
-  'gemini:veo-3.1-generate-preview': Object.freeze({ '720p': 0.4, '1080p': 0.4, '4k': 0.6 }),
-});
+// Owner prices (USD per generated second) of the Gemini-billed models. Mirrors src/tester/prices.js perSecond
+// (tests/remix.test.mjs keeps them equal) and is the table testers reserve from (tester.js VEO_PER_SECOND). Runway
+// models are priced by their credit quote (runway.js quote).
+export const OWNER_VIDEO_USD = Object.freeze({ ...VEO_PER_SECOND });
+export const OWNER_VEO_USD = OWNER_VIDEO_USD; // the pre-Omni name
 const RUNWAY_LENGTHS = Object.freeze([2, 3, 4, 5, 6, 7, 8, 9, 10]);
-// What may film an insert. image: 'optional' | 'required' (Gen-4 Turbo only animates a still); tester: offered to testers.
+// What may film an insert. image: 'optional' | 'required' (Gen-4 Turbo only animates a still); tester: offered to
+// testers (testerSeconds: the lengths the tester route takes). provider 'omni' films through /api/omni/* (omni.js),
+// 'runway' through /api/runway/* (runway.js; `runway` is Runway's model name). Veo 3.1 stays the owner's via Runway.
 export const SHOT_MODELS = Object.freeze([
-  Object.freeze({ id: 'gemini:veo-3.1-lite-generate-preview', provider: 'veo', label: 'Veo 3.1 Lite', seconds: VEO_SECONDS, res: Object.freeze(['720p', '1080p']), image: 'optional', tester: true }),
-  Object.freeze({ id: 'gemini:veo-3.1-fast-generate-preview', provider: 'veo', label: 'Veo 3.1 Fast', seconds: VEO_SECONDS, res: Object.freeze(['720p', '1080p']), hdSeconds: 8, image: 'optional', tester: true }),
-  Object.freeze({ id: 'gemini:veo-3.1-generate-preview', provider: 'veo', label: 'Veo 3.1 · max quality', seconds: VEO_SECONDS, res: Object.freeze(['720p', '1080p']), image: 'optional', tester: false }),
+  Object.freeze({ id: OMNI_ID, provider: 'omni', label: 'Gemini Omni Flash', seconds: OMNI_SHOT_SECONDS, testerSeconds: VEO_SECONDS, res: Object.freeze(['720p', '1080p']), image: 'optional', tester: true }),
   Object.freeze({ id: 'runway:gen4.5', provider: 'runway', runway: 'gen4.5', label: 'Runway Gen-4.5', seconds: RUNWAY_LENGTHS, res: Object.freeze(['720p']), image: 'optional', tester: false }),
   Object.freeze({ id: 'runway:gen4_turbo', provider: 'runway', runway: 'gen4_turbo', label: 'Runway Gen-4 Turbo', seconds: RUNWAY_LENGTHS, res: Object.freeze(['720p']), image: 'required', tester: false }),
+  Object.freeze({ id: 'runway:veo3.1', provider: 'runway', runway: 'veo3.1', label: 'Veo 3.1 · Runway', seconds: VEO_SECONDS, res: Object.freeze(['720p']), image: 'optional', tester: false }),
+  Object.freeze({ id: 'runway:veo3.1_fast', provider: 'runway', runway: 'veo3.1_fast', label: 'Veo 3.1 Fast · Runway', seconds: VEO_SECONDS, res: Object.freeze(['720p']), image: 'optional', tester: false }),
 ]);
-export const DEFAULT_SHOT_MODEL = SHOT_MODELS[0].id;
-export const shotModel = (id) => SHOT_MODELS.find((m) => m.id === id) || null;
+export const DEFAULT_SHOT_MODEL = OMNI_ID;
+/** A shot model by id; a retired Veo id (a saved shot or setting) resolves to the model that films it now (Omni). */
+export const shotModel = (id) => { const want = migrateVideoId(id); return SHOT_MODELS.find((m) => m.id === want) || null; };
+/** The id to store for a saved model id (retired Veo → Omni), or null when it names no shot model. */
+export const shotModelId = (id) => shotModel(id)?.id ?? null;
 
 export const PHASES = Object.freeze(['plan', 'review', 'film', 'check', 'cut', 'done']);
 export const SHOT_STATES = Object.freeze(['idle', 'queued', 'starting', 'filming', 'downloading', 'ready', 'failed', 'filtered', 'budget', 'unknown', 'expired', 'missing']);
@@ -114,7 +123,7 @@ export function sendMode(mode, hasVideo, remixOn) {
   if (mode === 'video' && remixOn) return 'remix';
   return 'ask';
 }
-export const ASKS_FOOTAGE = /\b(b-?roll|new (?:shot|footage|clip|scene)s?|film(?:ed)?|generate[ds]?|veo|runway)\b/i;
+export const ASKS_FOOTAGE = /\b(b-?roll|new (?:shot|footage|clip|scene)s?|film(?:ed)?|generate[ds]?|veo|omni|runway)\b/i;
 /** Seconds of new footage a remix may generate. choice: 'ask' (only if the note asks) | 'off' | 8 | 12 | 24. */
 export function footageCap(choice, text) {
   if (choice === 'off' || choice === 0 || choice === '0') return 0;
@@ -394,29 +403,39 @@ const KIND_PREFIX = { source: 'k', card: 'c', shot: 'v', shots: 's', text: 't', 
 function idMaker(taken) {
   return (prefix) => { let n = 1; while (taken.has(`${prefix}${n}`)) n++; const id = `${prefix}${n}`; taken.add(id); return id; };
 }
-/** Length a model films that covers `need` seconds (4/6/8 for Veo; 2–10 whole seconds for Runway), or null. */
-export function shotLength(model, need, res = '720p') {
+/**
+ * The lengths a model films. tester: only those the tester route takes (testerSeconds) whose reserve fits VEO_CAP —
+ * Omni at 720p: 4 s ($0.51) and 6 s ($0.76), not 8 s ($1.01); nothing at 1080p.
+ */
+export function shotLengths(model, res = '720p', { tester = false } = {}) {
   const m = shotModel(model) || shotModel(DEFAULT_SHOT_MODEL);
-  const list = m.hdSeconds && res !== '720p' ? [m.hdSeconds] : m.seconds;
-  return list.find((s) => s >= need - 1e-6) ?? null;
+  if (!tester) return m.seconds;
+  if (!m.tester) return [];
+  return (m.testerSeconds || m.seconds).filter((s) => { const c = veoCost(m.id, s, res); return c != null && c <= VEO_CAP; });
 }
-/** The longest shot a model films at a resolution. */
-export function maxShotSeconds(model, res = '720p') {
+/** Length a model films that covers `need` seconds (4/6/8/10 for Omni; 2–10 whole seconds for Runway), or null. */
+export function shotLength(model, need, res = '720p', opts = {}) {
+  return shotLengths(model, res, opts).find((s) => s >= need - 1e-6) ?? null;
+}
+/** The longest shot a model films at a resolution (tester: the longest that fits the cap, else its shortest). */
+export function maxShotSeconds(model, res = '720p', opts = {}) {
+  const list = shotLengths(model, res, opts);
+  if (list.length) return Math.max(...list);
   const m = shotModel(model) || shotModel(DEFAULT_SHOT_MODEL);
-  return m.hdSeconds && res !== '720p' ? m.hdSeconds : Math.max(...m.seconds);
+  return Math.min(...(m.testerSeconds || m.seconds));
 }
-/** Owner price of one shot in USD (Veo per second; Runway by its credit quote), or null when unknown. */
+/** Owner price of one shot in USD (Omni per second; Runway by its credit quote), or null when unknown. */
 export function shotUsd(model, seconds, res = '720p') {
   const m = shotModel(model);
   if (!m || !(seconds > 0)) return null;
   if (m.provider === 'runway') return runwayQuote(m.runway, seconds)?.usd ?? null;
-  const rate = OWNER_VEO_USD[model]?.[res];
+  const rate = OWNER_VIDEO_USD[m.id]?.[res];
   return rate == null ? null : Math.round(rate * seconds * 1e6) / 1e6;
 }
 /** A tester's reserve for one shot in µ$ (tester.js veoCost: price × s × 1.25), or null when testers can't film it. */
 export function shotReserve(model, seconds, res = '720p') {
   const m = shotModel(model);
-  return m && m.tester ? veoCost(model, seconds, res) : null;
+  return m && m.tester ? veoCost(m.id, seconds, res) : null;
 }
 const scenesAt = (scenes, a, b) => scenes.filter((sc) => sc.end > a + 1e-6 && sc.start < b - 1e-6);
 
@@ -563,16 +582,17 @@ export function normalizePlan(p, source = {}, opts = {}, caps = {}) {
   // shot lengths: the smallest the chosen model films that covers every use_out (a snap-up costs more: say so)
   const choice = (id) => {
     const o = record(opts.shotModels?.[id]) ? opts.shotModels[id] : {};
-    const model = shotModel(o.model) ? o.model : shotModel(opts.model) ? opts.model : DEFAULT_SHOT_MODEL;
+    const model = shotModelId(o.model) || shotModelId(opts.model) || DEFAULT_SHOT_MODEL;
     const m = shotModel(model);
     return { model, res: oneOf(o.res ?? opts.res, m.res, m.res[0]) };
   };
+  const lenOpts = { tester: Boolean(opts.tester) }; // a tester's shots snap only to lengths their cap allows
   for (const s of shotList) {
     const uses = plan.timeline.filter((c) => c.type === 'shot' && c.shot === s.id);
     if (!uses.length) continue;
     const { model, res } = choice(s.id);
     const need = Math.max(...uses.map((c) => c.use_out));
-    const len = shotLength(model, need, res) ?? maxShotSeconds(model, res);
+    const len = shotLength(model, need, res, lenOpts) ?? maxShotSeconds(model, res, lenOpts);
     const asked = Number.isFinite(s.seconds) ? s.seconds : len;
     if (len > asked + 1e-6) {
       const delta = (shotUsd(model, len, res) ?? 0) - (shotUsd(model, asked, res) ?? 0);
@@ -939,7 +959,7 @@ export function initShots(plan, opts = {}, prev = {}) {
   const out = {}, look = plan?.style?.look || '';
   for (const s of plan?.shots || []) {
     const p = record(prev?.[s.id]) ? prev[s.id] : null;
-    const model = shotModel(p?.model) ? p.model : shotModel(opts.model) ? opts.model : DEFAULT_SHOT_MODEL;
+    const model = shotModelId(p?.model) || shotModelId(opts.model) || DEFAULT_SHOT_MODEL;
     const m = shotModel(model), res = oneOf(p?.res ?? opts.res, m.res, m.res[0]);
     const ck = contentKey(s, look);
     const next = { model, res, seconds: s.seconds, enabled: p ? p.enabled !== false : true, state: 'idle', contentKey: ck, usd: shotUsd(model, s.seconds, res) ?? 0, reserve: shotReserve(model, s.seconds, res) };
@@ -959,7 +979,7 @@ export function initShots(plan, opts = {}, prev = {}) {
  * 'filming'), or null when filming it again is the only way. advanceShot drops the op when the generation itself
  * ended (failed or filtered at the provider), so those refilm.
  */
-export const resumeOf = (s) => (s?.state === 'failed' && isShotOp(s.op) ? (typeof s.uri === 'string' && s.uri ? 'downloading' : 'filming') : null);
+export const resumeOf = (s) => (s?.state === 'failed' && isLiveOp(s.op) ? (typeof s.uri === 'string' && s.uri ? 'downloading' : 'filming') : null);
 /** Shots that would cost money if filmed now (enabled and not ready or already running, nor resumable). */
 const toFilm = (remix) => Object.entries(remix?.shots || {}).filter(([, s]) => s && s.enabled !== false && NEEDS_FILM.has(s.state) && !resumeOf(s));
 /**
@@ -1004,8 +1024,8 @@ export function approvalFor(remix, ids = null, now = Date.now()) {
 /**
  * The money card. opts: {tester (the tester record, or true), left ({day, month, pool} µ$; default leftOf(tester))}.
  * Owner: usd = Σ seconds × rate of shots still to film (billed by Google/Runway per generated second).
- * Tester: each Veo shot reserves veoCost (× 1.25) in µ$; Approve needs every shot ≤ VEO_CAP and Σ reserves within
- * headroom; otherwise `fits` lists the shots that do fit, in timeline order. Runway and Veo Standard are owner-only.
+ * Tester: each Omni shot reserves veoCost (× 1.25) in µ$; Approve needs every shot ≤ VEO_CAP and Σ reserves within
+ * headroom; otherwise `fits` lists the shots that do fit, in timeline order. Runway (and its Veo 3.1) is owner-only.
  * → {tester, lines:[{id, model, seconds, res, usd, reserve, ok, why}], usd, reserve, canApprove, fits, over, scope, room}.
  */
 export function planCost(remix, { tester = null, left = null } = {}) {
@@ -1057,9 +1077,16 @@ export function filmQueue(remix, { tester = false, now = Date.now() } = {}) {
 }
 
 // ─────────────────────────── what a thread may store ───────────────────────────
-const OP_RE = /^models\/[\w.-]+\/operations\/[\w.-]+$/; // router.js OPERATION
+// A shot's provider job: 'omni:<interaction id>' (omni.js) or 'runway:<task uuid>'. A Veo operation from before Omni
+// ('models/…/operations/…') still validates in a saved remix but can't be followed any more (Veo on the Gemini API
+// shuts down 2026-10-22): migrateRemix and remix-shots.js end such a shot as expired; resumeOf never collects one.
+const OP_RE = /^models\/[\w.-]+\/operations\/[\w.-]+$/; // router.js OPERATION (legacy Veo)
+const OMNI_OP_RE = /^omni:[A-Za-z0-9_-]{1,256}$/;
 const RUNWAY_OP_RE = /^runway:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const isShotOp = (v) => typeof v === 'string' && (OP_RE.test(v) || RUNWAY_OP_RE.test(v));
+export const isVeoOp = (v) => typeof v === 'string' && OP_RE.test(v);
+/** An op this build can still follow (Omni or Runway). */
+export const isLiveOp = (v) => typeof v === 'string' && (OMNI_OP_RE.test(v) || RUNWAY_OP_RE.test(v));
+export const isShotOp = (v) => isLiveOp(v) || isVeoOp(v);
 export const BLOB_KEY_RE = /^rx:(shot|img):[\w-]{1,120}:[a-z][\w-]{0,7}$/;
 const SAFE_IMG = /^data:image\/(png|jpe?g|webp);base64,[a-z\d+/=]+$/i;
 const safeImg = (v, max = 60_000) => typeof v === 'string' && v.length <= max && SAFE_IMG.test(v);
@@ -1157,6 +1184,7 @@ export function validRemix(r) {
 export function recoverRemix(e, { imported = false } = {}) {
   const r = e?.remix;
   if (!record(r)) return e;
+  migrateRemix(r);
   for (const s of Object.values(record(r.shots) ? r.shots : {})) {
     if (!record(s)) continue;
     if (imported && ['filming', 'ready', 'downloading'].includes(s.state)) { s.state = 'missing'; delete s.op; delete s.blobKey; delete s.startedAt; delete s.uri; continue; }
@@ -1171,3 +1199,35 @@ export function recoverRemix(e, { imported = false } = {}) {
   }
   return e;
 }
+/**
+ * A saved remix from before Omni: shot models and the plan's model choices that name a retired Veo id → Omni
+ * (migrateVideoId). Approval keys are left alone, so a migrated shot that still has to be filmed needs a new Approve
+ * (Omni costs more than Veo Lite did). A shot still tied to a Veo operation (filming, downloading, or a failed
+ * collect) can't be followed any more → 'expired' (Refilm films it with Omni). keepOps: leave states and ops alone
+ * (the film tick: advanceShot expires such a shot through the job store, so every copy agrees). Idempotent; mutates
+ * and returns r.
+ */
+export function migrateRemix(r, { keepOps = false } = {}) {
+  if (!record(r)) return r;
+  for (const s of Object.values(record(r.shots) ? r.shots : {})) {
+    if (!record(s)) continue;
+    const id = shotModelId(s.model);
+    if (id && id !== s.model) s.model = id;
+    if (!keepOps && isVeoOp(s.op) && ['filming', 'downloading', 'failed'].includes(s.state)) {
+      s.state = 'expired'; s.error = VEO_RETIRED;
+      delete s.op; delete s.uri; delete s.tries;
+    }
+  }
+  if (record(r.opts)) {
+    const id = shotModelId(r.opts.model);
+    if (id && id !== r.opts.model) r.opts.model = id;
+    if (record(r.opts.shotModels)) {
+      for (const o of Object.values(r.opts.shotModels)) {
+        const oid = record(o) ? shotModelId(o.model) : null;
+        if (oid && oid !== o.model) o.model = oid;
+      }
+    }
+  }
+  return r;
+}
+export const VEO_RETIRED = 'Google retired Veo 3.1 on the Gemini API before this shot was collected — refilm it with Gemini Omni';

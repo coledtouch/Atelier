@@ -59,7 +59,7 @@ test('the Labs toggle lives in the owner-only Settings section, named for what i
   assert.match(HTML, /<link rel="stylesheet" href="\/remix\.css\?v=\d+" \/>/);
 });
 
-test('sendMode: a clip in Video mode remixes only with Remix on; otherwise it is answered in Ask (never a silent Veo clip)', () => {
+test('sendMode: a clip in Video mode remixes only with Remix on; otherwise it is answered in Ask (never a silent paid clip)', () => {
   assert.equal(sendMode('video', true, true), 'remix');
   assert.equal(sendMode('video', true, false), 'ask');
   assert.equal(sendMode('ask', true, true), 'ask');
@@ -124,7 +124,7 @@ test('Phase 0: the attached-video note says what Send does in Video mode', () =>
 // ── data-safety ──
 const remixOf = (over = {}) => ({
   v: REMIX_V, phase: 'film', rev: 1, opts: {}, plan: { title: 'x', timeline: [] }, issues: [], assets: {},
-  shots: { s1: { state: 'filming', model: DEFAULT_SHOT_MODEL, op: 'models/veo-3.1-lite/operations/abc123', startedAt: 1 },
+  shots: { s1: { state: 'filming', model: DEFAULT_SHOT_MODEL, op: 'omni:int_abc123', startedAt: 1 },
     s2: { state: 'starting', model: DEFAULT_SHOT_MODEL }, s3: { state: 'ready', model: DEFAULT_SHOT_MODEL, blobKey: 'rx:shot:e1:s3', bytes: 10 } },
   approval: { keys: { s1: 'k' }, usd: 0.4, at: 1 },
   ...over,

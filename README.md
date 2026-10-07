@@ -52,7 +52,7 @@ Design: `docs/superpowers/specs/2026-09-30-atelier-tester-access-design.md` plus
   → `{spotsLeft, cap, paused}` (public, cached 60 s).
 - **Deny by default:** a tester request goes only through `src/tester/router.js` (`TESTER_ROUTES`): `GET /api/tester/me`,
   `GET/PUT /api/tester/profile` (their own "You", ≤ 300 KB, kept in the Ledger), `POST /api/chat`, OpenAI / Meta / Nano
-  Banana images, Veo (lite and fast; one video, ≤ 8 s, ≤ $1.00) with polls and downloads of their own jobs only, and
+  Banana images, Gemini Omni video (one clip, 4/6/8 s, ≤ $1.00 reserved) with status checks and downloads of their own jobs only, and
   `/api/video/*` for their own uploads (≤ 200 MB). Everything else answers `403 {code:"owner_only"}`. Non-GET tester
   requests must come from `https://atelier.ciprari.ai` (or `http://127.0.0.1:8787`). No NVIDIA and no free models.
 - **The meter (`src/tester/ledger.js`, Durable Object `Ledger`, SQLite):** every metered call reserves its worst case

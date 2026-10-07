@@ -7,22 +7,23 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=79';
-import * as Sync from './sync.js?v=79';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds } from './runway.js?v=79';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=79';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=79';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=79';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=79';
-import { initLookup } from './lookup.js?v=79';
-import { createRemix } from './remix-app.js?v=79';
-import { sendMode, looksLikeQuestion } from './remix.js?v=79';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=79';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=79';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=79';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=79';
-import * as ClaudeImport from './claude-import.js?v=79';
-import { createFeedback } from './feedback.js?v=79';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=80';
+import * as Sync from './sync.js?v=80';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwaySeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=80';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=80';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=80';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=80';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=80';
+import { initLookup } from './lookup.js?v=80';
+import { createRemix } from './remix-app.js?v=80';
+import { sendMode, looksLikeQuestion } from './remix.js?v=80';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=80';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=80';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=80';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=80';
+import * as ClaudeImport from './claude-import.js?v=80';
+import { createFeedback } from './feedback.js?v=80';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=80';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -64,7 +65,8 @@ const PREMIUM_MODELS = {
     ['zai:glm-5.3', 'GLM 5.3 (Z.ai)'], ['deepseek:deepseek-flash', 'DeepSeek Flash'], ['meta:muse-spark-1.3', 'Muse Spark 1.3 (Meta)'], ['openai:gpt-6-luna', 'GPT-6 Luna'],
   ],
   // Helper calls (prompt polish, titles, memory): cheap and quick.
-  fast: [['gemini:gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite'], ['zai:glm-4.7-flash', 'GLM 4.7 Flash (Z.ai, free)'], ['deepseek:deepseek-flash', 'DeepSeek Flash'], ['openai:gpt-6-luna', 'GPT-6 Luna']],
+  // Claude Haiku 5.5 first whenever the Anthropic key is there (adaptive thinking at effort low, no sampling params).
+  fast: [['anthropic:claude-haiku-5-5', 'Claude Haiku 5.5'], ['gemini:gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite'], ['zai:glm-4.7-flash', 'GLM 4.7 Flash (Z.ai, free)'], ['deepseek:deepseek-flash', 'DeepSeek Flash'], ['openai:gpt-6-luna', 'GPT-6 Luna']],
 };
 const NVIDIA_MODELS = {
   ask: [
@@ -115,7 +117,7 @@ const KLEIN_SIZES = { '1:1': [1024, 1024], '4:5': [944, 1104], '3:2': [1248, 832
 const IMAGE_MODELS = [
   { id: 'openai:gpt-image-2.5-flare', editId: 'openai:gpt-image-2.5-sunburst', label: 'GPT Image 2.5', edit: true, run: (p, o, sig) => openaiImage(p, o, sig) },
   { id: 'gemini:gemini-3-pro-image', label: 'Nano Banana Pro', edit: true, run: (p, o, sig) => geminiImage('gemini-3-pro-image', p, o, sig) },
-  { id: 'gemini:gemini-3.1-flash-image', label: 'Nano Banana 2 · fast', edit: true, run: (p, o, sig) => geminiImage('gemini-3.1-flash-image', p, o, sig) },
+  { id: 'gemini:gemini-nano-banana-2.1', label: 'Nano Banana 2.1 · fast', edit: true, run: (p, o, sig) => geminiImage('gemini-nano-banana-2.1', p, o, sig) },
   { id: 'meta:muse-image-1.0', label: 'Muse Image (Meta)', run: (p, o, sig) => metaImage(p, o, sig) },
   {
     id: 'black-forest-labs/flux.1-dev', label: 'FLUX.1 dev · detailed',
@@ -136,11 +138,10 @@ const EDIT_MODEL = {
   body: (p, img, o) => ({ prompt: p, image: [img], width: o.w, height: o.h, seed: o.seed, steps: 4 }),
 };
 const VIDEO_MODELS = [
-  // Cheapest real AI video first (Auto); step up for more fidelity.
-  { id: 'gemini:veo-3.1-lite-generate-preview', label: 'Veo 3.1 Lite · best value', veo: true, note: 'Veo Lite ≈ $0.05–0.08/sec · 4 s ≈ $0.25' },
-  { id: 'gemini:veo-3.1-fast-generate-preview', label: 'Veo 3.1 Fast', veo: true, note: 'Veo Fast ≈ $0.10–0.30/sec' },
-  { id: 'gemini:veo-3.1-generate-preview', label: 'Veo 3.1 · max quality', veo: true, note: 'Veo ≈ $0.40/sec' },
-  // Runway Gen-4.5 / Gen-4 Turbo (owner only, public/runway.js). auto:false: Auto never spends Runway credits.
+  // Real AI video first (Auto): Google's Gemini Omni Flash (public/omni.js), which replaced Veo 3.1 on the Gemini API
+  // (shut down 2026-10-22; saved Veo pins migrate here, migrateVideoId). veo: priced per second for testers (tester.js).
+  { id: OMNI_ID, label: 'Gemini Omni Flash', omni: true, veo: true, note: 'Omni ≈ $0.10/sec at 720p, ≈ $0.20 HD · 6 s ≈ $0.61' },
+  // Runway Gen-4.5 / Gen-4 Turbo / Veo 3.1 (owner only, public/runway.js). auto:false: Auto never spends Runway credits.
   ...RUNWAY_VIDEO_MODELS,
   {
     id: 'nvidia/cosmos3-nano', fn: 'cosmos3-nano', label: 'Cosmos 3 Nano',
@@ -159,7 +160,7 @@ const MODES = {
   ask:   { label: 'Ask',   key: '1', ph: 'Ask anything…', desc: 'Answers, explanations, writing, planning. Reads images too.', tries: ['Plan a 3-day trip to Lisbon on a mid budget', 'Explain how mortgages amortize, simply', 'Draft a polite follow-up email to a client who went quiet'] },
   code:  { label: 'Code',  key: '2', ph: 'What should we code?', desc: 'Write, debug, refactor and explain code.', tries: ['Python script that renames photos by EXIF date', 'Why does my React effect run twice?', 'SQL: top 3 customers by revenue per month'] },
   image: { label: 'Image', key: '3', ph: 'Describe an image…', desc: 'GPT Image, Nano Banana & FLUX — or attach a photo to edit it.', tries: ['A tiny greenhouse café on a rainy Tokyo rooftop, cinematic, 35mm', 'Minimal isometric icon of a paper plane, soft pastel', 'Portrait of an old lighthouse keeper, Rembrandt lighting'] },
-  video: { label: 'Video', key: '4', ph: 'Describe a scene…', desc: 'Real AI video with Veo — from a sentence or a still image.', tries: ['Waves rolling onto a black sand beach at golden hour', 'A paper boat drifting down a neon-lit rainy street'] },
+  video: { label: 'Video', key: '4', ph: 'Describe a scene…', desc: 'Real AI video with Gemini Omni — from a sentence or a still image.', tries: ['Waves rolling onto a black sand beach at golden hour', 'A paper boat drifting down a neon-lit rainy street'] },
   ideas: { label: 'Ideas', key: '5', ph: 'Ideas for what?', desc: 'A spread of idea cards you can expand or build.', tries: ['Side projects I can ship in a weekend', 'Birthday gift ideas for a dad who loves fishing', 'Names for a cozy neighborhood bakery'] },
   build: { label: 'Build', key: '6', ph: 'Describe an app…', desc: 'Single-file web apps, previewed live. Refine by chatting.', tries: ['A pomodoro timer with a daily streak heatmap', 'A split-the-bill calculator with tip slider', 'A habit tracker with a satisfying check animation'] },
 };
@@ -221,8 +222,17 @@ const S = {
     video: { model: '', aspect: '16:9', secs: 4, enhance: true },
     ideas: { count: 6, flavor: 'Practical' },
     build: { model: '', style: 'Refined', refine: true },
-  }, (({ video, image, ...rest }) => ({ ...rest, ...(video?.secs && !/cosmos|motion/.test(video.model || '') ? { video } : {}), ...(image && !image.model?.includes?.('/') ? { image } : {}) }))(LS.get('opts', {}))),
+  }, (({ video, image, ...rest }) => ({ ...rest, ...(video?.secs && !/cosmos|motion/.test(video.model || '') ? { video } : {}), ...(image && !image.model?.includes?.('/') ? { image } : {}) }))(migrateOpts(LS.get('opts', {})))),
 };
+// Saved pins of retired models → their successors: a Veo 3.1 video pin → Gemini Omni (public/omni.js), the deprecated
+// Nano Banana 2 (gemini-3.1-flash-image) → Nano Banana 2.1. Threads keep their old ids; the lookups below migrate them.
+function migrateImageId(id) { return id === 'gemini:gemini-3.1-flash-image' ? 'gemini:gemini-nano-banana-2.1' : id; }
+function migrateOpts(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return {};
+  if (o.video && typeof o.video === 'object') o.video = { ...o.video, model: migrateVideoId(o.video.model) };
+  if (o.image && typeof o.image === 'object') o.image = { ...o.image, model: migrateImageId(o.image.model) };
+  return o;
+}
 
 // Last known provider list (refreshed from /api/health at boot) so startup never waits on the network.
 let server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, runway: false, ...LS.get('server', {}) };
@@ -277,6 +287,7 @@ const feat = (k) => !S.tester || S.tester.features[k] !== false;
 // (feat() treats unknown keys as on, so it isn't used here). Until the Phase 6 server work, testers never get it.
 const remixOn = () => Boolean(remix) && (S.tester ? S.tester.features?.remix === true : S.settings.labs?.remix !== false);
 let remix = null; // createRemix(...) just before boot()
+let omniEdit = null; // Video mode: {id, at, label} of the Omni clip the next prompt edits (Edit on its card); session only
 function providerReady(provider) {
   if (S.tester) return Boolean(server[provider]) && [...testerAllow].some((id) => providerOf(id) === provider);
   return Boolean(server[provider] && S.settings.passcode);
@@ -889,8 +900,9 @@ const blobToDataUrl = (blob) => new Promise((res) => { const r = new FileReader(
 const splitDataUrl = (u) => { const m = u.match(/^data:([^;]+);base64,(.+)$/); return m ? { mime: m[1], data: m[2] } : null; };
 
 // null only for a tester whose plan has no image (or video) model: there is no free fallback for testers.
-const imageModel = (id) => IMAGE_MODELS.find((m) => m.id === id && modelReady(m.id)) || IMAGE_MODELS.find((m) => modelReady(m.id)) || (S.tester ? null : IMAGE_MODELS.find((m) => !m.run));
-const videoModel = (id) => VIDEO_MODELS.find((m) => m.id === id && modelReady(m.id)) || VIDEO_MODELS.find((m) => m.auto !== false && modelReady(m.id)) || (S.tester ? null : VIDEO_MODELS.find((m) => m.local));
+// A thread's or a setting's retired id (Veo 3.1, Nano Banana 2) is looked up as its successor.
+const imageModel = (id0) => { const id = migrateImageId(id0); return IMAGE_MODELS.find((m) => m.id === id && modelReady(m.id)) || IMAGE_MODELS.find((m) => modelReady(m.id)) || (S.tester ? null : IMAGE_MODELS.find((m) => !m.run)); };
+const videoModel = (id0) => { const id = migrateVideoId(id0); return VIDEO_MODELS.find((m) => m.id === id && modelReady(m.id)) || VIDEO_MODELS.find((m) => m.auto !== false && modelReady(m.id)) || (S.tester ? null : VIDEO_MODELS.find((m) => m.local)); };
 const canEdit = (m) => m.edit && modelReady(m.id) && (!m.editId || modelReady(m.editId));
 
 const OPENAI_SIZES = { '1:1': '1024x1024', '4:5': '1024x1280', '3:2': '1536x1024', '16:9': '1792x1008', '9:16': '1008x1792' };
@@ -936,32 +948,34 @@ async function geminiImage(model, prompt, o, signal) {
   return out;
 }
 
-// Veo: start a long-running job, poll it, then download the MP4 through the proxy.
-async function runVeo(e, cfg, prompt, still, signal) {
-  const hd = e.params.aspect === '16:9hd';
-  const instance = { prompt };
-  const img = still && splitDataUrl(still);
-  if (img) instance.image = { inlineData: { mimeType: img.mime, data: img.data } };
-  const body = {
-    instances: [instance],
-    parameters: { aspectRatio: e.params.aspect === '9:16' ? '9:16' : '16:9', resolution: hd ? '1080p' : '720p', durationSeconds: hd ? 8 : +e.params.secs || 6 },
-  };
+// Gemini Omni (public/omni.js): start an interaction, poll it, download the MP4 through /api/omni/*. e.omni {id, at}
+// lets Try again pick up the same video instead of paying for a new one, and later lets Edit build on it (Google keeps
+// stored interactions 55 days). previous: an earlier Omni clip's id to edit.
+const OMNI_KEEP_MS = 54 * 864e5;
+async function runOmni(e, prompt, still, signal) {
+  const prev = e.omni, resume = prev?.id && !prev.done && Date.now() - prev.at < 864e5 ? prev.id : null;
+  const edit = e.params.omniEdit?.id && Date.now() - (e.params.omniEdit.at || 0) < OMNI_KEEP_MS ? e.params.omniEdit.id : null;
+  const body = omniRequest({ prompt, still, params: e.params, tester: Boolean(S.tester), previous: edit, task: edit ? 'edit' : null });
+  const home = () => [...liveThreads.values()].find((t) => t.entries.includes(e)) || (S.thread?.entries.includes(e) ? S.thread : null);
   const t0 = Date.now();
-  let op = await (await xfetch(`gemini/v1beta/models/${cfg.id.replace('gemini:', '')}:predictLongRunning`, { body, signal })).json();
-  while (!op.done) {
-    await sleep(5000, signal);
-    tick(e, Date.now() - t0);
-    op = await (await xfetch(`gemini/v1beta/${op.name}`, { method: 'GET', signal })).json();
-  }
-  if (op.error) throw new ApiError(500, op.error.message || 'Veo couldn’t make this video.');
-  const res = op.response?.generateVideoResponse;
-  const uri = res?.generatedSamples?.[0]?.video?.uri;
-  if (!uri) throw new ApiError(400, res?.raiMediaFilteredReasons?.[0] || 'Veo returned no video — it may have been filtered. Try rephrasing.');
-  const file = uri.match(/\/(v1(?:beta)?\/files\/[^?:]+:download)/);
-  if (!file) throw new ApiError(500, 'Unexpected Veo download link.');
-  e.stage = 'Downloading'; repaint(e);
-  const blob = await (await xfetch(`gemini/${file[1]}?alt=media`, { method: 'GET', signal })).blob();
-  return blobToDataUrl(blob.type ? blob : new Blob([blob], { type: 'video/mp4' }));
+  const timer = setInterval(() => tick(e, Date.now() - t0), 1000);
+  try {
+    const out = await omniVideo(body, {
+      apiHeaders, signal, resume, onResponse: noteAllowance,
+      onId: (id) => {
+        e.omni = { id, at: Date.now() };
+        const t = home(); // saved now: if the app closes before the clip lands, Try again resumes it (no second charge)
+        if (t) { t.updatedAt = Date.now(); DB.put(t).catch(storageError); }
+      },
+      onStatus: (text) => { e.stage = text; repaint(e); },
+    });
+    e.omni = { id: out.id, at: e.omni?.at || Date.now(), done: true };
+    return blobToDataUrl(out.blob);
+  } catch (err) {
+    if (!err.resumable) delete e.omni; // failed or filtered at Google: Try again starts afresh
+    if (err.status != null && !(err instanceof ApiError)) throw new ApiError(err.status, err.message, { code: err.code, scope: err.scope, resetsAt: err.resetsAt });
+    throw err;
+  } finally { clearInterval(timer); }
 }
 
 // Normalize the many response shapes visual endpoints use.
@@ -1312,7 +1326,9 @@ function paintEntry(li, e) {
       if (!m) {
         html += `<div class="developing" style="aspect-ratio:${w}/${h}">${statusLine(e.stage || 'Developing', e)}</div>`;
       } else if (m.type === 'video') {
-        html += `<figure class="shot vid"><video src="${esc(m.src)}" autoplay loop muted playsinline controls></video><div class="shot-acts"><button class="mini" data-act="dl-media" data-k="${k}" aria-label="Save video">${ICON.down}Save</button></div></figure>`;
+        // An Omni clip Google still keeps (55 days) can be edited: the next Video prompt builds on it (runOmni).
+        const omniEditable = k === 0 && e.omni?.done && typeof e.omni.id === 'string' && Date.now() - e.omni.at < OMNI_KEEP_MS;
+        html += `<figure class="shot vid"><video src="${esc(m.src)}" autoplay loop muted playsinline controls></video><div class="shot-acts"><button class="mini" data-act="dl-media" data-k="${k}" aria-label="Save video">${ICON.down}Save</button>${omniEditable ? `<button class="mini" data-act="omni-edit" data-k="${k}" aria-label="Edit this clip with Gemini Omni">${ICON.pen}Edit</button>` : ''}</div></figure>`;
       } else {
         html += `<figure class="shot"><img src="${esc(m.src)}" alt="${esc(e.prompt)}" data-act="view-media" data-k="${k}" loading="lazy" /><div class="shot-acts">
           <button class="mini" data-act="dl-media" data-k="${k}" aria-label="Save">${ICON.down}Save</button>
@@ -1563,7 +1579,7 @@ async function submit(textArg, modeArg, extra = {}) {
   if (!hasCredentials()) { openOnboard(signinReason); return; }
   if (!navigator.onLine) { toast('You’re offline — connect, then send again', { error: true }); return; }
   if (route === 'remix' && (await remix.composer.gate(text, video, S.thread)) !== 'ok') return; // can't decode → held
-  // Video mode, no attachment, in a thread with a remix: Revise or New clip must be chosen (never a silent paid Veo clip).
+  // Video mode, no attachment, in a thread with a remix: Revise or New clip must be chosen (never a silent paid video clip).
   if (!video && mode === 'video' && remixOn() && !images.length && !extra.entry && textArg == null) {
     const c = remix.composer.textChoice(text, S.thread);
     if (c === 'hold') return;
@@ -1589,6 +1605,10 @@ async function submit(textArg, modeArg, extra = {}) {
   if (!S.thread) S.thread = newThread();
   const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(untrusted && { untrusted }), ...(extra.via === 'assist' && { via: 'assist' }), ...extra.entry };
   delete e.images_;
+  // Video mode after Edit on an Omni clip (the chip shows it): this prompt edits that clip. Once only.
+  if (mode === 'video' && omniEdit && !video && !images.length && !extra.entry && route !== 'remix' && videoModel(e.params.model)?.omni) {
+    e.params.omniEdit = { id: omniEdit.id, at: omniEdit.at }; omniEdit = null; renderOptions();
+  }
   if (route === 'remix') e.remix = remix.newRemix(video, text); // kind stays 'video'
   // A typed text follow-up right after a video turn (or its follow-ups) keeps that video in view — on every path: with
   // Accounts or Web on it goes to the agent / web with the video's frames (see followUpRoute in context.js).
@@ -2256,7 +2276,7 @@ async function runVideo(e, signal) {
   if (!cfg) throw new ApiError(403, 'Video isn’t part of your tester plan right now.', { code: 'tester_model' });
   if (S.tester && cfg.veo) {
     const { seconds, resolution } = veoShape(e.params), cost = veoCost(cfg.id, seconds, resolution), room = headroom(leftOf(S.tester), VEO_CAP);
-    if (cost == null || cost > room.amount) throw new ApiError(402, `A ${seconds} s ${resolution} Veo clip reserves ${money(cost ?? 0, { up: true })}; ${money(room.amount)} fits right now.`, { code: 'tester_budget', scope: room.scope });
+    if (cost == null || cost > room.amount) throw new ApiError(402, `A ${seconds} s ${resolution} video reserves ${money(cost ?? 0, { up: true })}; ${money(room.amount)} fits right now.`, { code: 'tester_budget', scope: room.scope });
   }
   // Skip a doomed call if Cosmos was refused for this key in the last 24h.
   if (cfg.fn && Date.now() - LS.get('cosmosDeniedAt', 0) < 864e5) cfg = VIDEO_MODELS.find((m) => m.local);
@@ -2265,17 +2285,19 @@ async function runVideo(e, signal) {
   e.meta = { model: cfg.id, note: still ? 'image → video' : 'text → video' };
   e.media = []; e.expect = 1;
   const prompt = await enhance(e, 'video', signal);
-  if (cfg.veo) {
-    e.stage = 'Filming with Veo · 1–6 min'; repaint(e);
+  if (cfg.omni) {
+    e.stage = 'Filming with Gemini Omni · 1–6 min'; repaint(e);
+    if (e.params.omniEdit?.id) e.meta.note = 'edit of an Omni clip';
     try {
-      const src = await runVeo(e, cfg, prompt, still && await shrinkDataUrl(still, 1280, 1280, 1_500_000), signal);
+      const src = await runOmni(e, prompt, still && await shrinkDataUrl(still, 1280, 1280, 1_500_000), signal);
       e.media = [{ type: 'video', src }];
       return;
     } catch (err) {
-      if (err.name === 'AbortError' || S.tester || !(accountProblem(err) || err.status === 429)) throw err;
-      toast('Veo unavailable on this key (billing/quota) — making a motion still instead');
+      // An Omni video that may exist (resumable) is never swapped for a motion still: Try again checks on it.
+      if (err.name === 'AbortError' || S.tester || err.resumable || !(accountProblem(err) || err.status === 429)) throw err;
+      toast('Gemini Omni unavailable on this key (billing/quota) — making a motion still instead');
       await runMotionStill(e, prompt, still, signal);
-      e.meta.note = `motion still · Veo said: ${err.message.replace(/^Request failed \(\d+\)\.\s*/, '').slice(0, 140)}`;
+      e.meta.note = `motion still · Omni said: ${err.message.replace(/^Request failed \(\d+\)\.\s*/, '').slice(0, 140)}`;
       return;
     }
   }
@@ -2296,7 +2318,7 @@ async function runVideo(e, signal) {
   await runMotionStill(e, prompt, still, signal);
 }
 
-// Runway (owner only; public/runway.js): the same pending card and result card as Veo. The browser only talks to
+// Runway (owner only; public/runway.js): the same pending card and result card as Omni. The browser only talks to
 // /api/runway/*; the Worker keeps the key and Runway's expiring links. e.runway {task, model, at} lets Try again pick
 // up the earlier task instead of paying for a new one: one still running, one that finished but didn't download, or
 // one that Stop cancelled (Try again then sees it cancelled and starts afresh). runwayVideo marks those errors resumable.
@@ -2573,6 +2595,17 @@ stream.addEventListener('click', async (ev) => {
       renderAttachments();
       input.value = e.enhanced || e.prompt; setMark(e.untrusted); autosize(); input.focus();
       return toast('Image attached — hit send to animate');
+    case 'omni-edit': {
+      if (!e.omni?.id) return;
+      clearComposerVideo();
+      setMode('video');
+      if (!videoModel(S.opts.video.model)?.omni) { S.opts.video.model = OMNI_ID; saveOpts(); }
+      const p = String(e.prompt || 'this clip');
+      omniEdit = { id: e.omni.id, at: e.omni.at, label: `‘${p.length > 22 ? `${p.slice(0, 21)}…` : p}’` };
+      renderOptions();
+      input.value = ''; setMark(''); autosize(); input.focus();
+      return toast('Describe the change — Gemini Omni edits this clip');
+    }
     case 'edit-image':
       clearComposerVideo();
       setMode('image');
@@ -2741,11 +2774,23 @@ function modelChoices(list, current, fallbackLabel) {
   if (current && !S.tester && !opts.some(([v]) => v === current)) opts.push([current, shortModel(current)]);
   return opts;
 }
-// Tester Veo: what the chosen clip reserves, and which lengths won't fit (addendum A7b).
+// Tester video (Gemini Omni): what the chosen clip reserves, and which lengths won't fit (addendum A7b).
 function veoNote(vm, fit, o) {
-  if (!fit.secs.length) return `Veo needs ${money(fit.cheapest, { up: true })} a clip · ${money(fit.room)} fits now`;
-  const { seconds, resolution } = veoShape(o), wont = [...[4, 6, 8].filter((x) => !fit.secs.includes(x)).map((x) => `${x} s`), ...(fit.hd ? [] : ['HD'])];
+  if (!fit.secs.length) return `A video needs ${money(fit.cheapest, { up: true })} · ${money(fit.room)} fits now`;
+  const { seconds, resolution } = veoShape(o), have = o.aspect === '16:9hd' ? fit.hdSecs : fit.secs;
+  const wont = [...[4, 6, 8].filter((x) => !have.includes(x)).map((x) => `${x} s`), ...(fit.hd ? [] : ['HD'])];
   return `${money(veoCost(vm.id, seconds, resolution), { up: true })} of ${money(fit.room)}${wont.length ? ` · ${wont.join(', ')} won’t fit` : ''}`;
+}
+// The owner's Omni note: what this clip should cost (Google bills output tokens: 5,792 a second at 720p, $0.10136;
+// the 1080p rate is an estimate until Google prices it).
+function omniNote(o) {
+  const { seconds, resolution } = veoShape(o), usd = (VEO_PER_SECOND[OMNI_ID]?.[resolution] || 0) * seconds;
+  return `Gemini Omni · ${seconds} s ${resolution} ≈ $${usd.toFixed(2)}${resolution === '720p' ? '' : ' (estimate)'}`;
+}
+// Video mode, after Edit on an Omni clip: the chip that says the next prompt edits it (tap to film a new clip instead).
+function omniEditChip() {
+  if (!omniEdit || !videoModel(S.opts.video.model)?.omni) return '';
+  return `<button class="chip on" data-omni-edit-off title="Your next prompt edits that clip. Tap to film a new one instead"><span aria-hidden="true">✎</span> Editing ${esc(omniEdit.label)} ✕</button>`;
 }
 function renderOptions() {
   const o = S.opts[S.mode];
@@ -2785,22 +2830,27 @@ function renderOptions() {
       if (!vm) { h = '<span class="opt-note keep">Video isn’t in your tester plan right now</span>'; break; }
       // Testers see only the lengths and resolutions whose worst case fits what's left (and $1 a clip).
       const fit = S.tester && vm.veo ? veoChoices(vm.id, leftOf(S.tester)) : null;
-      if (fit?.secs.length) { if (o.aspect === '16:9hd' && !fit.hd) o.aspect = '16:9'; if (!fit.secs.includes(+o.secs)) o.secs = fit.secs.at(-1); }
-      // Runway: 2–10 s and no HD choice; back on Veo/Cosmos a Runway-only length snaps to 4/6/8.
-      const rw = vm.runway || null;
-      if (rw) { if (o.aspect === '16:9hd') o.aspect = '16:9'; if (!RUNWAY_SECONDS.includes(+o.secs)) o.secs = 4; }
+      if (fit && o.aspect === '16:9hd' && !fit.hd) o.aspect = '16:9';
+      const fitSecs = fit ? (o.aspect === '16:9hd' ? fit.hdSecs : fit.secs) : null;
+      if (fitSecs?.length && !fitSecs.includes(+o.secs)) o.secs = fitSecs.at(-1);
+      // Runway: its own lengths (2–10 s; Veo 3.1 4/6/8) and HD only where it has a 1080p ratio (Veo 3.1); Omni (owner)
+      // 4–10 s; Cosmos and the motion still 4/6/8.
+      const rw = vm.runway || null, rwHd = Boolean(rw && RUNWAY_SPECS[rw]?.hd);
+      if (rw) { if (o.aspect === '16:9hd' && !rwHd) o.aspect = '16:9'; if (!runwaySecondsFor(rw).includes(+o.secs)) o.secs = runwaySeconds(o.secs, rw); }
+      else if (!fit && vm.omni) { if (!OMNI_SECONDS.includes(+o.secs)) o.secs = +o.secs > 10 ? 10 : 4; }
       else if (!fit) o.secs = veoSeconds(o.secs);
-      const secs = fit ? fit.secs : rw ? RUNWAY_SECONDS : [4, 6, 8];
+      const secs = fit ? fitSecs : rw ? runwaySecondsFor(rw) : vm.omni ? OMNI_SECONDS : [4, 6, 8];
       h = selectOpt('', 'model', [['', `Auto · ${videoModel('').label}`], ...VIDEO_MODELS.filter((m) => modelReady(m.id)).map((m) => [m.id, m.label])], o.model)
         // "Use Runway Gen-4.5?" (syncRunwayHint) sits next to the model it would change: a phone's strip scrolls, and
         // at the end the chip would start off-screen
         + '<span class="rw-hint-slot"></span>'
-        + selectOpt('', 'aspect', [['16:9', '16:9'], ['9:16', '9:16'], ...(!rw && (!fit || fit.hd) ? [['16:9hd', '16:9 · HD']] : [])], o.aspect)
-        + (secs.length ? selectOpt('', 'secs', secs.map((x) => [x, `${x} s`]), o.aspect === '16:9hd' ? 8 : o.secs) : '')
+        + selectOpt('', 'aspect', [['16:9', '16:9'], ['9:16', '9:16'], ...((rw ? rwHd : !fit || fit.hd) ? [['16:9hd', '16:9 · HD']] : [])], o.aspect)
+        + (secs.length ? selectOpt('', 'secs', secs.map((x) => [x, `${x} s`]), o.secs) : '')
+        + omniEditChip()
         + `<button class="chip ${o.enhance ? 'on' : ''}" data-toggle="enhance"><span aria-hidden="true">✦</span> Enhance</button>`
         // kept on phones whenever a length or HD was left out of the menus, so the tester sees why (A7b)
         + (rw ? `<span class="opt-note keep">${esc(runwayOptNote(vm, o.secs))} · ${RUNWAY_POWERED}</span>`
-          : `<span class="opt-note${fit && (!fit.hd || fit.secs.length < 3) ? ' keep' : ''}">${esc(fit ? veoNote(vm, fit, o) : vm.note || 'attach an image to animate it')}</span>`);
+          : `<span class="opt-note${fit && (!fit.hd || fit.secs.length < 3) ? ' keep' : ''}">${esc(fit ? veoNote(vm, fit, o) : vm.omni ? omniNote(o) : vm.note || 'attach an image to animate it')}</span>`);
       h = rxChoice + h;
       break;
     }
@@ -2872,7 +2922,8 @@ $('#options').addEventListener('change', (ev) => {
   const v = s.value;
   S.opts[S.mode][s.dataset.opt] = /^\d+$/.test(v) ? +v : v;
   saveOpts();
-  if (S.mode === 'video' && (s.dataset.opt === 'model' || (s.dataset.opt === 'secs' && isRunwayId(S.opts.video.model)))) {
+  // Video: the cost note follows the length and HD choice (Omni, Runway and a tester's reserve all price by them).
+  if (S.mode === 'video' && ['model', 'secs', 'aspect'].includes(s.dataset.opt)) {
     const key = s.dataset.opt; // keep focus on the select that changed
     renderOptions(); saveOpts(); // renderOptions may snap the length/aspect to what the new model takes: keep that
     $(`[data-opt="${key}"]`, $('#options'))?.focus({ preventScroll: true });
@@ -2896,6 +2947,7 @@ $('#options').addEventListener('click', (ev) => {
   }
   if (remix?.composer.onOption(ev.target)) return; // footage / model / ♪ soundtrack / Revise-or-New chips (it calls renderOptions itself)
   if (ev.target.closest('[data-ask-about]')) { setMode('ask'); return; }
+  if (ev.target.closest('[data-omni-edit-off]')) { omniEdit = null; renderOptions(); toast('Your next prompt films a new clip'); return; }
   if (ev.target.closest('[data-remix-in-video]')) { setMode('video'); return; }
   const t = ev.target.closest('[data-toggle]');
   const set = ev.target.closest('[data-set]');
@@ -2952,7 +3004,7 @@ function clearArm() { $$('.armed').forEach((b) => b.classList.remove('armed')); 
 document.addEventListener('click', (ev) => ev.target.closest?.('.armed')?.classList.remove('armed'), true); // any click on an armed button clears it
 let sendHold = null;
 // The keyed hold's toast: where it is going ("Sending to Image…"). Video also says how long and what it will cost, from
-// the same table as the Video options (tester.js veoShape/veoCost: Veo's reserve, price × 1.25). A model with no price
+// the same table as the Video options (tester.js veoShape/veoCost: Omni's reserve, price × 1.25). A model with no price
 // there (Runway, local) shows no price rather than a wrong one.
 function holdNote(launchMode) {
   if (launchMode !== 'video') return sendingNote(launchMode);
@@ -4431,7 +4483,7 @@ $('#diagBtn').onclick = async () => {
     const r = await fetch('/api/diag', { headers: apiHeaders() });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `Check failed (${r.status})`);
-    const names = { anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini', veo: 'Veo (model access)', zai: 'Z.ai (GLM)', deepseek: 'DeepSeek', meta: 'Meta (Muse)', nvidia: 'NVIDIA', runway: 'Runway' };
+    const names = { anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini', veo: 'Gemini Omni (model access)', zai: 'Z.ai (GLM)', deepseek: 'DeepSeek', meta: 'Meta (Muse)', nvidia: 'NVIDIA', runway: 'Runway' };
     box.innerHTML = Object.entries(j).map(([k, v]) => `<span class="${v.ok ? 'ok' : 'err'}">${v.ok ? '✓' : '✗'} ${names[k] || k}${v.ok ? '' : ` — ${esc(v.status ? `(${v.status}) ` : '')}${esc(v.message || '')}`}${v.keyShape ? ` <i style="color:var(--ink-3)">[key ${esc(v.keyShape)}]</i>` : ''}</span>`).join('');
   } catch (err) { box.innerHTML = `<span class="err">${esc(netText(err))}</span>`; }
   finally { done(); box.removeAttribute('aria-busy'); }
@@ -5156,7 +5208,7 @@ function welcomeTester() {
   const dlg = document.createElement('dialog');
   dlg.className = 'tok-dialog tester-welcome';
   dlg.setAttribute('aria-labelledby', 'twTitle');
-  dlg.innerHTML = `<form method="dialog"><p class="eyebrow">LinkedIn tester</p><h3 id="twTitle">Welcome${first ? `, <em>${esc(first)}</em>` : ''}.</h3><p class="hint">You have <b>${money(t.allowance.day.limit)}</b> a day and <b>${money(t.allowance.month.limit)}</b> a month on paid models — Claude, GPT, Gemini and others (Z.ai, DeepSeek, Meta) for answers, code, ideas and apps, plus images and Veo video. The line above the prompt shows what’s left.</p><p class="hint">Your threads are private to your account on this device. Enable device sync in Settings → Your data to continue on another device. Your You profile is saved to your tester account.</p><div class="row"><button class="btn-primary" value="ok">Start making</button></div></form>`;
+  dlg.innerHTML = `<form method="dialog"><p class="eyebrow">LinkedIn tester</p><h3 id="twTitle">Welcome${first ? `, <em>${esc(first)}</em>` : ''}.</h3><p class="hint">You have <b>${money(t.allowance.day.limit)}</b> a day and <b>${money(t.allowance.month.limit)}</b> a month on paid models — Claude, GPT, Gemini and others (Z.ai, DeepSeek, Meta) for answers, code, ideas and apps, plus images and Gemini Omni video. The line above the prompt shows what’s left.</p><p class="hint">Your threads are private to your account on this device. Enable device sync in Settings → Your data to continue on another device. Your You profile is saved to your tester account.</p><div class="row"><button class="btn-primary" value="ok">Start making</button></div></form>`;
   document.body.append(dlg);
   dlg.addEventListener('close', () => { dlg.remove(); if (!COARSE.matches) input.focus({ preventScroll: true }); resumeLaunch(); });
   dlg.showModal();
@@ -5668,7 +5720,7 @@ $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
 
 // The build feedback reports when app.js was loaded without its ?v= (scripts/bump-version.mjs moves it with sw.js VERSION).
-const APP_BUILD = '79';
+const APP_BUILD = '80';
 const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || APP_BUILD}`, online: navigator.onLine !== false }), toast });
 $('#feedbackBtn').onclick = () => feedback.open();
 $('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };

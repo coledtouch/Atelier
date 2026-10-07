@@ -13,6 +13,7 @@ import { handleTts } from './tts.js';
 import { handleSync } from './sync.js';
 import { handleFeedback } from './feedback.js';
 import { handleRunway, runwayDiag, RUNWAY_PROVIDER } from './runway.js';
+import { handleOmni, OMNI_MODEL } from './omni.js';
 import { handleLookup } from './lookup.js';
 import { handleTranscribe } from './transcribe.js';
 export { Relay } from './relay.js';
@@ -58,11 +59,9 @@ const PASSTHRU = {
   gemini: {
     base: 'https://generativelanguage.googleapis.com',
     auth: (k) => ({ 'x-goog-api-key': k }),
-    allow: [
-      ['POST', /^v1(beta)?\/models\/[\w.-]+:(generateContent|predictLongRunning)$/],
-      ['GET', /^v1beta\/models\/[\w.-]+\/operations\/[\w.-]+$/],
-      ['GET', /^v1(beta)?\/files\/[\w.-]+:download$/],
-    ],
+    // Images only. Video is Gemini Omni on /api/omni/* (src/omni.js): Veo's predictLongRunning, operations and file
+    // downloads went with the Veo 3.1 shutdown (2026-10-22).
+    allow: [['POST', /^v1(beta)?\/models\/[\w.-]+:generateContent$/]],
   },
 };
 
@@ -496,7 +495,7 @@ async function handleApi(req, env, url) {
     if (env.OPENAI_API_KEY) out.openai = await check('https://api.openai.com/v1/models', { authorization: `Bearer ${env.OPENAI_API_KEY}` });
     if (env.GEMINI_API_KEY) {
       out.gemini = await check('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { 'x-goog-api-key': env.GEMINI_API_KEY });
-      if (out.gemini.ok) out.veo = await check('https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-lite-generate-preview', { 'x-goog-api-key': env.GEMINI_API_KEY });
+      if (out.gemini.ok) out.veo = await check(`https://generativelanguage.googleapis.com/v1beta/models/${OMNI_MODEL}`, { 'x-goog-api-key': env.GEMINI_API_KEY });
       const k = env.GEMINI_API_KEY;
       // AI Studio issues "auth keys" (AQ.…) since May 2026; Google is retiring the older AIza… standard keys.
       out.gemini.keyShape = /^\s|\s$/.test(k) ? 'has leading/trailing whitespace'
@@ -692,6 +691,14 @@ async function handleApi(req, env, url) {
   if (path.startsWith('video/')) {
     if (!resolveKey(req, env, 'gemini')) return missingKey(req, env, 'gemini');
     return handleVideoApi(req, env, path, url.searchParams);
+  }
+
+  // /api/omni/* → Gemini Omni video (src/omni.js), owner behind the passcode. Testers reach their own metered copies of
+  // these routes in the tester router above.
+  if (path.startsWith('omni/')) {
+    const key = resolveKey(req, env, 'gemini');
+    if (!key) return missingKey(req, env, 'gemini');
+    return handleOmni(req, env, path, { key });
   }
 
   // /api/runway/* → Runway video, owner only (src/runway.js). Testers never get here: the tester router above answers

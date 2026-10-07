@@ -10,7 +10,7 @@ const {
   quote, quoteNote, creditsNote, ratioFor, ratioBox, t2vRatio, runwaySeconds, veoSeconds, alephProblem, ALEPH_PROBLEM_TEXT, clampPrompt, buildRequest,
   pollDelay, statusText, failureOf, mentionsRunway, runwayHint, connectionRow, isRunwayId, runwayModelOf,
   waitForTask, runwayVideo, takeSlot, slotState, uploadToRunway, runwayAccount, forgetAccount, accountLimit, cancelTask, downloadOutput, POWERED_BY,
-  stillPlan, INPUT_ASPECT, createTask, createTimeout,
+  stillPlan, INPUT_ASPECT, createTask, createTimeout, VEO_RATIOS, runwaySecondsFor, veoRatio, optionNote,
 } = R;
 
 // app.js's own errorKind (+ accountProblem), lifted from the source so the card a Runway error gets is the real one.
@@ -73,12 +73,38 @@ test('the client catalogue matches the Worker’s (models, prices, ratios, uploa
   assert.equal(R.DATA_URI_MAX, S.DATA_URI_MAX);
   assert.equal(R.UPLOAD_MAX, S.UPLOAD_MAX);
   assert.ok(RUNWAY_SECONDS.every((s) => s >= S.DURATION_MIN && s <= S.DURATION_MAX));
-  // no retired id anywhere on the client
-  for (const id of Object.keys(S.RETIRED)) assert.ok(!Object.hasOwn(RUNWAY_MODELS, id), id);
+  // Veo 3.1 on Runway: the same four ratios and 4/6/8 s on both sides, and the silent rate on the Worker
+  for (const id of ['veo3.1', 'veo3.1_fast']) {
+    assert.deepEqual([...VEO_RATIOS], [...S.RUNWAY_MODELS[id].kinds.text_to_video], id);
+    assert.deepEqual([...VEO_RATIOS], [...S.RUNWAY_MODELS[id].kinds.image_to_video], id);
+    assert.deepEqual([...RUNWAY_MODELS[id].seconds], [...S.RUNWAY_MODELS[id].durations], id);
+    assert.equal(S.RUNWAY_MODELS[id].creditsNoAudio * 2, S.RUNWAY_MODELS[id] === S.RUNWAY_MODELS['veo3.1'] ? 40 : 20, id);
+  }
+  // only current ids (gen3a_turbo and gen4_aleph were retired by Runway on 2026-07-30)
+  assert.deepEqual(Object.keys(RUNWAY_MODELS).sort(), ['aleph2', 'gen4.5', 'gen4_turbo', 'veo3.1', 'veo3.1_fast']);
+});
+
+test('Veo 3.1 on Runway: requests in its own ratios and lengths, the still as is, and a quote per second with sound', () => {
+  assert.deepEqual(buildRequest({ model: 'veo3.1', prompt: 'a lighthouse', aspect: '16:9', secs: 8 }),
+    { kind: 'text_to_video', body: { model: 'veo3.1', promptText: 'a lighthouse', ratio: '1280:720', duration: 8 }, ratio: '1280:720', seconds: 8, note: 'text → video' });
+  assert.equal(buildRequest({ model: 'veo3.1', prompt: 'x', aspect: '9:16', secs: 4 }).body.ratio, '720:1280');
+  assert.equal(buildRequest({ model: 'veo3.1_fast', prompt: 'x', aspect: '16:9hd', secs: 6 }).body.ratio, '1920:1080');
+  const i2v = buildRequest({ model: 'veo3.1_fast', prompt: 'slow push in', still: PNG, stillSize: { w: 720, h: 1280 }, aspect: '16:9', secs: 10 });
+  assert.deepEqual(i2v.body, { model: 'veo3.1_fast', promptText: 'slow push in', promptImage: PNG, ratio: '720:1280', duration: 8 }); // portrait still; 10 s → 8
+  assert.equal(buildRequest({ model: 'veo3.1', prompt: 'x', still: PNG, ratio: '1080:1920', secs: 6 }).body.ratio, '1080:1920');
+  assert.throws(() => buildRequest({ model: 'veo3.1', prompt: '' }), (e) => e.status === 400 && /Describe the video/.test(e.message));
+  assert.deepEqual([runwaySeconds(2, 'veo3.1'), runwaySeconds(5, 'veo3.1'), runwaySeconds(6, 'veo3.1'), runwaySeconds(10, 'veo3.1')], [4, 4, 6, 8]);
+  assert.deepEqual([...runwaySecondsFor('veo3.1')], [4, 6, 8]);
+  assert.deepEqual([...runwaySecondsFor('gen4.5')], [...RUNWAY_SECONDS]);
+  assert.equal(veoRatio({ w: 1000, h: 500, aspect: '16:9hd' }), '1920:1080');
+  assert.equal(quoteNote('veo3.1', 4), '≈ 160 credits ($1.60)');
+  assert.equal(quoteNote('veo3.1_fast', 8), '≈ 120 credits ($1.20)');
+  const entry = RUNWAY_VIDEO_MODELS.find((m) => m.id === 'runway:veo3.1');
+  assert.equal(optionNote(entry, 10), 'Veo 3.1 (Runway) · 8 s ≈ 320 credits ($3.20)');
 });
 
 test('menu entries: runway:<model> ids, never Auto, and the meta line reads runway:gen4.5', () => {
-  assert.deepEqual(RUNWAY_VIDEO_MODELS.map((m) => m.id), ['runway:gen4.5', 'runway:gen4_turbo']);
+  assert.deepEqual(RUNWAY_VIDEO_MODELS.map((m) => m.id), ['runway:gen4.5', 'runway:gen4_turbo', 'runway:veo3.1', 'runway:veo3.1_fast']);
   for (const m of [...RUNWAY_VIDEO_MODELS, RUNWAY_EDIT_MODEL]) {
     assert.equal(m.auto, false, m.id);
     assert.equal(runwayModelOf(m.id), m.runway);
@@ -87,8 +113,9 @@ test('menu entries: runway:<model> ids, never Auto, and the meta line reads runw
     assert.equal(m.id.replace(/^(anthropic|openai|gemini|zai|deepseek|meta):/, '').split('/').pop(), m.id);
   }
   assert.equal(RUNWAY_EDIT_MODEL.id, 'runway:aleph2');
-  assert.equal(runwayModelOf('runway:gen4_aleph'), null);
-  assert.equal(runwayModelOf('gemini:veo-3.1-lite-generate-preview'), null);
+  assert.equal(runwayModelOf('runway:seedance2'), null);
+  assert.equal(runwayModelOf('gemini:gemini-omni-1.1-flash'), null);
+  assert.equal(runwayModelOf('runway:veo3.1'), 'veo3.1');
   assert.match(POWERED_BY, /href="https:\/\/runway\.com" target="_blank" rel="noopener">Powered by Runway</);
 });
 
@@ -224,7 +251,7 @@ test('buildRequest refuses what Runway would refuse, in words for people', () =>
     [{ model: 'aleph2', prompt: 'x' }, 400, /Attach a clip/],
     [{ model: 'aleph2', prompt: 'x', videoUri: 'https://example.com/a.mp4' }, 400, /Attach a clip/],
     [{ model: 'aleph2', prompt: '', videoUri: 'runway://upload/abc123' }, 400, /Describe the edit/],
-    [{ model: 'gen4_aleph', prompt: 'x' }, 400, /isn’t available/],
+    [{ model: 'seedance2', prompt: 'x' }, 400, /isn’t available/],
   ];
   for (const [input, status, re] of bad) {
     assert.throws(() => buildRequest(input), (e) => e.status === status && re.test(e.message) && !/passcode/i.test(e.message), JSON.stringify(input).slice(0, 80));

@@ -7,8 +7,9 @@ import { claudeChat } from '../anthropic.js';
 import { geminiNativeChat, handleVideoApi, isGeminiFileUri, fileNameOf, normalizeVideoMime, fileGone, GEMINI_BASE, GEMINI_VIDEO_MIMES, VIDEO_NEEDS_GEMINI, FILE_GONE_ERROR } from '../gemini.js';
 import {
   PRICES, TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, TESTER_TTS_MODELS, PER_CALL_RESERVE_CAP, WEB_CALL_RESERVE_CAP, VEO_CALL_RESERVE_CAP,
-  PriceError, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, ttsWorstCase, ttsReserved, ttsActual,
+  PriceError, chatWorstCase, chatActual, imageCost, imageActual, veoCost, omniActual, maxTokensWithin, ttsWorstCase, ttsReserved, ttsActual,
 } from './prices.js';
+import { shapeOmni, omniCreate, omniGet, omniVideo, omniCancel, omniFail, readBody as readOmniBody, validId as omniId, OmniError, OMNI_PRICE_ID } from '../omni.js';
 import { handleTts, TTS_VOICES, TTS_VOICE_IDS, ttsPriceId } from '../tts.js';
 import { handleTranscribe, STT_MODELS } from '../transcribe.js';
 import { TESTER_STT_MODELS, sttWorstCase, sttActual } from './prices.js';
@@ -32,7 +33,7 @@ export const LIMITS = Object.freeze({
   minReply: 256, // a call that can't leave room for this much answer is refused instead
   clipBytes: 200 * MB, clipSeconds: 180, // full clips for testers (A2); longer ones go as frames
   imageN: 4, imageRefs: 4, imageBody: 24 * MB, // A3
-  veoBody: 8 * MB, veoSeconds: 8,
+  videoSeconds: 8, videoDurations: Object.freeze([4, 6, 8]), videoResolutions: Object.freeze(['720p', '1080p']), // Omni (A2, A7b)
   prompt: 32_000,
 });
 const WEB_FALLBACK = 'anthropic:claude-sonnet-5-5'; // A7b: a web call that fits nowhere else runs on Sonnet 5.5
@@ -40,7 +41,6 @@ const PRO_VIDEO_FALLBACK = ['gemini:gemini-3.1-pro-preview', 'gemini:gemini-3.8-
 const IMAGE_DATA = /^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/]+=*$/;
 const B64 = /^[A-Za-z0-9+/]+=*$/;
 const IMAGE_MIME = /^image\/(?:png|jpeg|webp)$/;
-const OPERATION = /^models\/[\w.-]+\/operations\/[\w.-]+$/;
 const EFFORTS = { minimal: 'low', low: 'low', medium: 'medium', high: 'high', xhigh: 'high', max: 'high' }; // A3: up to high
 const SAFE = new Set(['GET', 'HEAD']);
 
@@ -158,9 +158,11 @@ export const TESTER_ROUTES = Object.freeze([
   { method: 'POST', match: /^x\/openai\/images\/(generations|edits)$/, sample: 'x/openai/images/edits', run: openaiImages },
   { method: 'POST', match: /^x\/meta\/images\/generations$/, sample: 'x/meta/images/generations', run: metaImages },
   { method: 'POST', match: /^x\/gemini\/(v1beta|v1)\/models\/([\w.-]+):generateContent$/, sample: 'x/gemini/v1beta/models/gemini-3-pro-image:generateContent', run: geminiImage },
-  { method: 'POST', match: /^x\/gemini\/v1beta\/models\/([\w.-]+):predictLongRunning$/, sample: 'x/gemini/v1beta/models/veo-3.1-lite-generate-preview:predictLongRunning', run: veoStart },
-  { method: 'GET', match: /^x\/gemini\/v1beta\/(models\/[\w.-]+\/operations\/[\w.-]+)$/, sample: 'x/gemini/v1beta/models/veo-3.1-lite-generate-preview/operations/op1', run: veoPoll },
-  { method: 'GET', match: /^x\/gemini\/(v1beta|v1)\/(files\/[\w-]+):download$/, sample: 'x/gemini/v1beta/files/abc123:download', run: veoDownload },
+  // Gemini Omni video (src/omni.js): each interaction is tied to the tester who started it.
+  { method: 'POST', match: 'omni/start', run: omniStart },
+  { method: 'GET', match: /^omni\/status\/([A-Za-z0-9_-]{1,256})$/, sample: 'omni/status/v1_abc', run: omniStatusRoute },
+  { method: 'GET', match: /^omni\/video\/([A-Za-z0-9_-]{1,256})$/, sample: 'omni/video/v1_abc', run: omniVideoRoute },
+  { method: 'POST', match: /^omni\/cancel\/([A-Za-z0-9_-]{1,256})$/, sample: 'omni/cancel/v1_abc', run: omniCancelRoute },
   VIDEO('POST', 'upload/start'), VIDEO('PUT', 'upload/chunk'), VIDEO('POST', 'upload/query'), VIDEO('POST', 'upload/cancel'),
   VIDEO('GET', 'file'), VIDEO('DELETE', 'file'),
 ]);
@@ -198,7 +200,7 @@ async function me(c) {
   return json({
     sub: c.who.sub, name: c.who.name, picture: c.who.picture, email: c.who.email,
     models: { chat: TESTER_MODELS.filter(ready), image: TESTER_IMAGE_MODELS.filter(ready), video: TESTER_VIDEO_MODELS.filter(ready), tts: voices },
-    features: { web: ready('anthropic:'), video: ready('gemini:'), veo: ready('gemini:'), helpers: true, profile: true, sync: testerSyncReady(c.env), tts: voices.length > 0, dictation: dictation.length > 0 },
+    features: { web: ready('anthropic:'), video: ready('gemini:'), veo: ready(OMNI_PRICE_ID), helpers: true, profile: true, sync: testerSyncReady(c.env), tts: voices.length > 0, dictation: dictation.length > 0 },
     allowance: { day: a.day, month: a.month },
     pool: { paused: a.paused, spotsLeft: a.spotsLeft, ...(a.preview ? { preview: true } : {}) },
   }, 200, allowanceHeader(a));
@@ -398,11 +400,8 @@ async function tts(c) {
       const model = ttsPriceId(voice);
       if (!TESTER_TTS_MODELS.includes(model)) return { res: notTesterModel('That voice isn’t part of the tester set.') };
       if (await ttsThrottled(c)) return { res: fail(429, 'tts_busy', 'Read aloud is busy right now. Try again in a moment.', {}, { 'retry-after': TTS_RATE_RETRY_AFTER }) };
-      // Priced on a ceiling of the reading time (ttsCeilingUnits: symbols and emoji are read as words) and held to it.
-      // Gemini: maxOutputTokens is the reserved audio, so its bill can't pass the reservation. OpenAI speech has no
-      // output bound: the cut-off (cutoffSeconds) bounds what the tester hears, and the settle bounds what is billed:
-      // a stream stopped before its usage pays no less than the audio it timed, at the reserved token rate (src/tts.js
-      // viaOpenAI); one stopped after it, no less than that usage (the complete bill).
+      // Priced on a ceiling of the reading time (ttsCeilingUnits: symbols and emoji are read as words) and held to it:
+      // every voice is Gemini speech, and its maxOutputTokens is the reserved audio, so the bill can't pass the reservation.
       const o = { model, chars, units: ceiling ?? units, ...(voice.maxOutputTokens ? { maxAudioTokens: voice.maxOutputTokens } : {}) };
       const worst = ttsWorstCase(o);
       if (worst > PER_CALL_RESERVE_CAP) return { res: refused({ scope: 'call' }) };
@@ -411,21 +410,15 @@ async function tts(c) {
       if (mtr.res) return mtr;
       return {
         headers: mtr.headers,
-        limits: voice.provider === 'gemini' ? { outputTokens: held.audioTokens } : { seconds: held.cutoffSeconds },
-        // null: keep the full reservation; {billed: false}: $0; {usage, seconds}: the provider's report; {usage,
-        // stopped}: an OpenAI stream that stopped (cut off, hung up or broke) after the provider reported, settled at
-        // max(reservation, the reported bill); {usage: null, stopped, seconds}: one that stopped before that, or finished
-        // without usage (plain audio/mpeg; a speech.audio.done without it), after audio was timed, settled at
-        // max(reservation, the timed seconds x 50 tokens/s). ttsActual ignores the seconds
-        // of an OpenAI answer that has usage (it comes only in speech.audio.done, the whole bill).
+        limits: { outputTokens: held.audioTokens },
+        // null: keep the full reservation; {billed: false}: $0; {usage, seconds}: the provider's report.
         async settle(r) {
           let actual = mtr.amount;
           if (r?.billed === false) actual = 0;
           else if (r) {
             try {
-              // Gemini: the seconds floor (25 tokens/s) is held to the maxOutputTokens it was sent; the reported count rules.
-              const reported = ttsActual({ model, usage: r.usage, seconds: r.seconds, chars, ...(voice.provider === 'gemini' ? { maxAudioTokens: held.audioTokens } : {}) });
-              actual = r.stopped ? Math.max(mtr.amount, reported) : reported;
+              // The seconds floor (25 tokens/s) is held to the maxOutputTokens it was sent; the reported count rules.
+              actual = ttsActual({ model, usage: r.usage, seconds: r.seconds, chars, maxAudioTokens: held.audioTokens });
             } catch {
               if (!warnedTtsUsage) { warnedTtsUsage = true; console.warn('tts: no usable usage reported, the full reservation stands', model); }
             }
@@ -439,8 +432,10 @@ async function tts(c) {
 }
 
 // ── POST /api/transcribe (dictation): src/transcribe.js checks the recording and calls the provider; this reserves and
-// settles. OpenAI is reserved on its whole context window plus its output cap (sttWorstCase: $0.0375); the Gemini fallback
-// on its own input bound (the WAV's seconds, else the 3-minute cap, reserved before Gemini's countTokens checks it, so a
+// settles. OpenAI gpt-transcribe bills by duration: it is reserved on the WAV's length, else on the recording's bytes at
+// STT_MIN_BYTES_PER_SECOND (sttWorstCase); a recording whose reservation would pass the per-call cap goes to Gemini
+// instead (reserve answers {res, next: true}) when this server has Gemini, else it is refused. The Gemini fallback is
+// reserved on its own input bound (the WAV's seconds, else the 3-minute cap, reserved before Gemini's countTokens checks it, so a
 // throttled or refused tester never makes the Worker upload the recording) plus its output bound. Each provider that
 // runs is reserved and settled on its own; a provider's refusal (or a failed count) costs $0.
 // Dictation models a tester may use: priced for testers and with the provider's key on the server.
@@ -450,9 +445,9 @@ let warnedSttUsage = false;
 // is one recording, so a burst past it is a script opening reservations in parallel. Checked once per request: the
 // fallback to the second provider is the same dictation.
 const STT_RATE_RETRY_AFTER = '30';
-// Dictation's reservation doesn't shrink with the clip (OpenAI's is its whole context window), so refused()'s advice
-// ("a lighter model, a shorter clip") can't help: say what it needs (reserve() passes this to refused(), S21). With
-// under $0.01 left, the usual "you've used it" words stand.
+// Dictation's reservation is set by the recording already made (and Gemini's by the 3-minute cap when its length isn't
+// known), so refused()'s advice ("a lighter model, a shorter clip") can't help: say what it needs (reserve() passes
+// this to refused(), S21). With under $0.01 left, the usual "you've used it" words stand.
 const sttBudgetWords = (worst) => (r) => {
   const rest = r.allowance?.[r.scope] ? left(r.allowance[r.scope]) : 0;
   if (!SHORT[r.scope] || rest < 10_000) return undefined;
@@ -468,21 +463,23 @@ async function transcribe(c) {
     tester: true,
     // 503, not noProvider's 401: the dictation client reads any 401 as "sign in again".
     unavailable: () => fail(503, 'transcribe_unavailable', 'Dictation isn’t available to testers right now.'),
-    async reserve({ model, inputTokens, fallback }) {
+    async reserve({ model, inputTokens, seconds, bytes, fallback }) {
       if (!TESTER_STT_MODELS.includes(model.priceId)) return { res: notTesterModel('That dictation model isn’t part of the tester set.') };
       if (!fallback && await sttThrottled(c)) return { res: fail(429, 'transcribe_busy', 'Dictation is busy right now. Try again in a moment.', {}, { 'retry-after': STT_RATE_RETRY_AFTER }) };
-      const worst = sttWorstCase({ model: model.priceId, inputTokens, maxOutputTokens: model.maxOutputTokens });
-      if (worst > PER_CALL_RESERVE_CAP) return { res: refused({ scope: 'call' }) };
+      const worst = sttWorstCase(model.provider === 'openai' ? { model: model.priceId, seconds, bytes } : { model: model.priceId, inputTokens, maxOutputTokens: model.maxOutputTokens });
+      // Too long a recording for one OpenAI call (a big non-WAV file, reserved on its bytes): Gemini, when here, takes it.
+      if (worst > PER_CALL_RESERVE_CAP) return { res: refused({ scope: 'call' }), next: model.provider === 'openai' };
       const mtr = await reserve(c, worst, sttBudgetWords(worst));
       if (mtr.res) return mtr;
       return {
         headers: mtr.headers,
-        // null: keep the full reservation; {billed: false}: $0; {usage}: the provider's report.
+        // null: keep the full reservation; {billed: false}: $0; {usage, seconds}: the provider's report (and the WAV's
+        // length, which a duration-billed answer without a duration usage settles on).
         async settle(r) {
           let actual = mtr.amount;
           if (r?.billed === false) actual = 0;
           else if (r) {
-            try { actual = sttActual({ model: model.priceId, usage: r.usage }); } catch {
+            try { actual = sttActual({ model: model.priceId, usage: r.usage, seconds: r.seconds }); } catch {
               if (!warnedSttUsage) { warnedSttUsage = true; console.warn('transcribe: no usable usage reported, the full reservation stands', model.priceId); }
             }
           }
@@ -600,80 +597,72 @@ async function geminiImage(c) {
   });
 }
 
-// ── Veo (A2, A7b): one video, ≤ 8 s, ≤ $1.00 reserved; polls and downloads only for this tester's own jobs ──
-async function veoStart(c) {
-  const id = c.m[1], model = `gemini:${id}`;
-  if (!TESTER_VIDEO_MODELS.includes(model)) return notTesterModel();
-  const e = PRICES[model];
-  const { big, body: b } = await readJson(c.req, LIMITS.veoBody);
-  if (big) return tooLarge('This video request');
-  if (!b) return badRequest('Bad JSON body');
-  if (b.tools != null) return notTesterModel('Tools aren’t available on tester video requests.');
-  const inst = Array.isArray(b.instances) && b.instances.length === 1 ? b.instances[0] : null;
-  if (!inst || !goodPrompt(inst.prompt)) return badRequest('Send one video request with a prompt.');
-  const instance = { prompt: inst.prompt };
-  if (inst.image != null) {
-    const img = inst.image.inlineData;
-    if (!img || !IMAGE_MIME.test(img.mimeType) || typeof img.data !== 'string' || img.data.length > LIMITS.image || !B64.test(img.data)) {
-      return badRequest('The starting image must be PNG, JPEG or WebP base64 data up to 5 MB.');
-    }
-    instance.image = { inlineData: { mimeType: img.mimeType, data: img.data } };
-  }
-  const q = b.parameters && typeof b.parameters === 'object' ? b.parameters : {};
-  if ((q.numberOfVideos ?? 1) !== 1 || (q.sampleCount ?? 1) !== 1) return notTesterModel('Tester requests make one video at a time.');
-  const resolution = q.resolution ?? '720p', seconds = q.durationSeconds ?? LIMITS.veoSeconds;
-  if (!Object.hasOwn(e.perSecond, resolution)) return badRequest(`resolution must be one of ${Object.keys(e.perSecond).join(', ')}.`);
-  if (!e.durations.includes(seconds) || seconds > LIMITS.veoSeconds) return badRequest(`durationSeconds must be one of ${e.durations.join(', ')}.`);
-  const parameters = { aspectRatio: q.aspectRatio === '9:16' ? '9:16' : '16:9', resolution, durationSeconds: seconds };
-  if (typeof q.negativePrompt === 'string') parameters.negativePrompt = q.negativePrompt.slice(0, 2000);
-  const cost = veoCost({ model, seconds, resolution });
-  if (cost > VEO_CALL_RESERVE_CAP) return refused({ scope: 'call' }, 'One tester video can cost at most $1.00 — pick a shorter clip or 720p.');
+// ── Gemini Omni video (A2, A7b): one clip, ≤ 8 s, ≤ $1.00 reserved; status and video only for this tester's own jobs ──
+// A tester's start: 720p or 1080p, 4/6/8 s, priced at its worst case (prices.js perSecond × seconds × 1.25) and reserved
+// before Google is called. The reservation settles when this tester's status check sees the interaction finish: at the
+// reported usage (omniActual) when there is a video, else at $0 (a filtered or failed video isn't billed). An edit
+// (previous) must name the tester's own earlier interaction. Duration is sent as asked; no retry without it.
+const omniJob = (id) => `omni:${id}`;
+const omniOut = (res, allowance) => withHeaders(res, allowanceHeader(allowance));
+async function omniStart(c) {
+  if (!TESTER_VIDEO_MODELS.includes(OMNI_PRICE_ID)) return notTesterModel();
   const key = c.env.GEMINI_API_KEY;
   if (!key) return noProvider(c.up, 'gemini');
+  let shaped;
+  try {
+    const b = await readOmniBody(c.req);
+    shaped = shapeOmni(b, { resolutions: LIMITS.videoResolutions, durations: LIMITS.videoDurations, maxSeconds: LIMITS.videoSeconds });
+  } catch (err) { return err instanceof OmniError && err.status === 413 ? tooLarge('This video request') : omniFail(err); }
+  if (shaped.previous && !(await c.stub.ownsJob(c.who.sub, omniJob(shaped.previous)))) return notYours();
+  const cost = veoCost({ model: OMNI_PRICE_ID, seconds: shaped.seconds, resolution: shaped.resolution });
+  if (cost > VEO_CALL_RESERVE_CAP) return refused({ scope: 'call' }, 'One tester video can cost at most $1.00 — pick a shorter clip or 720p.');
   const mtr = await reserve(c, cost);
   if (mtr.res) return mtr.res;
-  const res = await c.up.forward(`${GEMINI_BASE}/v1beta/models/${id}:predictLongRunning`, {
-    method: 'POST', headers: { 'x-goog-api-key': key, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ instances: [instance], parameters }),
-  });
-  if (!res.ok) { await mtr.settle(0); return withHeaders(res, mtr.headers); }
-  const text = await res.text().catch(() => '');
-  let name = '';
-  try { name = JSON.parse(text).name; } catch {}
-  // The reservation settles when this tester's poll sees the operation finish (at $0 when no video came back).
-  if (typeof name === 'string' && OPERATION.test(name)) {
-    await c.stub.addJob(c.who.sub, `op:${name}`, 'op', { reservation: mtr.id, actual: veoCost({ model, seconds, resolution, margin: false }) });
-  } else await mtr.settle(mtr.amount);
-  return new Response(text, { status: res.status, headers: { ...JSON_HEADERS, ...mtr.headers } });
-}
-
-async function veoPoll(c) {
-  const name = c.m[1];
-  if (!(await c.stub.ownsJob(c.who.sub, `op:${name}`))) return notYours();
-  const key = c.env.GEMINI_API_KEY;
-  if (!key) return noProvider(c.up, 'gemini');
-  const res = await c.up.forward(`${GEMINI_BASE}/v1beta/${name}`, { method: 'GET', headers: { 'x-goog-api-key': key, accept: 'application/json' } });
-  if (!res.ok) return withHeaders(res, allowanceHeader(await c.stub.allowance(c.who.sub)));
-  const text = await res.text().catch(() => '');
-  let j = null, allowance = null;
-  try { j = JSON.parse(text); } catch {}
-  if (j?.done) {
-    const samples = j.response?.generateVideoResponse?.generatedSamples;
-    const files = (Array.isArray(samples) ? samples : []).map((s) => String(s?.video?.uri || '').match(/\/(files\/[\w-]+)(?::download)?(?:\?|$)/)?.[1]).filter(Boolean);
-    for (const f of files) await c.stub.addJob(c.who.sub, `file:${f}`, 'file');
-    allowance = (await c.stub.finishJob(c.who.sub, `op:${name}`, !j.error && files.length > 0))?.allowance;
+  let made;
+  try { made = await omniCreate(key, shaped.body); }
+  catch (err) {
+    // A refusal (an HTTP answer) bills nothing; an unreachable Google may still have started it: the reservation stands.
+    await mtr.settle(err instanceof OmniError && err.code !== 'omni_unreachable' && err.code !== 'omni_failed' ? 0 : mtr.amount);
+    return withHeaders(omniFail(err), mtr.headers);
   }
-  allowance ??= await c.stub.allowance(c.who.sub);
-  return new Response(text, { status: res.status, headers: { ...JSON_HEADERS, ...allowanceHeader(allowance) } });
+  await c.stub.addJob(c.who.sub, omniJob(made.id), 'omni', { reservation: mtr.id, actual: veoCost({ model: OMNI_PRICE_ID, seconds: shaped.seconds, resolution: shaped.resolution, margin: false }) });
+  return json({ id: made.id, status: made.status, seconds: shaped.seconds, pollAfterMs: 10_000 }, 200, mtr.headers);
 }
-
-async function veoDownload(c) {
-  const [, ver, name] = c.m;
-  if (!(await c.stub.ownsJob(c.who.sub, `file:${name}`))) return notYours();
+async function omniStatusRoute(c) {
+  const id = c.m[1];
+  if (!omniId(id) || !(await c.stub.ownsJob(c.who.sub, omniJob(id)))) return notYours();
   const key = c.env.GEMINI_API_KEY;
   if (!key) return noProvider(c.up, 'gemini');
-  const qs = c.url.searchParams.get('alt') === 'media' ? '?alt=media' : '';
-  const res = await c.up.forward(`${GEMINI_BASE}/${ver}/${name}:download${qs}`, { method: 'GET', headers: { 'x-goog-api-key': key, accept: c.req.headers.get('accept') || '*/*' } });
-  return withHeaders(res, allowanceHeader(await c.stub.allowance(c.who.sub)));
+  let summary;
+  try { ({ summary } = await omniGet(key, id)); }
+  catch (err) {
+    // Google no longer has it: nothing more can be learned, so the reservation settles in full (it may have been made).
+    if (err instanceof OmniError && err.status === 404) return omniOut(omniFail(err), (await c.stub.finishJob(c.who.sub, omniJob(id), true))?.allowance ?? await c.stub.allowance(c.who.sub));
+    return omniOut(omniFail(err), await c.stub.allowance(c.who.sub));
+  }
+  let allowance = null;
+  if (summary.done) {
+    let actual = null;
+    if (summary.video) { try { actual = omniActual({ model: OMNI_PRICE_ID, usage: summary.usage }); } catch {} }
+    allowance = (await c.stub.finishJob(c.who.sub, omniJob(id), summary.video, actual))?.allowance;
+  }
+  const { usage, ...out } = summary; // usage stays on the server
+  return json(out, 200, allowanceHeader(allowance ?? await c.stub.allowance(c.who.sub)));
+}
+async function omniVideoRoute(c) {
+  const id = c.m[1];
+  if (!omniId(id) || !(await c.stub.ownsJob(c.who.sub, omniJob(id)))) return notYours();
+  const key = c.env.GEMINI_API_KEY;
+  if (!key) return noProvider(c.up, 'gemini');
+  try { return omniOut(await omniVideo(key, id), await c.stub.allowance(c.who.sub)); }
+  catch (err) { return omniOut(omniFail(err), await c.stub.allowance(c.who.sub)); }
+}
+async function omniCancelRoute(c) {
+  const id = c.m[1];
+  if (!omniId(id) || !(await c.stub.ownsJob(c.who.sub, omniJob(id)))) return notYours();
+  const key = c.env.GEMINI_API_KEY;
+  if (!key) return noProvider(c.up, 'gemini');
+  try { return json(await omniCancel(key, id)); } catch (err) { return omniFail(err); }
 }
 
 // ── /api/video/* (A2): uploads and files, each tied to the tester who started it ──

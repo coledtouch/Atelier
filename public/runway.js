@@ -16,17 +16,23 @@ export const PROMPT_MAX = 1000, DATA_URI_MAX = 5_242_880, UPLOAD_MAX = 95 * 1024
 export const ALEPH_MIN_S = 2, ALEPH_MAX_S = 30;
 export const I2V_RATIOS = Object.freeze(['1280:720', '720:1280', '1104:832', '832:1104', '960:960', '1584:672']);
 export const T2V_RATIOS = Object.freeze(['1280:720', '720:1280']);
+// Google Veo 3.1 through Runway: these four ratios for text and image → video, 4/6/8 s (src/runway.js keeps the same).
+export const VEO_RATIOS = Object.freeze(['1280:720', '720:1280', '1080:1920', '1920:1080']);
 export const TARGET_ASPECTS = Object.freeze(['16:9', '4:3', '3:2', '1:1', '2:3', '3:4', '9:16', '21:9']);
 export const UPLOAD_TYPES = Object.freeze(['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska', 'image/png', 'image/jpeg', 'image/webp']);
-// Video-mode length menu for Runway models (Runway takes 2–10 whole seconds; Veo keeps 4/6/8).
+// Video-mode length menu for Runway models (Runway takes 2–10 whole seconds; Veo 3.1, on Runway too, 4/6/8).
 export const RUNWAY_SECONDS = Object.freeze([2, 4, 6, 8, 10]);
 export const VEO_SECONDS = Object.freeze([4, 6, 8]);
 
 // credits: per second; min: per generation. i2v / t2v / v2v: image → video, text → video, video → video.
+// seconds: the lengths the model takes (else RUNWAY_SECONDS); ratios: its own ratio list; hd: has a 1080p ratio.
+// Veo 3.1 (with audio, Runway's default): 40 credits/s, Fast 15 (https://docs.dev.runwayml.com/guides/pricing/).
 export const RUNWAY_MODELS = Object.freeze({
   'gen4.5': Object.freeze({ label: 'Runway Gen-4.5', credits: 12, min: 0, i2v: true, t2v: true, v2v: false }),
   gen4_turbo: Object.freeze({ label: 'Runway Gen-4 Turbo', credits: 5, min: 0, i2v: true, t2v: false, v2v: false }),
   aleph2: Object.freeze({ label: 'Runway Aleph', credits: 28, min: 56, i2v: false, t2v: false, v2v: true }),
+  'veo3.1': Object.freeze({ label: 'Veo 3.1 (Runway)', credits: 40, min: 0, i2v: true, t2v: true, v2v: false, seconds: VEO_SECONDS, ratios: VEO_RATIOS, hd: true }),
+  'veo3.1_fast': Object.freeze({ label: 'Veo 3.1 Fast (Runway)', credits: 15, min: 0, i2v: true, t2v: true, v2v: false, seconds: VEO_SECONDS, ratios: VEO_RATIOS, hd: true }),
 });
 
 // Entries for app.js VIDEO_MODELS (appended after the Veo entries). auto:false — Auto never spends Runway credits;
@@ -34,6 +40,9 @@ export const RUNWAY_MODELS = Object.freeze({
 export const RUNWAY_VIDEO_MODELS = Object.freeze([
   Object.freeze({ id: 'runway:gen4.5', label: 'Runway Gen-4.5', runway: 'gen4.5', auto: false, note: 'Runway Gen-4.5 ≈ $0.12/sec · text or image → video' }),
   Object.freeze({ id: 'runway:gen4_turbo', label: 'Runway Gen-4 Turbo · animate a still', runway: 'gen4_turbo', needsImage: true, auto: false, note: 'Runway Gen-4 Turbo ≈ $0.05/sec · attach a still to animate' }),
+  // Google's Veo 3.1 through Runway (owner only; it shuts down on the Gemini API on 2026-10-22).
+  Object.freeze({ id: 'runway:veo3.1', label: 'Veo 3.1 · Runway', runway: 'veo3.1', auto: false, note: 'Veo 3.1 on Runway ≈ $0.40/sec with sound · text or image → video' }),
+  Object.freeze({ id: 'runway:veo3.1_fast', label: 'Veo 3.1 Fast · Runway', runway: 'veo3.1_fast', auto: false, note: 'Veo 3.1 Fast on Runway ≈ $0.15/sec with sound · text or image → video' }),
 ]);
 // Video → video edits (a clip attached in Video mode). Not in the menu until app.js routes clips there (phase 1b).
 export const RUNWAY_EDIT_MODEL = Object.freeze({ id: 'runway:aleph2', label: 'Runway Aleph · edit a video', runway: 'aleph2', v2v: true, auto: false, note: 'Runway Aleph ≈ $0.28/sec · at least $0.56' });
@@ -77,7 +86,7 @@ export function quoteNote(model, seconds) {
 export function optionNote(entry, secs) {
   const model = entry?.runway;
   if (!Object.hasOwn(RUNWAY_MODELS, model ?? '')) return '';
-  const s = runwaySeconds(secs);
+  const s = runwaySeconds(secs, model);
   return `${RUNWAY_MODELS[model].label} · ${s} s ${quoteNote(model, s)}${entry.needsImage ? ' · attach a still' : ''}`;
 }
 // '48 credits ($0.48)' for a finished task's real cost; '' when unknown.
@@ -96,7 +105,8 @@ export function ratioFor(w, h, kind = 'image_to_video') {
   return best;
 }
 // Runway refuses a prompt image whose width ÷ height is outside these (docs: assets/inputs, "Input asset aspect ratio
-// requirements") — it does NOT crop it first. Phone screenshots (≈ 0.45) and wide panoramas fall outside.
+// requirements") — it does NOT crop it first. Phone screenshots (≈ 0.45) and wide panoramas fall outside. Veo 3.1 has
+// no such range listed (the still goes as is; its output ratio follows the still's orientation).
 export const INPUT_ASPECT = Object.freeze({ 'gen4.5': Object.freeze([0.5, 2]), gen4_turbo: Object.freeze([0.5, 2.358]) });
 // A w×h still for `model` → {ratio, crop}: the output ratio (ratioFor), and the centre crop {x, y, w, h} that gives the
 // image that shape — what Runway would cut anyway — kept 1% inside the model's input range so later rounding can't push
@@ -125,7 +135,9 @@ export async function cropStill(src, model = 'gen4.5') {
     i.onerror = () => rej(fail(400, 'Atelier couldn’t read that image for Runway — try another one.'));
     i.src = src;
   });
-  const w = img.naturalWidth, h = img.naturalHeight, plan = stillPlan(w, h, model);
+  const w = img.naturalWidth, h = img.naturalHeight;
+  if (RUNWAY_MODELS[model]?.ratios) return { src, ratio: veoRatio({ w, h }), w, h };
+  const plan = stillPlan(w, h, model);
   if (!plan.crop) return { src, ratio: plan.ratio, w, h };
   const { x, y, w: cw, h: ch } = plan.crop, k = Math.min(1, 2048 / Math.max(cw, ch));
   const c = document.createElement('canvas');
@@ -140,12 +152,21 @@ export function ratioBox(ratio) {
 }
 // Video-mode aspect ('16:9' | '9:16' | '16:9hd') → text → video ratio.
 export const t2vRatio = (aspect) => (aspect === '9:16' ? '720:1280' : '1280:720');
-// A length Runway takes: whole seconds 2–10 (default 5).
-export function runwaySeconds(secs) {
-  const s = Math.round(Number(secs));
+// A length Runway takes: whole seconds 2–10 (default 5); for a model with its own lengths (Veo 3.1: 4/6/8) the nearest
+// one of those at or below (else its shortest).
+export function runwaySeconds(secs, model) {
+  const s = Math.round(Number(secs)), list = RUNWAY_MODELS[model]?.seconds;
+  if (list) return list.includes(s) ? s : [...list].reverse().find((x) => x <= s) ?? (Number.isFinite(s) && s > 0 ? list[0] : 6);
   return Number.isFinite(s) && s >= 2 && s <= 10 ? s : 5;
 }
-// After switching from Runway back to Veo: a length Veo takes (4/6/8).
+/** The Video-mode length menu for a Runway model. */
+export const runwaySecondsFor = (model) => RUNWAY_MODELS[model]?.seconds || RUNWAY_SECONDS;
+// Veo 3.1 on Runway: the ratio for the Video-mode aspect ('16:9hd' is 1920:1080), or for a still's orientation.
+export function veoRatio({ w, h, aspect } = {}) {
+  if (w > 0 && h > 0) return h > w ? (aspect === '16:9hd' ? '1080:1920' : '720:1280') : aspect === '16:9hd' ? '1920:1080' : '1280:720';
+  return aspect === '9:16' ? '720:1280' : aspect === '16:9hd' ? '1920:1080' : '1280:720';
+}
+// After switching from Runway back to Omni / Cosmos: a length of 4/6/8 s.
 export const veoSeconds = (secs) => (VEO_SECONDS.includes(+secs) ? +secs : +secs > 8 ? 8 : 4);
 
 // Why a clip can't go to Aleph → 'too-short' | 'too-long' | 'too-large' | 'type' | null. v: {duration, size, type}.
@@ -191,7 +212,17 @@ export function buildRequest({ model, prompt, still, stillSize, ratio: wantRatio
     if (Number(seconds) > 0) body.seconds = Number(seconds); // the Worker echoes a quote from it; never sent to Runway
     return { kind: 'video_to_video', body, ratio: null, seconds: Number(seconds) > 0 ? Number(seconds) : null, note: 'video edit' };
   }
-  const duration = runwaySeconds(secs);
+  const duration = runwaySeconds(secs, model);
+  if (spec.ratios) { // Veo 3.1: its own ratios, 4/6/8 s; the still goes as is
+    if (!promptText) throw fail(400, 'Describe the video you want Veo to make.');
+    const ratio = spec.ratios.includes(wantRatio) ? wantRatio : veoRatio({ w: stillSize?.w, h: stillSize?.h, aspect });
+    if (still) {
+      if (typeof still !== 'string' || !/^data:image\/(jpeg|jpg|png|webp);base64,/.test(still)) throw fail(400, 'Runway takes JPEG, PNG or WebP images.');
+      if (still.length > DATA_URI_MAX) throw fail(413, 'That image is too large for Runway (5 MB) — try a smaller one.');
+      return { kind: 'image_to_video', body: { model, promptText, promptImage: still, ratio, duration, ...extra }, ratio, seconds: duration, note: 'image → video' };
+    }
+    return { kind: 'text_to_video', body: { model, promptText, ratio, duration, ...extra }, ratio, seconds: duration, note: 'text → video' };
+  }
   if (still) {
     if (typeof still !== 'string' || !/^data:image\/(jpeg|jpg|png|webp);base64,/.test(still)) throw fail(400, 'Runway takes JPEG, PNG or WebP images.');
     if (still.length > DATA_URI_MAX) throw fail(413, 'That image is too large for Runway (5 MB) — try a smaller one.');
@@ -293,12 +324,12 @@ export function connectionRow({ configured = false, passcode = false, account = 
     if (account.code === 'runway_key') return { on: false, state: 'Key rejected', detail: 'check RUNWAYML_API_SECRET at dev.runway.com' };
     return { on: true, state: 'Connected', detail: 'couldn’t read the credit balance just now' };
   }
-  if (!account?.ok) return { on: true, state: 'Connected', detail: 'Gen-4.5 · Gen-4 Turbo video' };
+  if (!account?.ok) return { on: true, state: 'Connected', detail: 'Gen-4.5 · Gen-4 Turbo · Veo 3.1 video' };
   const parts = [];
   if (Number.isFinite(account.creditBalance)) parts.push(`${n$(account.creditBalance)} credits (${credits$(account.creditBalance)})`);
   const lim = account.models?.['gen4.5']?.maxConcurrentGenerations;
   if (Number.isInteger(lim) && lim > 0) parts.push(`${lim} video${lim === 1 ? '' : 's'} at a time`);
-  return { on: true, state: 'Connected', detail: parts.join(' · ') || 'Gen-4.5 · Gen-4 Turbo video' };
+  return { on: true, state: 'Connected', detail: parts.join(' · ') || 'Gen-4.5 · Gen-4 Turbo · Veo 3.1 video' };
 }
 
 // ── browser: talking to /api/runway/* ──

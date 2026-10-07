@@ -8,10 +8,12 @@ import { cleanProfile, EMPTY_PROFILE } from '../src/tester/profile.js';
 const root = resolve('public');
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 // REVIEW_SYNC=1 enables owner sync; REVIEW_TESTER=<subject> enables simulated tester sign-in and private sync.
+// REVIEW_PROVIDERS=1 (or --providers) reports Anthropic, OpenAI, Gemini and Runway as configured for the owner too (Video mode's Omni and
+// Runway menus, Settings → models and voices); their /api/omni, /api/runway and /api/tts calls get local stubs below.
 // Both run the real src/sync.js over separate account buckets in memory (tests/fake-r2.mjs), shared by every browser
 // profile on this port; restarting empties them. workerRequest gives a body with a Content-Length the known length the
 // Workers runtime would (the strict fake, like R2, refuses a stream without one).
-const syncEnvs = new Map(), profiles = new Map(), feedback = new Map();
+const syncEnvs = new Map(), profiles = new Map(), feedback = new Map(), omniJobs = new Map();
 const fixtureTester = process.env.REVIEW_TESTER || '';
 let testerActive = Boolean(fixtureTester);
 const feedbackEnv = { ATELIER_KV: {
@@ -22,7 +24,7 @@ const feedbackEnv = { ATELIER_KV: {
 } };
 const fixtureMe = () => ({
   sub: fixtureTester, name: 'Review tester', email: 'review@example.test', picture: '',
-  models: { chat: ['anthropic:claude-sonnet-5-5', 'openai:gpt-6.1-sol'], image: ['openai:gpt-image-2.5-flare', 'openai:gpt-image-2.5-sunburst'], video: ['gemini:veo-3.1-lite-generate-preview'], tts: ['atelier'] },
+  models: { chat: ['anthropic:claude-sonnet-5-5', 'anthropic:claude-haiku-5-5', 'openai:gpt-6.1-sol'], image: ['openai:gpt-image-2.5-flare', 'openai:gpt-image-2.5-sunburst', 'gemini:gemini-nano-banana-2.1'], video: ['gemini:gemini-omni-1.1-flash'], tts: ['atelier', 'sulafat'] },
   features: { web: true, video: true, veo: true, helpers: true, profile: true, tts: true, dictation: true, sync: true },
   allowance: { day: { spent: 0, reserved: 0, limit: 5_000_000 }, month: { spent: 0, reserved: 0, limit: 50_000_000 }, pool: { spent: 0, reserved: 0, limit: 100_000_000 } },
   pool: { paused: false, preview: false, spotsLeft: 24 },
@@ -55,7 +57,8 @@ createServer(async (req, res) => {
   if (url.pathname.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    if (url.pathname === '/api/health') return res.end(JSON.stringify({ server: { nvidia: true, ...(process.env.REVIEW_STT || fixtureTester ? { openai: true } : {}), ...(fixtureTester ? { anthropic: true, gemini: true } : {}) } }));
+    const allProviders = Boolean(process.env.REVIEW_PROVIDERS) || process.argv.includes('--providers');
+    if (url.pathname === '/api/health') return res.end(JSON.stringify({ server: { nvidia: true, ...(process.env.REVIEW_STT || fixtureTester || allProviders ? { openai: true } : {}), ...(fixtureTester || allProviders ? { anthropic: true, gemini: true } : {}), ...(allProviders ? { runway: true } : {}) } }));
     if (url.pathname === '/api/li/spots') return res.end('{"spotsLeft":24,"cap":25,"paused":false}');
     // REVIEW_TESTER=<subject> is a local, simulated session. No LinkedIn call or production cookie is used.
     if (url.pathname === '/api/li/start' && fixtureTester) { testerActive = true; res.statusCode = 303; res.setHeader('Location', '/?tester=welcome'); return res.end(); }
@@ -109,6 +112,33 @@ createServer(async (req, res) => {
     }
     if (url.pathname === '/api/tools') return res.end('{"services":{},"list":[]}');
     if (url.pathname === '/api/relay/status') return res.end('{"online":false}');
+    // Gemini Omni stub (src/omni.js routes): start → two "in_progress" polls → completed; the video is a placeholder.
+    if (url.pathname === '/api/omni/start' && req.method === 'POST') {
+      const parts = []; for await (const p of req) parts.push(p);
+      let b = {}; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
+      const id = `v1_review${Date.now().toString(36)}`; omniJobs.set(id, 0);
+      return res.end(JSON.stringify({ id, status: 'queued', seconds: b.seconds ?? 6, pollAfterMs: 10000 }));
+    }
+    const omniM = url.pathname.match(/^\/api\/omni\/(status|video|cancel)\/([A-Za-z0-9_-]+)$/);
+    if (omniM) {
+      const [, what, id] = omniM;
+      if (!omniJobs.has(id)) { res.statusCode = 404; return res.end('{"error":"Google no longer has that video.","code":"omni_gone"}'); }
+      if (what === 'cancel') { omniJobs.delete(id); return res.end('{"ok":true}'); }
+      if (what === 'status') { const n = omniJobs.get(id) + 1; omniJobs.set(id, n); const done = n > 2; return res.end(JSON.stringify({ id, status: done ? 'completed' : 'in_progress', done, video: done, ...(done ? {} : { pollAfterMs: 10000 }) })); }
+      res.setHeader('Content-Type', 'video/mp4'); return res.end(await readFile(resolve(root, 'icons/atelier-v2-512.png')));
+    }
+    if (url.pathname === '/api/runway/account') return res.end('{"creditBalance":1200,"usd":12,"maxMonthlyCreditSpend":null,"models":{}}');
+    // Read aloud stub: half a second of silence as WAV (the Gemini voices' format), any voice.
+    if (url.pathname === '/api/tts' && req.method === 'POST') {
+      const parts = []; for await (const p of req) parts.push(p);
+      let b = {}; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
+      const data = 24_000, wav = Buffer.alloc(44 + data);
+      wav.write('RIFF', 0); wav.writeUInt32LE(36 + data, 4); wav.write('WAVE', 8); wav.write('fmt ', 12); wav.writeUInt32LE(16, 16);
+      wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(24_000, 24); wav.writeUInt32LE(48_000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
+      wav.write('data', 36); wav.writeUInt32LE(data, 40);
+      res.setHeader('Content-Type', 'audio/wav'); res.setHeader('x-tts-voice', String(b.voice || 'atelier')); res.setHeader('x-tts-brief', '2');
+      return res.end(wav);
+    }
     if (url.pathname === '/api/transcribe' && req.method === 'POST') { // dictation stub: REVIEW_STT=ok | busy | down | format | slow | empty
       let n = 0; for await (const p of req) n += p.length;
       const mode = process.env.REVIEW_STT || 'ok';
@@ -153,4 +183,4 @@ createServer(async (req, res) => {
     res.setHeader('Content-Type', mime[extname(file)] || 'application/octet-stream');
     res.end(await readFile(file));
   } catch { res.statusCode = 404; res.end('Not found'); }
-}).listen(Number(process.env.REVIEW_PORT) || 8791, '127.0.0.1', () => console.log(`Isolated review: http://127.0.0.1:${Number(process.env.REVIEW_PORT) || 8791} — passcode: review-only${fixtureTester ? ` — simulated tester: ${fixtureTester}` : ''}`)); // REVIEW_PORT: a second fixture beside :8791
+}).listen((Number(process.env.REVIEW_PORT) || Number(process.argv.find((a) => a.startsWith('--port='))?.slice(7)) || 8791), '127.0.0.1', () => console.log(`Isolated review: http://127.0.0.1:${(Number(process.env.REVIEW_PORT) || Number(process.argv.find((a) => a.startsWith('--port='))?.slice(7)) || 8791)} — passcode: review-only${fixtureTester ? ` — simulated tester: ${fixtureTester}` : ''}`)); // REVIEW_PORT: a second fixture beside :8791

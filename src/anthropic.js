@@ -69,8 +69,10 @@ function buildParams(body, tester = null) {
   if (!tester && Array.isArray(body.tools) && body.tools.length) {
     params.tools = body.tools.map((t) => ({ name: t.function.name, description: t.function.description, input_schema: t.function.parameters }));
   }
-  // Current models take adaptive thinking + effort; Haiku 4.5 predates both.
-  if (!/haiku/.test(model)) {
+  // Current models take adaptive thinking + effort (Claude Haiku 5.5 included: effort low–max, default medium); only
+  // Haiku 4.5 and older predate both. No sampling parameters are ever sent: since Opus 4.7, non-default temperature /
+  // top_p / top_k return a 400 (Haiku 5.5 and Sonnet 5.5 too), so body.temperature is deliberately not read here.
+  if (!/^claude-(?:3|haiku-4)/.test(model)) {
     params.thinking = { type: 'adaptive', display: 'summarized' };
     const effort = EFFORTS.has(body.reasoning_effort) ? body.reasoning_effort : 'medium';
     params.output_config = { effort: tester ? TESTER_EFFORT[effort] : effort };

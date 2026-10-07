@@ -10,8 +10,9 @@ const R = await import('../public/remix.js');
 const { createRemixStore, memoryKv } = await import('../public/remix-store.js');
 const FX = JSON.parse(readFileSync(new URL('./fixtures/remix/remix-plan-promo.json', import.meta.url), 'utf8'));
 const LUMA = JSON.parse(readFileSync(new URL('./fixtures/remix/promo-luma.json', import.meta.url), 'utf8'));
-const OP = 'models/veo-3.1-lite-generate-preview/operations/op123';
-const URI = 'https://generativelanguage.googleapis.com/v1beta/files/abc123:download?alt=media';
+// Gemini Omni: POST /api/omni/start → {id}; the shot's op is 'omni:<id>'; GET status → {done, video}; GET video → MP4.
+const OMNI = 'int_abc123', OP = `omni:${OMNI}`;
+const VEO_OP = 'models/veo-3.1-lite-generate-preview/operations/op123'; // a pre-Omni saved shot
 const CLIP = { name: 'files/abc', uri: 'https://generativelanguage.googleapis.com/v1beta/files/abc', mime: 'video/mp4', expiresAt: Date.now() + 864e5 };
 const INFO = { name: 'Atelier-promo-4x5.mp4', size: 8290821, duration: 48, width: 1080, height: 1350, rotation: 0, fps: 30, vcodec: 'avc1', vkbps: 1173, audio: 'aac', hasAudio: true, hdr: false, canDecode: true };
 
@@ -64,7 +65,7 @@ function harness({ answers = [], fetchAnswers = [], tester = null, store: seeded
     },
     completeChat: async (o) => { log.completes.push(o); const a = answers.shift(); return typeof a.raw === 'string' ? a.raw : JSON.stringify(a.raw); },
     fetch: async (url, init = {}) => {
-      log.fetches.push({ url: String(url), method: init.method || 'GET' });
+      log.fetches.push({ url: String(url), method: init.method || 'GET', body: typeof init.body === 'string' ? JSON.parse(init.body) : null });
       const a = fetchQueue.shift();
       if (!a) throw new Error(`unexpected fetch ${url}`);
       if (a instanceof Error) throw a;
@@ -237,8 +238,8 @@ test('approve → film: one POST per shot only after Approve; poll; download; re
   const h = harness({
     answers: [{ raw: SHOT_PLAN }],
     fetchAnswers: [
-      json(200, { name: OP }),
-      json(200, { done: true, response: { generateVideoResponse: { generatedSamples: [{ video: { uri: URI } }] } } }),
+      json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 }),
+      json(200, { id: OMNI, status: 'completed', done: true, video: true }),
       new Response(new Blob([new Uint8Array(4096)], { type: 'video/mp4' }), { status: 200 }),
     ],
   });
@@ -250,13 +251,19 @@ test('approve → film: one POST per shot only after Approve; poll; download; re
   assert.deepEqual(h.remix.activeThreads(), new Set(['t1']));
   assert.match(h.remix.deleteWarning('t1'), /still filming/);
   await h.remix.tick('e1');
-  assert.deepEqual(h.log.fetches.map((f) => [f.method, f.url]), [['POST', '/api/x/gemini/v1beta/models/veo-3.1-lite-generate-preview:predictLongRunning']]);
+  assert.deepEqual(h.log.fetches.map((f) => [f.method, f.url]), [['POST', '/api/omni/start']]);
+  const body = h.log.fetches[0].body;
+  assert.deepEqual(Object.keys(body), ['prompt', 'aspect', 'resolution', 'seconds'], 'no first frame in this plan');
+  assert.deepEqual([body.aspect, body.resolution, body.seconds], ['9:16', '720p', 4], 'a 4:5 cut films vertical');
+  assert.match(body.prompt, /walnut desk at dawn.*Avoid: text, letters/);
+  assert.equal(e.remix.shots.s1.model, 'gemini:gemini-omni-1.1-flash');
   assert.equal(e.remix.shots.s1.state, 'filming');
   assert.equal(e.remix.shots.s1.op, OP);
   assert.deepEqual((await h.store.opsAll()).map((o) => [o.entryId, o.shotId, o.op]), [['e1', 's1', OP]]);
   h.tick(5000);
   await h.remix.tick('e1');
   assert.equal(h.log.fetches.length, 3, 'poll + download, no second POST');
+  assert.deepEqual(h.log.fetches.slice(1).map((f) => f.url), [`/api/omni/status/${OMNI}`, `/api/omni/video/${OMNI}`]);
   assert.equal(e.remix.shots.s1.state, 'ready');
   assert.equal(e.remix.shots.s1.blobKey, 'rx:shot:e1:s1');
   assert.ok(h.kv.map.has('rx:shot:e1:s1'));
@@ -281,7 +288,7 @@ test('a dropped start → unknown, never re-sent; Retry anyway needs a fresh App
 });
 
 test('tester: a 429 queues (not billed) and the shot is retried only after its retryAt', async () => {
-  const h = harness({ answers: [{ raw: SHOT_PLAN }], tester: { features: { remix: true }, models: {} }, fetchAnswers: [json(429, { error: 'busy' }), json(200, { name: OP })] });
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], tester: { features: { remix: true }, models: {} }, fetchAnswers: [json(429, { error: 'busy' }), json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 })] });
   const e = await planned(h);
   e.remix.approval = R.approvalFor(e.remix, null, h.now()); e.remix.phase = 'film';
   h.remix.startJob('e1', 't1');
@@ -330,12 +337,55 @@ test('boot: a shot left "starting" becomes unknown (no re-send); a filming one r
   assert.deepEqual(h.remix.activeThreads(), new Set(['t1']));
   await h.remix.tick('e2');
   assert.deepEqual(h.log.fetches.map((f) => f.method), ['GET'], 'polls, never starts');
+  assert.equal(h.log.fetches[0].url, `/api/omni/status/${OMNI}`);
+  assert.equal(thread.entries[1].remix.shots.s1.model, 'gemini:gemini-omni-1.1-flash', 'the saved Veo Lite id now reads as Omni');
+});
+
+test('boot: a pre-Omni shot still filming on a Veo operation ends expired — nothing is polled or started; Approve films it with Omni', async () => {
+  const kv = memoryKv();
+  const st = createRemixStore(kv);
+  const T0 = 1_700_000_000_000 - 60_000;
+  await st.opsAdd({ entryId: 'e1', threadId: 't1', shotId: 's1', op: VEO_OP, startedAt: T0 });
+  await st.jobPatch('e1', 's1', { state: 'filming', op: VEO_OP, startedAt: T0 }, 't1');
+  const LITE = 'gemini:veo-3.1-lite-generate-preview';
+  const thread = { id: 't1', entries: [{ id: 'e1', kind: 'video', remix: { v: 1, phase: 'film', plan: SHOT_PLAN, opts: { model: LITE, res: '720p', shotModels: { s1: { model: LITE, res: '720p' } } },
+    shots: { s1: { model: LITE, res: '720p', seconds: 4, enabled: true, contentKey: 'deadbeef', state: 'filming', op: VEO_OP, startedAt: T0 } }, approval: { at: 1, keys: { s1: `${LITE}|4|720p` } } } }] };
+  assert.equal(R.validRemix(thread.entries[0].remix), true, 'a saved pre-Omni remix still validates');
+  const h = harness({ store: { kv }, threads: [thread], fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 })] });
+  h.S.thread = thread;
+  await h.remix.boot();
+  await h.remix.tick('e1');
+  const r = thread.entries[0].remix;
+  assert.equal(h.log.fetches.length, 0, 'a Veo operation is never polled');
+  assert.deepEqual([r.shots.s1.state, r.shots.s1.op, r.shots.s1.model], ['expired', undefined, 'gemini:gemini-omni-1.1-flash']);
+  assert.match(r.shots.s1.error, /retired Veo 3\.1/);
+  assert.equal((await h.store.jobGet('e1')).shots.s1.state, 'expired', 'the job store agrees');
+  assert.deepEqual(await h.store.opsAll(), []);
+  assert.deepEqual([r.opts.model, r.opts.shotModels.s1.model], ['gemini:gemini-omni-1.1-flash', 'gemini:gemini-omni-1.1-flash']);
+  const need = R.needsApproval(r);
+  assert.equal(need.needed, true, 'the old Veo approval does not cover an Omni shot');
+  assert.equal(need.reasons[0].cause, 'changed');
+  assert.equal(h.remix.approve(thread.entries[0]), true);
+  await h.remix.tick('e1');
+  assert.deepEqual(h.log.fetches.map((f) => [f.method, f.url]), [['POST', '/api/omni/start']]);
+  assert.equal(r.shots.s1.op, OP);
+});
+
+test('paint: an owner shot Google may have started (unknown) links to AI Studio usage; the shot picker label names Omni', async () => {
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [new TypeError('Failed to fetch')] });
+  const e = await planned(h);
+  h.remix.approve(e);
+  await h.remix.tick('e1');
+  assert.equal(e.remix.shots.s1.state, 'unknown');
+  assert.match(paintHtml(h, e), /aistudio\.google\.com\/usage/);
+  h.remix.composer.attached(video());
+  assert.match(h.remix.composer.options(), /New shots: Gemini Omni Flash ▾/);
 });
 
 test('forgetThread: the thread’s job keeps polling, then its bytes are dropped', async () => {
   const h = harness({
     answers: [{ raw: SHOT_PLAN }],
-    fetchAnswers: [json(200, { name: OP }), json(200, { done: true, response: { generateVideoResponse: { raiMediaFilteredReasons: ['filtered'] } } })],
+    fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 }), json(200, { id: OMNI, status: 'completed', done: true, video: false, filtered: true, error: 'filtered' })],
   });
   const e = await planned(h);
   h.remix.approve(e);
@@ -352,7 +402,7 @@ test('forgetThread: the thread’s job keeps polling, then its bytes are dropped
 test('cut: renders with the graph, the filmed shot and the source codec; stores the MP4; done', async () => {
   const h = harness({
     answers: [{ raw: SHOT_PLAN }],
-    fetchAnswers: [json(200, { name: OP }), json(200, { done: true, response: { generateVideoResponse: { generatedSamples: [{ video: { uri: URI } }] } } }), new Response(new Blob([new Uint8Array(10)], { type: 'video/mp4' }))],
+    fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 }), json(200, { id: OMNI, status: 'completed', done: true, video: true }), new Response(new Blob([new Uint8Array(10)], { type: 'video/mp4' }))],
   });
   const e = await planned(h);
   h.remix.approve(e);
@@ -419,7 +469,8 @@ test('paint: renders the story and cost card once; an unchanged key only patches
   const li = { classList: { add() {} }, querySelector: (s) => (s === '.out' ? out : s === '.actions' ? acts : null) };
   h.remix.paint(li, e, '<div class="meta-line"></div>');
   assert.equal(writes, 1);
-  assert.match(html, /Approve &amp; film · \$0\.20/);
+  assert.match(html, /Approve &amp; film · \$0\.41/, 'Omni 4 s at 720p: 4 × $0.10136');
+  assert.match(html, /Gemini Omni Flash · 720p/);
   assert.match(html, /rx-beat rx-shot/);
   assert.ok(html.includes(A.COPY.free));
   h.remix.paint(li, e, '<div class="meta-line"></div>');
@@ -436,7 +487,7 @@ test('paint: renders the story and cost card once; an unchanged key only patches
 });
 
 // ── wiring additions (v61): sync hold, the Library copy, a cut that finishes in another thread ──
-const veoDone = () => [json(200, { name: OP }), json(200, { done: true, response: { generateVideoResponse: { generatedSamples: [{ video: { uri: URI } }] } } }), new Response(new Blob([new Uint8Array(10)], { type: 'video/mp4' }))];
+const veoDone = () => [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 }), json(200, { id: OMNI, status: 'completed', done: true, video: true }), new Response(new Blob([new Uint8Array(10)], { type: 'video/mp4' }))];
 test('holdSync: owner sync never pushes an entry while it films or cuts; the hold is released after', async () => {
   const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: veoDone() });
   const holds = [];
@@ -496,7 +547,7 @@ test('a cut that finishes after switching threads is saved into its own thread (
 });
 
 // ── adversarial review (v61): money, data and robustness ──
-const pollDone = () => json(200, { done: true, response: { generateVideoResponse: { generatedSamples: [{ video: { uri: URI } }] } } });
+const pollDone = () => json(200, { id: OMNI, status: 'completed', done: true, video: true });
 const filmed = async (h) => { const e = await planned(h); h.remix.approve(e); await h.remix.tick('e1'); return e; };
 const paintHtml = (h, e) => {
   let html = '';
@@ -508,7 +559,7 @@ const paintHtml = (h, e) => {
 
 test('review: a download that kept dropping is collected again by Retry — never filmed (and billed) a second time', async () => {
   const drop = () => new TypeError('reset');
-  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { name: OP }), pollDone(), drop(), drop(), drop(), new Response(new Blob([new Uint8Array(10)], { type: 'video/mp4' }))] });
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 }), pollDone(), drop(), drop(), drop(), new Response(new Blob([new Uint8Array(10)], { type: 'video/mp4' }))] });
   const e = await filmed(h);
   for (let i = 0; i < 3; i++) { h.tick(5000); await h.remix.tick('e1'); }
   assert.equal(e.remix.shots.s1.state, 'failed');
@@ -516,13 +567,13 @@ test('review: a download that kept dropping is collected again by Retry — neve
   assert.equal(R.planCost(e.remix).usd, 0, 'nothing left to pay for: the shot is already filmed');
   h.remix.retryShot(e, 's1');
   await h.remix.tick('e1');
-  assert.equal(h.log.fetches.filter((f) => f.method === 'POST').length, 1, 'no second predictLongRunning');
+  assert.equal(h.log.fetches.filter((f) => f.method === 'POST').length, 1, 'no second Omni start');
   assert.equal(e.remix.shots.s1.state, 'ready');
   assert.equal(e.remix.phase, 'check');
 });
 
 test('review: a poll refused mid-filming (e.g. 401) → Retry polls the same operation again, it does not refilm', async () => {
-  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { name: OP }), json(401, { error: 'Wrong passcode — check it in Settings.' }), json(200, { done: false })] });
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 }), json(401, { error: 'Wrong passcode — check it in Settings.' }), json(200, { done: false })] });
   const e = await filmed(h);
   h.tick(5000); await h.remix.tick('e1');
   assert.equal(e.remix.shots.s1.state, 'failed');
@@ -534,7 +585,7 @@ test('review: a poll refused mid-filming (e.g. 401) → Retry polls the same ope
 });
 
 test('review: Approve after a failed start really films again (the job store’s old state never undoes the tap)', async () => {
-  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(400, { error: { message: 'Prompt rejected' } }), json(200, { name: OP })] });
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(400, { error: { message: 'Prompt rejected' } }), json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 })] });
   const e = await filmed(h);
   assert.equal(e.remix.shots.s1.state, 'failed');
   assert.equal(h.remix.approve(e), true);
@@ -555,21 +606,21 @@ test('review: a reload between Approve and the first start never leaves a dead "
 });
 
 test('review: a tester (no features.remix) can’t film or plan a remix that arrived in a backup', async () => {
-  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { name: OP })] });
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 })] });
   const e = await planned(h);
   h.S.tester = { features: {}, models: {} };
   assert.equal(h.remix.approve(e), false);
   e.remix.approval = R.approvalFor(e.remix, null, h.now()); e.remix.phase = 'film';
   h.remix.startJob('e1', 't1');
   await h.remix.tick('e1');
-  assert.equal(h.log.fetches.length, 0, 'never a Veo start');
+  assert.equal(h.log.fetches.length, 0, 'never an Omni start');
   assert.equal(h.remix.activeThreads().size, 0, 'and the job ends instead of spinning');
   const again = { ...e, id: 'e9', pending: true, remix: { ...h.remix.newRemix(video(), 'x') } };
   await assert.rejects(h.remix.plan(again, new AbortController().signal, h.thread), (err) => err.status === 403);
 });
 
 test('review: Revise waits while shots are filming (the revision would hold a shot nobody collects)', async () => {
-  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { name: OP })] });
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 })] });
   const e = await filmed(h);
   assert.equal(e.remix.shots.s1.state, 'filming');
   assert.equal(h.remix.revise(e, 'make the title bigger'), null);
@@ -578,7 +629,7 @@ test('review: Revise waits while shots are filming (the revision would hold a sh
 });
 
 test('review: two tabs approving the same remix start each shot once (the start is claimed across tabs)', async () => {
-  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { name: OP })] });
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 })] });
   const e = await planned(h);
   // the other tab holds the start lock first and films s1 meanwhile
   const locks = { request: async (name, fn) => { await h.store.jobPatch('e1', 's1', { state: 'filming', op: OP, startedAt: h.now() }, 't1'); return fn(); } };
@@ -590,7 +641,7 @@ test('review: two tabs approving the same remix start each shot once (the start 
 });
 
 test('review: Clear this device — nothing remix writes comes back after the wipe', async () => {
-  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { name: OP })] });
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 })] });
   const e = await filmed(h);
   await h.remix.editPlan(e, (p) => { p.title = 'Changed'; }); // a debounced draft is pending
   h.remix.wipe();

@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=79';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=80';
 
 export const CHAT_KINDS = ['ask', 'code'];
 export const HISTORY_TURNS = 10; // earlier turns replayed (chat answers and notes alike)
@@ -48,7 +48,9 @@ export function outputNote(x, label = (id) => id) {
   if (x.kind === 'video') {
     if (!(x.media || []).some((m) => m?.type === 'video')) return null;
     const motion = /motion-still/.test(x.meta?.model || '');
-    const secs = x.params?.aspect === '16:9hd' ? 8 : +x.params?.secs || (motion || /veo/.test(x.meta?.model || '') ? 6 : 4);
+    // Veo's HD was always 8 s; Gemini Omni films the chosen length at any resolution.
+    const omni = /omni/.test(x.meta?.model || '');
+    const secs = x.params?.aspect === '16:9hd' && !omni ? 8 : +x.params?.secs || (motion || omni || /veo/.test(x.meta?.model || '') ? 6 : 4);
     return { user: user('Video'), assistant: `[made a ${secs} s ${motion ? 'motion-still video (a camera move over one image)' : 'video'}${x.images?.length ? ' from the attached image' : ''}${motion ? '' : by}]` };
   }
   if (x.kind === 'ideas') {

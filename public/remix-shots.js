@@ -1,20 +1,21 @@
-// Video Remix: filming the new shots a plan asks for — Veo 3.1 through Atelier's /api/x/gemini proxy (the same paths
-// as app.js runVeo, so the owner allow-list and the tester routes both work unchanged) and, for the owner, Runway
-// Gen-4.5 / Gen-4 Turbo through public/runway.js (/api/runway/*). Resumable: a shot's whole state is {state, op,
-// startedAt, …}, so polling can pick up after a reload from the op alone. Node-tested with a mocked fetch
-// (tests/remix-shots.test.mjs); nothing here touches the DOM.
+// Video Remix: filming the new shots a plan asks for — Gemini Omni Flash through Atelier's /api/omni/* (public/omni.js:
+// src/omni.js for the owner, the tester routes with the same paths) and, for the owner, Runway Gen-4.5 / Gen-4 Turbo /
+// Veo 3.1 through public/runway.js (/api/runway/*). Resumable: a shot's whole state is {state, op, startedAt, …}, so
+// polling can pick up after a reload from the op alone ('omni:<interaction id>' | 'runway:<task uuid>'). Node-tested
+// with a mocked fetch (tests/remix-shots.test.mjs); nothing here touches the DOM.
+// Veo 3.1 on the Gemini API shuts down 2026-10-22: a saved shot still tied to a Veo operation ('models/…/operations/…')
+// ends as expired (its job ends with the shutdown) and is refilmed with Omni after a fresh approval.
 //
 // The one rule that matters for money: a start request that may have reached the provider is never sent again by
-// itself. Only a DEFINITIVE answer (an HTTP status with a body) can be retried: 429 → 'queued' (no operation was
-// created, nothing billed), tester 402 → 'budget'. A dropped connection or timeout after sending → 'unknown', which
-// needs the user's fresh approval ("retrying may bill twice").
-import { createTask, getTask, downloadOutput, failureOf, buildRequest, ratioFor } from './runway.js?v=79';
-import { parseResetsAt } from './tester.js?v=79';
-import { shotModel, shotPrompt, SHOT_NEGATIVE, isShotOp } from './remix.js?v=79';
+// itself. Only a DEFINITIVE answer (an HTTP status with a body) can be retried: 429 → 'queued' (no video was created,
+// nothing billed), tester 402 → 'budget'. A dropped connection or timeout after sending (omni_unconfirmed, status 0)
+// or a gateway answer → 'unknown', which needs the user's fresh approval ("retrying may bill twice").
+import { createTask, getTask, downloadOutput, failureOf, buildRequest, ratioFor } from './runway.js?v=80';
+import { omniStart, omniStatus, omniFetch } from './omni.js?v=80';
+import { parseResetsAt } from './tester.js?v=80';
+import { shotModel, shotPrompt, SHOT_NEGATIVE, isShotOp, isVeoOp, LIMITS, VEO_RETIRED } from './remix.js?v=80';
 
-export const SHOT_TIMING = { start: 60_000, poll: 5_000, pollSlow: 10_000, slowAfter: 180_000, queuedRetry: 30_000, queuedMax: 600_000, expireAfter: 47 * 3_600_000, request: 30_000, download: 300_000, downloadTries: 3 };
-const OP_RE = /^models\/[\w.-]+\/operations\/[\w.-]+$/;
-const FILE_RE = /\/(v1(?:beta)?\/files\/[^?:/]+:download)/;
+export const SHOT_TIMING = { start: 60_000, poll: 5_000, pollSlow: 10_000, slowAfter: 180_000, queuedRetry: 30_000, queuedMax: 600_000, expireAfter: 47 * 3_600_000, request: 30_000, download: 300_000, downloadTries: 3, notReadyTries: 6 };
 
 /** kind: 'definitive' (the provider answered: status + body), 'unknown' (may have started), 'transient' (a poll or
  *  download hiccup: try again next tick). */
@@ -25,21 +26,33 @@ const abortError = () => new DOMException('Aborted', 'AbortError');
 const isAbort = (e) => e?.name === 'AbortError';
 
 export const providerOf = (model) => shotModel(model)?.provider ?? null;
+// Gemini Omni ('omni'; 'veo' is the pre-Omni name of the same Gemini path) vs Runway.
+const isOmni = (m) => m?.provider === 'omni' || m?.provider === 'veo';
+// Runway's Veo 3.1 takes Veo's own 16:9 / 9:16 frames (1280:720, 720:1280), not Gen-4's ratios.
+const runwayVeo = (m) => m?.provider === 'runway' && /^veo/.test(m.runway || '');
 
 // ── request bodies ──
 /**
- * Pixel size of the still a shot starts from (remix-draw.js padFrame draws the source frame into it): Veo takes its own
- * 9:16 / 16:9 frame (the source sits centred with blurred bands, outside the later crop); Runway takes the ratio
- * closest to the output (832:1104 for 4:5), so its insert is nearly native.
+ * Pixel size of the still a shot starts from (remix-draw.js padFrame draws the source frame into it): Omni (and Veo 3.1
+ * on Runway) take their own 9:16 / 16:9 frame (the source sits centred with blurred bands, outside the later crop);
+ * Runway Gen-4 takes the ratio closest to the output (832:1104 for 4:5), so its insert is nearly native.
  */
 export function firstFrameShape(model, out = { w: 1080, h: 1350 }) {
-  const portrait = out.h >= out.w;
-  if (providerOf(model) === 'runway') { const [w, h] = ratioFor(out.w, out.h, 'image_to_video').split(':').map(Number); return { w, h }; }
+  const portrait = out.h >= out.w, m = shotModel(model);
+  if (m?.provider === 'runway' && !runwayVeo(m)) { const [w, h] = ratioFor(out.w, out.h, 'image_to_video').split(':').map(Number); return { w, h }; }
   return portrait ? { w: 720, h: 1280 } : { w: 1280, h: 720 };
 }
+/** The Omni prompt: Omni has no negative-prompt field, so SHOT_NEGATIVE goes in as plain words (within the cap). */
+export function omniPrompt(prompt) {
+  const avoid = `Avoid: ${SHOT_NEGATIVE}.`;
+  const p = String(prompt ?? '').trim().slice(0, LIMITS.shotPromptMax - avoid.length - 1).trim();
+  return p ? `${p} ${avoid}` : avoid;
+}
+const OMNI_IMAGE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z\d+/=]+$/;
 /**
- * One shot → the provider request. ctx: {model, res, seconds, look, image (data:image/jpeg|png;base64 first frame or
- * null), out: {w, h}}. → {provider, model, veo: {path, body}} | {provider, model, runway: {kind, body}}.
+ * One shot → the provider request. ctx: {model, res, seconds, look, image (data:image/jpeg|png|webp;base64 first frame
+ * or null), out: {w, h}}. → {provider: 'omni', model, omni: {body}} (POST /api/omni/start's body:
+ * {prompt, image?, aspect, resolution, seconds}) | {provider: 'runway', model, runway: {kind, body}}.
  */
 export function shotRequest(shot, ctx = {}) {
   const m = shotModel(ctx.model);
@@ -47,115 +60,81 @@ export function shotRequest(shot, ctx = {}) {
   const out = ctx.out || { w: 1080, h: 1350 }, portrait = out.h >= out.w;
   const prompt = shotPrompt(shot, ctx.look || '', portrait ? 'vertical' : 'wide');
   const seconds = Number(ctx.seconds ?? shot?.seconds);
-  if (m.provider === 'veo') {
-    const instance = { prompt };
-    const img = typeof ctx.image === 'string' && ctx.image.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
-    if (img) instance.image = { inlineData: { mimeType: img[1], data: img[2] } };
-    return { provider: 'veo', model: m.id, veo: {
-      path: `gemini/v1beta/models/${m.id.replace('gemini:', '')}:predictLongRunning`,
-      body: { instances: [instance], parameters: { aspectRatio: portrait ? '9:16' : '16:9', resolution: ctx.res || '720p', durationSeconds: seconds, negativePrompt: SHOT_NEGATIVE } },
-    } };
+  if (isOmni(m)) {
+    const body = { prompt: omniPrompt(prompt) };
+    if (typeof ctx.image === 'string' && OMNI_IMAGE.test(ctx.image)) body.image = ctx.image;
+    Object.assign(body, { aspect: portrait ? '9:16' : '16:9', resolution: m.res.includes(ctx.res) ? ctx.res : '720p', seconds });
+    return { provider: 'omni', model: m.id, omni: { body } };
   }
   const shape = firstFrameShape(m.id, out);
   const req = buildRequest({ model: m.runway, prompt, still: ctx.image || undefined, stillSize: ctx.image ? shape : undefined, ratio: `${shape.w}:${shape.h}`, aspect: portrait ? '9:16' : '16:9', secs: seconds });
   return { provider: 'runway', model: m.id, runway: { kind: req.kind, body: req.body } };
 }
 
-// ── Veo over /api/x/gemini ──
-const headersFor = (deps, json) => {
-  const h = new Headers(typeof deps.apiHeaders === 'function' ? deps.apiHeaders() : deps.apiHeaders || {});
-  if (json) h.set('content-type', 'application/json'); else h.delete('content-type');
-  return h;
-};
-// fetch with a timeout. A throw here is ambiguous for a POST (it may have arrived), so callers decide what it means.
-async function send(deps, path, { method = 'GET', body, timeout = SHOT_TIMING.request } = {}) {
-  const f = deps.fetch || globalThis.fetch;
-  const ctrl = new AbortController(), outer = deps.signal;
-  let late = false;
-  const timer = setTimeout(() => { late = true; ctrl.abort(); }, timeout);
-  const ab = () => ctrl.abort();
-  if (outer?.aborted) { clearTimeout(timer); throw abortError(); }
-  outer?.addEventListener('abort', ab, { once: true });
-  try {
-    const r = await f(`/api/x/${path}`, { method, signal: ctrl.signal, headers: headersFor(deps, body !== undefined), body: body === undefined ? undefined : JSON.stringify(body) });
-    try { deps.onResponse?.(r); } catch {}
-    return r;
-  } catch (err) {
-    if (outer?.aborted && !late) throw abortError();
-    throw Object.assign(err instanceof Error ? err : new Error(String(err)), { late });
-  } finally { clearTimeout(timer); outer?.removeEventListener('abort', ab); }
-}
-async function bodyOf(r) {
-  let text = '';
-  try { text = await r.text(); } catch {}
-  let j = null;
-  try { j = JSON.parse(text); if (Array.isArray(j)) j = j[0] || null; } catch {}
-  const msg = (j && (typeof j.error === 'string' ? j.error : j.error?.message || j.message)) || text || `Request failed (${r.status}).`;
-  return { j: j && typeof j === 'object' ? j : {}, msg: String(msg).slice(0, 300), parsed: Boolean(j && typeof j === 'object') };
-}
 const GATEWAY = new Set([502, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530]);
-/** A start answer that can't rule out that the job was created (see veoStart / runwayStart). */
+/** A start answer that can't rule out that the job was created (a gateway, or a 5xx that isn't Atelier's own JSON). */
 export const ambiguous = (status, parsed = true) => GATEWAY.has(status) || (status >= 500 && !parsed);
+const transientStatus = (s) => s === 0 || s === 408 || s === 429 || s >= 500;
+
+// ── Gemini Omni over /api/omni/* ──
+const omniId = (op) => (typeof op === 'string' && op.startsWith('omni:') ? op.slice(5) : '');
+const omniDeps = (deps, signal = deps.signal) => ({ fetch: deps.fetch, apiHeaders: deps.apiHeaders, onResponse: deps.onResponse, signal });
 /**
- * POST predictLongRunning → {op}. Throws ShotError: definitive (HTTP status with a body: status, code, scope,
- * resetsAt, retryAfter) or unknown (no answer: the shot may be filming and billing at Google). deps: {fetch,
- * apiHeaders, onResponse, signal}. Aborting before the request leaves → AbortError (nothing sent).
+ * POST /api/omni/start → {op: 'omni:<id>'}. Throws ShotError: definitive (an HTTP status with a body: status, code,
+ * scope, resetsAt, retryAfter) or unknown (no answer, omni_unconfirmed, or a gateway: the shot may be filming and
+ * billing at Google). Aborting before the request leaves → AbortError (nothing sent); once sent it is never cut short.
  */
-export async function veoStart(deps, request) {
+export async function omniShotStart(deps, request) {
   if (deps.signal?.aborted) throw abortError();
-  let r;
-  try { r = await send({ ...deps, signal: null }, request.path, { method: 'POST', body: request.body, timeout: SHOT_TIMING.start }); }
-  catch (err) { throw new ShotError('unknown', err.late ? 'Google didn’t confirm the new shot in time — it may have started anyway.' : 'The connection dropped before Google confirmed the new shot — it may have started anyway.'); }
-  const { j, msg, parsed } = await bodyOf(r);
-  if (!r.ok) {
-    // A gateway answer (Atelier's own 'Upstream unreachable' 502, Cloudflare's 504/52x) or a 5xx that isn't the provider's
-    // JSON error doesn't say whether the request reached Google: it may be filming, so it is never retried by itself.
-    if (ambiguous(r.status, parsed)) throw new ShotError('unknown', 'Google didn’t confirm the new shot — it may have started anyway.', { status: r.status });
-    const ra = Number(r.headers?.get?.('retry-after'));
-    throw new ShotError('definitive', msg, { status: r.status, code: typeof j.code === 'string' ? j.code : null, scope: typeof j.scope === 'string' ? j.scope : null, resetsAt: j.resetsAt ?? null, ...(ra > 0 ? { retryAfter: ra } : {}) });
+  let made;
+  try { made = await omniStart(omniDeps(deps, null), request.body); }
+  catch (err) {
+    const status = Number(err?.status) || 0;
+    if (status === 0 || err?.code === 'omni_unconfirmed' || ambiguous(status, typeof err?.code === 'string')) {
+      throw new ShotError('unknown', err?.message || 'Google didn’t confirm the new shot — it may have started anyway.', { status });
+    }
+    throw new ShotError('definitive', err?.message || 'Gemini Omni refused the shot.', { status, code: err?.code ?? null, scope: err?.scope ?? null, resetsAt: err?.resetsAt ?? null, ...(err?.retryAfter > 0 ? { retryAfter: err.retryAfter } : {}) });
   }
-  if (typeof j.name !== 'string' || !OP_RE.test(j.name)) throw new ShotError('unknown', 'Google answered without an operation to follow — check usage before filming this again.');
-  return { op: j.name };
+  const op = `omni:${made.id}`;
+  if (!isShotOp(op)) throw new ShotError('unknown', 'Google answered without a video id — check usage in AI Studio before filming this again.');
+  return { op };
 }
-/** Done-operation JSON → {done:true, uri} | {done:true, filtered:true, reason} | {done:true, error}. */
-export function readVeoOp(op) {
-  if (!op?.done) return { done: false };
-  if (op.error) return { done: true, error: String(op.error.message || 'Veo couldn’t make this shot.').slice(0, 300) };
-  const res = op.response?.generateVideoResponse;
-  const uri = res?.generatedSamples?.[0]?.video?.uri;
-  if (typeof uri === 'string' && FILE_RE.test(uri)) return { done: true, uri };
-  return { done: true, filtered: true, reason: String(res?.raiMediaFilteredReasons?.[0] || 'Veo returned no video — it may have been filtered.').slice(0, 300) };
-}
-/** GET the operation → readVeoOp's shape; {done:true, gone:true} on 404. Network trouble / 429 / 5xx → transient. */
-export async function veoPoll(deps, op) {
-  if (!OP_RE.test(op)) throw new ShotError('definitive', 'Not a Veo operation.', { status: 400 });
-  let r;
-  try { r = await send(deps, `gemini/v1beta/${op}`); }
-  catch (err) { if (isAbort(err)) throw err; throw new ShotError('transient', 'Couldn’t reach Atelier to check on the shot.'); }
-  if (r.status === 404) return { done: true, gone: true };
-  if (!r.ok) {
-    const { msg } = await bodyOf(r);
-    if (r.status === 429 || r.status >= 500) throw new ShotError('transient', msg, { status: r.status });
-    throw new ShotError('definitive', msg, { status: r.status });
+/**
+ * GET /api/omni/status/<id> → {done:false} | {done:true, uri: op} (the video is ready to download) | {done:true,
+ * filtered:true, reason} | {done:true, error} | {done:true, gone:true} (404). Network trouble / 429 / 5xx → transient.
+ */
+export async function omniShotPoll(deps, op) {
+  const id = omniId(op);
+  if (!id) throw new ShotError('definitive', 'Not an Omni video.', { status: 400 });
+  let s;
+  try { s = await omniStatus(omniDeps(deps), id); }
+  catch (err) {
+    if (isAbort(err)) throw err;
+    if (err?.status === 404 || err?.code === 'omni_gone') return { done: true, gone: true };
+    if (transientStatus(Number(err?.status) || 0)) throw new ShotError('transient', err?.message || 'Couldn’t reach Atelier to check on the shot.', { status: Number(err?.status) || 0 });
+    throw new ShotError('definitive', err?.message || 'Checking the Omni shot failed.', { status: err.status });
   }
-  const { j } = await bodyOf(r);
-  return readVeoOp(j);
+  if (!s?.done) return { done: false };
+  if (s.video) return { done: true, uri: op };
+  const reason = typeof s.error === 'string' && s.error ? s.error.slice(0, 300) : '';
+  if (s.filtered) return { done: true, filtered: true, reason: reason || 'Gemini Omni returned no video — it may have been filtered.' };
+  if (s.status === 'cancelled') return { done: true, error: reason || 'The Omni shot was cancelled.' };
+  return { done: true, error: reason || 'Gemini Omni couldn’t make this shot.' };
 }
-/** The finished MP4 → a video/mp4 Blob. Network trouble → transient (downloading again is free). */
-export async function veoFetch(deps, uri) {
-  const m = String(uri || '').match(FILE_RE);
-  if (!m) throw new ShotError('definitive', 'Unexpected Veo download link.', { status: 502 });
-  let r;
-  try { r = await send(deps, `gemini/${m[1]}?alt=media`, { timeout: SHOT_TIMING.download }); }
-  catch (err) { if (isAbort(err)) throw err; throw new ShotError('transient', 'The shot download dropped — it will try again (no new shot is made).'); }
-  if (!r.ok) {
-    const { msg } = await bodyOf(r);
-    if (r.status === 404 || r.status === 403) throw new ShotError('definitive', msg, { status: r.status, gone: r.status === 404 });
-    throw new ShotError('transient', msg, { status: r.status });
+/** GET /api/omni/video/<id> → a video/mp4 Blob. 409 omni_not_ready, network trouble, 5xx → transient (downloading
+ *  again is free); 404 → definitive gone. */
+export async function omniShotFetch(deps, op) {
+  const id = omniId(op);
+  if (!id) throw new ShotError('definitive', 'Not an Omni video.', { status: 400 });
+  try { return await omniFetch(omniDeps(deps), id); }
+  catch (err) {
+    if (isAbort(err)) throw err;
+    const status = Number(err?.status) || 0;
+    if (status === 409 || err?.code === 'omni_not_ready') throw new ShotError('transient', err?.message || 'Google is still preparing the shot.', { status: 409, notReady: true });
+    if (status === 404 || err?.code === 'omni_gone') throw new ShotError('definitive', err?.message || 'Google no longer has this shot.', { status: 404, gone: true });
+    if (transientStatus(status) || err?.resumable) throw new ShotError('transient', err?.message || 'The shot download dropped — it will try again (no new shot is made).', { status });
+    throw new ShotError('definitive', err?.message || 'Downloading the Omni shot failed.', { status });
   }
-  const blob = await r.blob();
-  if (!blob.size) throw new ShotError('transient', 'Google sent back an empty shot.');
-  return blob.type === 'video/mp4' ? blob : new Blob([blob], { type: 'video/mp4' });
 }
 
 // ── Runway (owner only) through public/runway.js ──
@@ -203,15 +182,28 @@ export async function runwayFetch(deps, op) {
 }
 
 // ── one interface ──
-export const startShot = (deps, req) => (req.provider === 'runway' ? runwayStart(deps, req.runway) : veoStart(deps, req.veo));
-export const pollShot = (deps, op) => (runwayId(op) ? runwayPoll(deps, op) : veoPoll(deps, op));
-export const fetchShot = (deps, op, uri) => (runwayId(op) ? runwayFetch(deps, op) : veoFetch(deps, uri));
+export function startShot(deps, req) {
+  if (req?.provider === 'runway') return runwayStart(deps, req.runway);
+  if (req?.provider === 'omni') return omniShotStart(deps, req.omni);
+  return Promise.reject(new ShotError('definitive', 'That model can’t film remix shots.', { status: 400 }));
+}
+export async function pollShot(deps, op) {
+  if (runwayId(op)) return runwayPoll(deps, op);
+  if (omniId(op)) return omniShotPoll(deps, op);
+  if (isVeoOp(op)) return { done: true, gone: true, retired: true }; // Veo on the Gemini API: nothing left to follow
+  throw new ShotError('definitive', 'This shot lost track of its job.', { status: 400 });
+}
+export async function fetchShot(deps, op) {
+  if (runwayId(op)) return runwayFetch(deps, op);
+  if (omniId(op)) return omniShotFetch(deps, op);
+  throw new ShotError('definitive', isVeoOp(op) ? VEO_RETIRED : 'This shot lost track of its job.', { status: 404, gone: true });
+}
 
 /**
  * An error or a poll result → the shot's next {state, …} patch, or null (no change: a transient hiccup or a Stop).
  *   start errors: definitive 429 → queued (retryAt); tester 402 → budget (resetsAt); other definitive → failed;
  *                 unknown → unknown.
- *   poll results: not done → filming; uri → downloading; no uri → filtered (not billed); error → failed;
+ *   poll results: not done → filming; uri → downloading; no video → filtered (not billed); error → failed;
  *                 gone → expired.
  */
 export function classify(x, now = Date.now()) {
@@ -229,7 +221,7 @@ export function classify(x, now = Date.now()) {
   }
   if (typeof x === 'object' && 'done' in x) {
     if (!x.done) return { state: 'filming', ...(x.progress ? { progress: x.progress } : {}) };
-    if (x.gone) return { state: 'expired', error: 'The provider no longer has this shot (it keeps them about 2 days).' };
+    if (x.gone) return { state: 'expired', error: x.retired ? VEO_RETIRED : 'The provider no longer has this shot (it keeps them about 2 days).' };
     if (x.uri) return { state: 'downloading', uri: x.uri };
     if (x.filtered) return { state: 'filtered', error: x.reason };
     return { state: 'failed', error: x.error || 'The shot couldn’t be made.' };
@@ -245,7 +237,7 @@ export const pollDelay = (startedAt, now = Date.now()) => (now - startedAt > SHO
  * BEFORE the start request so a reload sees 'starting' and never sends it twice — putBlob(blob) → {blobKey, bytes},
  * request: shotRequest(…) for this shot}. → the patch to apply (null: nothing to do now).
  *   idle | queued (retryAt passed) → starting → filming {op, startedAt} | queued | budget | failed | unknown
- *   filming → filming | downloading | filtered | failed | expired (startedAt older than 47 h)
+ *   filming → filming | downloading | filtered | failed | expired (startedAt older than 47 h, or a retired Veo op)
  *   downloading → ready {blobKey, bytes, filmedKey} (a dropped download retries: it is already paid for)
  *   everything else (ready, unknown, failed, filtered, budget, expired, missing, starting) waits for the user.
  */
@@ -266,6 +258,7 @@ export async function advanceShot(deps, s) {
       return p;
     }
   }
+  if ((s.state === 'filming' || s.state === 'downloading') && isVeoOp(s.op)) return { state: 'expired', error: VEO_RETIRED, op: null, uri: null };
   if (s.state === 'filming') {
     if (!isShotOp(s.op)) return { state: 'failed', error: 'This shot lost track of its job.' };
     if (Number(s.startedAt) > 0 && now - s.startedAt > SHOT_TIMING.expireAfter) return { state: 'expired', error: 'The provider no longer keeps this shot (about 2 days).' };
@@ -287,7 +280,9 @@ export async function advanceShot(deps, s) {
       const tries = (Number(s.tries) || 0) + 1;
       // uri travels with every patch: a shot that reached 'downloading' inside this call (filming → done) has it only here
       if (err?.kind === 'definitive') return { state: err.gone ? 'expired' : 'failed', error: err.message, uri: s.uri };
-      return tries >= SHOT_TIMING.downloadTries ? { state: 'failed', error: 'The shot download kept dropping — tap Retry download (it won’t film again).', tries, uri: s.uri } : { state: 'downloading', tries, uri: s.uri };
+      // Google still preparing the file (409) gets more patience than a dropped download
+      const limit = err?.notReady ? SHOT_TIMING.notReadyTries : SHOT_TIMING.downloadTries;
+      return tries >= limit ? { state: 'failed', error: 'The shot download kept dropping — tap Retry download (it won’t film again).', tries, uri: s.uri } : { state: 'downloading', tries, uri: s.uri };
     }
   }
   return null;

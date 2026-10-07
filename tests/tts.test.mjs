@@ -3,27 +3,28 @@ import assert from 'node:assert/strict';
 import { makeEnv, mockFetch, restoreFetch, upstream, reply, api } from './tester-env.mjs';
 
 const {
-  handleTts, validateTts, sseToAudio, toWav, wavHeader, previewCacheKey, openaiSpeechBody, geminiSpeechBody, spokenUnits, previewId,
-  TTS_BRIEF, TTS_BRIEF_V, PREVIEW_TEXT, PREVIEW_ID, TTS_VOICES, TTS_VOICE_IDS, TTS_LIMITS, OWNER_HOOKS, ttsPriceId, GEMINI_MAX_OUTPUT_TOKENS,
-  ttsCeilingUnits, TTS_CEILING, mp3Clock,
+  handleTts, validateTts, toWav, wavHeader, previewCacheKey, geminiSpeechBody, spokenUnits, previewId,
+  TTS_BRIEF_V, PREVIEW_TEXT, PREVIEW_ID, TTS_VOICES, TTS_VOICE_IDS, TTS_LIMITS, OWNER_HOOKS, ttsPriceId, GEMINI_MAX_OUTPUT_TOKENS,
+  ttsCeilingUnits, TTS_CEILING, RETIRED_VOICES,
 } = await import('../src/tts.js');
 const { GEMINI_BASE } = await import('../src/gemini.js');
 
 const ORIGIN = 'https://atelier.ciprari.ai';
-const OPENAI = /^POST https:\/\/api\.openai\.com\/v1\/audio\/speech$/;
+const OPENAI = /^POST https:\/\/api\.openai\.com\//;
+// The Atelier voice (gemini-3.8-flash-tts) and Sulafat (gemini-3.8-flash-lite-tts).
+const FLASH = /^POST https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-3\.8-flash-tts:generateContent$/;
 const GEMINI = /^POST https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-3\.8-flash-lite-tts:generateContent$/;
 const KEYS = { OPENAI_API_KEY: 'sk-openai-test', GEMINI_API_KEY: 'AQ.test-gemini-key-0123456789abcdef' };
 const enc = new TextEncoder();
 const b64 = (bytes) => Buffer.from(bytes).toString('base64');
-const MP3 = Uint8Array.from({ length: 5_000 }, (_, i) => (i * 7) % 256);
-const delta = (bytes) => `data: ${JSON.stringify({ type: 'speech.audio.delta', audio: b64(bytes) })}\n\n`;
-const done = (usage = { input_tokens: 150, output_tokens: 900, total_tokens: 1_050 }) => `data: ${JSON.stringify({ type: 'speech.audio.done', ...(usage ? { usage } : {}) })}\n\n`;
-const sseText = (bytes = MP3, usage) => [delta(bytes.subarray(0, 2_000)), delta(bytes.subarray(2_000)), done(usage)].join('');
-const streamOf = (parts) => new ReadableStream({ start(c) { for (const p of parts) c.enqueue(typeof p === 'string' ? enc.encode(p) : p); c.close(); } });
-const speech = (text = sseText(), headers = {}) => new Response(streamOf([text]), { headers: { 'content-type': 'text/event-stream', ...headers } });
+const PCM = Uint8Array.from({ length: 4_800 }, (_, i) => (i * 7) % 256); // 0.1 s at 24 kHz s16le mono
+const WAV = toWav(PCM, 'audio/L16;codec=pcm;rate=24000').wav;
+const spoken = (pcm = PCM, usageMetadata = { promptTokenCount: 30, candidatesTokenCount: 4, totalTokenCount: 34 }, headers = {}) => reply(200, {
+  candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: b64(pcm) } }] }, finishReason: 'STOP' }],
+  ...(usageMetadata ? { usageMetadata } : {}),
+}, headers);
 const ttsReq = (body, headers = {}) => new Request(`${ORIGIN}/api/tts`, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body), headers: { 'content-type': 'application/json', ...headers } });
 const bytesOf = async (res) => new Uint8Array(await res.arrayBuffer());
-const collect = async (stream) => new Uint8Array(await new Response(stream).arrayBuffer());
 
 // console capture: nothing logged may hold a key fragment or the text being read
 let logs = [];
@@ -48,28 +49,27 @@ function fakeCache() {
   };
 }
 
-// ── the allow-list and the brief ──
-test('voices are a frozen server allow-list; the default is OpenAI marin on the pinned snapshot', () => {
-  assert.deepEqual([...TTS_VOICE_IDS], ['atelier', 'cedar', 'sage', 'sulafat']);
-  assert.deepEqual({ ...TTS_VOICES.atelier }, { provider: 'openai', model: 'gpt-4o-mini-tts-2025-12-15', voice: 'marin' });
-  assert.equal(TTS_VOICES.cedar.voice, 'cedar');
-  assert.equal(TTS_VOICES.sage.voice, 'sage');
-  assert.equal(TTS_VOICES.sulafat.provider, 'gemini');
-  assert.equal(TTS_VOICES.sulafat.voice, 'Sulafat');
-  assert.ok(Object.isFrozen(TTS_VOICES) && Object.isFrozen(TTS_VOICES.atelier) && Object.isFrozen(TTS_LIMITS));
-  assert.throws(() => { TTS_VOICES.atelier.voice = 'alloy'; }, TypeError);
-  assert.equal(ttsPriceId(TTS_VOICES.atelier), 'openai:gpt-4o-mini-tts-2025-12-15');
+// ── the allow-list ──
+test('voices are a frozen server allow-list; the default is Gemini 3.8 Flash TTS, Achernar, with the soft style', () => {
+  assert.deepEqual([...TTS_VOICE_IDS], ['atelier', 'sulafat']);
+  assert.deepEqual({ ...TTS_VOICES.atelier }, { provider: 'gemini', model: 'gemini-3.8-flash-tts', voice: 'Achernar', style: TTS_VOICES.sulafat.style, maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS });
+  assert.match(TTS_VOICES.atelier.style, /^warm, soft and calm; unhurried and gentle/);
+  assert.deepEqual({ ...TTS_VOICES.sulafat }, { provider: 'gemini', model: 'gemini-3.8-flash-lite-tts', voice: 'Sulafat', style: TTS_VOICES.atelier.style, maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS });
+  assert.ok(Object.values(TTS_VOICES).every((v) => v.provider === 'gemini'), 'no OpenAI voice is left (gpt-4o-mini-tts retires 2027-01-06)');
+  assert.ok(Object.isFrozen(TTS_VOICES) && Object.isFrozen(TTS_VOICES.atelier) && Object.isFrozen(TTS_LIMITS) && Object.isFrozen(RETIRED_VOICES));
+  assert.throws(() => { TTS_VOICES.atelier.voice = 'Puck'; }, TypeError);
+  assert.equal(ttsPriceId(TTS_VOICES.atelier), 'gemini:gemini-3.8-flash-tts');
   assert.equal(ttsPriceId(TTS_VOICES.sulafat), 'gemini:gemini-3.8-flash-lite-tts');
-  assert.equal(TTS_BRIEF_V, 1);
-  assert.match(TTS_BRIEF, /^Voice: warm, soft and close/);
-  assert.match(TTS_BRIEF, /never salesy, theatrical or announcer-like/);
+  assert.equal(TTS_BRIEF_V, 2, 'the Atelier voice changed in v80: cached clips and previews roll over');
+  assert.deepEqual({ ...RETIRED_VOICES }, { cedar: 'atelier', sage: 'atelier' });
   assert.ok(PREVIEW_TEXT.startsWith('Hello, I’m the voice of Atelier.'));
   assert.deepEqual({ ...TTS_LIMITS }, { bodyBytes: 16_384, ownerChars: 4_000, testerChars: 1_000, maxAudioBytes: 8 * 1024 * 1024, timeoutMs: 30_000 });
-  // Gemini's output is bounded at the source: as many audio tokens (25 a second) as fit in maxAudioBytes of 24 kHz s16 PCM.
+  // Gemini's output is bounded at the source: as many audio tokens (25 a second) as fit in maxAudioBytes of 24 kHz s16
+  // PCM, well under both models' 16,384-token output limit.
   assert.equal(GEMINI_MAX_OUTPUT_TOKENS, 4_369);
-  assert.ok(GEMINI_MAX_OUTPUT_TOKENS / 25 * 48_000 <= TTS_LIMITS.maxAudioBytes);
-  assert.equal(TTS_VOICES.sulafat.maxOutputTokens, GEMINI_MAX_OUTPUT_TOKENS);
+  assert.ok(GEMINI_MAX_OUTPUT_TOKENS / 25 * 48_000 <= TTS_LIMITS.maxAudioBytes && GEMINI_MAX_OUTPUT_TOKENS <= 16_384);
   assert.equal(geminiSpeechBody(TTS_VOICES.sulafat, 'x').generationConfig.maxOutputTokens, GEMINI_MAX_OUTPUT_TOKENS);
+  assert.equal(geminiSpeechBody(TTS_VOICES.atelier, 'x').generationConfig.maxOutputTokens, GEMINI_MAX_OUTPUT_TOKENS);
   // The preview line is part of its cache key.
   assert.match(PREVIEW_ID, /^[0-9a-f]{8}$/);
   assert.equal(PREVIEW_ID, previewId(PREVIEW_TEXT));
@@ -133,8 +133,12 @@ test('ttsCeilingUnits: every symbol and emoji is reserved for at least its spoke
 // ── validation: before any reserve or upstream call ──
 test('validateTts: voice ids are an allow-list, text must be a non-empty string within the cap, extra fields are ignored', () => {
   const ok = validateTts({ voice: 'atelier', text: '  Hello\u0007 there.\n', instructions: 'shout', model: 'tts-1', speed: 4 });
-  assert.deepEqual({ ...ok, voice: ok.voice.voice }, { ok: true, voiceId: 'atelier', voice: 'marin', text: 'Hello there.', units: 12, ceiling: 12, preview: false });
+  assert.deepEqual({ ...ok, voice: ok.voice.voice }, { ok: true, voiceId: 'atelier', voice: 'Achernar', text: 'Hello there.', units: 12, ceiling: 12, preview: false });
+  // retired ids read as their stand-in
+  const old = validateTts({ voice: 'cedar', text: 'Hello there.' });
+  assert.deepEqual([old.ok, old.voiceId, old.voice.voice], [true, 'atelier', 'Achernar']);
   const prev = validateTts({ voice: 'sage', preview: true, text: 'ignored' });
+  assert.equal(prev.voiceId, 'atelier');
   assert.equal(prev.text, PREVIEW_TEXT);
   assert.equal(prev.preview, true);
   assert.equal(prev.ceiling, ttsCeilingUnits(PREVIEW_TEXT));
@@ -159,11 +163,12 @@ test('validateTts: voice ids are an allow-list, text must be a non-empty string 
   assert.equal(validateTts({ voice: 'atelier', text: '7'.repeat(251) }, { tester: true }).status, 413);
   assert.equal(validateTts({ voice: 'sulafat', text: '好'.repeat(333) }, { tester: true }).units, 999);
   assert.equal(validateTts({ voice: 'sulafat', text: '好'.repeat(334) }, { tester: true }).status, 413);
-  assert.equal(validateTts({ voice: 'atelier', text: '7'.repeat(4_000) }).ok, true, 'the owner’s cap is OpenAI’s, in characters');
+  assert.equal(validateTts({ voice: 'atelier', text: '7'.repeat(4_000) }).ok, true, 'the owner’s cap is in characters');
   // Gemini reads <...> as a sound cue: the brackets go (and a text of only brackets is empty)
   assert.equal(validateTts({ voice: 'sulafat', text: 'Take a breath <sigh> and go.' }).text, 'Take a breath sigh and go.');
   assert.equal(validateTts({ voice: 'sulafat', text: '<>' }).ok, false);
-  assert.equal(validateTts({ voice: 'atelier', text: 'a < b > c' }).text, 'a < b > c', 'OpenAI text keeps its brackets');
+  assert.equal(validateTts({ voice: 'atelier', text: 'a < b > c' }).text, 'a b c', 'the Atelier voice is Gemini too');
+  assert.equal(validateTts({ voice: 'cedar', text: 'Take a breath <sigh> now.' }).text, 'Take a breath sigh now.');
 });
 
 test('bad requests answer 400 / 413 with no upstream call (owner and tester caps)', async () => {
@@ -199,188 +204,83 @@ test('bad requests answer 400 / 413 with no upstream call (owner and tester caps
   assert.equal(upstream.calls.length, 0);
 });
 
-// ── OpenAI ──
-test('OpenAI: the upstream body is rebuilt from server constants; mp3 streams back with our own headers only', async () => {
-  mockFetch([[OPENAI, () => speech(sseText(), { 'x-request-id': 'req_123', 'openai-organization': 'org-secret', 'set-cookie': 'a=b', 'openai-processing-ms': '42' })]]);
-  const r = await handleTts(ttsReq({ voice: 'atelier', text: 'Hello there.', instructions: 'Speak like a pirate', model: 'tts-1', voice_id: 'alloy', speed: 4, response_format: 'wav', stream_format: 'audio', input: 'evil' }), KEYS);
+// ── the Atelier voice: Gemini 3.8 Flash TTS ──
+test('Atelier: the request goes to gemini-3.8-flash-tts with voice Achernar and the soft style; the WAV comes back with our own headers only', async () => {
+  mockFetch([[FLASH, () => spoken(PCM, { promptTokenCount: 30, candidatesTokenCount: 4, totalTokenCount: 34 }, { 'x-goog-request-id': 'g1', 'set-cookie': 'a=b' })]]);
+  const r = await handleTts(ttsReq({ voice: 'atelier', text: 'Hello <laugh> there.', instructions: 'Speak like a pirate', model: 'tts-1', style: 'shouting', speed: 4, voice_id: 'Puck' }), KEYS);
   assert.equal(r.status, 200);
-  assert.deepEqual(Object.fromEntries(r.headers), { 'cache-control': 'no-store', 'content-type': 'audio/mpeg', 'x-tts-brief': '1', 'x-tts-voice': 'atelier' });
-  assert.deepEqual(await bytesOf(r), MP3);
+  assert.deepEqual(Object.fromEntries(r.headers), { 'cache-control': 'no-store', 'content-type': 'audio/wav', 'x-tts-brief': '2', 'x-tts-voice': 'atelier' });
+  assert.deepEqual(await bytesOf(r), WAV);
   assert.equal(upstream.calls.length, 1);
   const call = upstream.calls[0];
-  assert.equal(call.headers.get('authorization'), 'Bearer sk-openai-test');
-  assert.equal(call.headers.get('accept'), 'text/event-stream');
-  assert.deepEqual(call.json, { model: 'gpt-4o-mini-tts-2025-12-15', voice: 'marin', input: 'Hello there.', instructions: TTS_BRIEF, response_format: 'mp3', stream_format: 'sse' });
-  assert.deepEqual(openaiSpeechBody(TTS_VOICES.atelier, 'Hello there.'), call.json);
-  for (const [id, voice] of [['cedar', 'cedar'], ['sage', 'sage']]) {
-    const res = await handleTts(ttsReq({ voice: id, text: 'Hi.' }), KEYS);
-    assert.equal(res.headers.get('x-tts-voice'), id);
-    await res.arrayBuffer();
-    assert.equal(upstream.calls.at(-1).json.voice, voice);
-    assert.equal(upstream.calls.at(-1).json.model, 'gpt-4o-mini-tts-2025-12-15');
-  }
+  assert.equal(call.url, `${GEMINI_BASE}/v1beta/models/gemini-3.8-flash-tts:generateContent`);
+  assert.equal(call.url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent');
+  assert.equal(call.headers.get('x-goog-api-key'), KEYS.GEMINI_API_KEY);
+  assert.equal(call.headers.get('authorization'), null);
+  assert.equal(call.headers.get('content-type'), 'application/json');
+  assert.deepEqual(call.json, {
+    contents: [{ role: 'user', parts: [{ text: 'Hello laugh there.', speech_metadata: { style: TTS_VOICES.atelier.style } }] }],
+    generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { voice: 'Achernar' } }, maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS },
+  });
+  assert.deepEqual(geminiSpeechBody(TTS_VOICES.atelier, 'Hello laugh there.'), call.json);
   // the owner log carries token counts, never the text
-  assert.ok(logs.some((l) => /tts atelier tokens in 150 out 900/.test(l)), logs.join('\n'));
-  assert.ok(!logs.some((l) => /Hello there/.test(l)));
+  assert.ok(logs.some((l) => /^tts atelier tokens in 30 out 4 seconds 0\.1$/.test(l)), logs.join('\n'));
+  assert.ok(!logs.some((l) => /Hello/.test(l)));
 });
 
-test('OpenAI: plain audio (no SSE) still plays, under the same byte cap', async () => {
-  mockFetch([[OPENAI, () => new Response(streamOf([MP3]), { headers: { 'content-type': 'audio/mpeg' } })]]);
+test('Atelier: a RIFF answer (Gemini’s default WAV) passes through as it came', async () => {
+  const riff = new Uint8Array(44 + 2_400);
+  riff.set(wavHeader(2_400, 24_000), 0);
+  mockFetch([[FLASH, () => reply(200, { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/wav', data: b64(riff) } }] } }] })]]);
   const r = await handleTts(ttsReq({ voice: 'atelier', text: 'Hi.' }), KEYS);
-  assert.equal(r.status, 200);
-  assert.deepEqual(await bytesOf(r), MP3);
+  assert.equal(r.headers.get('content-type'), 'audio/wav');
+  assert.deepEqual(await bytesOf(r), riff);
 });
 
-// ── sseToAudio ──
-test('sseToAudio: exact bytes across any chunk split, LF or CRLF; stops at speech.audio.done', async () => {
-  const a = Uint8Array.from({ length: 777 }, (_, i) => i % 256), b = Uint8Array.from({ length: 333 }, (_, i) => 255 - (i % 256));
-  const after = Uint8Array.of(9, 9, 9);
-  for (const eol of ['\n', '\r\n']) {
-    const text = [`event: speech.audio.delta`, `data: ${JSON.stringify({ type: 'speech.audio.delta', audio: b64(a) })}`, '',
-      `data: ${JSON.stringify({ type: 'speech.audio.delta', audio: b64(b) })}`, '', ': keep-alive', '',
-      `data: ${JSON.stringify({ type: 'speech.audio.done', usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 } })}`, '',
-      `data: ${JSON.stringify({ type: 'speech.audio.delta', audio: b64(after) })}`, '', 'data: [DONE]', ''].join(eol);
-    const all = enc.encode(text);
-    const want = new Uint8Array([...a, ...b]);
-    // every two-way split, then a byte-by-byte feed
-    for (let cut = 0; cut <= all.length; cut += 37) {
-      const out = await collect(streamOf([all.subarray(0, cut), all.subarray(cut)]).pipeThrough(sseToAudio(10_000)));
-      assert.deepEqual(out, want, `${JSON.stringify(eol)} cut at ${cut}`);
-    }
-    const bytewise = await collect(streamOf([...all].map((x) => Uint8Array.of(x))).pipeThrough(sseToAudio(10_000)));
-    assert.deepEqual(bytewise, want);
+test('retired voices (cedar, sage) read as the Atelier voice, on Gemini; nothing reaches OpenAI', async () => {
+  mockFetch([[FLASH, () => spoken()]]);
+  const reserves = [];
+  const hooks = { tester: true, reserve: async (j) => { reserves.push(j); return { headers: {}, limits: { outputTokens: 96 }, settle: async () => null }; } };
+  for (const id of ['cedar', 'sage']) {
+    const v = validateTts({ voice: id, text: 'Hi.' });
+    assert.equal(v.ok, true);
+    assert.equal(v.voiceId, 'atelier');
+    assert.equal(v.voice, TTS_VOICES.atelier);
+    const r = await handleTts(ttsReq({ voice: id, text: 'Hi.' }), KEYS, hooks);
+    assert.equal(r.status, 200, id);
+    assert.equal(r.headers.get('x-tts-voice'), 'atelier', `${id} answers as atelier`);
+    assert.deepEqual(await bytesOf(r), WAV);
+    assert.equal(upstream.calls.at(-1).json.generationConfig.speechConfig.voiceConfig.voice, 'Achernar');
+    assert.equal(upstream.calls.at(-1).json.generationConfig.maxOutputTokens, 96, 'held to the tester reservation');
   }
-  // no trailing newline on the last event is fine
-  const last = await collect(streamOf([`data: ${JSON.stringify({ type: 'speech.audio.delta', audio: b64(a) })}`]).pipeThrough(sseToAudio(10_000)));
-  assert.deepEqual(last, a);
-});
-
-test('sseToAudio: errors past maxBytes, on an error event, on bad base64 and when no audio came', async () => {
-  const chunk = new Uint8Array(600);
-  await assert.rejects(collect(streamOf([delta(chunk), delta(chunk)]).pipeThrough(sseToAudio(1_000))), /longer than one read-aloud request/);
-  assert.deepEqual(await collect(streamOf([delta(chunk), delta(chunk)]).pipeThrough(sseToAudio(1_200))), new Uint8Array(1_200), 'exactly at the cap is fine');
-  await assert.rejects(collect(streamOf([delta(chunk), `data: ${JSON.stringify({ type: 'error', error: { message: 'boom sk-proj-SECRET123' } })}\n\n`]).pipeThrough(sseToAudio())), (e) => /provider error event/.test(e.message) && !/SECRET123/.test(e.message));
-  await assert.rejects(collect(streamOf([`data: {"type":"speech.audio.delta","audio":"%%%not-base64%%%"}\n\n`]).pipeThrough(sseToAudio())), /undecodable audio/);
-  await assert.rejects(collect(streamOf([done()]).pipeThrough(sseToAudio())), /no audio/);
-  await assert.rejects(collect(streamOf(['x'.repeat(2_500)]).pipeThrough(sseToAudio(1_000))), /oversized event/);
-});
-
-// MP3 frames. MPEG-2 Layer III, 24 kHz, 160 kbit/s (OpenAI's speech): 480 bytes, 576 samples = 24 ms. MPEG-1, 44.1 kHz,
-// 128 kbit/s: 417 bytes (418 padded), 1,152 samples. The payload is 0xFF-heavy so a lost sync would show.
-const frame2 = () => { const f = new Uint8Array(480).fill(0xff); f.set([0xff, 0xf3, 0xe4, 0xc4]); return f; };
-const frame1 = (pad) => { const f = new Uint8Array(pad ? 418 : 417).fill(0xff); f.set([0xff, 0xfb, pad ? 0x92 : 0x90, 0x64]); return f; };
-const join = (parts) => { const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0)); let at = 0; for (const p of parts) { out.set(p, at); at += p.length; } return out; };
-const id3 = (n) => { const t = new Uint8Array(10 + n).fill(0xff); t.set([0x49, 0x44, 0x33, 4, 0, 0, (n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f]); return t; };
-const clockOf = (bytes, sizes) => {
-  const c = mp3Clock();
-  for (let at = 0, k = 0; at < bytes.length; k++) { const n = sizes[k % sizes.length]; c.push(bytes.subarray(at, at + n)); at += n; }
-  return c.seconds();
-};
-const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, `${msg}: ${a} vs ${b}`);
-
-test('mp3Clock: seconds from the frame headers across any split, past an ID3 tag and junk; never below the bytes at 320 kbit/s', () => {
-  const two = join(Array.from({ length: 100 }, frame2)); // 2.4 s
-  for (const sizes of [[two.length], [1], [3, 7, 480, 1, 2], [4096], [479, 481]]) near(clockOf(two, sizes), 2.4, `MPEG-2 split ${sizes}`);
-  const one = join(Array.from({ length: 50 }, (_, i) => frame1(i % 3 === 0))); // 50 x 1152 / 44100
-  for (const sizes of [[one.length], [1], [5, 11]]) near(clockOf(one, sizes), 50 * 1152 / 44_100, `MPEG-1 split ${sizes}`);
-  // An ID3v2 tag (its body full of 0xFF) and junk before the first frame are skipped, not timed.
-  near(clockOf(join([id3(2_000), two]), [1, 2, 3]), 2.4, 'after an ID3 tag');
-  near(clockOf(join([Uint8Array.of(0, 0xff, 0x00, 0x12, 0xff), two]), [7]), 2.4, 'after junk');
-  // Bytes it can't parse still run the clock: at least bytes / 40,000 seconds.
-  near(clockOf(new Uint8Array(80_000), [1_000]), 2, 'not mp3');
-  near(clockOf(Uint8Array.from({ length: 5_000 }, (_, i) => (i * 7) % 256), [5_000]), 5_000 / 40_000, 'the MP3 fixture of these tests');
-});
-
-test('sseToAudio: past maxSeconds of mp3 (a tester’s reserved reading time) the stream errors; within it, every byte passes', async () => {
-  const frames = Array.from({ length: 250 }, frame2); // 6 s, sent 10 frames per delta
-  const deltas = [];
-  for (let i = 0; i < frames.length; i += 10) deltas.push(delta(join(frames.slice(i, i + 10))));
-  assert.deepEqual(await collect(streamOf([...deltas, done()]).pipeThrough(sseToAudio(TTS_LIMITS.maxAudioBytes, 6))), join(frames), 'exactly at the limit');
-  const got = [];
-  const cut = streamOf([...deltas, done()]).pipeThrough(sseToAudio(TTS_LIMITS.maxAudioBytes, 5)).getReader();
-  await assert.rejects((async () => { for (let r = await cut.read(); !r.done; r = await cut.read()) got.push(r.value); })(), /ran past the reading time/);
-  const played = got.reduce((n, c) => n + c.length, 0) / 480 * 0.024;
-  assert.ok(played <= 5 && played > 4.5, `${played} s passed before the cut`);
-  // The owner (no maxSeconds) is held only to maxAudioBytes.
-  assert.equal((await collect(streamOf([...deltas, done()]).pipeThrough(sseToAudio()))).length, 250 * 480);
-});
-
-test('a tester stream stopped before speech.audio.done settles on the audio it timed (the clock that cuts it off is the one read); one cut after it, on its usage alone', async () => {
-  const frames = Array.from({ length: 250 }, frame2); // 6 s, 10 frames (0.24 s) a delta
-  const deltas = [];
-  for (let i = 0; i < frames.length; i += 10) deltas.push(delta(join(frames.slice(i, i + 10))));
-  // sseToAudio times into a clock its caller passes, so the caller can read it once the stream has stopped.
-  const clock = mp3Clock();
-  await assert.rejects(collect(streamOf(deltas).pipeThrough(sseToAudio(TTS_LIMITS.maxAudioBytes, 5, clock))), /ran past the reading time/);
-  near(clock.seconds(), 21 * 0.24, 'timed up to and including the delta that crossed 5 s');
-  // OpenAI keeps talking and never reaches speech.audio.done (where its usage would be): the settle hook gets the
-  // seconds that same clock timed, marked stopped, with no usage.
-  const runaway = () => {
-    let n = 0;
-    return new Response(new ReadableStream({ pull(c) { c.enqueue(enc.encode(deltas[n++ % deltas.length])); } }), { headers: { 'content-type': 'text/event-stream' } });
-  };
-  const settles = [];
-  const hooks = { tester: true, reserve: async () => ({ headers: {}, limits: { seconds: 5 }, settle: async (r) => { settles.push(r); return null; } }) };
-  mockFetch([[OPENAI, runaway]]);
-  const res = await handleTts(ttsReq({ voice: 'atelier', text: 'Hello there.' }), KEYS, hooks);
-  assert.equal(res.status, 200);
-  await assert.rejects(res.arrayBuffer(), /ran past the reading time/);
-  await new Promise((ok) => setTimeout(ok, 20));
-  assert.equal(settles.length, 1);
-  assert.deepEqual(Object.keys(settles[0]).sort(), ['seconds', 'stopped', 'usage']);
-  assert.equal(settles[0].usage, null);
-  assert.equal(settles[0].stopped, true);
-  near(settles[0].seconds, 21 * 0.24, 'the seconds the cut-off timed');
-  // A finished stream still settles from its usage alone.
-  settles.length = 0;
-  mockFetch([[OPENAI, () => speech(sseText(join(frames.slice(0, 50))))]]);
-  await bytesOf(await handleTts(ttsReq({ voice: 'atelier', text: 'Hello there.' }), KEYS, hooks));
-  assert.deepEqual(settles, [{ usage: { input_tokens: 150, output_tokens: 900, total_tokens: 1_050 } }]);
-  // A cut landing in the chunk that also carries speech.audio.done (the upstream not yet closed): the usage is OpenAI's
-  // complete bill, so the settle gets it, marked stopped, and no timed seconds.
-  settles.length = 0;
-  mockFetch([[OPENAI, () => {
-    let n = 0;
-    return new Response(new ReadableStream({
-      pull(c) {
-        if (n < 20) return c.enqueue(enc.encode(deltas[n++]));
-        if (n++ === 20) return c.enqueue(enc.encode(deltas[20] + done({ input_tokens: 204, output_tokens: 113, total_tokens: 317 })));
-        return new Promise(() => {});
-      },
-    }), { headers: { 'content-type': 'text/event-stream' } });
-  }]]);
-  await assert.rejects((await handleTts(ttsReq({ voice: 'atelier', text: 'Hello there.' }), KEYS, hooks)).arrayBuffer(), /ran past the reading time/);
-  await new Promise((ok) => setTimeout(ok, 20));
-  assert.deepEqual(settles, [{ usage: { input_tokens: 204, output_tokens: 113, total_tokens: 317 }, stopped: true }]);
-  // Without a time limit (the owner's hooks) nothing is timed: a stream that breaks before its usage settles null.
-  settles.length = 0;
-  const unlimited = { tester: false, reserve: async () => ({ headers: {}, settle: async (r) => { settles.push(r); return null; } }) };
-  mockFetch([[OPENAI, () => { let n = 0; return new Response(new ReadableStream({ pull(c) { if (n < 3) c.enqueue(enc.encode(deltas[n++])); else c.error(new Error('connection reset')); } }), { headers: { 'content-type': 'text/event-stream' } }); }]]);
-  await assert.rejects((await handleTts(ttsReq({ voice: 'atelier', text: 'Hello there.' }), KEYS, unlimited)).arrayBuffer());
-  await new Promise((ok) => setTimeout(ok, 20));
-  assert.deepEqual(settles, [null]);
+  assert.deepEqual(reserves.map((j) => [j.voiceId, j.voice.model]), [['atelier', 'gemini-3.8-flash-tts'], ['atelier', 'gemini-3.8-flash-tts']]);
+  assert.ok(upstream.calls.every((c) => FLASH.test(`${c.method} ${c.url}`)), 'only Gemini Flash TTS was called');
+  // a retired preview is the Atelier preview
+  assert.equal(validateTts({ voice: 'sage', preview: true }).voiceId, 'atelier');
+  // provider voice names were never ids, and still aren't
+  for (const voice of ['marin', 'Achernar', 'Sulafat', 'Cedar', 'alloy']) assert.equal(validateTts({ voice, text: 'Hi.' }).ok, false, voice);
 });
 
 // ── errors are mapped, never passed through ──
-test('an upstream 401 quoting the key becomes a generic 502; nothing upstream reaches the client or the log', async () => {
-  const leak = 'Incorrect API key provided: sk-proj-AbCdEf123456********************wxyz. You can find your API key at https://platform.openai.com/account/api-keys.';
-  mockFetch([[OPENAI, () => reply(401, { error: { message: leak, type: 'invalid_request_error', code: 'invalid_api_key' } }, { 'x-request-id': 'req_9', 'set-cookie': 'z=1', 'openai-organization': 'org-x' })]]);
+test('an upstream error quoting the key becomes a generic 502; nothing upstream reaches the client or the log', async () => {
+  const leak = 'API key not valid. Please pass a valid API key: AQ.test-gemini-key-0123456789abcdef (Bearer sk-proj-AbCdEf123456wxyz)';
+  mockFetch([[FLASH, () => reply(400, { error: { code: 400, message: leak, status: 'INVALID_ARGUMENT' } }, { 'x-goog-request-id': 'req_9', 'set-cookie': 'z=1' })]]);
   const r = await handleTts(ttsReq({ voice: 'atelier', text: 'Private sentence to read.' }), KEYS);
   assert.equal(r.status, 502);
   const text = await r.text();
   assert.deepEqual(JSON.parse(text), { error: 'Read aloud is unavailable right now.', code: 'tts_unavailable' });
-  assert.ok(!/sk-|wxyz|AbCdEf|invalid_api_key/.test(text));
+  assert.ok(!/AQ\.|sk-|wxyz|AbCdEf|INVALID/.test(text));
   assert.deepEqual([...r.headers.keys()].sort(), ['cache-control', 'content-type']);
   const logged = logs.join('\n');
-  assert.match(logged, /tts upstream 401 openai atelier/);
-  assert.ok(!/AbCdEf|wxyz|\*\*\*\*/.test(logged), logged);
+  assert.match(logged, /tts upstream 400 gemini atelier/);
+  assert.ok(!/0123456789abcdef|AbCdEf|wxyz/.test(logged), logged);
   assert.ok(!/Private sentence/.test(logged), 'the text is never logged');
 });
 
 test('upstream 429 keeps retry-after; other failures and network errors are 502 tts_unavailable', async () => {
   let mode = '429';
-  mockFetch([[OPENAI, () => {
-    if (mode === '429') return reply(429, { error: { message: 'Rate limit' } }, { 'retry-after': '7', 'x-ratelimit-remaining-requests': '0' });
+  mockFetch([[FLASH, () => {
+    if (mode === '429') return reply(429, { error: { message: 'Resource exhausted' } }, { 'retry-after': '7', 'x-ratelimit-remaining-requests': '0' });
     if (mode === 'bad-retry') return reply(429, {}, { 'retry-after': 'soonÿx<script>' });
     if (mode === '500') return reply(500, 'oops');
     if (mode === '302') return new Response('', { status: 302, headers: { location: 'https://evil.example/' } });
@@ -402,21 +302,13 @@ test('upstream 429 keeps retry-after; other failures and network errors are 502 
   }
 });
 
-test('a provider error mid-stream breaks the response body (the client falls back to the device voice)', async () => {
-  mockFetch([[OPENAI, () => speech(delta(MP3.subarray(0, 100)) + `data: ${JSON.stringify({ type: 'error', error: { message: 'server_error' } })}\n\n`)]]);
-  const r = await handleTts(ttsReq({ voice: 'atelier', text: 'Hi.' }), KEYS);
-  assert.equal(r.status, 200);
-  await assert.rejects(r.arrayBuffer());
-});
-
-test('owner: no key for the voice’s provider → 503 tts_unavailable naming the secret', async () => {
+test('owner: no GEMINI_API_KEY → 503 tts_unavailable naming the secret (an OpenAI key alone reads nothing)', async () => {
   mockFetch([]);
-  let r = await handleTts(ttsReq({ voice: 'atelier', text: 'Hi.' }), { GEMINI_API_KEY: 'g' });
-  assert.equal(r.status, 503);
-  assert.deepEqual(await r.json(), { error: 'Read aloud needs OPENAI_API_KEY on the server.', code: 'tts_unavailable' });
-  r = await handleTts(ttsReq({ voice: 'sulafat', text: 'Hi.' }), { OPENAI_API_KEY: 'k' });
-  assert.equal(r.status, 503);
-  assert.match((await r.json()).error, /GEMINI_API_KEY/);
+  for (const voice of ['atelier', 'sulafat', 'cedar']) {
+    const r = await handleTts(ttsReq({ voice, text: 'Hi.' }), { OPENAI_API_KEY: 'k' });
+    assert.equal(r.status, 503, voice);
+    assert.deepEqual(await r.json(), { error: 'Read aloud needs GEMINI_API_KEY on the server.', code: 'tts_unavailable' });
+  }
   assert.equal(upstream.calls.length, 0);
 });
 
@@ -619,40 +511,51 @@ test('Gemini: no network chunk of the answer is held once read (memory stays nea
 test('preview: a miss is generated once and cached per voice and brief version; a hit makes no upstream call', async () => {
   const cache = fakeCache();
   globalThis.caches = { default: cache };
-  mockFetch([[OPENAI, () => speech()]]);
+  mockFetch([[FLASH, () => spoken()], [GEMINI, () => spoken()]]);
   const owner = [];
   const hooks = { reserve: async (j) => { owner.push(j); return OWNER_HOOKS.reserve(j); } };
   let r = await handleTts(ttsReq({ voice: 'atelier', preview: true, text: 'not this' }), KEYS, hooks);
   assert.equal(r.status, 200);
-  assert.equal(r.headers.get('content-type'), 'audio/mpeg');
-  assert.deepEqual(await bytesOf(r), MP3);
+  assert.equal(r.headers.get('content-type'), 'audio/wav');
+  assert.deepEqual(await bytesOf(r), WAV);
   assert.equal(upstream.calls.length, 1);
-  assert.equal(upstream.calls[0].json.input, PREVIEW_TEXT);
+  assert.equal(upstream.calls[0].json.contents[0].parts[0].text, PREVIEW_TEXT);
   const key = previewCacheKey(ORIGIN, 'atelier');
-  assert.equal(key, `${ORIGIN}/__tts-preview/v${TTS_BRIEF_V}/${PREVIEW_ID}/atelier/gpt-4o-mini-tts-2025-12-15/marin`);
+  assert.equal(key, `${ORIGIN}/__tts-preview/v2/${PREVIEW_ID}/atelier/gemini-3.8-flash-tts/Achernar`);
   assert.deepEqual(cache.puts, [key]);
   assert.equal(cache.store.get(key).headers['cache-control'], 'public, max-age=2592000');
-  assert.equal(cache.store.get(key).headers['content-type'], 'audio/mpeg');
+  assert.equal(cache.store.get(key).headers['content-type'], 'audio/wav');
   r = await handleTts(ttsReq({ voice: 'atelier', preview: true }), KEYS, hooks);
   assert.equal(r.status, 200);
-  assert.deepEqual(await bytesOf(r), MP3);
+  assert.deepEqual(await bytesOf(r), WAV);
   assert.equal(r.headers.get('x-tts-voice'), 'atelier');
   assert.equal(upstream.calls.length, 1, 'a cache hit calls no provider');
   assert.equal(owner.length, 1, 'and reserves nothing');
+  // a retired id's preview is the Atelier preview: the same cached clip
   r = await handleTts(ttsReq({ voice: 'cedar', preview: true }), KEYS, hooks);
+  assert.deepEqual(await bytesOf(r), WAV);
+  assert.equal(upstream.calls.length, 1);
+  r = await handleTts(ttsReq({ voice: 'sulafat', preview: true }), KEYS, hooks);
   await r.arrayBuffer();
   assert.equal(upstream.calls.length, 2, 'each voice has its own clip');
+  // an old mp3 entry under a key is a miss (only audio/wav previews are served)
+  const old = previewCacheKey('https://old.example', 'atelier');
+  cache.store.set(old, { bytes: Uint8Array.of(0xff, 0xf3, 1, 2), headers: { 'content-type': 'audio/mpeg' } });
+  r = await handleTts(new Request('https://old.example/api/tts', { method: 'POST', body: JSON.stringify({ voice: 'atelier', preview: true }) }), KEYS, hooks);
+  assert.deepEqual(await bytesOf(r), WAV);
+  assert.equal(upstream.calls.length, 3);
   // a failed preview isn't cached
-  mockFetch([[OPENAI, () => reply(500, {})]]);
-  r = await handleTts(ttsReq({ voice: 'sage', preview: true }), KEYS);
+  mockFetch([[GEMINI, () => reply(500, {})]]);
+  cache.store.delete(previewCacheKey(ORIGIN, 'sulafat'));
+  r = await handleTts(ttsReq({ voice: 'sulafat', preview: true }), KEYS);
   assert.equal(r.status, 502);
-  assert.ok(!cache.store.has(previewCacheKey(ORIGIN, 'sage')));
+  assert.ok(!cache.store.has(previewCacheKey(ORIGIN, 'sulafat')));
 });
 
 test('preview without a Cache API (tests, local tools) still works', async () => {
-  mockFetch([[OPENAI, () => speech()], [GEMINI, () => reply(200, { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: b64(new Uint8Array(4_800)) } }] } }] })]]);
-  let r = await handleTts(ttsReq({ voice: 'sage', preview: true }), KEYS);
-  assert.deepEqual(await bytesOf(r), MP3);
+  mockFetch([[FLASH, () => spoken()], [GEMINI, () => reply(200, { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: b64(new Uint8Array(4_800)) } }] } }] })]]);
+  let r = await handleTts(ttsReq({ voice: 'atelier', preview: true }), KEYS);
+  assert.deepEqual(await bytesOf(r), WAV);
   r = await handleTts(ttsReq({ voice: 'sulafat', preview: true }), KEYS);
   assert.equal(r.headers.get('content-type'), 'audio/wav');
   assert.equal((await bytesOf(r)).length, 4_844);
@@ -662,7 +565,7 @@ test('preview without a Cache API (tests, local tools) still works', async () =>
 // ── the owner route in worker.js ──
 test('POST /api/tts needs the passcode; the owner path never touches the Ledger', async () => {
   const { env, L } = makeEnv();
-  mockFetch([[OPENAI, () => speech()]]);
+  mockFetch([[FLASH, () => spoken()]]);
   const body = { method: 'POST', body: { voice: 'atelier', text: 'Hi.' }, headers: { 'content-type': 'application/json' } };
   let r = await api(env, 'tts', body, { origin: null });
   assert.equal(r.status, 401);
@@ -672,11 +575,12 @@ test('POST /api/tts needs the passcode; the owner path never touches the Ledger'
   assert.equal(upstream.calls.length, 0);
   r = await api(env, 'tts', body, { pass: 'pw', origin: null });
   assert.equal(r.status, 200);
-  assert.equal(r.headers.get('content-type'), 'audio/mpeg');
+  assert.equal(r.headers.get('content-type'), 'audio/wav');
   assert.equal(r.headers.get('cache-control'), 'no-store');
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(r.headers.get('x-tester-allowance'), null);
-  assert.deepEqual(await bytesOf(r), MP3);
+  assert.deepEqual(await bytesOf(r), WAV);
+  assert.ok(!upstream.calls.some((c) => OPENAI.test(`${c.method} ${c.url}`)));
   r = await api(env, 'tts', { method: 'GET' }, { pass: 'pw', origin: null });
   assert.equal(r.status, 404, 'only POST');
   assert.deepEqual(L.calls, []);

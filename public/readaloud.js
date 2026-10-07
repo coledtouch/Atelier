@@ -4,7 +4,7 @@
 // DOM at import time — app.js imports it and wires the Read aloud buttons and Settings → Read aloud.
 
 // ── shared constants (src/tts.js owns the voices, the brief and the preview line; keep the ids and TTS_BRIEF_V in step) ──
-export const TTS_BRIEF_V = 1; // src/tts.js TTS_BRIEF_V: part of every cache key, so a new brief never replays old clips
+export const TTS_BRIEF_V = 2; // src/tts.js TTS_BRIEF_V: part of every cache key, so a new voice never replays old clips
 export const PREVIEW_ID = '7d6c99da'; // src/tts.js PREVIEW_ID (a hash of its PREVIEW_TEXT): part of the preview cache key
 /**
  * Spoken length, as src/tts.js counts it (a test keeps the two identical): characters, plus extra weight for digits (3),
@@ -18,15 +18,20 @@ export function spokenUnits(text) {
   for (const [re, w] of SPOKEN_EXTRA) n += (s.match(re)?.length || 0) * w;
   return n;
 }
-// provider: which path plays it — 'openai' streams mp3 (MediaSource where supported), 'gemini' sends a whole WAV.
+// provider: 'gemini' (every AI voice: the server sends one whole WAV per segment) or 'device' (speechSynthesis).
 export const VOICES = Object.freeze([
-  Object.freeze({ id: 'atelier', label: 'Atelier', hint: 'warm, soft (default)', provider: 'openai' }),
-  Object.freeze({ id: 'cedar', label: 'Cedar', hint: 'deeper, grounded', provider: 'openai' }),
-  Object.freeze({ id: 'sage', label: 'Sage', hint: 'softest, quiet', provider: 'openai' }),
-  Object.freeze({ id: 'sulafat', label: 'Sulafat', hint: 'warm (Google)', provider: 'gemini' }),
+  Object.freeze({ id: 'atelier', label: 'Atelier', hint: 'warm, soft (default)', provider: 'gemini' }),
+  Object.freeze({ id: 'sulafat', label: 'Sulafat', hint: 'warm', provider: 'gemini' }),
   Object.freeze({ id: 'device', label: 'Device voice', hint: 'offline, free', provider: 'device' }),
 ]);
 const VOICE = new Map(VOICES.map((v) => [v.id, v]));
+/**
+ * Retired voice ids → the voice that reads in their place (src/tts.js RETIRED_VOICES; a test keeps them in step). The
+ * OpenAI voices Cedar and Sage went with gpt-4o-mini-tts in v80, and the Atelier voice is the nearest soft one.
+ */
+export const RETIRED_VOICES = Object.freeze({ cedar: 'atelier', sage: 'atelier' });
+// A saved or allowed voice id as it reads today: a retired id becomes its stand-in.
+const current = (id) => (typeof id === 'string' && Object.hasOwn(RETIRED_VOICES, id) ? RETIRED_VOICES[id] : id);
 export const SPEEDS = Object.freeze([0.9, 1, 1.1, 1.25]);
 export const DEFAULT_READ_ALOUD = Object.freeze({ voice: 'atelier', speed: 1 }); // settings.readAloud
 // first/target: segment sizes in spoken units (fast first audio, then paragraph-sized); owner/tester: the most one
@@ -36,7 +41,7 @@ export const READ_LIMITS = Object.freeze({ first: 220, target: 900, owner: 24_00
 export const DEVICE_RATE = 0.95;
 export const TTS_CACHE = 'atelier-tts'; // sw.js only deletes 'atelier-v*' caches, so clips survive deploys
 export const CACHE_CAP = Object.freeze({ bytes: 30 * 1024 * 1024, clips: 200 });
-export const AI_CAPTION = 'AI-generated voice. To make the audio, answer text is sent to OpenAI (Google for Sulafat). Clips stay on this device until you clear it.';
+export const AI_CAPTION = 'AI-generated voice. To make the audio, answer text is sent to Google. Clips stay on this device until you clear it.';
 export const NOTES = Object.freeze({
   code: 'There’s a code block on screen.',
   formula: 'There’s a formula on screen.',
@@ -75,22 +80,26 @@ const MOSTLY_CODE_PROSE = 400; // this much prose is always read, however much c
 const MOSTLY_CODE_TINY = 80; // less prose than this (or none in whole sentences) next to mostly code isn't read
 const SHORT_SENTENCE = 15; // "Yes." or "Dr.": not counted toward the first segment's two sentences
 
-/** settings.readAloud → {voice, speed}: a known voice id (else 'atelier') and one of SPEEDS (else 1). */
+/**
+ * settings.readAloud → {voice, speed}: a known voice id (a retired one, 'cedar' or 'sage', becomes its stand-in,
+ * RETIRED_VOICES; anything else unknown becomes 'atelier') and one of SPEEDS (else 1).
+ */
 export function normalizeReadAloud(v) {
-  const o = v && typeof v === 'object' ? v : {}, speed = Number(o.speed);
-  return { voice: VOICE.has(o.voice) ? o.voice : DEFAULT_READ_ALOUD.voice, speed: SPEEDS.includes(speed) ? speed : DEFAULT_READ_ALOUD.speed };
+  const o = v && typeof v === 'object' ? v : {}, speed = Number(o.speed), voice = current(o.voice);
+  return { voice: VOICE.has(voice) ? voice : DEFAULT_READ_ALOUD.voice, speed: SPEEDS.includes(speed) ? speed : DEFAULT_READ_ALOUD.speed };
 }
 /** The Settings list: AI voices the account may use (allowed: ids, or null for all) plus the device voice. */
-export const voiceChoices = (allowed) => VOICES.filter((v) => v.provider === 'device' || !Array.isArray(allowed) || allowed.includes(v.id));
+export const voiceChoices = (allowed) => VOICES.filter((v) => v.provider === 'device' || !Array.isArray(allowed) || allowed.map(current).includes(v.id));
 /**
  * The voice that reads for this account when `want` is chosen (allowed: ids, or null for all): `want` itself, else the
  * first AI voice the account may use, else the device voice. The reader picks this way, and Settings and the Read aloud
- * button show the same answer.
+ * button show the same answer. Retired ids (RETIRED_VOICES), in `want` or in `allowed`, count as their stand-in.
  */
 export function voiceFor(want, allowed) {
-  const v = VOICE.has(want) ? want : DEFAULT_READ_ALOUD.voice;
-  if (v === 'device' || !Array.isArray(allowed) || allowed.includes(v)) return v;
-  return allowed.find((id) => VOICE.get(id) && VOICE.get(id).provider !== 'device') || 'device';
+  const w = current(want), v = VOICE.has(w) ? w : DEFAULT_READ_ALOUD.voice;
+  const ok = Array.isArray(allowed) ? allowed.map(current) : null;
+  if (v === 'device' || !ok || ok.includes(v)) return v;
+  return ok.find((id) => VOICE.get(id) && VOICE.get(id).provider !== 'device') || 'device';
 }
 
 // ── text: Markdown → what a listener should hear ──
@@ -431,25 +440,12 @@ const sleep = (ms, signal) => new Promise((res, rej) => {
   signal?.addEventListener('abort', () => { clearTimeout(t); rej(new DOMException('Aborted', 'AbortError')); }, { once: true });
 });
 const bufferedEnd = (x) => { try { const b = x?.buffered; return b?.length ? b.end(b.length - 1) : 0; } catch { return 0; } };
-const notify = (rec) => { const w = rec.wake; rec.wake = []; for (const f of w) f(); };
-// A segment's audio from the first byte: chunks already here first, then the rest as it arrives.
-async function* chunksOf(rec) {
-  for (let k = 0; ; k++) {
-    while (k >= rec.chunks.length && !rec.done && !rec.error) await new Promise((res) => rec.wake.push(res));
-    if (k < rec.chunks.length) { yield rec.chunks[k]; continue; }
-    if (rec.error) throw rec.error;
-    return;
-  }
-}
 const ACTIONS = ['play', 'pause', 'stop', 'seekbackward', 'seekforward', 'previoustrack', 'nexttrack'];
 const IDX = 'atelier.ttsIndex', NOTED = 'atelier.ttsNoted';
 // Clips kept in memory for instant replay: at most this many, and this many bytes (a Sulafat WAV is ~2.9 MB a minute).
 const MEMO_MAX = 40, MEMO_BYTES = 24 * 1024 * 1024;
-const AHEAD = 2; // segments requested past the one being heard, on both paths
+const AHEAD = 2; // segments requested past the one being heard
 const aborted = () => new DOMException('Aborted', 'AbortError');
-const bufferedStart = (x) => { try { const b = x?.buffered; return b?.length ? b.start(0) : 0; } catch { return 0; } };
-// A MediaSource or SourceBuffer fault (not the clip's): the read carries on with whole clips.
-const mseFault = (cause) => Object.assign(failure('media', 0), { mse: true, cause });
 
 /**
  * The read-aloud player. One read at a time; states per entry id: 'idle' | 'preparing' | 'playing' | 'paused',
@@ -462,7 +458,7 @@ const mseFault = (cause) => Object.assign(failure('media', 0), { mse: true, caus
  *   device voice without its own toast, or for a preview just stops), onSignedOut(err) when a tester's /api/tts answers
  *   401 (the session has ended: the app may sign them out, and if that stops the read the reader says nothing more),
  *   lang() → BCP 47.
- * Test seams (default to the browser's): Audio, MediaSource, URL, speech, Utterance, caches, storage, mediaSession,
+ * Test seams (default to the browser's): Audio, URL, speech, Utterance, caches, storage, mediaSession,
  *   MediaMetadata, online(), stallMs.
  * → {toggle(id, markdown, button?, {title, album, lang}?), stop(), pause(), resume(), stateFor(id), preview(voiceId),
  *    setSpeed(x), clearCache()}. toggle() and preview() must be called straight from the tap (no await before them).
@@ -472,7 +468,7 @@ export function createReader(opts = {}) {
   const { apiHeaders, getSettings, isTester, onState, onResponse, onRefusal, onSignedOut, allowedVoices, signedIn } = opts;
   const toast = opts.toast || (() => {});
   const doFetch = opts.fetch || ((...a) => g.fetch(...a));
-  const AudioCtor = opts.Audio || g.Audio, MS = has('MediaSource') ? opts.MediaSource : g.MediaSource, URLs = opts.URL || g.URL;
+  const AudioCtor = opts.Audio || g.Audio, URLs = opts.URL || g.URL;
   const speech = has('speech') ? opts.speech : g.speechSynthesis, Utterance = opts.Utterance || g.SpeechSynthesisUtterance;
   const store = has('caches') ? opts.caches : g.caches, session = has('mediaSession') ? opts.mediaSession : g.navigator?.mediaSession;
   const Meta = opts.MediaMetadata || g.MediaMetadata, stallMs = opts.stallMs ?? 1500;
@@ -499,7 +495,7 @@ export function createReader(opts = {}) {
     const ctrl = new AbortController();
     ctrls.add(ctrl);
     return job = { id, voice, segs, lang: o.lang || langOf(), speed: o.speed ?? 1, button: o.button || null, meta: o.meta || null, preview: Boolean(o.preview),
-      mode: null, state: 'idle', recs: [], starts: [], cur: -1, turn: 0, line: 0, lines: [], pending: 0, ctrl, gen: generation, dead: false };
+      mode: null, state: 'idle', recs: [], cur: -1, turn: 0, line: 0, lines: [], pending: 0, ctrl, gen: generation, dead: false };
   }
   // Ends a read (stopped or finished). Clips already being fetched finish into the cache: a tester is then settled at
   // the real cost rather than the full reservation, and a replay is instant. Nothing new is requested.
@@ -512,20 +508,8 @@ export function createReader(opts = {}) {
     quiet(j);
     if (!j.preview) clearSession();
     if (!j.pending) ctrls.delete(j.ctrl);
-    wake(j);
     set(j, 'idle');
   }
-  // Waits for the element's next time update or seek, a change of path or the read's end (or `ms`, whichever is first).
-  function tick(j, ms = 1000) {
-    return new Promise((res) => {
-      const done = () => { clearTimeout(t); el?.removeEventListener('timeupdate', done); el?.removeEventListener('seeked', done); j.wakers.delete(done); res(); };
-      const t = setTimeout(done, ms);
-      t?.unref?.();
-      el?.addEventListener('timeupdate', done); el?.addEventListener('seeked', done);
-      (j.wakers ||= new Set()).add(done);
-    });
-  }
-  const wake = (j) => { for (const f of [...(j.wakers || [])]) f(); };
   // Silences the element for this read. Callers set j.mode first, so a 'pause' event from here is never taken for
   // the listener pausing.
   function quiet(j) {
@@ -550,14 +534,13 @@ export function createReader(opts = {}) {
     el.addEventListener('ended', () => {
       const j = job;
       if (!j || j.dead || j.mode === 'device') return;
-      if (j.mode === 'mse') return j.failAt != null ? device(j, j.failAt) : end(j);
       if (j.cur < 0 || j.waiting) return;
       return j.cur + 1 < j.segs.length ? playSeg(j, j.cur + 1) : end(j);
     });
     el.addEventListener('error', () => {
       const j = job;
       if (!j || j.dead || j.mode === 'device' || (j.mode === 'blob' && (j.cur < 0 || j.waiting))) return;
-      fail(j, failure('media', 0), j.mode === 'blob' ? j.cur : curIndex(j));
+      fail(j, failure('media', 0), j.cur);
     });
     return el;
   }
@@ -581,7 +564,6 @@ export function createReader(opts = {}) {
       j.stalled = true; el.pause(); set(j, 'paused'); toast(SAY.resume);
     }, stallMs);
   }
-  const curIndex = (j) => { let i = 0; for (let k = 0; k < j.starts.length; k++) if (j.starts[k] != null && j.starts[k] <= el.currentTime + 0.05) i = k; return i; };
 
   // ── fetching clips: memory → Cache Storage → POST /api/tts ──
   function headers() {
@@ -605,7 +587,7 @@ export function createReader(opts = {}) {
   }
   function load(j, i) {
     if (j.recs[i]) return j.recs[i];
-    const rec = j.recs[i] = { chunks: [], done: false, error: null, wake: [] };
+    const rec = j.recs[i] = { chunks: [], done: false, error: null };
     j.pending++;
     // Keys (SHA-256) and Cache Storage lookups finish in any order: chained per read, so requests go out in reading order.
     const look = j.look = (j.look || Promise.resolve()).catch(() => {}).then(async () => {
@@ -614,25 +596,24 @@ export function createReader(opts = {}) {
     });
     rec.whole = (async () => {
       const { key, hit } = await look;
-      if (hit) { if (j.mode === 'mse') rec.chunks.push(new Uint8Array(await hit.arrayBuffer())); notify(rec); return hit; } // only streaming reads chunks
+      if (hit) return hit;
       const r = await request(j, j.preview ? { voice: j.voice, preview: true } : { voice: j.voice, text: j.segs[i] });
       try {
         if (r.body?.getReader) {
           const rd = r.body.getReader();
-          for (;;) { const { done, value } = await rd.read(); if (done) break; if (value?.byteLength) { rec.chunks.push(value); notify(rec); } }
-        } else { rec.chunks.push(new Uint8Array(await r.arrayBuffer())); notify(rec); }
+          for (;;) { const { done, value } = await rd.read(); if (done) break; if (value?.byteLength) rec.chunks.push(value); }
+        } else rec.chunks.push(new Uint8Array(await r.arrayBuffer()));
       } catch (err) { // the provider failed after the 200 (src/tts.js then errors the body) or the connection dropped
         if (err?.name === 'AbortError') throw err;
         throw failure('stream', 502);
       }
-      const blob = new Blob(rec.chunks, { type: (r.headers.get('content-type') || 'audio/mpeg').split(';')[0] });
-      if (j.mode !== 'mse') rec.chunks = []; // the whole-clip path plays the blob; only streaming reads chunks
+      const blob = new Blob(rec.chunks, { type: (r.headers.get('content-type') || 'audio/wav').split(';')[0] });
+      rec.chunks = []; // the blob holds the clip now
       if (!blob.size) throw failure('empty', 502);
       keep(key, blob, j.gen);
       return blob;
     })();
     rec.whole.then(() => { rec.done = true; }, (err) => { rec.error = err; }).finally(() => {
-      notify(rec);
       if (!--j.pending && j.dead) ctrls.delete(j.ctrl);
     });
     return rec;
@@ -673,79 +654,14 @@ export function createReader(opts = {}) {
     while (memo.size > 1 && (memo.size > MEMO_MAX || memoBytes > MEMO_BYTES)) { const [k, b] = memo.entries().next().value; memo.delete(k); memoBytes -= b.size; }
     bucket().then(async (c) => {
       if (!c || gen !== generation) return;
-      await c.put(key, new Response(blob, { headers: { 'content-type': blob.type || 'audio/mpeg' } }));
+      await c.put(key, new Response(blob, { headers: { 'content-type': blob.type || 'audio/wav' } }));
       const { list, evicted } = lruAdd(readIndex(), key, blob.size);
       lsSet(IDX, JSON.stringify(list));
       await Promise.all(evicted.map((k) => c.delete(k)));
     }).catch(() => {});
   }
 
-  // ── path (a): one MediaSource buffer, appended chunk by chunk (Chromium, Firefox; OpenAI mp3) ──
-  // Still streaming this read (not stopped, not handed to whole clips or the device voice).
-  const live = (j) => j === job && !j.dead && j.mode === 'mse';
-  const updated = (sb) => new Promise((res, rej) => {
-    const off = () => { sb.removeEventListener('updateend', ok); sb.removeEventListener('error', bad); };
-    const ok = () => { off(); res(); }, bad = () => { off(); rej(mseFault()); };
-    sb.addEventListener('updateend', ok); sb.addEventListener('error', bad);
-  });
-  async function mseOp(j, f) {
-    try { f(); } catch (err) { throw mseFault(err); }
-    await updated(j.sb);
-  }
-  // A full buffer (QuotaExceededError) frees what was heard more than 10 s ago, else waits for the listener to move on;
-  // it is never taken for a MediaSource fault.
-  async function append(j, chunk) {
-    for (;;) {
-      if (!live(j)) throw aborted();
-      try { j.sb.appendBuffer(chunk); }
-      catch (err) {
-        if (err?.name !== 'QuotaExceededError') throw mseFault(err);
-        const heard = el.currentTime - 10;
-        if (heard > 1 && bufferedStart(j.sb) < heard - 0.5) await mseOp(j, () => j.sb.remove(0, heard));
-        else { const t = el.currentTime; while (live(j) && el.currentTime < t + 5) await tick(j); }
-        continue;
-      }
-      return updated(j.sb);
-    }
-  }
-  async function runMse(j) {
-    let i = 0;
-    try {
-      if (j.ms.readyState !== 'open') await new Promise((res) => j.ms.addEventListener('sourceopen', res, { once: true }));
-      if (!live(j)) return;
-      try { j.sb = j.ms.addSourceBuffer('audio/mpeg'); j.sb.mode = 'sequence'; } catch (err) { throw mseFault(err); } // mp3 has no timestamps: play in append order
-      for (; i < j.segs.length; i++) {
-        // Paced to the listener: segment i is asked for only once segment i - AHEAD is being heard.
-        while (live(j) && i > curIndex(j) + AHEAD) await tick(j);
-        if (!live(j)) return;
-        const rec = load(j, i);
-        for (let k = i + 1; k <= Math.min(curIndex(j) + AHEAD, j.segs.length - 1); k++) load(j, k);
-        j.starts[i] = bufferedEnd(j.sb);
-        for await (const chunk of chunksOf(rec)) { if (!live(j)) return; await append(j, chunk); }
-        if (!live(j)) return;
-        rec.chunks = []; // in the buffer now (and rec.whole keeps the clip should whole clips take over)
-        release(j, curIndex(j) - 1);
-      }
-      if (j.ms.readyState === 'open') j.ms.endOfStream();
-    } catch (err) {
-      if (!live(j) || err?.name === 'AbortError') return;
-      if (!err?.mse) { // this clip failed (the provider, the network, a stream cut off): hand over at its segment
-        // What arrived of this segment isn't heard yet: drop it, so the hand-over falls at the segment's start.
-        if (j.starts[i] != null && bufferedEnd(j.sb) > j.starts[i] && el.currentTime + 0.25 < j.starts[i]) {
-          try { await mseOp(j, () => j.sb.remove(j.starts[i], Infinity)); } catch {}
-          if (!live(j)) return;
-        }
-        return fail(j, err?.tts ? err : failure('stream', 502), i);
-      }
-      // MediaSource trouble: carry on with whole clips from the segment being heard.
-      const from = Math.min(i, curIndex(j));
-      Object.assign(j, { mode: 'blob', cur: -1, waiting: true });
-      quiet(j); j.audio = true;
-      playSeg(j, from);
-    }
-  }
-
-  // ── path (b): one blob per segment (iOS/Safari, Gemini WAV, no MediaSource) ──
+  // ── one blob per segment (a whole Gemini WAV each), played in turn on the one <audio> element ──
   async function playSeg(j, i) {
     if (j !== job || j.dead || j.mode !== 'blob') return;
     const turn = ++j.turn;
@@ -769,8 +685,7 @@ export function createReader(opts = {}) {
     if (j !== job || j.dead || j.mode === 'device') return;
     if (!speech || typeof Utterance !== 'function') { toast(SAY.unsupported, { error: true }); return end(j); }
     const was = j.mode;
-    Object.assign(j, { mode: 'device', failAt: null, line: 0 });
-    wake(j); // a streaming loop waiting on the listener sees the hand-over and stops
+    Object.assign(j, { mode: 'device', line: 0 });
     if (was) { quiet(j); if (!j.preview) clearSession(); }
     j.lines = j.segs.slice(from).flatMap((s) => sentencesOf(s, j.lang)).flatMap((s) => splitLong(s, READ_LIMITS.deviceLine));
     if (j.state === 'idle') set(j, 'preparing');
@@ -823,8 +738,6 @@ export function createReader(opts = {}) {
     if (j.preview) { if (k) toast(SAY[PREVIEW_SAY[k] || 'previewFailed']); return end(j); }
     const msg = k && SAY[k];
     if (msg) toast(msg);
-    // Streaming: let what is already buffered finish, then hand over at the failed segment (a decode error can't finish).
-    if (j.mode === 'mse' && err.code !== 'media' && i > 0 && bufferedEnd(j.sb) > el.currentTime + 0.25) { j.failAt = i; try { j.ms.endOfStream(); } catch {} return; }
     device(j, i);
   }
 
@@ -849,9 +762,8 @@ export function createReader(opts = {}) {
   function track(step) {
     const j = job;
     if (!j || j.dead || j.mode === 'device') return;
-    if (j.mode === 'blob') { const i = j.cur + step; if (i >= 0 && i < j.segs.length) playSeg(j, i); return; }
-    const t = j.starts[curIndex(j) + step];
-    if (t != null) el.currentTime = t;
+    const i = j.cur + step;
+    if (i >= 0 && i < j.segs.length) playSeg(j, i);
   }
 
   // ── public ──
@@ -894,19 +806,14 @@ export function createReader(opts = {}) {
     const E = element();
     j.audio = true;
     rate(j);
-    if (VOICE.get(j.voice)?.provider === 'openai' && !j.preview && typeof MS === 'function' && MS.isTypeSupported?.('audio/mpeg') === true) {
-      j.mode = 'mse'; j.ms = new MS(); j.url = URLs.createObjectURL(j.ms); E.src = j.url;
-      play(j);
-    } else {
-      j.mode = 'blob'; E.src = silentWav();
-      play(j, true);
-      if (!spoke && speech && typeof Utterance === 'function') { // let a later device-voice fallback speak on iOS too
-        spoke = true;
-        try { const u = new Utterance(' '); u.volume = 0; speech.speak(u); } catch {}
-      }
+    j.mode = 'blob'; E.src = silentWav();
+    play(j, true);
+    if (!spoke && speech && typeof Utterance === 'function') { // let a later device-voice fallback speak on iOS too
+      spoke = true;
+      try { const u = new Utterance(' '); u.volume = 0; speech.speak(u); } catch {}
     }
     set(j, 'preparing');
-    if (j.mode === 'mse') runMse(j); else playSeg(j, 0);
+    playSeg(j, 0);
   }
   function toggle(id, markdown, button, meta) {
     const cur = job;
@@ -929,7 +836,7 @@ export function createReader(opts = {}) {
     if (pick.voice === 'device') { if (pick.note) toast(pick.note); return device(j, 0); }
     startAi(j);
     bindSession(j);
-    if (lsGet(NOTED) == null) { toast(SAY.first); lsSet(NOTED, '1'); } // OpenAI asks that listeners know it's an AI voice
+    if (lsGet(NOTED) == null) { toast(SAY.first); lsSet(NOTED, '1'); } // listeners are told once that it's an AI voice
   }
   function stop() { end(job); }
   function preview(voiceId) {

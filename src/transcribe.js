@@ -4,8 +4,9 @@
 // browser's MediaRecorder made it (Safari and iOS Home Screen apps: AAC in MP4; Chrome and Android: Opus in WebM;
 // Firefox: Opus in Ogg) or as WAV. Its container is sniffed from the first bytes (the content-type is ignored) and names
 // the file the provider sees: dictation.<ext>, with the matching mime type. Optional request headers:
-//   x-dictate-lang    the UI or device language (BCP 47). OpenAI gets its ISO 639-1 base when Whisper's language list
-//                     has it (else the language is detected); Gemini gets the whole tag as a hint. ?lang= also works.
+//   x-dictate-lang    the UI or device language (BCP 47). OpenAI gets its ISO 639-1 base as a language hint when
+//                     Whisper's language list has it (else the language is detected); Gemini gets the whole tag as a
+//                     hint. ?lang= also works.
 //   x-dictate-prompt  a short hint (names, terms), percent-encoded UTF-8; at most TRANSCRIBE_LIMITS.promptChars.
 // The models, the response format, the Gemini instructions and every limit are server constants. Everything is checked
 // (size, container, WAV length) before anything is reserved or any provider is called. Provider errors are mapped to
@@ -13,12 +14,15 @@
 // status word is logged; no upstream header is copied onto the response; the audio, the hint and the transcript are
 // never logged.
 //
-// Providers (read 2026-09-30):
-//   OpenAI  gpt-4o-mini-transcribe-2025-12-15 (pinned): POST /v1/audio/transcriptions, multipart file + model +
-//           response_format json (+ language, prompt) → {text, usage: {type: "tokens", input_tokens, output_tokens …}}.
-//           16,000-token context, 2,000 output tokens, $1.25 / $5 per 1M tokens; files up to 25 MB.
-//           https://developers.openai.com/api/docs/models/gpt-4o-mini-transcribe
+// Providers (read 2026-09-30; OpenAI re-read 2026-10-07 for v80):
+//   OpenAI  gpt-transcribe: POST /v1/audio/transcriptions, multipart file + model + response_format json (+ languages[],
+//           one ISO 639-1 code per field, which replaces the older models' singular `language`; + prompt) → {text,
+//           languages: [{code}], usage}. Billed by duration, $0.0045 a minute (usage {type: "duration", seconds}; the
+//           reference also documents a token usage). Files up to 25 MB in mp3, mp4, mpeg, mpga, m4a, wav or webm: Ogg and
+//           FLAC recordings go straight to Gemini (AUDIO_FORMATS openai: false).
+//           https://developers.openai.com/api/docs/models/gpt-transcribe
 //           https://developers.openai.com/api/docs/guides/speech-to-text
+//           https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create
 //   Gemini  gemini-3.5-flash-lite, the fallback (FALLBACK_ON): generateContent with the audio inline (a request is at
 //           most 20 MB; 32 tokens per second of audio; wav, mp3, aac, ogg, flac, m4a, opus, webm …).
 //           https://ai.google.dev/gemini-api/docs/audio
@@ -28,8 +32,8 @@ const MB = 1024 * 1024;
 export const TRANSCRIBE_LIMITS = Object.freeze({
   maxBytes: 10 * MB, // owner and testers; 180 s of 16 kHz mono WAV is 5.76 MB, recorded AAC/Opus far less
   // Enforced only where the length is measured: a WAV's header, and a tester's Gemini fallback (countTokens). Other
-  // containers (MP4, WebM, Ogg, MP3, FLAC) are held to maxBytes alone; at OpenAI, its 16,000-token context bounds what
-  // one is billed (no chunking_strategy is sent, so it is one block).
+  // containers (MP4, WebM, Ogg, MP3, FLAC) are held to maxBytes alone; at OpenAI (billed by duration) a tester's
+  // reservation counts such a recording's bytes at prices.js STT_MIN_BYTES_PER_SECOND, a ceiling on how long it plays.
   maxSeconds: 180,
   minSeconds: 0.1, // OpenAI refuses shorter audio
   minBytes: 128, // less than this can't hold a container header and any sound
@@ -50,7 +54,7 @@ export const TRANSCRIBE_LIMITS = Object.freeze({
  * Gemini's answer (thinking included), and with it a tester's reservation.
  */
 export const STT_MODELS = deepFreeze({
-  openai: { provider: 'openai', model: 'gpt-4o-mini-transcribe-2025-12-15', priceId: 'openai:gpt-4o-mini-transcribe-2025-12-15' },
+  openai: { provider: 'openai', model: 'gpt-transcribe', priceId: 'openai:gpt-transcribe' },
   gemini: { provider: 'gemini', model: 'gemini-3.5-flash-lite', priceId: 'gemini:gemini-3.5-flash-lite#stt', maxOutputTokens: 4_096, audioTokensPerSecond: 32 },
 });
 /** The prices.js id a model is metered under. */
@@ -70,14 +74,17 @@ export const GEMINI_STT_PROMPT = [
   'If there is no intelligible speech, reply with nothing at all.',
 ].join('\n');
 
-/** Containers the endpoint accepts, by sniffed kind: ext and mime name the file sent to OpenAI; gemini is Gemini's mime. */
+/**
+ * Containers the endpoint accepts, by sniffed kind: ext and mime name the file sent to OpenAI; gemini is Gemini's mime;
+ * openai: false = not on gpt-transcribe's format list (mp3, mp4, mpeg, mpga, m4a, wav, webm), so only Gemini is asked.
+ */
 export const AUDIO_FORMATS = deepFreeze({
-  wav: { kind: 'wav', mime: 'audio/wav', ext: 'wav', gemini: 'audio/wav' },
-  mp4: { kind: 'mp4', mime: 'audio/mp4', ext: 'mp4', gemini: 'audio/m4a' }, // Safari and iOS: AAC in (fragmented) MP4
-  webm: { kind: 'webm', mime: 'audio/webm', ext: 'webm', gemini: 'audio/webm' }, // Chrome, Android: Opus in WebM
-  ogg: { kind: 'ogg', mime: 'audio/ogg', ext: 'ogg', gemini: 'audio/ogg' }, // Firefox: Opus in Ogg
-  mp3: { kind: 'mp3', mime: 'audio/mpeg', ext: 'mp3', gemini: 'audio/mp3' },
-  flac: { kind: 'flac', mime: 'audio/flac', ext: 'flac', gemini: 'audio/flac' },
+  wav: { kind: 'wav', mime: 'audio/wav', ext: 'wav', gemini: 'audio/wav', openai: true },
+  mp4: { kind: 'mp4', mime: 'audio/mp4', ext: 'mp4', gemini: 'audio/m4a', openai: true }, // Safari and iOS: AAC in (fragmented) MP4
+  webm: { kind: 'webm', mime: 'audio/webm', ext: 'webm', gemini: 'audio/webm', openai: true }, // Chrome, Android: Opus in WebM
+  ogg: { kind: 'ogg', mime: 'audio/ogg', ext: 'ogg', gemini: 'audio/ogg', openai: false }, // Firefox: Opus in Ogg
+  mp3: { kind: 'mp3', mime: 'audio/mpeg', ext: 'mp3', gemini: 'audio/mp3', openai: true },
+  flac: { kind: 'flac', mime: 'audio/flac', ext: 'flac', gemini: 'audio/flac', openai: false },
 });
 
 const PROVIDER_KEYS = Object.freeze({ openai: 'OPENAI_API_KEY', gemini: 'GEMINI_API_KEY' });
@@ -168,8 +175,8 @@ export function wavInfo(b) {
   return { seconds: data / bytesPerSecond, rate: fmt.rate, channels: fmt.channels, bits: fmt.bits, dataBytes: data };
 }
 
-// ISO 639-1 codes on Whisper's language list (the transcription models take one of these as `language`; a code they
-// don't know refuses the whole request, so anything else is left to detection).
+// ISO 639-1 codes on Whisper's language list (gpt-transcribe takes these as `languages[]`; a code it doesn't know could
+// refuse the whole request, so anything else is left to detection).
 const WHISPER_LANGS = new Set(('af am ar as az ba be bg bn bo br bs ca cs cy da de el en es et eu fa fi fo fr gl gu ha he hi hr ht hu '
   + 'hy id is it ja ka kk km kn ko la lb ln lo lt lv mg mi mk ml mn mr ms mt my ne nl nn no oc pa pl ps pt ro ru sa sd si sk sl '
   + 'sn so sq sr su sv sw ta te tg th tk tl tr tt uk ur uz vi yi yo zh').split(' '));
@@ -311,13 +318,16 @@ function refusal(x, model, kind) {
 const usageOf = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? o : null);
 
 // ── OpenAI ──
-/** The multipart body sent to OpenAI: model and format are server constants; the file is named by its sniffed kind. */
+/**
+ * The multipart body sent to OpenAI: model and format are server constants; the file is named by its sniffed kind. The
+ * language hint goes as `languages[]` (one field per code), which gpt-transcribe takes in place of `language`.
+ */
 export function openaiForm(audio, model = STT_MODELS.openai) {
   const fd = new FormData();
   fd.append('file', new Blob([audio.bytes], { type: audio.format.mime }), `dictation.${audio.format.ext}`);
   fd.append('model', model.model);
   fd.append('response_format', 'json');
-  if (audio.language) fd.append('language', audio.language);
+  if (audio.language) fd.append('languages[]', audio.language);
   if (audio.prompt) fd.append('prompt', audio.prompt);
   return fd;
 }
@@ -420,11 +430,14 @@ export async function geminiCountTokens(key, audio, model = STT_MODELS.gemini) {
  *                                       throttled, paused or out-of-allowance tester never makes the Worker send it) and
  *                                       then checked by it; no count, no Gemini (that reservation is released at $0)
  *   unavailable(provider) → Response    no key for any provider
- *   reserve({model, provider, priceId, bytes, seconds, inputTokens, fallback}) → {res} (refused) |
+ *   reserve({model, provider, priceId, bytes, seconds, inputTokens, fallback}) → {res, next?} (refused) |
  *           {headers, settle(result) → headers|null}
- *     model: an STT_MODELS entry (model.maxOutputTokens bounds Gemini's output); seconds: the WAV's length, else null;
- *     inputTokens: Gemini's input tokens at most (audio, instructions and hints), null for OpenAI (its context window
- *     bounds it) and for the owner's non-WAV fallback; fallback: true for the second provider of a request.
+ *     model: an STT_MODELS entry (model.maxOutputTokens bounds Gemini's output); bytes: the recording's size; seconds:
+ *     the WAV's length, else null (OpenAI bills by duration: a tester's reservation counts them, else the bytes);
+ *     inputTokens: Gemini's input tokens at most (audio, instructions and hints), null for OpenAI and for the owner's
+ *     non-WAV fallback; fallback: true for the second provider of a request.
+ *     {res, next: true}: this provider can't take the recording (a tester's OpenAI reservation would pass the per-call
+ *     cap), but the next one may: it is asked instead, and res is the answer only when there is no next one.
  *     A refused fallback answers with what went wrong first (after a format refusal only: with the refusal itself).
  *     settle(result): null = keep the full reservation (failed, unknown); {billed: false} = nothing was billed;
  *     {usage, seconds} = the provider's report (usage may be null when an answer reported none).
@@ -441,7 +454,10 @@ export const OWNER_HOOKS = Object.freeze({
           const inTok = u.input_tokens ?? u.promptTokenCount ?? 0;
           const outTok = (u.output_tokens ?? u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0);
           const audioTok = u.input_token_details?.audio_tokens;
-          if (r.usage) console.log('transcribe', model.provider, 'tokens in', inTok, ...(audioTok != null ? ['audio', audioTok] : []), 'out', outTok, ...(r.seconds != null ? ['seconds', round1(r.seconds)] : []));
+          const wavSeconds = r.seconds != null ? ['seconds', round1(r.seconds)] : [];
+          // gpt-transcribe bills by duration: {type: "duration", seconds}; a token usage is logged as tokens
+          if (r.usage && Number.isFinite(u.seconds)) console.log('transcribe', model.provider, 'billed seconds', round1(u.seconds), ...wavSeconds);
+          else if (r.usage) console.log('transcribe', model.provider, 'tokens in', inTok, ...(audioTok != null ? ['audio', audioTok] : []), 'out', outTok, ...wavSeconds);
           else console.warn('transcribe', model.provider, 'finished without usage');
         }
         return null;
@@ -452,6 +468,8 @@ export const OWNER_HOOKS = Object.freeze({
 
 // The models with a key on this server, in order.
 const planFor = (env) => Object.values(STT_MODELS).filter((m) => env?.[PROVIDER_KEYS[m.provider]]);
+// …that can read this container: OpenAI doesn't take Ogg or FLAC (AUDIO_FORMATS openai: false), so Gemini reads those.
+const readsFormat = (m, format) => m.provider !== 'openai' || format.openai !== false;
 
 // Every attempt failed → our own answer. When a provider read the recording and refused it (too large, too short,
 // unreadable), that is the answer: the recording is the problem. A format refusal is one provider's view of the
@@ -510,15 +528,19 @@ export async function handleTranscribe(req, env, hooks = OWNER_HOOKS) {
   const v = validateAudio(bytes, { lang, prompt: req.headers.get('x-dictate-prompt') });
   if (!v.ok) return fail(v.status, v.code, v.error);
   const audio = v.audio;
-  const plan = planFor(env);
-  if (!plan.length) return h.unavailable('openai');
+  const keyed = planFor(env);
+  if (!keyed.length) return h.unavailable('openai');
+  const plan = keyed.filter((m) => readsFormat(m, audio.format));
+  if (!plan.length) return fail(415, 'unsupported_audio', UNSUPPORTED); // an Ogg or FLAC recording, and no Gemini key
 
   const failures = [];
   // A refused reservation: the first is answered as is. A refused fallback answers with what went wrong first, unless
   // that was only a format refusal: then the refusal (a tester's budget, say) is why nothing could read the recording.
   const refusal = (m) => (failures.every((f) => f.cls === 'format') ? m.res : failedResponse(failures));
+  let passOn = false; // the last provider's reservation said the next one should be asked instead ({res, next: true})
   for (const [i, model] of plan.entries()) {
-    if (i > 0 && !FALLBACK_ON.includes(failures.at(-1)?.cls)) break;
+    if (i > 0 && !passOn && !FALLBACK_ON.includes(failures.at(-1)?.cls)) break;
+    passOn = false;
     const key = env[PROVIDER_KEYS[model.provider]];
     const reserve = (inputTokens) => h.reserve({ model, provider: model.provider, priceId: model.priceId, bytes: audio.bytes.length, seconds: audio.seconds, inputTokens, fallback: i > 0 });
     let m = null, inputTokens = null;
@@ -534,7 +556,10 @@ export async function handleTranscribe(req, env, hooks = OWNER_HOOKS) {
       inputTokens = g.inputTokens;
     }
     m ||= await reserve(inputTokens);
-    if (m.res) return refusal(m);
+    if (m.res) {
+      if (m.next && i + 1 < plan.length) { passOn = true; continue; } // nothing was reserved or sent: ask the next provider
+      return refusal(m);
+    }
     let r;
     try {
       r = await (model.provider === 'gemini' ? geminiTranscribe : openaiTranscribe)(key, audio, model);

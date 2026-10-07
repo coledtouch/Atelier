@@ -10,7 +10,7 @@
 //      renderCut() — timing, size, then re-probes the MP4: duration 48 s, 1080×1350 (or 1088×1360), H.264, and the audio
 //      packet count / first pts equal to the source's (keep mode copies packets untouched — AAC priming included)
 //   5. shows the cut in a <video> and a Save link; logs a PASS/FAIL table.
-// Nothing here calls a provider: no Gemini, no Veo, no network beyond the app's own modules.
+// Nothing here calls a provider: no Gemini, no Omni or Runway, no network beyond the app's own modules.
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const root = new URL('../', import.meta.url);

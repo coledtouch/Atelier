@@ -1,15 +1,15 @@
 // Read aloud on the client (public/readaloud.js): Markdown → speakable text, segments, cache keys, the device-voice pick,
-// and the player's state machine driven with fake Audio / MediaSource / fetch / speechSynthesis / Cache Storage.
+// and the player's state machine driven with fake Audio / fetch / speechSynthesis / Cache Storage.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import '../public/vendor/marked.js'; // the UMD bundle sets globalThis.marked, as the app's <script> tag does
 import {
   TTS_BRIEF_V, PREVIEW_ID, VOICES, SPEEDS, READ_LIMITS, DEVICE_RATE, TTS_CACHE, CACHE_CAP, NOTES, SAY, DEFAULT_READ_ALOUD,
-  normalizeReadAloud, voiceChoices, voiceFor, speakable, segments, spokenUnits, textLang, pickDeviceVoice, cacheKey, previewKey, lruAdd, lruTouch, silentWav, createReader,
+  normalizeReadAloud, voiceChoices, voiceFor, RETIRED_VOICES, AI_CAPTION, speakable, segments, spokenUnits, textLang, pickDeviceVoice, cacheKey, previewKey, lruAdd, lruTouch, silentWav, createReader,
 } from '../public/readaloud.js';
 import {
   TTS_VOICE_IDS, TTS_BRIEF_V as SERVER_BRIEF_V, TTS_LIMITS, PREVIEW_ID as SERVER_PREVIEW_ID, PREVIEW_TEXT, previewId,
-  spokenUnits as serverUnits, validateTts,
+  spokenUnits as serverUnits, validateTts, RETIRED_VOICES as SERVER_RETIRED,
 } from '../src/tts.js';
 
 // ── helpers ──
@@ -40,13 +40,31 @@ test('the client voice list and brief version match src/tts.js', () => {
 
 test('normalizeReadAloud keeps a known voice and one of the speed steps', () => {
   assert.deepEqual(normalizeReadAloud(undefined), { ...DEFAULT_READ_ALOUD });
-  assert.deepEqual(normalizeReadAloud({ voice: 'cedar', speed: 1.25 }), { voice: 'cedar', speed: 1.25 });
+  assert.deepEqual(normalizeReadAloud({ voice: 'sulafat', speed: 1.25 }), { voice: 'sulafat', speed: 1.25 });
   assert.deepEqual(normalizeReadAloud({ voice: 'marin', speed: 3 }), { voice: 'atelier', speed: 1 }, 'provider voice names are not ids');
   assert.deepEqual(normalizeReadAloud({ voice: 'device', speed: '0.9' }), { voice: 'device', speed: 0.9 });
   assert.deepEqual(SPEEDS, [0.9, 1, 1.1, 1.25]);
   assert.deepEqual(voiceChoices(null).map((v) => v.id), VOICES.map((v) => v.id));
-  assert.deepEqual(voiceChoices(['cedar']).map((v) => v.id), ['cedar', 'device']);
+  assert.deepEqual(voiceChoices(['sulafat']).map((v) => v.id), ['sulafat', 'device']);
+  assert.deepEqual(voiceChoices(['cedar']).map((v) => v.id), ['atelier', 'device'], 'an old allow-list entry counts as its stand-in');
   assert.deepEqual(voiceChoices([]).map((v) => v.id), ['device']);
+});
+
+test('saved OpenAI voices (cedar, sage, retired in v80) migrate to the Atelier voice; the client and server maps agree', () => {
+  assert.deepEqual({ ...RETIRED_VOICES }, { ...SERVER_RETIRED });
+  assert.deepEqual({ ...RETIRED_VOICES }, { cedar: 'atelier', sage: 'atelier' });
+  for (const [old, now] of Object.entries(RETIRED_VOICES)) {
+    assert.ok(VOICES.some((v) => v.id === now), `${old} → ${now}, a voice that exists`);
+    assert.ok(!VOICES.some((v) => v.id === old), `${old} is no longer offered`);
+    assert.deepEqual(normalizeReadAloud({ voice: old, speed: 1.1 }), { voice: 'atelier', speed: 1.1 }, old);
+    assert.equal(validateTts({ voice: old, text: 'Hi.' }).voiceId, now, 'the server reads an old client id the same way');
+  }
+  // anything else unknown still falls back to the default
+  for (const voice of ['marin', 'alloy', 'Cedar', '', null, 7, '__proto__', 'toString']) assert.equal(normalizeReadAloud({ voice }).voice, 'atelier', String(voice));
+  assert.equal(normalizeReadAloud({ voice: 'sulafat' }).voice, 'sulafat');
+  assert.equal(normalizeReadAloud({ voice: 'device' }).voice, 'device');
+  assert.deepEqual(VOICES.map((v) => [v.id, v.provider]), [['atelier', 'gemini'], ['sulafat', 'gemini'], ['device', 'device']]);
+  assert.match(AI_CAPTION, /answer text is sent to Google./);
 });
 
 // ── speakable ──
@@ -157,10 +175,11 @@ test('cacheKey changes with the brief version, the voice and the text', async ()
   assert.match(a, /^\/__tts\/[0-9a-f]{64}$/);
   assert.equal(await cacheKey('atelier', 'Hello there.', TTS_BRIEF_V), a);
   assert.notEqual(await cacheKey('atelier', 'Hello there.', TTS_BRIEF_V + 1), a);
-  assert.notEqual(await cacheKey('cedar', 'Hello there.'), a);
+  assert.notEqual(await cacheKey('sulafat', 'Hello there.'), a);
   assert.notEqual(await cacheKey('atelier', 'Hello there!'), a);
-  assert.equal(previewKey('sage'), `/__tts/preview/v${TTS_BRIEF_V}/${PREVIEW_ID}/sage`);
-  assert.notEqual(previewKey('sage', TTS_BRIEF_V, previewId('Another line.')), previewKey('sage'));
+  assert.equal(previewKey('sulafat'), `/__tts/preview/v${TTS_BRIEF_V}/${PREVIEW_ID}/sulafat`);
+  assert.notEqual(previewKey('sulafat', TTS_BRIEF_V, previewId('Another line.')), previewKey('sulafat'));
+  assert.notEqual(previewKey('atelier'), previewKey('atelier', 1), 'v80 moved the brief version: old Atelier clips are never replayed');
 });
 
 test('lruAdd evicts the oldest clips past the count or byte cap; lruTouch moves a hit to the end', () => {
@@ -203,7 +222,7 @@ test('silentWav is a valid tiny RIFF/WAVE data URL', () => {
 
 // ── the player ──
 function rig(over = {}) {
-  const calls = [], toasts = [], states = [], refusals = [], refusalOpts = [], signouts = [], responses = [], audios = [], sources = [], spoken = [];
+  const calls = [], toasts = [], states = [], refusals = [], refusalOpts = [], signouts = [], responses = [], audios = [], spoken = [];
   let urls = 0;
   class FakeAudio extends EventTarget {
     constructor() { super(); audios.push(this); Object.assign(this, { paused: true, ended: false, currentTime: 0, playbackRate: 1, defaultPlaybackRate: 1, preservesPitch: false, plays: [], s: '' }); }
@@ -221,23 +240,6 @@ function rig(over = {}) {
     pause() { if (this.paused) return; this.paused = true; this.dispatchEvent(new Event('pause')); }
     finish() { this.ended = true; this.paused = true; this.dispatchEvent(new Event('pause')); this.dispatchEvent(new Event('ended')); }
   }
-  class FakeSB extends EventTarget {
-    constructor() { super(); Object.assign(this, { appended: [], removed: [], quota: over.quota ?? Infinity, startAt: 0, mode: 'segments', updating: false, buffered: { length: 0, start: () => 0, end: () => 0 } }); }
-    appendBuffer(b) {
-      if (this.appended.length >= this.quota) throw new DOMException('full', 'QuotaExceededError');
-      this.appended.push(new Uint8Array(b)); this.updating = true;
-      const n = this.appended.length; this.buffered = { length: 1, start: () => this.startAt, end: () => n };
-      queueMicrotask(() => { this.updating = false; this.dispatchEvent(new Event('updateend')); });
-    }
-    remove(a, b) { this.removed.push([a, b]); if (b !== Infinity) { this.startAt = Math.max(this.startAt, b); this.quota++; } queueMicrotask(() => this.dispatchEvent(new Event('updateend'))); }
-  }
-  class FakeMS extends EventTarget {
-    static isTypeSupported(t) { return t === 'audio/mpeg'; }
-    constructor() { super(); this.readyState = 'closed'; sources.push(this); }
-    addSourceBuffer(type) { this.type = type; return this.sb = new FakeSB(); }
-    endOfStream() { this.readyState = 'ended'; this.eos = true; }
-    open() { this.readyState = 'open'; this.dispatchEvent(new Event('sourceopen')); }
-  }
   const voices = over.voices || [{ name: 'Fred', lang: 'en-US', default: true }, { name: 'Ava (Natural)', lang: 'en-US' }];
   const speech = { cancels: 0, getVoices: () => voices, speak: (u) => spoken.push(u), cancel() { this.cancels++; } };
   class Utterance { constructor(text) { this.text = text; } }
@@ -245,7 +247,7 @@ function rig(over = {}) {
   class Meta { constructor(o) { Object.assign(this, o); } }
   const store = new Map();
   const storage = over.storage || { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
-  const ok = (i) => new Response(new Uint8Array([i + 1, 2, 3]), { headers: { 'content-type': 'audio/mpeg', 'x-tester-allowance': '{"dayLeft":1,"monthLeft":2}' } });
+  const ok = (i) => new Response(new Uint8Array([i + 1, 2, 3]), { headers: { 'content-type': 'audio/wav', 'x-tester-allowance': '{"dayLeft":1,"monthLeft":2}' } });
   const reader = createReader({
     apiHeaders: () => ({ 'content-type': 'application/json', 'x-app-pass': 'pw' }),
     getSettings: () => over.settings || { voice: 'atelier', speed: 1.1 },
@@ -263,16 +265,15 @@ function rig(over = {}) {
       calls.push(c);
       return (over.respond || ok)(calls.length - 1, c);
     },
-    Audio: FakeAudio, MediaSource: over.mse ? FakeMS : null,
+    Audio: FakeAudio,
     URL: { createObjectURL: () => `blob:fake/${++urls}`, revokeObjectURL() {} },
     speech, Utterance, caches: over.caches ?? null, storage, mediaSession: session, MediaMetadata: Meta,
     online: () => !over.offline, lang: () => 'en-US', stallMs: over.stallMs ?? 25,
   });
-  return { reader, calls, toasts, states, refusals, refusalOpts, signouts, responses, audios, sources, spoken, speech, session, storage, el: () => audios[0] };
+  return { reader, calls, toasts, states, refusals, refusalOpts, signouts, responses, audios, spoken, speech, session, storage, el: () => audios[0] };
 }
 const json = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
-const playTo = (el, t) => { el.currentTime = t; el.dispatchEvent(new Event('timeupdate')); };
-const mp3 = (bytes) => new Response(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), { headers: { 'content-type': 'audio/mpeg' } });
+const clip = (bytes) => new Response(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), { headers: { 'content-type': 'audio/wav' } });
 
 test('a tap starts the AI voice inside the gesture, streams segments in order and prefetches two ahead', async () => {
   const r = rig();
@@ -359,55 +360,10 @@ test('a second answer stops the first; stop() requests nothing new; a tap while 
   assert.equal(r.reader.stateFor('e5'), 'idle');
 });
 
-test('MediaSource path: one buffer, chunks appended in order, paced to the listener, end of stream after the last segment', async () => {
-  const r = rig({ mse: true });
-  const segs = segments(speakable(LONG), 'en-US');
-  assert.ok(segs.length >= 5);
+test('every AI voice plays whole clips; a system pause and the lock-screen next button are honored', async () => {
+  const r = rig();
   r.reader.toggle('e1', LONG);
-  assert.equal(r.sources.length, 1);
-  assert.equal(r.el().plays[0], 'blob:fake/1', 'play() on the MediaSource URL inside the tap');
-  r.sources[0].open();
-  // While segment 1 is heard, segments 2 and 3 may be fetched and buffered, and nothing past them.
-  await until(() => r.sources[0].sb?.appended.length === 3, 'three segments buffered');
-  await wait(30);
-  assert.equal(r.calls.length, 3, 'two ahead of the one being heard, not the whole answer');
-  assert.equal(r.sources[0].sb.appended.length, 3);
-  // The listener reaches segment 2 (one chunk per segment in the rig: segment k starts at k s): segment 4 is asked for.
-  playTo(r.el(), 1.2);
-  await until(() => r.calls.length === 4 && r.sources[0].sb.appended.length === 4, 'one more segment');
-  await wait(20);
-  assert.equal(r.calls.length, 4);
-  for (let k = 2; !r.sources[0].eos; k++) { playTo(r.el(), k + 0.2); await wait(5); assert.ok(k < 50); }
-  assert.equal(r.sources[0].type, 'audio/mpeg');
-  assert.equal(r.sources[0].sb.mode, 'sequence');
-  assert.deepEqual(r.sources[0].sb.appended.map((b) => b[0]), segs.map((_, i) => i + 1));
-  assert.equal(r.reader.stateFor('e1'), 'playing');
-  r.el().finish();
-  assert.equal(r.reader.stateFor('e1'), 'idle');
-});
-
-test('MediaSource path: a failed segment lets the buffered audio finish, then the device voice takes over', async () => {
-  const r = rig({ mse: true, respond: (i) => (i === 1 ? json(502, { code: 'tts_unavailable' }) : new Response(new Uint8Array([i + 1]), { headers: { 'content-type': 'audio/mpeg' } })) });
-  const segs = segments(speakable(LONG), 'en-US');
-  r.reader.toggle('e1', LONG);
-  r.sources[0].open();
-  await until(() => r.sources[0].eos, 'end of stream at the failed segment');
-  assert.deepEqual(r.sources[0].sb.appended.map((b) => b[0]), [1], 'segment 1 was buffered');
-  assert.ok(r.toasts.includes(SAY.down));
-  assert.equal(r.spoken.filter((u) => u.text.trim()).length, 0, 'the buffered audio plays first');
-  r.el().finish();
-  const said = r.spoken.filter((u) => u.text.trim());
-  assert.ok(segs[1].startsWith(said[0].text), 'then the device voice reads from segment 2');
-  assert.equal(r.reader.stateFor('e1'), 'playing');
-  r.reader.stop();
-});
-
-test('MediaSource trouble falls back to whole clips; a system pause and the lock-screen next button are honored', async () => {
-  const r = rig({ mse: true });
-  r.reader.toggle('e1', LONG);
-  r.sources[0].addSourceBuffer = () => { throw new DOMException('no mp3 here', 'NotSupportedError'); };
-  r.sources[0].open();
-  await until(() => r.el().src.startsWith('blob:') && r.el().src !== 'blob:fake/1' && r.reader.stateFor('e1') === 'playing', 'blob path');
+  await until(() => r.el().src.startsWith('blob:') && r.reader.stateFor('e1') === 'playing', 'blob path');
   const first = r.el().src;
   r.el().pause(); // e.g. headphones unplugged
   assert.equal(r.reader.stateFor('e1'), 'paused');
@@ -492,10 +448,15 @@ test('provider trouble (502) reads with the device voice; 429 is retried once; w
 });
 
 test('allowedVoices: another allowed AI voice stands in; none → the device voice, said once', async () => {
-  const sage = rig({ allowed: ['sage'] });
-  sage.reader.toggle('e1', 'Alpha one.');
-  await until(() => sage.calls.length === 1, 'request');
-  assert.equal(sage.calls[0].body.voice, 'sage');
+  const other = rig({ allowed: ['sulafat'] });
+  other.reader.toggle('e1', 'Alpha one.');
+  await until(() => other.calls.length === 1, 'request');
+  assert.equal(other.calls[0].body.voice, 'sulafat');
+  // a saved retired voice (cedar) reads as the Atelier voice
+  const old = rig({ settings: { voice: 'cedar', speed: 1 }, allowed: ['atelier', 'sulafat'] });
+  old.reader.toggle('e1', 'Alpha one.');
+  await until(() => old.calls.length === 1, 'request');
+  assert.equal(old.calls[0].body.voice, 'atelier');
   const none = rig({ allowed: [] });
   none.reader.toggle('e1', 'Alpha one.');
   none.reader.stop();
@@ -506,17 +467,17 @@ test('allowedVoices: another allowed AI voice stands in; none → the device voi
 
 test('previews: {voice, preview: true}, a second tap stops; the device preview speaks locally', async () => {
   const r = rig();
-  r.reader.preview('cedar');
-  assert.equal(r.reader.stateFor('preview:cedar'), 'preparing');
-  await until(() => r.reader.stateFor('preview:cedar') === 'playing', 'preview plays');
-  assert.deepEqual(r.calls[0].body, { voice: 'cedar', preview: true });
+  r.reader.preview('sulafat');
+  assert.equal(r.reader.stateFor('preview:sulafat'), 'preparing');
+  await until(() => r.reader.stateFor('preview:sulafat') === 'playing', 'preview plays');
+  assert.deepEqual(r.calls[0].body, { voice: 'sulafat', preview: true });
   assert.equal(r.session.metadata, null, 'previews leave the lock screen alone');
-  r.reader.preview('cedar');
-  assert.equal(r.reader.stateFor('preview:cedar'), 'idle');
+  r.reader.preview('sulafat');
+  assert.equal(r.reader.stateFor('preview:sulafat'), 'idle');
   r.reader.preview('device');
   assert.equal(r.reader.stateFor('preview:device'), 'playing');
   assert.match(r.spoken.at(-1).text, /device’s own voice/);
-  r.reader.preview('sage'); // switching voices stops the device preview
+  r.reader.preview('atelier'); // switching voices stops the device preview
   assert.equal(r.reader.stateFor('preview:device'), 'idle');
   assert.deepEqual(r.toasts, [], 'no first-read toast for previews');
 });
@@ -536,7 +497,7 @@ test('clips are cached on the device (Cache Storage + LRU index) and clearCache 
   await until(() => buckets.get(TTS_CACHE)?.size === 1, 'clip cached');
   const key = await cacheKey('atelier', 'Alpha one. Beta two.');
   assert.ok(buckets.get(TTS_CACHE).has(key));
-  assert.equal(buckets.get(TTS_CACHE).get(key).headers.get('content-type'), 'audio/mpeg');
+  assert.equal(buckets.get(TTS_CACHE).get(key).headers.get('content-type'), 'audio/wav');
   assert.deepEqual(JSON.parse(a.storage.getItem('atelier.ttsIndex')), [[key, 3]]);
   a.reader.stop();
   // Another page load (a new reader) replays it from the cache with no request.
@@ -699,59 +660,27 @@ test('a Japanese answer read with the device voice uses a Japanese voice and lan
   r.reader.stop();
 });
 
-test('MediaSource path: a stream that fails after its 200 hands over at that segment, with no replay of earlier audio', async () => {
-  const r = rig({ mse: true, respond: (i) => (i === 1
-    ? new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array([2, 9])); }, pull(c) { c.error(new TypeError('network error')); } }), { headers: { 'content-type': 'audio/mpeg' } })
-    : mp3([i + 1, 2, 3])) });
+test('an <audio> error during a clip hands over to the device voice alone: no AI clip plays alongside it', async () => {
+  let ctl;
+  const r = rig({ respond: (i) => (i === 1 ? new Response(new ReadableStream({ start(c) { ctl = c; } }), { headers: { 'content-type': 'audio/wav' } }) : clip([i + 1])) });
   const segs = segments(speakable(LONG), 'en-US');
   r.reader.toggle('e1', LONG);
-  r.sources[0].open();
-  await until(() => r.toasts.includes(SAY.down), 'the fallback is announced');
-  await until(() => r.sources[0].eos, 'end of stream at the failed segment');
-  assert.deepEqual(r.el().plays, ['blob:fake/1'], 'no whole-clip replay of segment 1');
-  assert.deepEqual(r.sources[0].sb.removed, [[1, Infinity]], 'the unheard part of segment 2 is dropped');
-  assert.equal(r.spoken.filter((u) => u.text.trim()).length, 0, 'segment 1 finishes first');
-  r.el().finish();
-  const said = r.spoken.filter((u) => u.text.trim());
-  assert.ok(segs[1].startsWith(said[0].text), 'then the device voice reads from segment 2');
-  r.reader.stop();
-});
-
-test('an <audio> error while streaming hands over to the device voice alone: no AI clip plays alongside it', async () => {
-  let ctl;
-  const r = rig({ mse: true, respond: (i) => (i === 1 ? new Response(new ReadableStream({ start(c) { ctl = c; } }), { headers: { 'content-type': 'audio/mpeg' } }) : mp3([i + 1])) });
-  r.reader.toggle('e1', LONG);
-  r.sources[0].open();
-  await until(() => r.sources[0].sb?.appended.length === 1 && ctl, 'segment 1 buffered, segment 2 waiting');
+  await until(() => r.reader.stateFor('e1') === 'playing' && ctl, 'segment 1 playing, segment 2 waiting');
+  const plays = r.el().plays.length;
   r.el().dispatchEvent(new Event('error')); // e.g. a decode error during playback
   assert.ok(r.toasts.includes(SAY.down));
-  assert.equal(r.spoken.filter((u) => u.text.trim()).length, 1, 'the device voice starts');
+  const said = r.spoken.filter((u) => u.text.trim());
+  assert.equal(said.length, 1, 'the device voice starts');
+  assert.ok(segs[0].startsWith(said[0].text), 'at the clip that failed');
   ctl.enqueue(new Uint8Array([2])); ctl.close();
   await wait(30);
-  assert.equal(r.sources[0].sb.appended.length, 1, 'nothing more is appended');
-  assert.ok(!r.el().plays.some((u) => u !== 'blob:fake/1' && u.startsWith('blob:')), 'no whole clip starts');
+  assert.equal(r.el().plays.length, plays, 'no whole clip starts');
   assert.equal(r.el().src, '');
   const n = r.calls.length;
   r.spoken.at(-1).onend();
   assert.equal(r.spoken.filter((u) => u.text.trim()).length, 2, 'the device voice carries on');
   await wait(20);
   assert.equal(r.calls.length, n, 'no more AI segments are fetched');
-  r.reader.stop();
-});
-
-test('MediaSource path: a full buffer waits for the listener (then frees what was heard) and never restarts a segment', async () => {
-  const r = rig({ mse: true, quota: 2 });
-  r.reader.toggle('e1', LONG);
-  r.sources[0].open();
-  await until(() => r.sources[0].sb?.appended.length === 2 && r.calls.length === 3, 'buffer full at segment 3');
-  await wait(30);
-  assert.equal(r.reader.stateFor('e1'), 'playing');
-  assert.deepEqual(r.el().plays, ['blob:fake/1'], 'no whole-clip replay');
-  assert.deepEqual(r.sources[0].sb.removed, [], 'nothing heard yet, nothing freed');
-  playTo(r.el(), 20); // the listener moves on: what was heard more than 10 s ago is freed and segment 3 goes in
-  await until(() => r.sources[0].sb.appended.length === 3, 'segment 3 appended');
-  assert.deepEqual(r.sources[0].sb.removed[0], [0, 10]);
-  assert.deepEqual(r.el().plays, ['blob:fake/1']);
   r.reader.stop();
 });
 
@@ -768,7 +697,7 @@ test('stopping during a 429 backoff sends nothing more', async () => {
 test('clips kept in memory are capped by size as well as count', async () => {
   const big = 5 * 1024 * 1024;
   const text = Array.from({ length: 8 }, (_, k) => paragraph(k * 6, 6)).join('\n\n');
-  const r = rig({ respond: () => mp3(new Uint8Array(big)) });
+  const r = rig({ respond: () => clip(new Uint8Array(big)) });
   const segs = segments(speakable(text), 'en-US');
   assert.ok(segs.length >= 6);
   r.reader.toggle('e1', text);
@@ -789,37 +718,41 @@ test('requests go out in reading order even when the cache keys (SHA-256) finish
   let n = 0; // each digest asked for at once finishes before the one asked for just before it
   Object.defineProperty(subtle, 'digest', { configurable: true, writable: true, value: (alg, data) => { const k = n++; return new Promise((res) => setTimeout(() => res(real(alg, data)), Math.max(0, 45 - 15 * k))); } });
   try {
-    for (const mse of [false, true]) {
-      n = 0;
-      const r = rig({ mse }), segs = segments(speakable(LONG), 'en-US');
-      r.reader.toggle('e1', LONG);
-      if (mse) r.sources[0].open();
-      await until(() => r.calls.length === 3, 'three segments asked for');
-      assert.deepEqual(r.calls.map((c) => c.body.text), segs.slice(0, 3), mse ? 'MediaSource path' : 'whole-clip path');
-      r.reader.stop();
-    }
+    const r = rig(), segs = segments(speakable(LONG), 'en-US');
+    r.reader.toggle('e1', LONG);
+    await until(() => r.calls.length === 3, 'three segments asked for');
+    assert.deepEqual(r.calls.map((c) => c.body.text), segs.slice(0, 3));
+    r.reader.stop();
   } finally { delete subtle.digest; }
 });
 
 test('voiceFor: the chosen voice, else the first AI voice the account may use, else the device voice', () => {
-  assert.equal(voiceFor('cedar', null), 'cedar');
-  assert.equal(voiceFor('cedar', ['cedar', 'sage']), 'cedar');
-  assert.equal(voiceFor('cedar', ['sage', 'atelier']), 'sage', 'in the account\'s order, as the reader picks');
-  assert.equal(voiceFor('cedar', ['device', 'nope', 'sulafat']), 'sulafat');
-  assert.equal(voiceFor('cedar', []), 'device');
+  assert.equal(voiceFor('sulafat', null), 'sulafat');
+  assert.equal(voiceFor('sulafat', ['atelier', 'sulafat']), 'sulafat');
+  assert.equal(voiceFor('sulafat', ['nope', 'atelier']), 'atelier', 'in the account\'s order, as the reader picks');
+  assert.equal(voiceFor('atelier', ['device', 'nope', 'sulafat']), 'sulafat');
+  assert.equal(voiceFor('sulafat', []), 'device');
   assert.equal(voiceFor('device', ['atelier']), 'device');
   assert.equal(voiceFor('nope', null), DEFAULT_READ_ALOUD.voice);
+  // Retired ids (the OpenAI voices) read as the Atelier voice, whether chosen or in an older allow-list.
+  for (const old of ['cedar', 'sage']) {
+    assert.equal(voiceFor(old, null), 'atelier', old);
+    assert.equal(voiceFor(old, ['atelier', 'sulafat']), 'atelier', old);
+    assert.equal(voiceFor(old, ['sulafat']), 'sulafat', `${old}: the account's own voice stands in`);
+    assert.equal(voiceFor('atelier', [old]), 'atelier', `an allow-list naming ${old} allows the Atelier voice`);
+    assert.equal(voiceFor(old, []), 'device');
+  }
   // Settings marks what the reader will use: always one of the voices it lists
-  for (const allowed of [null, [], ['sage'], ['sulafat', 'cedar'], ['nope']]) {
+  for (const allowed of [null, [], ['sulafat'], ['sulafat', 'cedar'], ['sage'], ['nope']]) {
     for (const v of VOICES) assert.ok(voiceChoices(allowed).some((c) => c.id === voiceFor(v.id, allowed)), `${v.id} with ${JSON.stringify(allowed)}`);
   }
 });
 
 test('a refused preview (tester out of allowance) just stops: the app says why, with no device-voice promise', async () => {
   const r = rig({ tester: true, respond: () => json(402, { error: 'Today’s allowance is used up.', code: 'tester_budget', scope: 'day' }) });
-  r.reader.preview('cedar');
+  r.reader.preview('sulafat');
   await until(() => r.refusals.length === 1, 'refusal reported');
-  assert.equal(r.reader.stateFor('preview:cedar'), 'idle');
+  assert.equal(r.reader.stateFor('preview:sulafat'), 'idle');
   assert.deepEqual(r.refusalOpts, [{ preview: true }], 'app.js leaves out "reading with the device voice"');
   await wait(20);
   assert.deepEqual(r.toasts, [], 'the reader adds nothing of its own');
@@ -831,7 +764,7 @@ test('a refused preview (tester out of allowance) just stops: the app says why, 
   assert.deepEqual(read.refusalOpts, [{ preview: false }]);
   // without onRefusal the reader says it, in preview words
   const plain = rig({ tester: true, noRefusal: true, respond: () => json(402, { code: 'tester_paused' }) });
-  plain.reader.preview('sage');
+  plain.reader.preview('atelier');
   await until(() => plain.toasts.length === 1, 'toast');
   assert.deepEqual(plain.toasts, [SAY.previewBudget]);
 });
@@ -844,10 +777,10 @@ test('preview failures say what happened in preview words, never "reading with t
     [() => json(502, { code: 'tts_unavailable' }), SAY.previewFailed, {}],
   ]) {
     const r = rig({ respond, ...over });
-    r.reader.preview('cedar');
+    r.reader.preview('sulafat');
     await until(() => r.toasts.length === 1, want);
     assert.deepEqual(r.toasts, [want]);
-    assert.equal(r.reader.stateFor('preview:cedar'), 'idle');
+    assert.equal(r.reader.stateFor('preview:sulafat'), 'idle');
     assert.equal(r.spoken.filter((u) => u.text.trim()).length, 0);
   }
   for (const k of Object.keys(SAY).filter((x) => x.startsWith('preview'))) assert.doesNotMatch(SAY[k], /device voice/, k);
@@ -865,7 +798,7 @@ test('a tester whose session ended (401) is handed to the app, which signs them 
   assert.equal(r.spoken.filter((u) => u.text.trim()).length, 0);
   // the cookie gone altogether (a plain 401) is the same for a tester, and for a preview
   const gone = rig({ tester: true, onSignedOut: (e, reader) => reader.stop(), respond: () => json(401, { error: 'Enter your passcode to use Atelier.' }) });
-  gone.reader.preview('cedar');
+  gone.reader.preview('sulafat');
   await until(() => gone.signouts.length === 1, 'app told (preview)');
   await wait(20);
   assert.deepEqual(gone.toasts, []);
@@ -888,9 +821,9 @@ test('no passcode and no tester session: the device voice reads with the passcod
   assert.deepEqual(r.toasts, [SAY.passcode], 'not "isn’t available on this account"');
   r.reader.toggle('e2', 'Beta two.');
   assert.deepEqual(r.toasts, [SAY.passcode], 'said once');
-  r.reader.preview('cedar');
+  r.reader.preview('sulafat');
   assert.deepEqual(r.toasts, [SAY.passcode, SAY.previewPasscode]);
-  assert.equal(r.reader.stateFor('preview:cedar'), 'idle');
+  assert.equal(r.reader.stateFor('preview:sulafat'), 'idle');
   r.reader.preview('device'); // the device voice needs nothing
   assert.equal(r.reader.stateFor('preview:device'), 'playing');
   r.reader.stop();
@@ -905,11 +838,11 @@ test('no passcode and no tester session: the device voice reads with the passcod
   assert.equal(r.toasts.filter((t) => t === SAY.passcode).length, 2);
   r.reader.stop();
   // a voice this account may not use isn't previewed either; one it may use is
-  const plan = rig({ tester: true, allowed: ['sage'] });
-  plan.reader.preview('cedar');
+  const plan = rig({ tester: true, allowed: ['sulafat'] });
+  plan.reader.preview('atelier');
   assert.deepEqual(plan.toasts, [SAY.previewPlan]);
   assert.equal(plan.calls.length, 0);
-  plan.reader.preview('sage');
+  plan.reader.preview('sulafat');
   await until(() => plan.calls.length === 1, 'allowed voice previewed');
   plan.reader.stop();
 });

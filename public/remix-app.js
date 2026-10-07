@@ -8,14 +8,14 @@
 // Money rules kept here: nothing billable starts before an Approve tap (filmQueue only starts shots whose approval key
 // matches their cost key); a shot whose start may have reached the provider ('unknown') needs a fresh approval; global
 // Stop never touches filming; a reload never starts anything new (boot only polls ops it finds in rx:ops).
-import * as R from './remix.js?v=79';
-import { cutsFrom } from './remix-cuts.js?v=79';
-import { advanceShot, shotRequest, firstFrameShape } from './remix-shots.js?v=79';
-import { buildGraph } from './remix-graph.js?v=79';
-import { createRemixStore, keys as rxKeys, SOURCE_MAX } from './remix-store.js?v=79';
-import { cardThumb, padFrameAt, grabFrame, canvasToDataUrl, ensureFonts, makeCanvas, composeFrame } from './remix-draw.js?v=79';
-import { frameAt as graphFrameAt } from './remix-graph.js?v=79';
-import { videoParts, planFor, noteFor, fmtDur } from './video.js?v=79';
+import * as R from './remix.js?v=80';
+import { cutsFrom } from './remix-cuts.js?v=80';
+import { advanceShot, shotRequest, firstFrameShape } from './remix-shots.js?v=80';
+import { buildGraph } from './remix-graph.js?v=80';
+import { createRemixStore, keys as rxKeys, SOURCE_MAX } from './remix-store.js?v=80';
+import { cardThumb, padFrameAt, grabFrame, canvasToDataUrl, ensureFonts, makeCanvas, composeFrame } from './remix-draw.js?v=80';
+import { frameAt as graphFrameAt } from './remix-graph.js?v=80';
+import { videoParts, planFor, noteFor, fmtDur } from './video.js?v=80';
 
 export const PLACEHOLDER = 'How should we remix it?'; // one line on a 360 px phone (the composer note and chips carry the rest)
 export const COPY = Object.freeze({
@@ -37,7 +37,7 @@ const LIVE = new Set(['starting', 'filming', 'downloading']);
 const TERMINAL = new Set(['ready', 'failed', 'filtered', 'budget', 'unknown', 'expired', 'missing']);
 const SAFE_IMG = /^data:image\/(png|jpe?g|webp);base64,[a-z\d+/=]+$/i;
 const CUT_SRC = /^data:video\/mp4;base64,[a-z\d+/=]+$/i;
-// A finished cut up to this size also goes into e.media (the Library; owner media sync uploads it like a Veo clip).
+// A finished cut up to this size also goes into e.media (the Library; owner media sync uploads it like a video clip).
 // Bigger cuts stay in rx:cut only: a data URL that size would be copied on every thread save (phones).
 export const LIBRARY_MAX = 16 * 1024 * 1024; // a cut is stored as a data: URL in its thread (copied on every save): keep phones light
 const toDataUrl = (blob) => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(blob); });
@@ -156,7 +156,7 @@ export function createRemix(deps) {
   const toast = deps.toast || (() => {});
   const ApiError = deps.ApiError || class extends Error { constructor(status, msg) { super(msg); this.status = status; } };
   let renderMod = null;
-  const loadRender = () => (renderMod ||= (deps.loadRender ? Promise.resolve(deps.loadRender()) : import('./remix-render.js?v=79')).catch((err) => { renderMod = null; throw err; }));
+  const loadRender = () => (renderMod ||= (deps.loadRender ? Promise.resolve(deps.loadRender()) : import('./remix-render.js?v=80')).catch((err) => { renderMod = null; throw err; }));
 
   const probes = new WeakMap(); // composer video → {status, info, caps, error}
   const files = new Map(); // entryId → source File (this session)
@@ -264,7 +264,7 @@ export function createRemix(deps) {
       return `<div class="rx-opts">${q}`
         + (noVeo ? '<span class="opt-note keep">New footage: Off (not in your plan)</span>'
           : `<button class="chip" data-rx-opt="footage" aria-label="New footage: ${esc(footageLabel(composerOpts.footage))} (tap to change)">New footage: ${esc(footageLabel(composerOpts.footage))} ▾</button>`
-          + (composerOpts.footage === 'off' ? '' : `<button class="chip" data-rx-opt="model">New shots: ${esc(m?.label || 'Veo')} ▾</button>`))
+          + (composerOpts.footage === 'off' ? '' : `<button class="chip" data-rx-opt="model">New shots: ${esc(m?.label || 'Gemini Omni')} ▾</button>`))
         + `<button class="chip${composerOpts.keep ? ' on' : ''}" data-rx-opt="keep" aria-pressed="${composerOpts.keep}">♪ Keep soundtrack</button>`
         + `<span class="opt-note keep">You approve the plan and any cost before filming · ${t ? 'planning reserves ≤ $0.11' : `planning ≈ ${Math.round(PLAN_EST_USD * 100)}¢`}</span>`
         + (q ? '' : '<button class="chip" data-ask-about>Ask about it</button>') + '</div>';
@@ -325,7 +325,8 @@ export function createRemix(deps) {
         fps: info.fps || 30, rotation: info.rotation || 0, vcodec: info.vcodec || null, vkbps: info.vkbps || null,
         audio: info.audio ?? null, hdr: Boolean(info.hdr), stored: false,
       },
-      opts: { footage, maxNew: R.footageCap(footage, text), model: composerOpts.model, res: '720p', fit: 'adjacent', audioMode: composerOpts.keep ? 'keep' : 'follow_cuts', shotModels: {} },
+      // tester: shot lengths snap only to what a tester's per-call cap allows (Omni 4 s / 6 s at 720p)
+      opts: { footage, maxNew: R.footageCap(footage, text), model: R.shotModelId(composerOpts.model) || R.DEFAULT_SHOT_MODEL, res: '720p', fit: 'adjacent', audioMode: composerOpts.keep ? 'keep' : 'follow_cuts', shotModels: {}, ...(tester() ? { tester: true } : {}) },
       cuts: null, plan: null, issues: [], shots: {}, assets: {}, approval: null, spent: { planUsd: 0 }, export: null,
     };
   }
@@ -499,7 +500,7 @@ export function createRemix(deps) {
 
   // ─────────── approval and filming ───────────
   function approve(e) {
-    const r = e.remix;
+    const r = R.migrateRemix(e.remix);
     if (!filmAllowed()) { toast('Video Remix isn’t part of your Atelier plan — nothing was filmed', { error: true }); return false; }
     if (blocked(r)) { toast('Fix the highlighted beats first', { error: true }); return false; }
     const cost = R.planCost(r, { tester: S?.tester || null });
@@ -582,6 +583,7 @@ export function createRemix(deps) {
       for (const [id, p] of resets) { const x = r.shots?.[id]; if (x) await applyShot(entryId, id, p, { op: x.op, model: x.model, seconds: x.seconds, res: x.res }); }
       const rec = await store.jobGet(entryId);
       for (const [id, s] of Object.entries(rec?.shots || {})) if (r.shots?.[id]) { const { at, ...rest } = s; void at; Object.assign(r.shots[id], rest); }
+      R.migrateRemix(r, { keepOps: true }); // a pre-Omni remix: Veo model ids → Omni (advanceShot expires a Veo op, everywhere)
       const t = now();
       const startIds = job.stopped || job.forget || r.phase !== 'film' || !filmAllowed() ? [] : R.filmQueue(r, { tester: tester(), now: t });
       const liveIds = Object.entries(r.shots || {}).filter(([, s]) => s.enabled !== false && (s.state === 'filming' || s.state === 'downloading')).map(([id]) => id);
@@ -926,7 +928,7 @@ export function createRemix(deps) {
   }
   const statusHtml = (text, e) => `<span class="status rx-status"><span class="shimmer" data-rx-status>${esc(text)}</span>${e?.startedAt ? `<span class="tick" data-since="${e.startedAt}" aria-hidden="true"></span>` : ''}</span>`;
   function bodyHtml(e) {
-    const r = e.remix;
+    const r = R.migrateRemix(e.remix);
     const ratio = r.source?.width && r.source?.height ? `${r.source.width}/${r.source.height}` : '4/5';
     if (e.pending) return `<div class="rx-pending" style="aspect-ratio:${ratio}">${statusHtml(e.status || 'Watching & listening', e)}</div>`;
     if (e.error) return deps.errorBox ? deps.errorBox(e) : `<p class="rx-error">${esc(e.error)}</p>`;
@@ -950,7 +952,8 @@ export function createRemix(deps) {
   const filmStatus = (r) => {
     const all = Object.values(r.shots || {}).filter((s) => s.enabled !== false);
     const done = all.filter((s) => s.state === 'ready').length;
-    const prov = all.some((s) => R.shotModel(s.model)?.provider === 'runway') ? 'Runway' : 'Veo';
+    const rw = all.filter((s) => R.shotModel(s.model)?.provider === 'runway').length;
+    const prov = rw === all.length ? 'Runway' : rw ? 'Gemini Omni and Runway' : 'Gemini Omni';
     return `Filming ${Math.min(all.length, done + 1)} of ${all.length} with ${prov} · usually 1–6 min`;
   };
   function storyHtml(e) {
@@ -992,7 +995,8 @@ export function createRemix(deps) {
     const acts = c.acts.map((a) => (a === 'play' ? act('rx-play-shot', 'Play ▶') : a === 'edit' ? act('rx-finetune', 'Edit prompt') : a === 'retry' ? act('rx-retry-shot', 'Retry') : a === 'retry-anyway' ? act('rx-retry-anyway', 'Retry anyway · needs approval') : a === 'refilm' ? act('rx-retry-anyway', `Refilm · ${price}`) : act('rx-card-instead', 'Use a card'))).join('');
     const changed = s.state === 'ready' && s.filmedKey && s.contentKey && s.filmedKey !== s.contentKey
       ? `<p class="rx-issue warn">Changed since filming</p>${act('rx-keep-footage', 'Keep current footage')}${act('rx-retry-anyway', `Refilm · ${price} · needs approval`)}` : '';
-    const unknownOwner = s.state === 'unknown' && !tester() && R.shotModel(s.model)?.provider === 'veo' ? '<a class="chip" href="https://aistudio.google.com/usage" target="_blank" rel="noopener">Check usage in AI Studio</a>' : '';
+    const prov = R.shotModel(s.model)?.provider;
+    const unknownOwner = s.state === 'unknown' && !tester() && (prov === 'omni' || prov === 'veo') ? '<a class="chip" href="https://aistudio.google.com/usage" target="_blank" rel="noopener">Check usage in AI Studio</a>' : '';
     return `<div class="rx-shot" data-shot="${esc(id)}">${chip}${acts}${unknownOwner}${changed}</div>`;
   }
   function costHtml(e) {

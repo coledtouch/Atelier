@@ -1,14 +1,14 @@
 // LinkedIn tester mode: pure helpers shared by app.js and the tests (spec 2026-09-30 §8, addendum A2/A3/A7b).
 // Money is integer micro-dollars (µ$) everywhere, as the Worker sends it.
 
-export const VEO_CAP = 1_000_000; // A7b: one Veo call never reserves more than $1.00
+export const VEO_CAP = 1_000_000; // A7b: one video call (Gemini Omni) never reserves more than $1.00
 export const MAX_IMAGES = 8; // spec §6: at most 8 images in one tester chat request (video frames count)
 export const CLIP_MAX_BYTES = 200 * 1024 * 1024, CLIP_MAX_SECONDS = 180; // A2: larger clips go as frames
 export const PROFILE_MAX = 300_000; // GET/PUT /api/tester/profile cap (bytes)
-// Veo USD per second of video by resolution. Mirrors src/tester/prices.js (a test keeps the two equal).
+// Video USD per second by resolution, as reserved (Gemini Omni: 5,792 tokens a second at 720p x $17.50/MTok = $0.10136;
+// 1080p and 4K at 2x and 4x, an assumption). Mirrors src/tester/prices.js perSecond (a test keeps the two equal).
 export const VEO_PER_SECOND = Object.freeze({
-  'gemini:veo-3.1-lite-generate-preview': Object.freeze({ '720p': 0.05, '1080p': 0.08 }),
-  'gemini:veo-3.1-fast-generate-preview': Object.freeze({ '720p': 0.1, '1080p': 0.12, '4k': 0.3 }),
+  'gemini:gemini-omni-1.1-flash': Object.freeze({ '360p': 0.10136, '720p': 0.10136, '1080p': 0.20272, '4k': 0.40544 }),
 });
 const MARGIN_PCT = 125; // prices.js MARGIN 1.25: reserve = price × 1.25
 
@@ -92,20 +92,23 @@ export function resetIn(ms, now = Date.now()) {
   return `on ${new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 }
 
-// ── Veo (A7b): offer only the durations and resolutions whose worst case fits ──
-/** Reserve for one Veo clip in µ$ (price × seconds × 1.25, rounded up), or null for an unknown model/resolution. */
+// ── generated video (A7b): offer only the durations and resolutions whose worst case fits ──
+/** Reserve for one clip in µ$ (price × seconds × 1.25, rounded up), or null for an unknown model/resolution. */
 export function veoCost(model, seconds, resolution) {
   const usd = VEO_PER_SECOND[model]?.[resolution];
   if (usd == null || !(seconds > 0)) return null;
   return Math.ceil((seconds * Math.round(usd * 1e6) * MARGIN_PCT) / 100);
 }
-/** The app's video params → Veo's request: '16:9hd' is 1080p and always 8 s, everything else 720p. */
-export const veoShape = (params = {}) => (params.aspect === '16:9hd' ? { seconds: 8, resolution: '1080p' } : { seconds: +params.secs || 6, resolution: '720p' });
-/** Which choices fit: {secs: [4, 6, 8 that fit at 720p], hd: 8 s 1080p fits, cheapest: µ$ of the smallest clip}. */
+/** The app's video params → the clip's length and resolution: '16:9hd' is 1080p, everything else 720p (Omni films
+ *  any length at either). */
+export const veoShape = (params = {}) => ({ seconds: +params.secs || 6, resolution: params.aspect === '16:9hd' ? '1080p' : '720p' });
+/** Which choices fit: {secs: [4, 6, 8 that fit at 720p], hd: some length fits at 1080p, hdSecs: those lengths,
+ *  cheapest: µ$ of the smallest clip, room}. */
 export function veoChoices(model, left) {
   const room = headroom(left, VEO_CAP).amount;
   const fits = (s, r) => { const c = veoCost(model, s, r); return c != null && c <= room; };
-  return { secs: [4, 6, 8].filter((s) => fits(s, '720p')), hd: fits(8, '1080p'), cheapest: veoCost(model, 4, '720p'), room };
+  const hdSecs = [4, 6, 8].filter((s) => fits(s, '1080p'));
+  return { secs: [4, 6, 8].filter((s) => fits(s, '720p')), hd: hdSecs.length > 0, hdSecs, cheapest: veoCost(model, 4, '720p'), room };
 }
 
 /** A2: a clip the tester may not send whole (Gemini then gets frames, like any over-limit clip). */

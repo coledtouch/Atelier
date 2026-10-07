@@ -9,11 +9,13 @@
 //
 // MARGIN
 //   Reserve functions (chatWorstCase, imageCost, veoCost) multiply by MARGIN by default.
-//   Settle functions (chatActual, imageActual) return the exact cost by default. Pass `margin: true|false` to override.
+//   Settle functions (chatActual, imageActual, omniActual) return the exact cost by default. Pass `margin: true|false` to override.
 //
 // CONSERVATIVE RULES
 //   - Long-context tiers: the top-level rates in each entry are the HIGHER tier, and the worst case always uses them.
 //     chatActual uses the tier the reported prompt actually fell in (`base` holds the lower tier and its threshold).
+//     Claude Haiku 5.5 is the one Anthropic model with a tier: $0.10/$0.50 up to 100K prompt tokens (input + cache
+//     reads + cache writes), $0.50/$2.50 above.
 //   - Fresh input is reserved at max(input, cacheWrite). src/anthropic.js sends top-level cache_control (a 5-minute
 //     write, 1.25x input), and OpenAI GPT-6 Chat Completions write the cache by default (1.25x input).
 //     cacheWrite here is Anthropic's 5-MINUTE rate, the only TTL the code uses. If 1-hour caching is ever enabled,
@@ -31,11 +33,10 @@
 // ASSUMPTIONS (estimates, not published numbers; each one is a named export so it can be tuned)
 //   WEB_SEARCH_RESULT_TOKENS, GEMINI_VIDEO_TOKENS_PER_SECOND, OPENAI_EDIT_IMAGE_TOKENS,
 //   GEMINI_PRO_IMAGE_THINKING_TOKENS, GEMINI_FLASH_IMAGE_THINKING_TOKENS, DEFAULT_IMAGE_PROMPT_TOKENS,
-//   OPENAI_TTS_AUDIO_TOKENS_PER_SECOND, TTS_MIN_CHARS_PER_SECOND, TTS_CUTOFF_FACTOR, TTS_INSTRUCTION_TOKENS (read aloud,
-//   src/tts.js).
+//   TTS_MIN_CHARS_PER_SECOND, TTS_INSTRUCTION_TOKENS (read aloud, src/tts.js), OMNI_TOKENS_PER_SECOND (by resolution: only 720p is published), STT_MIN_BYTES_PER_SECOND (dictation).
 //   The provider floors in MIN_OUTPUT mirror the max_tokens clamps in src/anthropic.js and src/gemini.js (2026-09-30).
 //
-// SOURCES (all read 2026-09-30)
+// SOURCES (read 2026-09-30; Anthropic, Google and OpenAI re-read 2026-10-07 for the v80 model update)
 //   Anthropic  https://platform.claude.com/docs/en/about-claude/pricing
 //              (and the claude-api skill reference: models table cached 2026-09-25, shared/model-migration.md)
 //              https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback   fallback billing, usage.iterations
@@ -47,20 +48,22 @@
 //   Google     https://ai.google.dev/gemini-api/docs/pricing   (page last updated 2026-10-01 UTC)
 //              https://ai.google.dev/gemini-api/docs/media-resolution   https://ai.google.dev/gemini-api/docs/video-understanding
 //              https://ai.google.dev/gemini-api/docs/tokens             https://ai.google.dev/gemini-api/docs/image-generation
+//              https://ai.google.dev/gemini-api/docs/omni   https://ai.google.dev/gemini-api/docs/deprecations
+//   OpenAI     https://developers.openai.com/api/docs/models/gpt-transcribe   ($0.0045 per minute of audio)
 //   Z.ai       https://docs.z.ai/guides/overview/pricing
 //   DeepSeek   https://api-docs.deepseek.com/quick_start/pricing
 //   Meta       https://dev.meta.ai/docs/pricing-rate-limits
 //   NVIDIA     https://developer.nvidia.com/nim   ("free access to NIM API endpoints for unlimited prototyping",
 //              for development and testing). There is no per-token price page; meter at $0 and count requests.
 
-export const PRICES_CHECKED = '2026-09-30';
+export const PRICES_CHECKED = '2026-10-07';
 export const MARGIN = 1.25;
 
 /** Spec §6: one call never reserves more than $0.25. Default budget for maxTokensWithin. */
 export const PER_CALL_RESERVE_CAP = 250_000;
 /** Addendum A7b: a chat call with Claude web search may reserve up to $0.50 (fallbacks off, max_uses 3, 2 or 1). */
 export const WEB_CALL_RESERVE_CAP = 500_000;
-/** Addendum A7b: one Veo video never reserves more than $1.00 (and must fit the tester's day, month and pool). */
+/** Addendum A7b: one generated video (Gemini Omni) never reserves more than $1.00 (and must fit the day, month and pool). */
 export const VEO_CALL_RESERVE_CAP = 1_000_000;
 
 /** Anthropic web search fee: $10 per 1,000 searches (failed searches are not billed). */
@@ -90,48 +93,45 @@ export const OPENAI_EDIT_IMAGE_TOKENS = 48_600;
  * published. The router should set generationConfig.maxOutputTokens to (image tokens + this) so the provider enforces it.
  */
 export const GEMINI_PRO_IMAGE_THINKING_TOKENS = 8_192;
-export const GEMINI_FLASH_IMAGE_THINKING_TOKENS = 4_096; // 3.1 Flash Image defaults to thinking_level "minimal"
+export const GEMINI_FLASH_IMAGE_THINKING_TOKENS = 8_192; // Nano Banana 2.1 thinks at "medium" by default (3.1 Flash Image: "minimal")
 /** ASSUMPTION. Prompt-token allowance when imageCost is called without `promptTokens`. Pass ceil(promptBytes / 3). */
 export const DEFAULT_IMAGE_PROMPT_TOKENS = 4_096;
 /** Output floors the server code applies: anthropic.js clamps max_tokens to >= 1024; gemini.js native video chat to >= 256. */
 export const MIN_OUTPUT = Object.freeze({ anthropic: 1024, geminiNative: 256 });
-/**
- * ASSUMPTION. Audio output tokens per second of gpt-4o-mini-tts speech. OpenAI publishes only "about $0.015 a minute"
- * (≈ 21 tokens/s at $12/MTok); users report runs above that. 50 covers them. Settle reads the exact count from the
- * speech.audio.done usage; a tester stream stopped before it (OpenAI sends usage only at the end) is settled on the
- * audio it timed at this rate, never below the reservation.
+/*
+ * Read aloud is Gemini speech only (gemini-3.8-flash-tts for the Atelier voice, gemini-3.8-flash-lite-tts for Sulafat).
  * Gemini TTS publishes 25 audio tokens per second, but the reported count runs above it: a live Sulafat read on
  * 2026-10-01 reported 388 audio tokens for 12.2 s (≈ 31.8/s). So Gemini settles at max(the reported count, seconds x 25):
  * seconds x 25 is only a floor for an answer that reports less. The reservation stays a true ceiling because a tester's
  * maxOutputTokens is the reserved audio tokens (the reported count can't pass it) and ttsActual's maxAudioTokens holds
- * the seconds floor to the same bound.
+ * the seconds floor to the same bound. Both models are reserved at their reserveTokensPerSecond (32) and settled so.
  */
-export const OPENAI_TTS_AUDIO_TOKENS_PER_SECOND = 50;
 /**
  * ASSUMPTION. The slowest read-aloud delivery, in spoken units per second: the brief's slow, pause-rich pace runs ~11-13
  * characters of prose a second. A tester's reservation counts the units of src/tts.js ttsCeilingUnits, a ceiling on the
  * reading time: digits (4 units) and CJK characters (3) as in spokenUnits, a symbol said as a word ($ % & @ # + = * / \
  * and the like) 10, any other symbol, fraction or Roman numeral (≤ → ≈ < > | ~ ^ ½) 21 and an emoji cluster (™ and ©
  * included) 37 or more, so number-, symbol- or emoji-heavy and Chinese/Japanese/Korean text is reserved for its longer
- * reading time. At 10 characters a second those weights cover names of about 12, 26 and 46 characters; the cut-off
- * (TTS_CUTOFF_FACTOR) covers any text read slower still.
+ * reading time. At 10 characters a second those weights cover names of about 12, 26 and 46 characters. A text read
+ * slower still is held to its reservation at the source: a tester's maxOutputTokens is the reserved audio tokens.
  */
 export const TTS_MIN_CHARS_PER_SECOND = 8;
-/**
- * ASSUMPTION. OpenAI speech has no output bound, so a tester's is cut off (the response errors and the upstream is
- * cancelled) once its audio plays longer than this many times the reserved reading time (ttsReserved seconds), plus one
- * second for the silence at either end of a very short clip (ttsReserved cutoffSeconds; src/tts.js times the mp3 from
- * its frame headers). The cut-off bounds what the tester hears; the settle bounds what is billed: a stream stopped before
- * OpenAI reported its usage pays max(the reservation, the audio it timed x OPENAI_TTS_AUDIO_TOKENS_PER_SECOND), one
- * stopped after it pays max(the reservation, that usage, the complete bill). So a text read slower than its ceiling
- * (fullwidth symbols, spelled-out letters, pauses) pays for the audio it got even when that runs past the reservation
- * (the Ledger caps an overrun at OVERRUN x). Prose runs about 0.65x its reserved time, so only a runaway or mis-read
- * text reaches the cut. (Gemini is bounded at the source instead: a tester's maxOutputTokens is the reserved audio
- * tokens.)
- */
-export const TTS_CUTOFF_FACTOR = 2;
-/** ASSUMPTION. Input tokens the server-side voice brief (src/tts.js TTS_BRIEF, ~120 tokens) or Gemini style adds. */
+/** ASSUMPTION. Input tokens the Gemini voice style (src/tts.js GEMINI_STYLE, well under 100 tokens) adds. */
 export const TTS_INSTRUCTION_TOKENS = 200;
+/**
+ * Gemini Omni Flash video output tokens per second, by resolution. Published: "5,792 tokens per second of 720p video"
+ * (pricing page, 2026-10-07) at $17.50 per 1M video output tokens = $0.10136 a second. ASSUMPTION for the others, which
+ * the page doesn't price: 360p at the 720p rate (never less), 1080p twice it and 4K four times (both are upscaled).
+ * Reservations use these; a finished video settles from the interaction's reported usage (omniActual).
+ */
+export const OMNI_TOKENS_PER_SECOND = Object.freeze({ '360p': 5_792, '720p': 5_792, '1080p': 11_584, '4k': 23_168 });
+/**
+ * ASSUMPTION. The lowest bit rate a dictation recording is reserved at when its length can't be read from its header
+ * (only WAV says how long it is): 1,000 bytes a second (8 kbit/s). The app records AAC/Opus at 64 kbit/s (8,000 B/s),
+ * and speech codecs don't go below ~6 kbit/s. gpt-transcribe bills per second of audio, so such a recording is reserved
+ * as its byte length at this rate (120 s at 64 kbit/s: 983 s, $0.074 x 1.25); settle reads the billed seconds.
+ */
+export const STT_MIN_BYTES_PER_SECOND = 1_000;
 
 export class PriceError extends Error {
   constructor(code, message) {
@@ -164,7 +164,7 @@ const GEMINI_PRO_LONG = 200_000; // "prompts <= 200k tokens"
 const nvidiaChat = (note) => ({ kind: 'chat', provider: 'nvidia', free: true, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, imageTokens: 0, source: SRC.nvidia, note });
 
 const TABLE = {
-  // ── Anthropic (claude-api skill + platform.claude.com pricing page). No long-context premium: 1M at standard rates.
+  // ── Anthropic (claude-api skill + platform.claude.com pricing page). No long-context premium except Haiku 5.5's tier.
   'anthropic:claude-opus-5-5': anthropic(4, 20, 5, 8, 0.2, {
     fallbacks: ['anthropic:claude-opus-5', 'anthropic:claude-opus-4-8'],
     note: 'Cache reads 0.05x. Thinking is always on and bills as output inside max_tokens.',
@@ -172,6 +172,13 @@ const TABLE = {
   'anthropic:claude-sonnet-5-5': anthropic(2, 10, 2.5, 4, 0.2, {
     fallbacks: ['anthropic:claude-sonnet-5'],
     note: 'Default fallback retries cyber and frontier_llm declines on Claude Sonnet 5.',
+  }),
+  // Haiku 5.5: two rate cards by prompt length (claude-api skill, models.md / model-migration.md cached 2026-10-06):
+  // $0.10 / $0.50 up to 100K prompt tokens, $0.50 / $2.50 above; cache reads 0.1x input, 5-minute writes 1.25x, 1-hour
+  // writes 2x. No server-side refusal fallback for this model.
+  'anthropic:claude-haiku-5-5': anthropic(0.5, 2.5, 0.625, 1, 0.05, {
+    base: { upTo: 100_000, input: 0.1, output: 0.5, cacheWrite: 0.125, cacheWrite1h: 0.2, cacheRead: 0.01 },
+    note: 'The fast role (titles, routing, helpers). Adaptive thinking bills as output inside max_tokens. Worst case at the >100K rates.',
   }),
   'anthropic:claude-fable-5-1': anthropic(10, 50, 12.5, 20, 0.25, {
     fallbacks: ['anthropic:claude-opus-5', 'anthropic:claude-opus-4-8'],
@@ -271,11 +278,12 @@ const TABLE = {
     thinkingTokens: GEMINI_PRO_IMAGE_THINKING_TOKENS, source: SRC.gemini,
     note: '$0.134 per 1K/2K image, $0.24 per 4K. Input image 560 tokens. Thinking/text output $12/MTok on top.',
   },
-  'gemini:gemini-3.1-flash-image': {
-    kind: 'image', provider: 'gemini', textInput: 0.5, imageInput: 0.5, textOutput: 3, imageOutput: 60,
-    imageTokens: { '1K': 1_120, '2K': 1_680, '4K': 2_520 }, inputImageTokens: 2_240,
+  // Nano Banana 2.1 replaces the deprecated gemini-3.1-flash-image (Gemini API changelog, 2026-10-07).
+  'gemini:gemini-nano-banana-2.1': {
+    kind: 'image', provider: 'gemini', textInput: 1.5, imageInput: 1.5, textOutput: 7.5, imageOutput: 30,
+    imageTokens: { '1K': 1_120, '2K': 1_680, '4K': 3_780 }, inputImageTokens: 2_240,
     thinkingTokens: GEMINI_FLASH_IMAGE_THINKING_TOKENS, source: SRC.gemini,
-    note: '$0.067 per 1K, $0.101 per 2K, $0.151 per 4K. Input-image tokens unpublished: 2,240 (Gemini 3 ultra_high) assumed.',
+    note: '$0.0336 per 1K, $0.0504 per 2K, $0.113 per 4K. Input-image tokens unpublished: 2,240 (Gemini 3 ultra_high) assumed.',
   },
   'meta:muse-image-1.0': {
     kind: 'image', provider: 'meta', perImageUsd: 0.01,
@@ -286,26 +294,24 @@ const TABLE = {
   'black-forest-labs/flux.2-klein-4b': { kind: 'image', provider: 'nvidia', free: true, source: SRC.nvidia, note: 'Also the EDIT_MODEL.' },
   'black-forest-labs/flux.1-schnell': { kind: 'image', provider: 'nvidia', free: true, source: SRC.nvidia },
 
-  // ── Video. Veo bills per second of generated video (audio included), only when a video is produced.
-  'gemini:veo-3.1-lite-generate-preview': {
-    kind: 'video', provider: 'gemini', perSecond: { '720p': 0.05, '1080p': 0.08 }, durations: [4, 6, 8], source: SRC.gemini,
-  },
-  'gemini:veo-3.1-fast-generate-preview': {
-    kind: 'video', provider: 'gemini', perSecond: { '720p': 0.1, '1080p': 0.12, '4k': 0.3 }, durations: [4, 6, 8], source: SRC.gemini,
-    note: '1080p and 4K are 8 s only: 8 s 1080p reserves $1.20, above the $1.00 tester day limit.',
-  },
-  'gemini:veo-3.1-generate-preview': {
-    kind: 'video', provider: 'gemini', perSecond: { '720p': 0.4, '1080p': 0.4, '4k': 0.6 }, durations: [4, 6, 8], source: SRC.gemini,
-    tester: false, why: 'the shortest clip (4 s at $0.40/s, x1.25) reserves $2.00, above the $1.00 default tester day limit',
+  // ── Video. Gemini Omni Flash (Interactions API) bills output tokens: $17.50 per 1M video tokens, 5,792 a second at
+  // 720p ($0.10136/s); input $1.50 and text/thinking output $9.00 per 1M. Only a produced video is billed. perSecond is
+  // the reserve rate (OMNI_TOKENS_PER_SECOND x $17.50/MTok); a finished video settles from its usage (omniActual).
+  // Veo 3.1 on the Gemini API shuts down 2026-10-22 (deprecations page); the owner keeps Veo 3.1 through Runway.
+  'gemini:gemini-omni-1.1-flash': {
+    kind: 'video', provider: 'gemini', omni: true, input: 1.5, videoOutput: 17.5, textOutput: 9,
+    perSecond: { '360p': 0.10136, '720p': 0.10136, '1080p': 0.20272, '4k': 0.40544 }, durations: [4, 6, 8], source: SRC.gemini,
+    note: '720p is published ($0.10136/s); 360p/1080p/4K reserve at the OMNI_TOKENS_PER_SECOND assumption. 8 s at 720p reserves $1.0136, over the $1.00 tester call cap, so testers get 4 s and 6 s.',
   },
   'nvidia/cosmos3-nano': { kind: 'video', provider: 'nvidia', free: true, source: `${SRC.nvidia} ; src/worker.js FUNCTIONS`, note: 'NVCF function; counted per request.' },
   'atelier/motion-still': { kind: 'video', provider: 'local', free: true, source: 'public/app.js VIDEO_MODELS (a free FLUX keyframe plus an in-browser camera move)' },
 
   // ── Speech (read aloud, src/tts.js). USD per 1M tokens: textInput (the text plus the voice brief), audioOutput.
-  'openai:gpt-4o-mini-tts-2025-12-15': {
-    kind: 'tts', provider: 'openai', textInput: 0.6, audioOutput: 12, audioTokensPerSecond: OPENAI_TTS_AUDIO_TOKENS_PER_SECOND,
-    source: `${SRC.openai} ; https://developers.openai.com/api/docs/models/gpt-4o-mini-tts`,
-    note: 'Pinned snapshot. Audio tokens per second are unpublished (≈ $0.015/min ≈ 21/s); settle uses speech.audio.done usage.',
+  // (OpenAI gpt-4o-mini-tts retires 2027-01-06 with no /v1/audio/speech successor: read aloud is Gemini-only from v80.)
+  'gemini:gemini-3.8-flash-tts': {
+    kind: 'tts', provider: 'gemini', textInput: 1, audioOutput: 18, audioTokensPerSecond: 25, reserveTokensPerSecond: 32,
+    promo: { until: '2026-12-31', textInput: 0.5, audioOutput: 9 }, source: SRC.gemini,
+    note: 'The Atelier voice. $0.50 / $9.00 through 2026-12-31, then $1.00 / $18.00 (the standing price, used for the worst case). 25 audio tokens per second published, a floor; reserved at 32/s as for Sulafat.',
   },
   'gemini:gemini-3.8-flash-lite-tts': {
     kind: 'tts', provider: 'gemini', textInput: 1, audioOutput: 12, audioTokensPerSecond: 25, reserveTokensPerSecond: 32,
@@ -314,10 +320,10 @@ const TABLE = {
   },
 
   // ── Dictation (speech to text, src/transcribe.js). USD per 1M tokens; one input rate for audio and text.
-  'openai:gpt-4o-mini-transcribe-2025-12-15': {
-    kind: 'stt', provider: 'openai', input: 1.25, output: 5, contextTokens: 16_000, maxOutputTokens: 2_000,
-    source: `${SRC.openai} ; https://developers.openai.com/api/docs/models/gpt-4o-mini-transcribe`,
-    note: 'Pinned snapshot, billed by tokens (usage.type "tokens"). The worst case is its whole 16,000-token context plus its 2,000 output tokens.',
+  'openai:gpt-transcribe': {
+    kind: 'stt', provider: 'openai', perMinute: 0.0045,
+    source: `${SRC.openai} ; https://developers.openai.com/api/docs/models/gpt-transcribe`,
+    note: 'Billed by audio duration ($0.0045 a minute; usage {type: "duration", seconds}). Reserved on the WAV length, else on the bytes at STT_MIN_BYTES_PER_SECOND.',
   },
   'gemini:gemini-3.5-flash-lite#stt': {
     kind: 'stt', provider: 'gemini', input: 0.3, output: 2.5, audioTokensPerSecond: 32,
@@ -378,7 +384,7 @@ const rateSet = (r) => ({ input: perToken(r.input), output: perToken(r.output), 
 // Pre-converted chat rates: top (higher tier / standing), base (lower tier), promo; plus Anthropic's 1h write.
 const RATES = Object.fromEntries(Object.entries(PRICES).filter(([, e]) => e.kind === 'chat').map(([k, e]) => [k, {
   top: rateSet(e),
-  base: e.base ? { ...rateSet(e.base), upTo: e.base.upTo } : null,
+  base: e.base ? { ...rateSet(e.base), upTo: e.base.upTo, cacheWrite1h: perToken(e.base.cacheWrite1h ?? e.base.cacheWrite) } : null,
   promo: e.promo ? { ...rateSet(e.promo), until: e.promo.until } : null,
   cacheWrite1h: perToken(e.cacheWrite1h ?? e.cacheWrite),
   webSearch: e.webSearchUsd ? usdPico(e.webSearchUsd) : 0n,
@@ -388,8 +394,10 @@ const TTS_RATES = Object.fromEntries(Object.entries(PRICES).filter(([, e]) => e.
   top: { input: perToken(e.textInput), audio: perToken(e.audioOutput) },
   promo: e.promo ? { input: perToken(e.promo.textInput), audio: perToken(e.promo.audioOutput), until: e.promo.until } : null,
 }]));
-// Dictation rates: one input rate (audio and text) and the output rate.
-const STT_RATES = Object.fromEntries(Object.entries(PRICES).filter(([, e]) => e.kind === 'stt').map(([k, e]) => [k, { input: perToken(e.input), output: perToken(e.output) }]));
+// Dictation rates: one input rate (audio and text) and the output rate; a duration-billed model (perMinute) has a
+// per-second rate instead (exact: $0.0045 a minute is $0.000075 a second).
+const STT_RATES = Object.fromEntries(Object.entries(PRICES).filter(([, e]) => e.kind === 'stt').map(([k, e]) => [k,
+  e.perMinute ? { perSecond: usdPico(e.perMinute / 60) } : { input: perToken(e.input), output: perToken(e.output) }]));
 
 // A count argument: a finite number >= 0, rounded up to an integer token/second/image count.
 function count(v, name, { required = false } = {}) {
@@ -500,16 +508,19 @@ function actualRates(model, promptTokens, date) {
   return R.top;
 }
 
-// Anthropic usage block (top level or one usage.iterations entry) → pico-dollars of tokens.
+// Anthropic usage block (top level or one usage.iterations entry) → pico-dollars of tokens. A model with a lower tier
+// (Haiku 5.5: up to 100K prompt tokens) bills at it when the whole prompt (fresh input + cache reads + writes) fits.
 function anthropicTokens(model, u) {
-  const r = RATES[model].top;
   const created = field(u.cache_creation_input_tokens);
+  const prompt = field(u.input_tokens) + field(u.cache_read_input_tokens) + created;
+  const R = RATES[model], low = R.base && prompt <= R.base.upTo;
+  const r = low ? R.base : R.top, w1Rate = low ? R.base.cacheWrite1h : R.cacheWrite1h;
   const split = u.cache_creation && typeof u.cache_creation === 'object';
   const w5 = split ? field(u.cache_creation.ephemeral_5m_input_tokens) : created; // no split: the code only writes 5-minute caches
   const w1 = split ? field(u.cache_creation.ephemeral_1h_input_tokens) : 0;
   const rest = Math.max(0, created - w5 - w1); // unexplained writes: price at the 1-hour rate
   return big(field(u.input_tokens)) * r.input + big(field(u.cache_read_input_tokens)) * r.cacheRead
-    + big(w5) * r.cacheWrite + big(w1 + rest) * RATES[model].cacheWrite1h + big(field(u.output_tokens)) * r.output;
+    + big(w5) * r.cacheWrite + big(w1 + rest) * w1Rate + big(field(u.output_tokens)) * r.output;
 }
 const ANTHROPIC_IDS = Object.keys(PRICES).filter((k) => PRICES[k].kind === 'chat' && PRICES[k].provider === 'anthropic');
 function anthropicActual(model, u) {
@@ -692,13 +703,33 @@ export function veoCost(o = {}) {
   return toMicros(big(seconds) * usdPico(usd), o.margin !== false);
 }
 
+/**
+ * Actual cost of a finished Gemini Omni video from the interaction's `usage` (settle; no margin unless `margin: true`):
+ * total_input_tokens at the input rate, the video tokens (output_tokens_by_modality, modality "video") at the video
+ * rate and the rest of total_output_tokens (thinking, text) at the text rate. Throws PriceError('no_usage') when there
+ * is no output count: settle at the per-second price instead (veoCost with margin: false).
+ * @param {object} o
+ * @param {string} o.model  'gemini:gemini-omni-1.1-flash'
+ * @param {object} o.usage  {total_input_tokens, total_output_tokens, output_tokens_by_modality: [{modality, tokens}]}
+ */
+export function omniActual(o = {}) {
+  const e = entryOf(o.model, 'video');
+  if (!e.omni) throw new PriceError('wrong_kind', `"${o.model}" is not billed by tokens`);
+  const u = o.usage && typeof o.usage === 'object' ? o.usage : null;
+  const byModality = Array.isArray(u?.output_tokens_by_modality) ? u.output_tokens_by_modality : [];
+  let video = byModality.filter((x) => String(x?.modality || '').toLowerCase() === 'video').reduce((n, x) => n + field(x.tokens), 0);
+  const out = Math.max(field(u?.total_output_tokens), video);
+  if (!u || !out) throw new PriceError('no_usage', 'No output tokens reported');
+  if (!byModality.length) video = out; // no breakdown: every output token at the (dearest) video rate
+  return toMicros(big(field(u.total_input_tokens)) * perToken(e.input) + big(video) * perToken(e.videoOutput) + big(out - video) * perToken(e.textOutput), o.margin === true);
+}
+
 // ───────────────────────────── speech (read aloud) ─────────────────────────────
 /**
- * The audio one read-aloud reservation pays for → {units, seconds, audioTokens, cutoffSeconds}: seconds = ceil(units /
- * TTS_MIN_CHARS_PER_SECOND), audioTokens = seconds x the reserve rate (reserveTokensPerSecond, else audioTokensPerSecond), at most maxAudioTokens,
- * cutoffSeconds = TTS_CUTOFF_FACTOR x seconds + 1. The tester router holds the provider to it: Gemini's maxOutputTokens
- * is audioTokens, and OpenAI speech is cut off past cutoffSeconds. Takes the same input as ttsWorstCase (margin is
- * ignored).
+ * The audio one read-aloud reservation pays for → {units, seconds, audioTokens}: seconds = ceil(units /
+ * TTS_MIN_CHARS_PER_SECOND), audioTokens = seconds x the reserve rate (reserveTokensPerSecond, else
+ * audioTokensPerSecond), at most maxAudioTokens. The tester router holds the provider to it: Gemini's maxOutputTokens
+ * is audioTokens. Takes the same input as ttsWorstCase (margin is ignored).
  */
 export function ttsReserved(o = {}) {
   const e = entryOf(o.model, 'tts');
@@ -709,7 +740,7 @@ export function ttsReserved(o = {}) {
   // holding it to the published 25/s cut slow reads short. Settling still uses the published rate as its floor.
   let audioTokens = seconds * (e.reserveTokensPerSecond ?? e.audioTokensPerSecond);
   if (o.maxAudioTokens !== undefined && o.maxAudioTokens !== null) audioTokens = Math.min(audioTokens, count(o.maxAudioTokens, 'maxAudioTokens'));
-  return { units, seconds, audioTokens, cutoffSeconds: TTS_CUTOFF_FACTOR * seconds + 1 };
+  return { units, seconds, audioTokens };
 }
 
 /**
@@ -717,9 +748,9 @@ export function ttsReserved(o = {}) {
  * ceil(units / TTS_MIN_CHARS_PER_SECOND) seconds x audio tokens per second at the audio rate (at most maxAudioTokens
  * when the request bounds its output), plus (ceil(units / 3) + TTS_INSTRUCTION_TOKENS) input tokens at the text rate.
  * units is a ceiling on the reading time (src/tts.js ttsCeilingUnits: digits, symbols, emoji and CJK characters weigh
- * more than a letter); without it, chars. Gemini is priced at its standing price.
+ * more than a letter); without it, chars. Priced at the standing price, never the promo.
  * @param {object} o
- * @param {string} o.model  'openai:gpt-4o-mini-tts-2025-12-15' | 'gemini:gemini-3.8-flash-lite-tts'
+ * @param {string} o.model  'gemini:gemini-3.8-flash-tts' | 'gemini:gemini-3.8-flash-lite-tts'
  * @param {number} o.chars  characters of text to speak
  * @param {number} [o.units] reading-time units of that text (at least chars)
  * @param {number} [o.maxAudioTokens] the request's own output bound (Gemini maxOutputTokens): a true ceiling
@@ -734,21 +765,15 @@ export function ttsWorstCase(o = {}) {
 
 /**
  * Actual cost of a finished read-aloud request (settle; no margin unless `margin: true`).
- * OpenAI: from the speech.audio.done `usage` {input_tokens, output_tokens, total_tokens}. That event is the only one
- *   that carries usage and it comes last, so a usage is the complete, final bill and `seconds` is then ignored. Without
- *   usage, `seconds` (a stopped stream: the audio already timed) bills seconds x 50 tokens/s, and input is estimated from
- *   `chars`. Throws PriceError('no_usage') when there is neither usage nor timed audio, or no audio tokens: keep the
- *   full reservation.
- * Gemini: audio = max(the reported candidates tokens, seconds x 25 tokens/s): the published 25/s is a floor (a live read
- *   reported ≈ 31.8/s); input = usageMetadata.promptTokenCount, else estimated from `chars`. Promo prices for requests
- *   dated through 2026-12-31 (UTC), then the standing price.
- * Both: `maxAudioTokens`, the request's own output bound (a tester's Gemini maxOutputTokens), caps the seconds
- *   estimate (the provider can't bill audio past it), never the reported count.
+ * Audio = max(the reported candidates tokens, seconds x 25 tokens/s): the published 25/s is a floor (a live read
+ * reported ≈ 31.8/s); input = usageMetadata.promptTokenCount, else estimated from `chars`. Promo prices for requests
+ * dated through 2026-12-31 (UTC), then the standing price. `maxAudioTokens`, the request's own output bound (a tester's
+ * maxOutputTokens), caps the seconds estimate (the provider can't bill audio past it), never the reported count.
+ * Throws PriceError('no_usage') when there is neither usage nor seconds: keep the full reservation.
  * @param {object} o
  * @param {string} o.model
- * @param {object} [o.usage]   OpenAI usage, or Gemini usageMetadata (or a response holding it)
- * @param {number} [o.seconds] seconds of audio returned (Gemini) or timed before the stream stopped (OpenAI, used only
- *   without usage)
+ * @param {object} [o.usage]   Gemini usageMetadata (or a response holding it)
+ * @param {number} [o.seconds] seconds of audio returned
  * @param {number} [o.chars]   characters sent, when usage is missing
  * @param {number} [o.maxAudioTokens] the request's output bound, if it sent one
  * @param {Date|string|number} [o.date]  when the request ran; default now
@@ -766,16 +791,6 @@ export function ttsActual(o = {}) {
     fromSeconds = Math.ceil(s * e.audioTokensPerSecond - 1e-9);
   }
   if (o.maxAudioTokens !== undefined && o.maxAudioTokens !== null) fromSeconds = Math.min(fromSeconds, count(o.maxAudioTokens, 'maxAudioTokens'));
-  if (e.provider === 'openai') {
-    // A usage comes only in speech.audio.done, the last event: the complete bill, so the timed seconds don't count then.
-    // Without it, fromSeconds: a stopped stream, the audio already timed (src/tts.js mp3Clock), at the reserved rate.
-    if (!u && !fromSeconds) throw new PriceError('no_usage', 'No usage reported');
-    const input = u ? field(u.input_tokens ?? u.prompt_tokens) : Math.ceil(count(o.chars ?? 0, 'chars') / 3) + TTS_INSTRUCTION_TOKENS;
-    const total = u ? field(u.total_tokens) : 0;
-    const out = u ? Math.max(field(u.output_tokens ?? u.completion_tokens), total ? total - input : 0) : fromSeconds;
-    if (!out) throw new PriceError('no_usage', 'No audio tokens reported');
-    return toMicros(big(input) * R.top.input + big(out) * R.top.audio, o.margin === true);
-  }
   if (!u && !hasSeconds) throw new PriceError('no_usage', 'No usage or audio length reported');
   const r = R.promo && dayKey(o.date) <= R.promo.until ? R.promo : R.top;
   const prompt = u ? field(u.promptTokenCount) : 0;
@@ -787,13 +802,23 @@ export function ttsActual(o = {}) {
 
 // ───────────────────────────── dictation (speech to text) ─────────────────────────────
 /**
+ * The seconds a duration-billed dictation (gpt-transcribe) is reserved for: the WAV's own length when it is known,
+ * else the recording's bytes at STT_MIN_BYTES_PER_SECOND (a ceiling on how long it can play). Rounded up.
+ */
+export function sttCeilingSeconds({ seconds = null, bytes = 0 } = {}) {
+  if (seconds != null) return Math.max(1, count(seconds, 'seconds'));
+  return Math.max(1, Math.ceil(count(bytes, 'bytes') / STT_MIN_BYTES_PER_SECOND));
+}
+
+/**
  * Worst-case cost of one dictation request, in integer micro-dollars, rounded up, x MARGIN.
- * OpenAI: the model's whole context window (contextTokens) as input plus its output cap (maxOutputTokens), whatever the
- *   recording: a request can't be billed past them ($0.0375 with the margin).
+ * OpenAI gpt-transcribe: billed by duration, so sttCeilingSeconds({seconds, bytes}) x $0.0045 a minute.
  * Gemini: inputTokens (src/transcribe.js: the WAV's seconds x 32 plus the instructions, or the 3-minute cap that Gemini's countTokens then checks)
  *   plus maxOutputTokens (the bound the request sends; thinking is inside it). Both are required.
  * @param {object} o
- * @param {string} o.model  'openai:gpt-4o-mini-transcribe-2025-12-15' | 'gemini:gemini-3.5-flash-lite#stt'
+ * @param {string} o.model  'openai:gpt-transcribe' | 'gemini:gemini-3.5-flash-lite#stt'
+ * @param {number} [o.seconds]          OpenAI: the WAV's measured length (null when unknown)
+ * @param {number} [o.bytes]            OpenAI: the recording's size, for a length that can't be measured
  * @param {number} [o.inputTokens]      Gemini: input tokens at most
  * @param {number} [o.maxOutputTokens]  Gemini: the request's output bound
  * @param {boolean} [o.margin=true]
@@ -801,35 +826,39 @@ export function ttsActual(o = {}) {
 export function sttWorstCase(o = {}) {
   const e = entryOf(o.model, 'stt');
   const r = STT_RATES[o.model];
-  const openai = e.provider === 'openai';
-  const input = openai ? e.contextTokens : count(o.inputTokens, 'inputTokens', { required: true });
-  const output = openai ? e.maxOutputTokens : count(o.maxOutputTokens, 'maxOutputTokens', { required: true });
+  if (e.perMinute) {
+    if (o.seconds == null && o.bytes == null) throw new PriceError('bad_input', 'seconds or bytes is required');
+    return toMicros(big(sttCeilingSeconds(o)) * r.perSecond, o.margin !== false);
+  }
+  const input = count(o.inputTokens, 'inputTokens', { required: true });
+  const output = count(o.maxOutputTokens, 'maxOutputTokens', { required: true });
   return toMicros(big(input) * r.input + big(output) * r.output, o.margin !== false);
 }
 
 /**
  * Actual cost of a finished dictation request (settle; no margin unless `margin: true`).
- * OpenAI: usage {type: "tokens", input_tokens, output_tokens, total_tokens}. Gemini: usageMetadata {promptTokenCount,
+ * OpenAI gpt-transcribe (duration-billed): usage {type: "duration", seconds}, rounded up to the second; when the answer
+ * reports tokens instead (or nothing), the WAV's measured `seconds`. Gemini: usageMetadata {promptTokenCount,
  * candidatesTokenCount, thoughtsTokenCount, totalTokenCount} (or a response holding it). Throws PriceError('no_usage')
- * when usage is missing or reports no input tokens (a duration-billed answer, say): keep the full reservation.
+ * when neither gives a count: keep the full reservation.
  * @param {object} o
  * @param {string} o.model
  * @param {object} o.usage
+ * @param {number} [o.seconds]  OpenAI: the WAV's measured length, used only when usage has no duration
  * @param {boolean} [o.margin=false]
  */
 export function sttActual(o = {}) {
   const e = entryOf(o.model, 'stt');
   const r = STT_RATES[o.model];
   const u = o.usage && typeof o.usage === 'object' ? (o.usage.usageMetadata || o.usage) : null;
-  if (!u) throw new PriceError('no_usage', 'No usage reported');
-  let input, output;
-  if (e.provider === 'openai') {
-    input = field(u.input_tokens);
-    output = Math.max(field(u.output_tokens), field(u.total_tokens) ? field(u.total_tokens) - input : 0);
-  } else {
-    input = field(u.promptTokenCount);
-    output = Math.max(field(u.candidatesTokenCount) + field(u.thoughtsTokenCount), field(u.totalTokenCount) ? field(u.totalTokenCount) - input : 0);
+  if (e.perMinute) {
+    const billed = u?.type === 'duration' && Number(u.seconds) >= 0 ? Number(u.seconds) : o.seconds != null ? Number(o.seconds) : NaN;
+    if (!Number.isFinite(billed) || billed < 0) throw new PriceError('no_usage', 'No billed duration reported');
+    return toMicros(big(Math.ceil(billed - 1e-9)) * r.perSecond, o.margin === true);
   }
+  if (!u) throw new PriceError('no_usage', 'No usage reported');
+  const input = field(u.promptTokenCount);
+  const output = Math.max(field(u.candidatesTokenCount) + field(u.thoughtsTokenCount), field(u.totalTokenCount) ? field(u.totalTokenCount) - input : 0);
   if (!input) throw new PriceError('no_usage', 'No input tokens reported');
   return toMicros(big(input) * r.input + big(output) * r.output, o.margin === true);
 }

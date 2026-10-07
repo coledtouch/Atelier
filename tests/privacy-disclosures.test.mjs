@@ -206,3 +206,15 @@ test('voluntary feedback disclosures match the optional diagnostics, screenshot 
   assert.match(text(TOS), /Feedback is voluntary/);
   assert.match(text(TOS), /submissions are kept for up to 90 days/);
 });
+
+test('Read aloud names the provider the voices really use (src/tts.js): Google only, since the OpenAI voices were retired', async () => {
+  const { TTS_VOICES } = await import('../src/tts.js');
+  const { AI_CAPTION } = await import('../public/readaloud.js');
+  assert.deepEqual([...new Set(Object.values(TTS_VOICES).map((v) => v.provider))], ['gemini'], 'a new provider: update the privacy row and AI_CAPTION');
+  const row = /<tr><td>Google \(Read aloud\)<\/td><td>([\s\S]*?)<\/td><\/tr>/.exec(PRIVACY)?.[1] || '';
+  assert.match(text(row), /the answer’s text is sent to Google’s Gemini API to generate the speech/);
+  assert.doesNotMatch(row, /OpenAI/);
+  assert.doesNotMatch(PRIVACY, /OpenAI and Google \(Read aloud\)/);
+  assert.match(AI_CAPTION, /sent to Google\./);
+  assert.doesNotMatch(AI_CAPTION, /OpenAI/);
+});

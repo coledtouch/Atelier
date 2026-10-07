@@ -46,10 +46,10 @@ test('blobs: put/get round-trip with bytes and thread; only rx blob keys are acc
 test('ops index: add replaces per (entry, shot), keeps the newest 50, remove by shot or entry', async () => {
   const kv = memoryKv(), st = createRemixStore(kv);
   await st.opsAdd({ entryId: 'e1', threadId: 't1', shotId: 's1', op: null, startedAt: 10 });
-  await st.opsAdd({ entryId: 'e1', threadId: 't1', shotId: 's1', op: 'models/veo/operations/a', startedAt: 10 });
-  await st.opsAdd({ entryId: 'e1', threadId: 't1', shotId: 's2', op: 'models/veo/operations/b', startedAt: 11 });
+  await st.opsAdd({ entryId: 'e1', threadId: 't1', shotId: 's1', op: 'omni:int_a', startedAt: 10 });
+  await st.opsAdd({ entryId: 'e1', threadId: 't1', shotId: 's2', op: 'omni:int_b', startedAt: 11 });
   let all = await st.opsAll();
-  assert.deepEqual(all.map((o) => [o.shotId, o.op]), [['s1', 'models/veo/operations/a'], ['s2', 'models/veo/operations/b']]);
+  assert.deepEqual(all.map((o) => [o.shotId, o.op]), [['s1', 'omni:int_a'], ['s2', 'omni:int_b']]);
   await st.opsRemove('e1', 's1');
   assert.deepEqual((await st.opsAll()).map((o) => o.shotId), ['s2']);
   await st.opsRemove('e1');
@@ -68,12 +68,12 @@ test('job state: patches merge per shot, concurrent patches all land, undefined 
   const kv = memoryKv(), st = createRemixStore(kv, { now: () => 42 });
   await Promise.all([
     st.jobPatch('e1', 's1', { state: 'starting', startedAt: 1 }, 't1'),
-    st.jobPatch('e1', 's2', { state: 'filming', op: 'models/x/operations/y' }),
-    st.jobPatch('e1', 's1', { state: 'filming', op: 'models/x/operations/z', error: 'old' }),
+    st.jobPatch('e1', 's2', { state: 'filming', op: 'omni:int_y' }),
+    st.jobPatch('e1', 's1', { state: 'filming', op: 'omni:int_z', error: 'old' }),
   ]);
   let j = await st.jobGet('e1');
   assert.equal(j.threadId, 't1');
-  assert.deepEqual(j.shots.s1, { state: 'filming', startedAt: 1, op: 'models/x/operations/z', error: 'old', at: 42 });
+  assert.deepEqual(j.shots.s1, { state: 'filming', startedAt: 1, op: 'omni:int_z', error: 'old', at: 42 });
   assert.equal(j.shots.s2.state, 'filming');
   await st.jobPatch('e1', 's1', { error: undefined });
   j = await st.jobGet('e1');

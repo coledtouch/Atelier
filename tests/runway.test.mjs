@@ -15,7 +15,7 @@ registerHooks({
 // fetch mock, and an unmatched one fails the test.
 const {
   handleRunway, runwayDiag, shapeRequest, cleanTask, quote, scrub, outputUrlOk, RunwayError,
-  RUNWAY_BASE, RUNWAY_VERSION, RUNWAY_MODELS, RETIRED, BODY_MAX, DATA_URI_MAX, UPLOAD_MAX, OUTPUT_MAX, PROMPT_MAX,
+  RUNWAY_BASE, RUNWAY_VERSION, RUNWAY_MODELS, BODY_MAX, DATA_URI_MAX, UPLOAD_MAX, OUTPUT_MAX, PROMPT_MAX,
 } = await import('../src/runway.js');
 
 const KEY = `key_${'ab12'.repeat(32)}`;
@@ -113,6 +113,26 @@ test('generate: image → video for gen4.5 and gen4_turbo (no outputFormat on Tu
   assert.deepEqual(calls[1].json, { model: 'gen4_turbo', promptImage: PNG, ratio: '832:1104', duration: 5 });
 });
 
+test('generate: Veo 3.1 and Veo 3.1 Fast (text and image → video): their four ratios, 4/6/8 s, audio, no outputFormat', async () => {
+  mockFetch([created(240)]);
+  const res = await rw('runway/generate/text_to_video', { method: 'POST', body: { model: 'veo3.1', promptText: 'A paper boat', ratio: '1920:1080', duration: 6, outputFormat: 'mp4', junk: 1 } });
+  const j = await read(res);
+  assert.equal(res.status, 200);
+  assert.equal(calls[0].url, `${RUNWAY_BASE}/text_to_video`);
+  assert.deepEqual(calls[0].json, { model: 'veo3.1', promptText: 'A paper boat', ratio: '1920:1080', duration: 6 });
+  assert.deepEqual(j.quote, { credits: 240, usd: 2.4 }); // 40 credits a second with audio (Runway's default)
+  await rw('runway/generate/image_to_video', { method: 'POST', body: { model: 'veo3.1_fast', promptText: 'slow push in', promptImage: PNG, ratio: '720:1280', duration: 8, audio: false } });
+  assert.equal(calls[1].url, `${RUNWAY_BASE}/image_to_video`);
+  assert.deepEqual(calls[1].json, { model: 'veo3.1_fast', promptText: 'slow push in', promptImage: PNG, ratio: '720:1280', duration: 8, audio: false });
+  await rw('runway/generate/text_to_video', { method: 'POST', body: { model: 'veo3.1', promptText: 'x' } });
+  assert.deepEqual(calls[2].json, { model: 'veo3.1', promptText: 'x', ratio: '1280:720', duration: 6 }, 'defaults: 16:9 720p, 6 s');
+  assert.deepEqual(quote('veo3.1', 8), { credits: 320, usd: 3.2 });
+  assert.deepEqual(quote('veo3.1', 8, false), { credits: 160, usd: 1.6 });
+  assert.deepEqual(quote('veo3.1_fast', 4), { credits: 60, usd: 0.6 });
+  assert.deepEqual(quote('veo3.1_fast', 4, false), { credits: 40, usd: 0.4 });
+  assert.deepEqual([...RUNWAY_MODELS['veo3.1'].kinds.text_to_video], ['1280:720', '720:1280', '1080:1920', '1920:1080']);
+});
+
 test('generate: aleph2 edits only runway:// clips, drops the deprecated ratio and shapes keyframes', async () => {
   mockFetch([created(56)]);
   const res = await rw('runway/generate/video_to_video', { method: 'POST', body: {
@@ -131,10 +151,13 @@ test('generate: aleph2 edits only runway:// clips, drops the deprecated ratio an
 test('generate refuses bad input with 400 and never calls Runway', async () => {
   mockFetch([[/./, () => reply(500, { error: 'must not be called' })]]);
   const cases = [
-    ['text_to_video', { ...t2v(), model: 'gen4_aleph' }, /retired gen4_aleph on 2026-07-30 — use aleph2/],
-    ['text_to_video', { ...t2v(), model: 'gen3a_turbo' }, /retired gen3a_turbo/],
     ['text_to_video', { ...t2v(), model: 'seedance2' }, /doesn’t offer the Runway model “seedance2”/],
-    ['text_to_video', { ...t2v(), model: 'veo3.1' }, /doesn’t offer/],
+    ['text_to_video', { ...t2v(), model: 'veo3' }, /doesn’t offer/],
+    ['text_to_video', { model: 'veo3.1', promptText: 'x', duration: 5 }, /veo3\.1 clips are 4, 6, 8 seconds/],
+    ['text_to_video', { model: 'veo3.1_fast', promptText: 'x', ratio: '960:960' }, /takes the ratios 1280:720, 720:1280, 1080:1920, 1920:1080/],
+    ['text_to_video', { model: 'veo3.1', promptText: 'x', audio: 'yes' }, /audio must be true or false/],
+    ['text_to_video', { model: 'veo3.1' }, /Describe the video/],
+    ['video_to_video', { model: 'veo3.1', promptText: 'x', videoUri: RUNWAY_URI }, /can’t do video to video/],
     ['text_to_video', { ...t2v(), model: '__proto__' }, /doesn’t offer/],
     ['text_to_video', { ...t2v(), model: 'gen4_turbo' }, /only animates a still image/],
     ['image_to_video', { model: 'aleph2', promptText: 'x', promptImage: PNG }, /only edits a video/],
@@ -178,10 +201,11 @@ test('generate refuses bad input with 400 and never calls Runway', async () => {
   assert.equal(calls.length, 0, 'Runway was called for a refused request');
 });
 
-test('retired ids are listed for both edit and turbo replacements', () => {
-  assert.deepEqual(Object.keys(RETIRED).sort(), ['gen3a_turbo', 'gen4_aleph']);
-  assert.ok(!Object.hasOwn(RUNWAY_MODELS, 'gen4_aleph'));
-  assert.throws(() => shapeRequest('video_to_video', { model: 'gen4_aleph', promptText: 'x', videoUri: RUNWAY_URI }), (e) => e instanceof RunwayError && e.status === 400 && /aleph2/.test(e.message));
+test('the Runway catalogue: only current ids (Runway retired gen3a_turbo and gen4_aleph on 2026-07-30)', () => {
+  assert.deepEqual(Object.keys(RUNWAY_MODELS).sort(), ['aleph2', 'gen4.5', 'gen4_turbo', 'veo3.1', 'veo3.1_fast']);
+  for (const old of ['gen3a_turbo', 'gen4_aleph']) {
+    assert.throws(() => shapeRequest('text_to_video', { model: old, promptText: 'x' }), (e) => e instanceof RunwayError && e.status === 400 && /doesn’t offer/.test(e.message), old);
+  }
 });
 
 test('generate: an oversized body is refused with 413 before anything is sent (declared or streamed)', async () => {

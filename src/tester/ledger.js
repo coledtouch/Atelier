@@ -291,13 +291,15 @@ export class Ledger extends DurableObject {
     return true;
   }
   ownsJob(sub, id) { return Boolean(this.#row('SELECT 1 AS y FROM jobs WHERE upstream_id = ? AND sub = ?', String(id), String(sub))); }
-  // A Veo operation finished: settle its reservation at the video's price when one was produced, else at $0. Idempotent.
-  finishJob(sub, id, produced) {
+  // A video job (a Gemini Omni interaction) finished: settle its reservation at the video's price when one was produced,
+  // else at $0. actual: the cost from the provider's reported usage, when it reported one (else the price recorded at
+  // addJob). Idempotent.
+  finishJob(sub, id, produced, actual = null) {
     return this.#tx(() => {
       const j = this.#row('SELECT reservation, actual FROM jobs WHERE upstream_id = ? AND sub = ?', String(id), String(sub));
       if (!j?.reservation) return null;
       this.#run('UPDATE jobs SET reservation = NULL WHERE upstream_id = ?', String(id));
-      const s = this.#settle(j.reservation, produced ? j.actual ?? Infinity : 0);
+      const s = this.#settle(j.reservation, produced ? (Number.isSafeInteger(actual) && actual >= 0 ? actual : j.actual ?? Infinity) : 0);
       return s && { charged: s.charged, allowance: this.#allowance(sub) };
     });
   }

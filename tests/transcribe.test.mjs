@@ -45,8 +45,10 @@ function wav(seconds, { rate = 16_000, channels = 1, bits = 16, format = 1, sub 
 }
 
 // ── provider answers ──
-const OAI_USAGE = { type: 'tokens', input_tokens: 120, input_token_details: { text_tokens: 0, audio_tokens: 120 }, output_tokens: 8, total_tokens: 128 };
-const openaiOk = (text = ' Hello there. ', usage = OAI_USAGE) => reply(200, { text, ...(usage ? { usage } : {}) }, { 'x-request-id': 'req_1', 'openai-organization': 'org-secret', 'set-cookie': 'a=b', 'openai-processing-ms': '42' });
+// gpt-transcribe is billed by duration; the API reference also documents a token usage (OAI_TOKEN_USAGE).
+const OAI_USAGE = { type: 'duration', seconds: 2 };
+const OAI_TOKEN_USAGE = { type: 'tokens', input_tokens: 120, input_token_details: { text_tokens: 0, audio_tokens: 120 }, output_tokens: 8, total_tokens: 128 };
+const openaiOk = (text = ' Hello there. ', usage = OAI_USAGE) => reply(200, { text, languages: [{ code: 'en' }], ...(usage ? { usage } : {}) }, { 'x-request-id': 'req_1', 'openai-organization': 'org-secret', 'set-cookie': 'a=b', 'openai-processing-ms': '42' });
 const LEAK = 'Incorrect API key provided: sk-proj-AbCdEf123456********************wxyz. You can find your API key at https://platform.openai.com/account/api-keys.';
 const openaiErr = (status, message = LEAK, headers = {}) => reply(status, { error: { message, type: 'invalid_request_error', param: null, code: status === 401 ? 'invalid_api_key' : null } }, headers);
 const G_USAGE = { promptTokenCount: 230, candidatesTokenCount: 9, thoughtsTokenCount: 40, totalTokenCount: 279 };
@@ -58,7 +60,8 @@ const geminiErr = (status, message = 'API key not valid: AQ.test-gemini-key-0123
   ...(reason ? { details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason, domain: 'googleapis.com' }] } : {}) } });
 
 const sttReq = (body, headers = {}, qs = '') => new Request(`${ORIGIN}/api/transcribe${qs}`, { method: 'POST', body, headers });
-const formOf = (call) => ({ model: call.body.get('model'), response_format: call.body.get('response_format'), language: call.body.get('language'), prompt: call.body.get('prompt'), name: call.body.get('file')?.name, type: call.body.get('file')?.type });
+// gpt-transcribe takes languages[] (one field per code) in place of the older models' language: never both.
+const formOf = (call) => ({ model: call.body.get('model'), response_format: call.body.get('response_format'), languages: call.body.getAll('languages[]'), language: call.body.get('language'), prompt: call.body.get('prompt'), name: call.body.get('file')?.name, type: call.body.get('file')?.type });
 const fileBytes = async (call) => new Uint8Array(await call.body.get('file').arrayBuffer());
 // Tester-shaped hooks that record every reservation and settlement.
 function recorder({ refuse = null } = {}) {
@@ -94,14 +97,17 @@ const noLeaks = (...secrets) => {
 };
 
 // ── the allow-list and limits ──
-test('models are a frozen server allow-list: OpenAI pinned snapshot first, Gemini 3.5 Flash-Lite as the fallback', () => {
+test('models are a frozen server allow-list: OpenAI gpt-transcribe first, Gemini 3.5 Flash-Lite as the fallback', () => {
   assert.deepEqual(Object.keys(STT_MODELS), ['openai', 'gemini']);
-  assert.deepEqual({ ...STT_MODELS.openai }, { provider: 'openai', model: 'gpt-4o-mini-transcribe-2025-12-15', priceId: 'openai:gpt-4o-mini-transcribe-2025-12-15' });
+  assert.deepEqual({ ...STT_MODELS.openai }, { provider: 'openai', model: 'gpt-transcribe', priceId: 'openai:gpt-transcribe' });
   assert.deepEqual({ ...STT_MODELS.gemini }, { provider: 'gemini', model: 'gemini-3.5-flash-lite', priceId: 'gemini:gemini-3.5-flash-lite#stt', maxOutputTokens: 4_096, audioTokensPerSecond: 32 });
   assert.equal(sttPriceId(STT_MODELS.gemini), 'gemini:gemini-3.5-flash-lite#stt');
   assert.ok(Object.isFrozen(STT_MODELS) && Object.isFrozen(STT_MODELS.openai) && Object.isFrozen(AUDIO_FORMATS.mp4) && Object.isFrozen(TRANSCRIBE_LIMITS) && Object.isFrozen(FALLBACK_ON));
   assert.throws(() => { STT_MODELS.openai.model = 'whisper-1'; }, TypeError);
   assert.deepEqual([...FALLBACK_ON], ['down', 'timeout', 'busy', 'format']);
+  // gpt-transcribe's formats: mp3, mp4, mpeg, mpga, m4a, wav, webm. Ogg and FLAC go to Gemini alone.
+  assert.deepEqual(Object.values(AUDIO_FORMATS).filter((f) => f.openai).map((f) => f.kind), ['wav', 'mp4', 'webm', 'mp3']);
+  assert.deepEqual(Object.values(AUDIO_FORMATS).filter((f) => !f.openai).map((f) => f.kind), ['ogg', 'flac']);
   assert.equal(TRANSCRIBE_LIMITS.maxBytes, 10 * 1024 * 1024);
   assert.equal(TRANSCRIBE_LIMITS.maxSeconds, 180);
   // 180 s of 16 kHz mono 16-bit WAV fits the byte cap, and the whole cap fits one inline Gemini request (≤ 20 MB) in base64.
@@ -275,23 +281,28 @@ test('OpenAI: the file is named by its sniffed container whatever the label; mod
   assert.equal(call.headers.get('authorization'), 'Bearer sk-openai-test');
   assert.equal(call.headers.get('accept'), 'application/json');
   assert.ok(call.body instanceof FormData);
-  assert.deepEqual(formOf(call), { model: 'gpt-4o-mini-transcribe-2025-12-15', response_format: 'json', language: 'en', prompt: 'Atelier, Ciprari', name: 'dictation.mp4', type: 'audio/mp4' });
-  assert.deepEqual([...call.body.keys()].sort(), ['file', 'language', 'model', 'prompt', 'response_format']);
+  assert.deepEqual(formOf(call), { model: 'gpt-transcribe', response_format: 'json', languages: ['en'], language: null, prompt: 'Atelier, Ciprari', name: 'dictation.mp4', type: 'audio/mp4' });
+  assert.deepEqual([...call.body.keys()].sort(), ['file', 'languages[]', 'model', 'prompt', 'response_format']);
   assert.deepEqual(await fileBytes(call), MP4, 'the recording is sent as it came');
-  // every container, any label (or none); ?lang= works too; an unknown language is left to detection
-  for (const [body, name, type] of [[WEBM, 'dictation.webm', 'audio/webm'], [OGG, 'dictation.ogg', 'audio/ogg'], [FLAC, 'dictation.flac', 'audio/flac'], [MP3_SYNC, 'dictation.mp3', 'audio/mpeg'], [wav(1), 'dictation.wav', 'audio/wav']]) {
+  // every container OpenAI lists, any label (or none); ?lang= works too; an unknown language is left to detection
+  for (const [body, name, type] of [[WEBM, 'dictation.webm', 'audio/webm'], [MP3_SYNC, 'dictation.mp3', 'audio/mpeg'], [MP3_ID3, 'dictation.mp3', 'audio/mpeg'], [wav(1), 'dictation.wav', 'audio/wav']]) {
     const res = await handleTranscribe(sttReq(body, { 'content-type': 'audio/mp4' }, '?lang=fr-CA'), KEYS);
     assert.equal(res.status, 200, name);
     const f = formOf(upstream.calls.at(-1));
-    assert.deepEqual([f.name, f.type, f.language, f.prompt], [name, type, 'fr', null]);
+    assert.deepEqual([f.name, f.type, f.languages, f.language, f.prompt], [name, type, ['fr'], null, null]);
   }
   await handleTranscribe(sttReq(MP4, { 'x-dictate-lang': 'yue-HK' }), KEYS);
-  assert.equal(formOf(upstream.calls.at(-1)).language, null);
+  assert.deepEqual(formOf(upstream.calls.at(-1)).languages, []);
+  assert.ok(!upstream.calls.at(-1).body.has('language') && !upstream.calls.at(-1).body.has('languages[]'));
   // a WAV's length comes back with the text; the owner's log has token counts only
   const w = await handleTranscribe(sttReq(wav(2.26)), KEYS);
   assert.deepEqual(await w.json(), { text: 'Hello there.', provider: 'openai', seconds: 2.3 });
+  assert.ok(logs.some((l) => l === 'transcribe openai billed seconds 2'), logs.join('\n'));
+  assert.ok(logs.some((l) => l === 'transcribe openai billed seconds 2 seconds 2.3'), logs.join('\n'));
+  // a token usage (the reference documents both) is logged as tokens
+  mockFetch([[OPENAI, () => openaiOk('Hi.', OAI_TOKEN_USAGE)]]);
+  await handleTranscribe(sttReq(WEBM), KEYS);
   assert.ok(logs.some((l) => l === 'transcribe openai tokens in 120 audio 120 out 8'), logs.join('\n'));
-  assert.ok(logs.some((l) => l === 'transcribe openai tokens in 120 audio 120 out 8 seconds 2.3'), logs.join('\n'));
   noLeaks('Hello there', 'Ciprari');
 });
 
@@ -320,7 +331,7 @@ test('an upstream 401 quoting the key: nothing upstream reaches the client or th
   assert.deepEqual(JSON.parse(text), { error: 'Dictation is unavailable right now.', code: 'transcribe_unavailable' });
   assert.ok(!/sk-|wxyz|AbCdEf|invalid_api_key/.test(text));
   assert.deepEqual([...r.headers.keys()].sort(), ['cache-control', 'content-type']);
-  assert.ok(logs.some((l) => l === 'transcribe upstream 401 openai gpt-4o-mini-transcribe-2025-12-15 invalid_request_error/invalid_api_key'), logs.join('\n'));
+  assert.ok(logs.some((l) => l === 'transcribe upstream 401 openai gpt-transcribe invalid_request_error/invalid_api_key'), logs.join('\n'));
   noLeaks();
 });
 
@@ -379,8 +390,8 @@ test('OpenAI refusals map to our codes; 429 keeps a sane retry-after; the record
     assert.equal(upstream.calls.length, 1, msg);
   }
   // a format refusal names the container in the log (a run of `container mp4` is Safari's recordings being refused)
-  assert.ok(logs.some((l) => l === 'transcribe upstream 400 openai gpt-4o-mini-transcribe-2025-12-15 invalid_request_error container webm'), logs.join('\n'));
-  assert.ok(logs.some((l) => l === 'transcribe upstream 429 openai gpt-4o-mini-transcribe-2025-12-15 insufficient_quota/insufficient_quota'), logs.join('\n'));
+  assert.ok(logs.some((l) => l === 'transcribe upstream 400 openai gpt-transcribe invalid_request_error container webm'), logs.join('\n'));
+  assert.ok(logs.some((l) => l === 'transcribe upstream 429 openai gpt-transcribe insufficient_quota/insufficient_quota'), logs.join('\n'));
   noLeaks();
 });
 
@@ -397,7 +408,7 @@ test('a provider that never answers times out: 504 transcribe_timeout, and the r
     assert.equal(r.status, 504);
     assert.deepEqual(await r.json(), { error: 'Dictation took too long. Try a shorter recording.', code: 'transcribe_timeout' });
     assert.deepEqual(rec.settles, [null]);
-    assert.ok(logs.some((l) => /transcribe failed openai gpt-4o-mini-transcribe-2025-12-15 timeout/.test(l)), logs.join('\n'));
+    assert.ok(logs.some((l) => /transcribe failed openai gpt-transcribe timeout/.test(l)), logs.join('\n'));
   } finally { mock.timers.reset(); }
 });
 
@@ -525,7 +536,7 @@ test('tester hooks: OpenAI is reserved once on its context bound, settled from u
   assert.equal(r.headers.get('x-tester-allowance'), 'settled');
   assert.equal(rec.reserves.length, 1);
   const j = rec.reserves[0];
-  assert.deepEqual({ ...j, model: j.model.provider }, { model: 'openai', provider: 'openai', priceId: 'openai:gpt-4o-mini-transcribe-2025-12-15', bytes: wav(1.5).length, seconds: 1.5, inputTokens: null, fallback: false });
+  assert.deepEqual({ ...j, model: j.model.provider }, { model: 'openai', provider: 'openai', priceId: 'openai:gpt-transcribe', bytes: wav(1.5).length, seconds: 1.5, inputTokens: null, fallback: false });
   assert.deepEqual(rec.settles, [{ usage: OAI_USAGE, seconds: 1.5 }]);
   // a refusal settles at $0; a timeout or an unreadable answer keeps the reservation; a textless answer with usage is settled on it
   for (const [make, settle] of [[() => openaiErr(401), { billed: false }], [() => openaiErr(400, 'Bad request.'), { billed: false }], [() => reply(200, 'x'), null], [() => reply(200, { usage: OAI_USAGE }), { usage: OAI_USAGE, seconds: null }]]) {
@@ -534,6 +545,59 @@ test('tester hooks: OpenAI is reserved once on its context bound, settled from u
     await handleTranscribe(sttReq(WEBM), ONLY_OPENAI, t.hooks);
     assert.deepEqual(t.settles, [settle]);
   }
+});
+
+test('Ogg and FLAC (not on gpt-transcribe’s list) go straight to Gemini; without a Gemini key they are 415', async () => {
+  mockFetch([[OPENAI, () => openaiOk()], [GEMINI, () => geminiOk()]]);
+  for (const body of [OGG, FLAC]) {
+    const rec = recorder();
+    const r = await handleTranscribe(sttReq(body), KEYS, { ...rec.hooks, tester: false });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { text: 'Hola, ¿qué tal?', provider: 'gemini' });
+    assert.deepEqual(rec.reserves.map((j) => [j.provider, j.fallback]), [['gemini', false]], 'Gemini is the first (and only) attempt');
+  }
+  assert.ok(upstream.calls.every((c) => GEMINI.test(`${c.method} ${c.url}`)), 'nothing was sent to OpenAI');
+  assert.equal(upstream.calls[0].json.contents[0].parts[0].inline_data.mime_type, 'audio/ogg');
+  mockFetch([[OPENAI, () => openaiOk()]]);
+  const r = await handleTranscribe(sttReq(OGG), ONLY_OPENAI);
+  assert.equal(r.status, 415);
+  assert.equal((await r.json()).code, 'unsupported_audio');
+  assert.equal(upstream.calls.length, 0);
+  // the formats OpenAI lists still go to OpenAI first
+  mockFetch([[OPENAI, () => openaiOk()], [GEMINI, () => geminiOk()]]);
+  for (const body of [MP4, WEBM, MP3_SYNC, wav(1)]) assert.equal((await (await handleTranscribe(sttReq(body), KEYS)).json()).provider, 'openai');
+});
+
+test('tester hooks: {res, next: true} from a reservation asks the next provider instead; with no next one, res is the answer', async () => {
+  const hooks = (log) => ({
+    tester: true,
+    async reserve(j) {
+      log.push([j.provider, j.fallback, j.bytes, j.seconds]);
+      if (j.provider === 'openai') return { res: new Response(JSON.stringify({ code: 'tester_budget', scope: 'call' }), { status: 402 }), next: true };
+      return { headers: {}, async settle() { return null; } };
+    },
+  });
+  mockFetch([[OPENAI, () => openaiOk()], [COUNT, () => reply(200, { totalTokens: 2_000 })], [GEMINI, () => geminiOk()]]);
+  let log = [];
+  let r = await handleTranscribe(sttReq(WEBM), KEYS, hooks(log));
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).provider, 'gemini');
+  assert.deepEqual(log, [['openai', false, WEBM.length, null], ['gemini', true, WEBM.length, null]]);
+  assert.ok(!upstream.calls.some((c) => OPENAI.test(`${c.method} ${c.url}`)));
+  // OpenAI alone: the refusal stands, nothing is sent
+  mockFetch([[OPENAI, () => openaiOk()]]);
+  log = [];
+  r = await handleTranscribe(sttReq(WEBM), ONLY_OPENAI, hooks(log));
+  assert.equal(r.status, 402);
+  assert.deepEqual(await r.json(), { code: 'tester_budget', scope: 'call' });
+  assert.equal(upstream.calls.length, 0);
+  // a plain refusal (no next) is never passed on
+  mockFetch([[OPENAI, () => openaiOk()], [GEMINI, () => geminiOk()]]);
+  const rec = recorder({ refuse: () => true });
+  r = await handleTranscribe(sttReq(wav(1)), KEYS, rec.hooks);
+  assert.equal(r.status, 402);
+  assert.equal(rec.reserves.length, 1);
+  assert.equal(upstream.calls.length, 0);
 });
 
 test('tester hooks: a refused first reservation is answered as is; a refused fallback answers with what went wrong first', async () => {
@@ -648,7 +712,7 @@ const routerSrc = await readFile(new URL('../src/tester/router.js', import.meta.
 const OWNER_ROUTE = /path === 'transcribe'/.test(workerSrc) ? false : 'src/worker.js has no /api/transcribe route yet (dictation-integration.md)';
 const TESTER_ROUTE = /match: 'transcribe'/.test(routerSrc) ? false : 'src/tester/router.js has no transcribe route yet (dictation-integration.md)';
 const P = await import('../src/tester/prices.js');
-const STT_OPENAI = 'openai:gpt-4o-mini-transcribe-2025-12-15', STT_GEMINI = 'gemini:gemini-3.5-flash-lite#stt';
+const STT_OPENAI = 'openai:gpt-transcribe', STT_GEMINI = 'gemini:gemini-3.5-flash-lite#stt';
 const audioPost = (body, headers = {}) => ({ method: 'POST', body, headers: { 'content-type': 'audio/mp4', ...headers } });
 const spent = (L, sub) => L.ledger.allowance(sub).day;
 const codeOf = async (r) => (await r.clone().json().catch(() => ({}))).code;
@@ -681,7 +745,7 @@ test('POST /api/transcribe needs the passcode; the owner path never touches the 
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(r.headers.get('x-tester-allowance'), null);
   assert.deepEqual(await r.json(), { text: 'Hello there.', provider: 'openai' });
-  assert.equal(formOf(upstream.calls[0]).language, 'en');
+  assert.deepEqual(formOf(upstream.calls[0]).languages, ['en']);
   r = await api(env, 'transcribe', { method: 'GET' }, { pass: 'pw', origin: null });
   assert.equal(r.status, 404, 'only POST');
   assert.deepEqual(L.calls, []);
@@ -705,22 +769,62 @@ test('tester: invalid recordings reserve nothing and call no provider; another O
   assert.deepEqual(spent(L, sub), { spent: 0, reserved: 0, limit: 1_000_000 });
 });
 
-test('tester: reserves the OpenAI worst case (its context window), settles from usage; the header shows the settled cost', { skip: TESTER_ROUTE }, async () => {
+test('tester: OpenAI gpt-transcribe is reserved on the recording’s length (WAV seconds, else bytes) and settled on the billed duration', { skip: TESTER_ROUTE }, async () => {
   const { L, sub, call } = await tester();
   mockFetch([[OPENAI, () => openaiOk()]]);
+  L.calls.length = 0;
   const r = await call(MP4, { 'x-dictate-lang': 'en-US' });
   assert.equal(r.status, 200);
   assert.deepEqual(await r.json(), { text: 'Hello there.', provider: 'openai' });
-  assert.equal(P.sttWorstCase({ model: STT_OPENAI }), 37_500);
+  // an MP4's length isn't in its header: reserved as its 2,000 bytes at 1,000 bytes a second = 2 s x $0.000075 x 1.25
+  const worst = P.sttWorstCase({ model: STT_OPENAI, seconds: null, bytes: MP4.length });
+  assert.equal(worst, 188);
+  // settled on usage {type: "duration", seconds: 2}: 2 s at $0.0045 a minute
   const actual = P.sttActual({ model: STT_OPENAI, usage: OAI_USAGE });
-  assert.ok(actual > 0 && actual < 37_500);
+  assert.equal(actual, 150);
   assert.equal(allowanceOf(r).dayLeft, 1_000_000 - actual);
   assert.deepEqual(spent(L, sub), { spent: actual, reserved: 0, limit: 1_000_000 });
-  assert.deepEqual(formOf(upstream.calls[0]), { model: 'gpt-4o-mini-transcribe-2025-12-15', response_format: 'json', language: 'en', prompt: null, name: 'dictation.mp4', type: 'audio/mp4' });
-  // no usage reported: the full reservation stands
+  assert.equal(L.calls.filter((m) => m === 'reserve').length, 1);
+  assert.deepEqual(formOf(upstream.calls[0]), { model: 'gpt-transcribe', response_format: 'json', languages: ['en'], language: null, prompt: null, name: 'dictation.mp4', type: 'audio/mp4' });
+  // no usage reported for a recording of unknown length: the full reservation stands
   mockFetch([[OPENAI, () => openaiOk('Hi.', null)]]);
   await (await call(MP4)).json();
-  assert.equal(spent(L, sub).spent, actual + 37_500);
+  assert.equal(spent(L, sub).spent, actual + worst);
+  // a WAV is reserved on its own seconds and, when the answer reports no duration, settled on them
+  mockFetch([[OPENAI, () => openaiOk('Hi.', null)]]);
+  await (await call(wav(3.2))).json();
+  assert.equal(P.sttWorstCase({ model: STT_OPENAI, seconds: 3.2, bytes: wav(3.2).length }), Math.ceil(4 * 75 * 1.25));
+  assert.equal(spent(L, sub).spent, actual + worst + 4 * 75);
+  // a token usage (documented too) can't price a duration-billed model: the WAV's seconds settle it
+  mockFetch([[OPENAI, () => openaiOk('Hi.', OAI_TOKEN_USAGE)]]);
+  await (await call(wav(1))).json();
+  assert.equal(spent(L, sub).spent, actual + worst + 4 * 75 + 75);
+});
+
+test('tester: a recording whose OpenAI reservation passes the $0.25 call cap goes to Gemini instead; without Gemini it is refused', { skip: TESTER_ROUTE }, async () => {
+  // 3 MB of WebM, length unknown: reserved as 3,000 s at OpenAI (> $0.25), so Gemini (counted, then capped at 3 minutes) takes it
+  const BIG = pad([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0x82, 0x84, ...ascii('webm')], 3_000_000);
+  assert.ok(P.sttWorstCase({ model: STT_OPENAI, seconds: null, bytes: BIG.length }) > P.PER_CALL_RESERVE_CAP);
+  const { L, sub, call } = await tester();
+  mockFetch([[OPENAI, () => openaiOk()], [COUNT, () => reply(200, { totalTokens: 2_000 })], [GEMINI, () => geminiOk()]]);
+  L.calls.length = 0;
+  const r = await call(BIG);
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { text: 'Hola, ¿qué tal?', provider: 'gemini' });
+  assert.ok(!upstream.calls.some((c) => OPENAI.test(`${c.method} ${c.url}`)), 'nothing was sent to OpenAI');
+  assert.deepEqual(upstream.calls.map((c) => c.url.split(/[/:]/).at(-1)), ['countTokens', 'generateContent']);
+  assert.equal(L.calls.filter((m) => m === 'reserve').length, 1, 'only Gemini was reserved');
+  assert.deepEqual(spent(L, sub), { spent: P.sttActual({ model: STT_GEMINI, usage: G_USAGE }), reserved: 0, limit: 1_000_000 });
+  // no Gemini key: the call-cap refusal is the answer, and nothing is sent or reserved
+  const solo = await tester({ env: { GEMINI_API_KEY: undefined } });
+  mockFetch([[OPENAI, () => openaiOk()]]);
+  solo.L.calls.length = 0;
+  const r2 = await solo.call(BIG);
+  assert.equal(r2.status, 402);
+  const j2 = await r2.json();
+  assert.deepEqual([j2.code, j2.scope], ['tester_budget', 'call']);
+  assert.equal(upstream.calls.length, 0);
+  assert.ok(!solo.L.calls.includes('reserve'));
 });
 
 test('tester: a provider refusal settles at $0 and never passes the provider’s error through', { skip: TESTER_ROUTE }, async () => {
@@ -763,20 +867,22 @@ test('tester: OpenAI down → Gemini counts, reserves its own ceiling and settle
 test('tester: a refused reservation is 402 tester_budget; no key is 503 transcribe_unavailable; neither calls a provider', { skip: TESTER_ROUTE }, async () => {
   const { call } = await tester({ config: { day_limit: 1_000 } });
   mockFetch([]);
-  const r = await call(MP4);
+  const MP4_20S = pad([0, 0, 0, 0x1c, ...ascii('ftypiso5'), 0, 0, 2, 0, ...ascii('iso5iso6mp41')], 20_000); // reserved as 20 s: $0.0019
+  const r = await call(MP4_20S);
   assert.equal(r.status, 402);
   const j = await r.json();
   assert.equal(j.code, 'tester_budget');
   assert.equal(j.scope, 'day');
-  // $0.03 left: dictation's reservation is fixed, so "a lighter model, a shorter clip" would be wrong advice
+  // $0.03 left: dictation's reservation is set by the recording already made, so "a lighter model, a shorter clip"
+  // would be wrong advice. 400 KB of MP4 is reserved as 400 s: $0.0375.
   const low = await tester({ config: { day_limit: 30_000 } });
-  const r3 = await low.call(MP4);
+  const r3 = await low.call(pad([0, 0, 0, 0x1c, ...ascii('ftypiso5'), 0, 0, 2, 0, ...ascii('iso5iso6mp41')], 400_000));
   assert.equal(r3.status, 402);
   const j3 = await r3.json();
   assert.deepEqual([j3.code, j3.scope, j3.error], ['tester_budget', 'day', 'Dictation needs about $0.04 of the allowance free, and $0.03 is left today. It resets at midnight UTC.']);
   const t = await tester({ env: { OPENAI_API_KEY: undefined, GEMINI_API_KEY: undefined } });
   t.L.calls.length = 0;
-  const r2 = await t.call(MP4);
+  const r2 = await t.call(MP4_20S);
   assert.equal(r2.status, 503);
   assert.deepEqual(await r2.json(), { error: 'Dictation isn’t available to testers right now.', code: 'transcribe_unavailable' });
   assert.ok(!t.L.calls.includes('reserve'));

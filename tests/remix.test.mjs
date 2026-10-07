@@ -5,14 +5,17 @@ import { readFileSync } from 'node:fs';
 // public/remix.js — the Video Remix plan contract, maths, money and stored state. Pure: no network, no DOM.
 const R = await import('../public/remix.js');
 const { cutsFrom } = await import('../public/remix-cuts.js');
-const { veoCost, VEO_CAP } = await import('../public/tester.js');
+const { veoCost, VEO_CAP, VEO_PER_SECOND } = await import('../public/tester.js');
 const { quote } = await import('../public/runway.js');
 const { PRICES } = await import('../src/tester/prices.js');
 
 const FX = JSON.parse(readFileSync(new URL('./fixtures/remix/remix-plan-promo.json', import.meta.url), 'utf8'));
 const LUMA = JSON.parse(readFileSync(new URL('./fixtures/remix/promo-luma.json', import.meta.url), 'utf8'));
 const SRC = { duration: 48, width: 1080, height: 1350, fps: 30, vkbps: 1046 };
-const LITE = 'gemini:veo-3.1-lite-generate-preview', FAST = 'gemini:veo-3.1-fast-generate-preview', STD = 'gemini:veo-3.1-generate-preview';
+const OMNI = 'gemini:gemini-omni-1.1-flash';
+// Retired Veo 3.1 ids (Gemini API shutdown 2026-10-22) that saved remixes may still name: they read as Omni.
+const VEO_LITE = 'gemini:veo-3.1-lite-generate-preview', VEO_FAST = 'gemini:veo-3.1-fast-generate-preview', VEO_STD = 'gemini:veo-3.1-generate-preview';
+const OMNI_OP = 'omni:int_abc123', VEO_OP = 'models/veo-3.1-lite-generate-preview/operations/abc123';
 const clone = (x) => structuredClone(x);
 const frame = 1 / 30 + 1e-9;
 const levels = (issues, level) => issues.filter((i) => i.level === level);
@@ -175,20 +178,26 @@ test('normalizePlan: __proto__ and unknown keys never survive; injected text sta
 const withShot = (shot, clip, over = {}) => base({ timeline: [{ id: 'a', type: 'source', src_in: 0, src_out: 24 }, { id: 'n', type: 'veo', shot: 's1', use_in: 0, use_out: 4, ...clip }, { id: 'b', type: 'source', src_in: 28, src_out: 48 }], shots: [{ id: 's1', prompt: 'A desk at dawn', seconds: 4, camera: 'static', ...shot }], ...over });
 
 test('normalizePlan: using 4.5 s of a 4 s shot snaps up to 6 s and prices the difference', () => {
-  const { plan, issues } = R.normalizePlan(withShot({}, { use_out: 4.5 }), SRC, { maxNew: 8, model: LITE, res: '720p' });
+  const { plan, issues } = R.normalizePlan(withShot({}, { use_out: 4.5 }), SRC, { maxNew: 8, model: OMNI, res: '720p' });
   assert.equal(plan.shots[0].seconds, 6);
   assert.equal(plan.timeline[1].type, 'shot', "legacy 'veo' beats become 'shot'");
-  assert.deepEqual(levels(issues, 'cost').map((i) => [i.id, i.msg]), [['s1', 'Using 4.5 s needs a 6 s shot · +$0.10']]);
+  assert.deepEqual(levels(issues, 'cost').map((i) => [i.id, i.msg]), [['s1', 'Using 4.5 s needs a 6 s shot · +$0.20']], 'Omni 720p: 2 s × $0.10136');
   const rw = R.normalizePlan(withShot({}, { use_out: 4.5 }), SRC, { maxNew: 8, model: 'runway:gen4.5' }).plan;
   assert.equal(rw.shots[0].seconds, 5, 'Runway films whole seconds 2–10');
-  const short = R.normalizePlan(withShot({ seconds: 8 }, { use_out: 3 }), SRC, { maxNew: 8, model: LITE }).plan;
+  const short = R.normalizePlan(withShot({ seconds: 8 }, { use_out: 3 }), SRC, { maxNew: 8, model: OMNI }).plan;
   assert.equal(short.shots[0].seconds, 4, 'never pay for more than is used');
-  const fastHd = R.normalizePlan(withShot({}, { use_out: 3 }), SRC, { maxNew: 8, model: FAST, res: '1080p' }).plan;
-  assert.equal(fastHd.shots[0].seconds, 8, 'Fast at 1080p is 8 s only');
+  const hd = R.normalizePlan(withShot({}, { use_out: 3 }), SRC, { maxNew: 8, model: OMNI, res: '1080p' }).plan;
+  assert.equal(hd.shots[0].seconds, 4, 'Omni films any of its lengths at 1080p');
+  const long = R.normalizePlan(withShot({ seconds: 10 }, { use_out: 9 }), SRC, { maxNew: 24, model: OMNI }).plan;
+  assert.equal(long.shots[0].seconds, 10, 'the owner gets Omni’s 10 s');
+  const tester = R.normalizePlan(withShot({ seconds: 8 }, { use_out: 7 }), SRC, { maxNew: 8, model: OMNI, tester: true }).plan;
+  assert.deepEqual([tester.shots[0].seconds, tester.timeline[1].use_out], [6, 6], 'a tester’s 8 s reserves $1.01 > the $1.00 cap: 6 s, and the beat is trimmed to it');
+  const legacy = R.normalizePlan(withShot({}, { use_out: 4.5 }), SRC, { maxNew: 8, model: VEO_FAST, res: '720p' }).plan;
+  assert.equal(legacy.shots[0].seconds, 6, 'a saved Veo choice snaps like Omni');
 });
 
 test('normalizePlan: footage over the cap or over 6 shots blocks; cap 0 turns shots into cards', () => {
-  const over = R.normalizePlan(withShot({ seconds: 8 }, { use_out: 8 }), SRC, { maxNew: 4, model: LITE });
+  const over = R.normalizePlan(withShot({ seconds: 8 }, { use_out: 8 }), SRC, { maxNew: 4, model: OMNI });
   assert.match(levels(over.issues, 'block')[0].msg, /8 s of new footage — over your 4 s limit/);
   const seven = base({ timeline: [{ id: 'a', type: 'source', src_in: 0, src_out: 40 }, ...Array.from({ length: 7 }, (_, i) => ({ id: `n${i}`, type: 'shot', shot: `s${i}`, use_in: 0, use_out: 1 }))], shots: Array.from({ length: 7 }, (_, i) => ({ id: `s${i}`, prompt: 'p', seconds: 4, camera: 'static' })) });
   assert.ok(levels(R.normalizePlan(seven, SRC, { maxNew: 100 }).issues, 'block').some((i) => /At most 6/.test(i.msg)));
@@ -362,49 +371,83 @@ test('layout: a fade without handles becomes a dip', () => {
 });
 
 // ── money ──
-test('OWNER_VEO_USD and the shot prices match src/tester/prices.js; tester reserves are tester.js veoCost', () => {
-  for (const id of [LITE, FAST, STD]) assert.deepEqual({ ...R.OWNER_VEO_USD[id] }, { ...PRICES[id].perSecond }, id);
-  assert.equal(R.shotUsd(LITE, 4, '720p'), 0.2);
-  assert.equal(R.shotUsd(STD, 4, '720p'), 1.6);
+test('OWNER_VIDEO_USD and the shot prices match src/tester/prices.js; tester reserves are tester.js veoCost', () => {
+  assert.deepEqual(Object.keys(R.OWNER_VIDEO_USD), [OMNI], 'only Omni is billed per second by Gemini');
+  assert.deepEqual({ ...R.OWNER_VIDEO_USD[OMNI] }, { ...PRICES[OMNI].perSecond });
+  assert.deepEqual({ ...R.OWNER_VIDEO_USD[OMNI] }, { ...VEO_PER_SECOND[OMNI] });
+  assert.equal(R.OWNER_VEO_USD, R.OWNER_VIDEO_USD, 'the old name still works');
+  assert.equal(R.shotUsd(OMNI, 4, '720p'), 0.40544);
+  assert.equal(R.shotUsd(OMNI, 4, '1080p'), 0.81088);
+  assert.equal(R.shotUsd(VEO_STD, 4, '720p'), 0.40544, 'a saved Veo Standard shot is priced as the Omni shot it now films');
   assert.equal(R.shotUsd('runway:gen4.5', 5), quote('gen4.5', 5).usd);
-  assert.equal(R.shotReserve(LITE, 4, '720p'), veoCost(LITE, 4, '720p'));
-  assert.equal(R.shotReserve(LITE, 4, '720p'), 250_000);
-  assert.equal(R.shotReserve(STD, 4, '720p'), null, 'Standard is owner-only');
+  assert.equal(R.shotReserve(OMNI, 4, '720p'), veoCost(OMNI, 4, '720p'));
+  assert.equal(R.shotReserve(OMNI, 4, '720p'), 506_800);
+  assert.equal(R.shotReserve(VEO_LITE, 4, '720p'), 506_800);
   assert.equal(R.shotReserve('runway:gen4.5', 4), null, 'Runway is owner-only');
+  assert.equal(R.shotReserve('runway:veo3.1', 4), null, 'Veo 3.1 on Runway is owner-only');
+});
+
+test('shot models: Omni is the default and the only tester model; Runway (Gen-4.5, Gen-4 Turbo, Veo 3.1, Veo 3.1 Fast) is the owner’s', () => {
+  assert.equal(R.DEFAULT_SHOT_MODEL, OMNI);
+  assert.deepEqual(R.SHOT_MODELS.map((m) => m.id), [OMNI, 'runway:gen4.5', 'runway:gen4_turbo', 'runway:veo3.1', 'runway:veo3.1_fast']);
+  assert.deepEqual(R.SHOT_MODELS.filter((m) => m.tester).map((m) => m.id), [OMNI]);
+  const o = R.shotModel(OMNI);
+  assert.deepEqual([o.provider, o.label, [...o.seconds], [...o.res], o.image], ['omni', 'Gemini Omni Flash', [4, 6, 8, 10], ['720p', '1080p'], 'optional']);
+  for (const id of ['runway:veo3.1', 'runway:veo3.1_fast']) {
+    const m = R.shotModel(id);
+    assert.deepEqual([m.provider, m.runway, m.tester, [...m.seconds], m.image], ['runway', id.slice(7), false, [4, 6, 8], 'optional'], id);
+  }
+  for (const id of [VEO_LITE, VEO_FAST, VEO_STD]) assert.equal(R.shotModel(id)?.id, OMNI, `${id} reads as Omni`);
+  assert.equal(R.shotModelId('openai:sora'), null);
+});
+
+test('shot lengths: owner 4/6/8/10 s; a tester only 4/6/8 s whose reserve fits the $1.00 cap (4 s and 6 s at 720p, none at 1080p)', () => {
+  assert.deepEqual([...R.shotLengths(OMNI)], [4, 6, 8, 10]);
+  assert.deepEqual(R.shotLengths(OMNI, '720p', { tester: true }), [4, 6]);
+  assert.ok(veoCost(OMNI, 6, '720p') <= VEO_CAP && veoCost(OMNI, 8, '720p') > VEO_CAP);
+  assert.deepEqual(R.shotLengths(OMNI, '1080p', { tester: true }), []);
+  assert.deepEqual(R.shotLengths('runway:veo3.1', '720p', { tester: true }), [], 'owner-only');
+  assert.deepEqual([R.shotLength(OMNI, 7), R.shotLength(OMNI, 7, '720p', { tester: true }), R.shotLength(OMNI, 11)], [8, null, null]);
+  assert.deepEqual([R.maxShotSeconds(OMNI), R.maxShotSeconds(OMNI, '720p', { tester: true }), R.maxShotSeconds(OMNI, '1080p', { tester: true })], [10, 6, 4]);
 });
 
 const remixWith = (shots, extra = {}) => ({ plan: { timeline: Object.keys(shots).map((id) => ({ id: `c${id}`, type: 'shot', shot: id })) }, shots, approval: null, ...extra });
 const shotState = (model, seconds, res = '720p', state = 'idle', more = {}) => ({ model, seconds, res, state, enabled: true, contentKey: 'k', usd: R.shotUsd(model, seconds, res), reserve: R.shotReserve(model, seconds, res), ...more });
 
 test('planCost: owner sums what is still to film; tester reserves, caps and the subset that fits', () => {
-  const rm = remixWith({ s1: shotState(LITE, 4), s2: shotState(LITE, 8), s3: shotState(LITE, 4, '720p', 'ready'), s4: shotState(LITE, 4, '720p', 'idle', { enabled: false }) });
+  const rm = remixWith({ s1: shotState(OMNI, 4), s2: shotState(OMNI, 6), s3: shotState(OMNI, 4, '720p', 'ready'), s4: shotState(OMNI, 4, '720p', 'idle', { enabled: false }) });
   const owner = R.planCost(rm);
-  assert.deepEqual([owner.usd, owner.canApprove, owner.lines.map((l) => l.id)], [0.6, true, ['s1', 's2']]);
-  const tester = R.planCost(rm, { tester: true, left: { day: 600_000, month: 5_000_000, pool: null } });
-  assert.deepEqual(tester.lines.map((l) => l.reserve), [veoCost(LITE, 4, '720p'), veoCost(LITE, 8, '720p')]);
-  assert.equal(tester.reserve, 750_000);
-  assert.equal(tester.canApprove, false, '$0.75 reserved > $0.60 left today');
+  assert.deepEqual([owner.usd, owner.canApprove, owner.lines.map((l) => l.id)], [1.0136, true, ['s1', 's2']]);
+  const tester = R.planCost(rm, { tester: true, left: { day: 1_000_000, month: 5_000_000, pool: null } });
+  assert.deepEqual(tester.lines.map((l) => l.reserve), [veoCost(OMNI, 4, '720p'), veoCost(OMNI, 6, '720p')]);
+  assert.deepEqual(tester.lines.map((l) => l.reserve), [506_800, 760_200]);
+  assert.equal(tester.reserve, 1_267_000);
+  assert.equal(tester.canApprove, false, '$1.27 reserved > $1.00 left today');
   assert.deepEqual([tester.fits, tester.over, tester.scope], [['s1'], ['s2'], 'day']);
-  const roomy = R.planCost(rm, { tester: true, left: { day: 1_000_000, month: 5_000_000, pool: 9_000_000 } });
+  const roomy = R.planCost(rm, { tester: true, left: { day: 2_000_000, month: 5_000_000, pool: 9_000_000 } });
   assert.equal(roomy.canApprove, true);
-  const fastHd = R.planCost(remixWith({ s1: shotState(FAST, 8, '1080p') }), { tester: true, left: { day: 5e6, month: 5e6, pool: null } });
-  assert.deepEqual([fastHd.lines[0].ok, fastHd.lines[0].why, fastHd.canApprove], [false, 'cap', false], `Fast 8 s 1080p reserves $1.20 > VEO_CAP ${VEO_CAP}`);
+  const eight = R.planCost(remixWith({ s1: shotState(OMNI, 8) }), { tester: true, left: { day: 5e6, month: 5e6, pool: null } });
+  assert.deepEqual([eight.lines[0].reserve, eight.lines[0].ok, eight.lines[0].why, eight.canApprove], [1_013_600, false, 'cap', false], `Omni 8 s 720p reserves $1.0136 > VEO_CAP ${VEO_CAP}`);
+  const hd = R.planCost(remixWith({ s1: shotState(OMNI, 4, '1080p') }), { tester: true, left: { day: 5e6, month: 5e6, pool: null } });
+  assert.deepEqual([hd.lines[0].ok, hd.lines[0].why], [false, 'cap'], 'Omni 4 s 1080p reserves $1.01');
+  const rwVeo = R.planCost(remixWith({ s1: shotState('runway:veo3.1', 4) }), { tester: true, left: { day: 5e6, month: 5e6, pool: null } });
+  assert.deepEqual([rwVeo.lines[0].ok, rwVeo.lines[0].why], [false, 'model'], 'Veo 3.1 on Runway is never a tester’s');
   const rw = R.planCost(remixWith({ s1: shotState('runway:gen4.5', 5) }), { tester: true, left: { day: 5e6, month: 5e6, pool: null } });
   assert.deepEqual([rw.lines[0].ok, rw.lines[0].why], [false, 'model']);
   assert.equal(R.planCost(remixWith({ s1: shotState('runway:gen4.5', 5) })).usd, 0.6);
 });
 
 test('runningTotal: planning plus filmed shots, with what filming would add', () => {
-  const rm = remixWith({ s1: shotState(LITE, 4, '720p', 'ready'), s2: shotState(LITE, 4), s3: shotState(LITE, 4, '720p', 'filtered') }, { spent: { planUsd: 0.03 } });
+  const rm = remixWith({ s1: shotState(OMNI, 4, '720p', 'ready'), s2: shotState(OMNI, 4), s3: shotState(OMNI, 4, '720p', 'filtered') }, { spent: { planUsd: 0.03 } });
   const t = R.runningTotal(rm);
-  assert.equal(t.spentUsd, 0.23);
-  assert.equal(t.text, 'This remix so far: ≈ $0.23 · filming adds $0.40');
+  assert.equal(t.spentUsd, 0.43544);
+  assert.equal(t.text, 'This remix so far: ≈ $0.44 · filming adds $0.81');
   assert.equal(R.runningTotal({ spent: { planUsd: 0.03 }, shots: {} }).text, 'This remix so far: ≈ $0.03');
 });
 
 test('costKey/contentKey: a prompt edit changes content, not cost; length or model changes cost', () => {
   const shot = { prompt: 'A desk at dawn', camera: 'static', seconds: 4 };
-  assert.equal(R.costKey({ model: LITE, seconds: 4, res: '720p' }), `${LITE}|4|720p`);
+  assert.equal(R.costKey({ model: OMNI, seconds: 4, res: '720p' }), `${OMNI}|4|720p`);
   const k = R.contentKey(shot, 'dark');
   assert.match(k, /^[0-9a-f]{8}$/);
   assert.notEqual(R.contentKey({ ...shot, prompt: 'A desk at dusk' }, 'dark'), k);
@@ -414,41 +457,43 @@ test('costKey/contentKey: a prompt edit changes content, not cost; length or mod
 });
 
 test('needsApproval / approvalFor / filmQueue: nothing films without a matching approval', () => {
-  const rm = remixWith({ s1: shotState(LITE, 4), s2: shotState(LITE, 4) });
+  const rm = remixWith({ s1: shotState(OMNI, 4), s2: shotState(OMNI, 4) });
   assert.deepEqual(R.needsApproval(rm).reasons.map((r) => r.cause), ['new', 'new']);
   assert.deepEqual(R.filmQueue(rm), [], 'no approval: nothing queued');
   rm.approval = R.approvalFor(rm, null, 1000);
-  assert.deepEqual([rm.approval.usd, rm.approval.at, Object.keys(rm.approval.keys)], [0.4, 1000, ['s1', 's2']]);
+  assert.deepEqual([rm.approval.usd, rm.approval.at, Object.keys(rm.approval.keys)], [0.81088, 1000, ['s1', 's2']]);
   assert.equal(R.needsApproval(rm).needed, false);
   assert.deepEqual(R.filmQueue(rm), ['s1', 's2'], 'owner: two at a time');
   assert.deepEqual(R.filmQueue(rm, { tester: true }), ['s1'], 'tester: one at a time');
   rm.shots.s1.seconds = 6;
   const n = R.needsApproval(rm);
-  assert.deepEqual(n.reasons.map((r) => [r.id, r.cause, r.msg]), [['s1', 'changed', '6 s instead of 4 s · +$0.10']]);
+  assert.deepEqual(n.reasons.map((r) => [r.id, r.cause, r.msg]), [['s1', 'changed', '6 s instead of 4 s · +$0.20']]);
   assert.deepEqual(R.filmQueue(rm), ['s2'], 'a changed cost key waits for approval');
   rm.shots.s2.state = 'unknown';
   assert.ok(R.needsApproval(rm).reasons.some((r) => r.id === 's2' && r.cause === 'unknown'), 'unknown always asks again');
-  rm.shots.s2 = shotState(LITE, 4, '720p', 'ready', { filmedKey: 'old', contentKey: 'new' });
+  rm.shots.s2 = shotState(OMNI, 4, '720p', 'ready', { filmedKey: 'old', contentKey: 'new' });
   assert.deepEqual(R.needsApproval(rm).changed, ['s2'], 'changed since filming');
-  const q = remixWith({ s1: shotState(LITE, 4, '720p', 'queued', { retryAt: 5000 }) });
+  const q = remixWith({ s1: shotState(OMNI, 4, '720p', 'queued', { retryAt: 5000 }) });
   q.approval = R.approvalFor(q);
   assert.deepEqual(R.filmQueue(q, { now: 4000 }), []);
   assert.deepEqual(R.filmQueue(q, { now: 6000 }), ['s1']);
-  const busy = remixWith({ s1: shotState(LITE, 4, '720p', 'filming'), s2: shotState(LITE, 4) });
+  const busy = remixWith({ s1: shotState(OMNI, 4, '720p', 'filming'), s2: shotState(OMNI, 4) });
   busy.approval = R.approvalFor(busy);
   assert.deepEqual(R.filmQueue(busy, { tester: true }), [], 'a tester’s one slot is taken');
 });
 
 test('initShots: a revision keeps filmed shots whose keys still match and restarts the rest', () => {
   const plan = { style: { look: 'dark' }, shots: [{ id: 's1', prompt: 'desk', camera: 'static', seconds: 4 }, { id: 's2', prompt: 'city', camera: 'static', seconds: 6 }] };
-  const first = R.initShots(plan, { model: LITE, res: '720p' });
-  assert.deepEqual([first.s1.state, first.s1.usd, first.s1.reserve, first.s2.usd], ['idle', 0.2, 250_000, 0.3]);
+  const first = R.initShots(plan, { model: OMNI, res: '720p' });
+  assert.deepEqual([first.s1.state, first.s1.usd, first.s1.reserve, first.s2.usd], ['idle', 0.40544, 506_800, 0.60816]);
   const prev = { s1: { ...first.s1, state: 'ready', blobKey: 'rx:shot:e1:s1', filmedKey: first.s1.contentKey }, s2: { ...first.s2, state: 'filtered', error: 'blocked' } };
-  const again = R.initShots(plan, { model: FAST }, prev);
-  assert.deepEqual([again.s1.state, again.s1.blobKey, again.s1.model], ['ready', 'rx:shot:e1:s1', LITE], 'the user’s model choice stays with the shot');
+  const again = R.initShots(plan, { model: 'runway:gen4.5' }, prev);
+  assert.deepEqual([again.s1.state, again.s1.blobKey, again.s1.model], ['ready', 'rx:shot:e1:s1', OMNI], 'the user’s model choice stays with the shot');
   assert.equal(again.s2.state, 'filtered');
   const longer = R.initShots({ ...plan, shots: [{ ...plan.shots[0], seconds: 6 }] }, {}, prev);
   assert.equal(longer.s1.state, 'idle', 'a new length means a new shot');
+  const legacy = R.initShots(plan, { model: VEO_LITE }, { s2: { model: VEO_FAST, res: '720p' } });
+  assert.deepEqual([legacy.s1.model, legacy.s2.model], [OMNI, OMNI], 'a saved Veo choice films with Omni');
 });
 
 // ── framing and export ──
@@ -489,13 +534,13 @@ const goodRemix = () => ({
   v: 1, phase: 'film', source: { name: 'Atelier-promo-4x5.mp4', size: 8290821, duration: 48, width: 1080, height: 1350, fps: 30, rotation: 0, hdr: false, vcodec: 'avc1', vkbps: 1173, audio: 'aac', stored: true },
   cuts: cutsFrom(LUMA.original), plan: FX.plan, issues: [{ level: 'warn', id: 'models', msg: 'x' }], opts: { footage: 'ask', maxNew: 8 },
   shots: {
-    s1: { model: LITE, res: '720p', seconds: 4, enabled: true, state: 'filming', op: 'models/veo-3.1-lite-generate-preview/operations/abc123', startedAt: 1, contentKey: 'deadbeef', usd: 0.2, reserve: 250000 },
-    s2: { model: LITE, res: '720p', seconds: 4, enabled: true, state: 'ready', blobKey: 'rx:shot:e1:s2', poster: 'data:image/jpeg;base64,/9j/AAAA', contentKey: 'deadbeef', filmedKey: 'deadbeef', usd: 0.2 },
+    s1: { model: OMNI, res: '720p', seconds: 4, enabled: true, state: 'filming', op: OMNI_OP, startedAt: 1, contentKey: 'deadbeef', usd: 0.40544, reserve: 506800 },
+    s2: { model: OMNI, res: '720p', seconds: 4, enabled: true, state: 'ready', blobKey: 'rx:shot:e1:s2', poster: 'data:image/jpeg;base64,/9j/AAAA', contentKey: 'deadbeef', filmedKey: 'deadbeef', usd: 0.2 },
     s3: { model: 'runway:gen4.5', res: '720p', seconds: 5, enabled: true, state: 'starting', op: 'runway:4a7b0c1d-2e3f-4a5b-8c6d-7e8f9a0b1c2d' },
-    s4: { model: LITE, res: '720p', seconds: 4, enabled: true, state: 'queued' },
+    s4: { model: OMNI, res: '720p', seconds: 4, enabled: true, state: 'queued' },
   },
   assets: { i1: { blobKey: 'rx:img:e1:i1', w: 100, h: 100, bytes: 2000, thumb: 'data:image/png;base64,iVBOR' } },
-  approval: { at: 1, keys: { s1: `${LITE}|4|720p` }, content: {}, usd: 0.2, reserve: 0 }, spent: { planUsd: 0.03, shotsUsd: 0.2 }, export: null,
+  approval: { at: 1, keys: { s1: `${OMNI}|4|720p` }, content: {}, usd: 0.2, reserve: 0 }, spent: { planUsd: 0.03, shotsUsd: 0.2 }, export: null,
 });
 
 test('validRemix: accepts a real record; rejects unsafe posters, ops, blob keys, enums and sizes', () => {
@@ -505,6 +550,8 @@ test('validRemix: accepts a real record; rejects unsafe posters, ops, blob keys,
   assert.equal(bad((r) => { r.shots.s2.poster = 'data:image/svg+xml;base64,PHN2Zz4='; }), false);
   assert.equal(bad((r) => { r.shots.s1.op = 'https://evil.example/op'; }), false);
   assert.equal(bad((r) => { r.shots.s1.op = 'models/veo/operations/../../x'; }), false);
+  assert.equal(bad((r) => { r.shots.s1.op = 'omni:../../x'; }), false);
+  assert.equal(bad((r) => { r.shots.s1.op = VEO_OP; r.shots.s1.model = VEO_LITE; }), true, 'a pre-Omni record still validates');
   assert.equal(bad((r) => { r.shots.s2.blobKey = 'rx:shot:e1:s9'; }), false, 'a blob key names its own shot');
   assert.equal(bad((r) => { r.shots.s2.blobKey = 'atelier-thread-1'; }), false);
   assert.equal(bad((r) => { r.assets.i1.blobKey = 'rx:shot:e1:i1'; }), false);
@@ -540,7 +587,7 @@ test('recoverRemix: a reload never leaves a shot "starting"; an import never lea
 // ── adversarial review (v61) ──
 test('review: a failed shot that still has its operation is collected, never re-priced or re-approved as new footage', () => {
   const r = goodRemix();
-  r.shots = { s1: { model: LITE, res: '720p', seconds: 4, enabled: true, state: 'failed', op: 'models/veo-3.1-lite-generate-preview/operations/abc123', uri: 'https://generativelanguage.googleapis.com/v1beta/files/x:download?alt=media' } };
+  r.shots = { s1: { model: OMNI, res: '720p', seconds: 4, enabled: true, state: 'failed', op: OMNI_OP, uri: OMNI_OP } };
   r.approval = null;
   assert.equal(R.resumeOf(r.shots.s1), 'downloading');
   assert.equal(R.resumeOf({ ...r.shots.s1, uri: undefined }), 'filming');
@@ -552,7 +599,7 @@ test('review: a failed shot that still has its operation is collected, never re-
 
 test('review: an import strips a failed shot’s operation (it belongs to the other device) so nothing imported resumes or spends', () => {
   const imp = { remix: goodRemix() };
-  imp.remix.shots.s4 = { ...imp.remix.shots.s4, state: 'failed', op: 'models/veo-3.1-lite-generate-preview/operations/zz9', uri: 'https://generativelanguage.googleapis.com/v1beta/files/x:download' };
+  imp.remix.shots.s4 = { ...imp.remix.shots.s4, state: 'failed', op: 'omni:int_zz9', uri: 'omni:int_zz9' };
   R.recoverRemix(imp, { imported: true });
   assert.equal(imp.remix.shots.s4.op, undefined);
   assert.equal(R.resumeOf(imp.remix.shots.s4), null);
@@ -570,4 +617,41 @@ test('review: validRemix rejects a plan the review would choke on (timeline not 
   assert.equal(bad((p) => { p.timeline[1].lines = [{ text: 7 }]; }), false);
   const n = R.normalizePlan(FX.plan, SRC);
   assert.equal(R.planShape(n.plan), true, 'what normalizePlan stores always passes');
+});
+
+// ── Veo 3.1 → Gemini Omni (Veo on the Gemini API shuts down 2026-10-22) ──
+test('migrateRemix: saved Veo model ids become Omni; a shot on a Veo operation ends expired; approvals are not carried over', () => {
+  const r = goodRemix();
+  r.opts = { model: VEO_FAST, res: '720p', shotModels: { s1: { model: VEO_LITE, res: '720p' }, s2: { model: 'runway:gen4.5' } } };
+  r.shots.s1 = { ...r.shots.s1, model: VEO_LITE, op: VEO_OP };
+  r.shots.s2.model = VEO_STD;
+  r.shots.s4 = { ...r.shots.s4, model: VEO_LITE, state: 'failed', op: VEO_OP, uri: 'https://generativelanguage.googleapis.com/v1beta/files/x:download' };
+  r.approval = { at: 1, keys: { s1: `${VEO_LITE}|4|720p` }, content: {}, usd: 0.2, reserve: 0 };
+  assert.equal(R.validRemix(r), true);
+  const kept = R.migrateRemix(clone(r), { keepOps: true });
+  assert.deepEqual([kept.shots.s1.model, kept.shots.s1.state, kept.shots.s1.op], [OMNI, 'filming', VEO_OP], 'keepOps: only the ids change');
+  assert.equal(R.migrateRemix(r), r);
+  assert.deepEqual(['s1', 's2', 's4'].map((id) => r.shots[id].model), [OMNI, OMNI, OMNI]);
+  assert.deepEqual([r.opts.model, r.opts.shotModels.s1.model, r.opts.shotModels.s2.model], [OMNI, OMNI, 'runway:gen4.5']);
+  assert.deepEqual([r.shots.s1.state, r.shots.s1.op, r.shots.s4.state, r.shots.s4.op, r.shots.s4.uri], ['expired', undefined, 'expired', undefined, undefined]);
+  assert.match(r.shots.s1.error, /retired Veo 3\.1/);
+  assert.equal(r.shots.s2.state, 'ready', 'footage already filmed stays');
+  assert.equal(R.resumeOf({ state: 'failed', op: VEO_OP }), null, 'a Veo operation is never collected again');
+  assert.deepEqual(r.approval.keys, { s1: `${VEO_LITE}|4|720p` });
+  const need = R.needsApproval(r);
+  assert.equal(need.reasons.find((x) => x.id === 's1').cause, 'changed', 'Omni costs more than Veo Lite did: Approve again');
+  assert.equal(R.validRemix(r), true);
+  assert.deepEqual(JSON.stringify(R.migrateRemix(clone(r))), JSON.stringify(r), 'idempotent');
+});
+
+test('recoverRemix migrates a pre-Omni remix (reload or import)', () => {
+  const e = { remix: goodRemix() };
+  e.remix.shots.s1 = { ...e.remix.shots.s1, model: VEO_LITE, op: VEO_OP };
+  R.recoverRemix(e);
+  assert.deepEqual([e.remix.shots.s1.model, e.remix.shots.s1.state], [OMNI, 'expired']);
+  const imp = { remix: goodRemix() };
+  imp.remix.shots.s4.model = VEO_FAST;
+  R.recoverRemix(imp, { imported: true });
+  assert.equal(imp.remix.shots.s4.model, OMNI);
+  assert.ok(R.validRemix(imp.remix));
 });

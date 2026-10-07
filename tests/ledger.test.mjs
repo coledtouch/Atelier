@@ -192,26 +192,28 @@ test('video chat: reserved from the clip length, settled from Gemini usageMetada
   assert.ok(chatWorstCase({ model: 'gemini:gemini-3.8-flash', inputTokens: 2_000, maxTokens: 2_048, videoSeconds: 180 }) <= 250_000);
 });
 
-test('Veo: the job keeps its reservation until the poll sees it finish; no video settles at $0', () => {
+test('Omni video: the job keeps its reservation until the status check sees it finish; reported usage settles it; no video is $0', () => {
   const L = setup();
   const sub = L.join();
-  const model = 'gemini:veo-3.1-lite-generate-preview';
-  const cost = veoCost({ model, seconds: 8, resolution: '720p' });
-  assert.equal(cost, 500_000);
+  const model = 'gemini:gemini-omni-1.1-flash';
+  const cost = veoCost({ model, seconds: 4, resolution: '720p' });
+  assert.equal(cost, 506_800);
   const r = L.ledger.reserve(sub, cost);
-  L.ledger.addJob(sub, 'op:models/veo/operations/a', 'op', { reservation: r.id, actual: veoCost({ model, seconds: 8, resolution: '720p', margin: false }) });
-  assert.equal(L.ledger.ownsJob(sub, 'op:models/veo/operations/a'), true);
-  assert.equal(L.ledger.ownsJob('someone-else', 'op:models/veo/operations/a'), false);
-  assert.equal(L.ledger.finishJob('someone-else', 'op:models/veo/operations/a', true), null, 'only the owner settles it');
-  assert.equal(L.ledger.finishJob(sub, 'op:models/veo/operations/a', true).charged, 400_000);
-  assert.equal(L.ledger.finishJob(sub, 'op:models/veo/operations/a', true), null, 'once');
+  L.ledger.addJob(sub, 'omni:v1_a', 'omni', { reservation: r.id, actual: veoCost({ model, seconds: 4, resolution: '720p', margin: false }) });
+  assert.equal(L.ledger.ownsJob(sub, 'omni:v1_a'), true);
+  assert.equal(L.ledger.ownsJob('someone-else', 'omni:v1_a'), false);
+  assert.equal(L.ledger.finishJob('someone-else', 'omni:v1_a', true), null, 'only the owner settles it');
+  assert.equal(L.ledger.finishJob(sub, 'omni:v1_a', true).charged, 405_440, 'no usage: the per-second price');
+  assert.equal(L.ledger.finishJob(sub, 'omni:v1_a', true, 1), null, 'once');
   const r2 = L.ledger.reserve(sub, cost);
-  L.ledger.addJob(sub, 'op:models/veo/operations/b', 'op', { reservation: r2.id, actual: 400_000 });
-  assert.equal(L.ledger.finishJob(sub, 'op:models/veo/operations/b', false).charged, 0, 'filtered or failed: nothing billed');
-  // $0.40 spent: one more 8 s 720p reserve fits today's $1.00, a second doesn't; Fast 1080p is over the per-video cap
-  assert.equal(L.ledger.reserve(sub, cost).ok, true);
+  L.ledger.addJob(sub, 'omni:v1_b', 'omni', { reservation: r2.id, actual: 405_440 });
+  assert.equal(L.ledger.finishJob(sub, 'omni:v1_b', true, 250_000).charged, 250_000, 'the reported usage wins');
+  const r3 = L.ledger.reserve(sub, 50_000); // what is left today is under another 4 s clip
+  L.ledger.addJob(sub, 'omni:v1_c', 'omni', { reservation: r3.id, actual: 405_440 });
+  assert.equal(L.ledger.finishJob(sub, 'omni:v1_c', false, 250_000).charged, 0, 'filtered or failed: nothing billed');
+  // $0.66 spent of today's $1.00: another 4 s 720p reserve ($0.51) doesn't fit; 8 s is over the per-video cap anyway
   assert.equal(L.ledger.reserve(sub, cost).scope, 'day');
-  assert.ok(veoCost({ model: 'gemini:veo-3.1-fast-generate-preview', seconds: 8, resolution: '1080p' }) > VEO_CALL_RESERVE_CAP);
+  assert.ok(veoCost({ model, seconds: 8, resolution: '720p' }) > VEO_CALL_RESERVE_CAP);
 });
 
 test('the web-search fee is part of the reserve and of the settle', () => {
@@ -235,7 +237,7 @@ test('images: up to four are reserved per image', () => {
   const four = imageCost({ model: 'openai:gpt-image-2.5-flare', size: '1024x1024', quality: 'medium', promptTokens: 100, n: 4 });
   assert.ok(four > 3 * one && four <= 4 * one);
   assert.equal(L.ledger.reserve(sub, four).ok, true);
-  assert.equal(imageCost({ model: 'gemini:gemini-3.1-flash-image', size: '1K', n: 4 }), 4 * imageCost({ model: 'gemini:gemini-3.1-flash-image', size: '1K' }));
+  assert.equal(imageCost({ model: 'gemini:gemini-nano-banana-2.1', size: '1K', n: 4 }), 4 * imageCost({ model: 'gemini:gemini-nano-banana-2.1', size: '1K' }));
 });
 
 test('sessions: stored by hash, expire after 30 days, end on revoke and logout; OAuth state is single-use', () => {

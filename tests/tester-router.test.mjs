@@ -2,8 +2,8 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { makeEnv, mockFetch, restoreFetch, upstream, reply, sseOf, api, signIn, PROFILE, resetTesterCaches, allowanceOf } from './tester-env.mjs';
-import { PRICES, chatWorstCase, chatActual, imageCost, imageActual, veoCost, maxTokensWithin, ttsWorstCase, ttsReserved, ttsActual, TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, PER_CALL_RESERVE_CAP } from '../src/tester/prices.js';
-import { TTS_BRIEF, TTS_VOICES, spokenUnits, ttsCeilingUnits } from '../src/tts.js';
+import { PRICES, chatWorstCase, chatActual, imageCost, imageActual, veoCost, omniActual, maxTokensWithin, ttsWorstCase, ttsReserved, ttsActual, TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS, PER_CALL_RESERVE_CAP } from '../src/tester/prices.js';
+import { TTS_VOICES, spokenUnits, ttsCeilingUnits, GEMINI_MAX_OUTPUT_TOKENS } from '../src/tts.js';
 
 const { TESTER_ROUTES, PUBLIC_PATHS, matchTesterRoute, LIMITS } = await import('../src/tester/router.js');
 const { GEMINI_BASE } = await import('../src/gemini.js');
@@ -259,8 +259,11 @@ test('the addendum records the live tester image routes: Meta Muse Image as an o
   assert.match(a7b, /Tester images come from GPT Image, Nano Banana and Meta Muse Image/);
   for (const words of ['owner decision', '`POST /api/x/meta/images/generations`', '`muse-image-1.0`', '`n` 1 to 4', '`1024x1024`, `1024x1280`, `1536x1024`, `1536x864`, `864x1536`', '`b64_json`', '`url`', '$0.01 per image returned'])
     assert.ok(a7b.includes(words), words);
-  assert.ok(matchTesterRoute('POST', 'x/gemini/v1/models/gemini-3-pro-image:generateContent') && matchTesterRoute('GET', 'x/gemini/v1/files/abc123:download'));
+  assert.ok(matchTesterRoute('POST', 'x/gemini/v1/models/gemini-3-pro-image:generateContent') && matchTesterRoute('GET', 'omni/status/v1_abc'));
+  // Veo's long-running routes went with the Veo 3.1 shutdown: video is Gemini Omni on omni/* only.
   assert.ok(!matchTesterRoute('POST', 'x/gemini/v1/models/veo-3.1-lite-generate-preview:predictLongRunning'));
+  assert.ok(!matchTesterRoute('GET', 'x/gemini/v1beta/models/veo-3.1-lite-generate-preview/operations/op1'));
+  assert.ok(!matchTesterRoute('GET', 'x/gemini/v1/files/abc123:download'));
   const a3 = /## A3\.([\s\S]*?)\n## /.exec(addendum)?.[1] || '';
   assert.match(a3, /accept `v1` as well as `v1beta`/);
   assert.match(a3, /Meta Muse Image \(`POST \/api\/x\/meta\/images\/generations`\) is a tester image route/);
@@ -480,61 +483,100 @@ test('Gemini images: always IMAGE-only output; a response over its reservation i
 test('Gemini image response without usageMetadata keeps the full reservation', async () => {
   const { L, sub, call } = await tester();
   mockFetch([[/:generateContent$/, () => reply(200, { candidates: [] })]]);
-  const r = await call('x/gemini/v1beta/models/gemini-3.1-flash-image:generateContent', post({ contents: [{ parts: [{ text: 'a fox' }] }] }));
+  const r = await call('x/gemini/v1beta/models/gemini-nano-banana-2.1:generateContent', post({ contents: [{ parts: [{ text: 'a fox' }] }] }));
   assert.equal(r.status, 200);
-  assert.equal(spent(L, sub).spent, imageCost({ model: 'gemini:gemini-3.1-flash-image', size: '1K', promptTokens: 2 }));
+  assert.equal(spent(L, sub).spent, imageCost({ model: 'gemini:gemini-nano-banana-2.1', size: '1K', promptTokens: 2 }));
+  // the deprecated Nano Banana 2 id is no longer a tester model
+  const old = await call('x/gemini/v1beta/models/gemini-3.1-flash-image:generateContent', post({ contents: [{ parts: [{ text: 'a fox' }] }] }));
+  assert.equal(await codeOf(old), 'tester_model');
 });
 
-// ── Veo ──
-test('Veo: allow-listed models only, one video ≤ 8 s and ≤ $1.00; polls and downloads only for this tester’s own job', async () => {
+// ── Gemini Omni video ──
+const OMNI = 'gemini:gemini-omni-1.1-flash';
+const OMNI_B64 = Buffer.from(Uint8Array.from({ length: 3_000 }, (_, i) => i % 251)).toString('base64'); // > 1 KB: cut out before parsing
+const omniDone = (id, usage) => ({ id, status: 'completed', model: 'gemini-omni-1.1-flash', object: 'interaction',
+  steps: [{ type: 'user_input', content: [{ type: 'text', text: 'waves' }] }, { type: 'thought', content: [{ type: 'thought', text: '…' }] },
+    { type: 'model_output', content: [{ type: 'video', mime_type: 'video/mp4', data: OMNI_B64 }] }], usage });
+test('Omni: one clip ≤ $1.00 reserved (4/6/8 s, 720p/1080p); status, video and edits only for this tester’s own interactions', async () => {
   const { L, sub, call, other } = await tester();
-  const OP = 'models/veo-3.1-lite-generate-preview/operations/op1';
-  let done = false;
+  let n = 0, done = false;
+  const usage = { total_input_tokens: 1_000, total_output_tokens: 4 * 5_792 + 300, output_tokens_by_modality: [{ modality: 'video', tokens: 4 * 5_792 }, { modality: 'text', tokens: 300 }] };
   mockFetch([
-    [/:predictLongRunning$/, () => reply(200, { name: OP })],
-    [/\/operations\/op1$/, () => reply(200, done ? { name: OP, done: true, response: { generateVideoResponse: { generatedSamples: [{ video: { uri: `${GEMINI_BASE}/v1beta/files/vid42:download?alt=media` } }] } } } : { name: OP })],
-    [/\/files\/vid42:download\?alt=media$/, () => new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'video/mp4' } })],
+    [/^POST https:\/\/generativelanguage\.googleapis\.com\/v1beta\/interactions$/, () => reply(200, { id: `v1_job${++n}`, status: 'in_progress' })],
+    [/^GET .*\/v1beta\/interactions\/v1_job1$/, () => reply(200, done ? omniDone('v1_job1', usage) : { id: 'v1_job1', status: 'in_progress' })],
   ]);
-  const start = (model, parameters, extra = {}) => call(`x/gemini/v1beta/models/${model}:predictLongRunning`, post({ instances: [{ prompt: 'waves' }], parameters, ...extra }));
-  let r = await start('veo-3.1-generate-preview', { durationSeconds: 4, resolution: '720p' });
-  assert.equal(await codeOf(r), 'tester_model', 'Veo standard is excluded');
-  r = await start('veo-3.1-fast-generate-preview', { durationSeconds: 8, resolution: '1080p' });
+  const start = (body) => call('omni/start', post({ prompt: 'waves', ...body }));
+  let r = await start({ seconds: 8 });
   assert.equal(r.status, 402);
-  assert.equal((await r.json()).scope, 'call', 'over $1.00');
-  r = await start('veo-3.1-lite-generate-preview', { durationSeconds: 10 });
-  assert.equal(r.status, 400);
-  r = await start('veo-3.1-lite-generate-preview', { durationSeconds: 8, numberOfVideos: 2 });
-  assert.equal(await codeOf(r), 'tester_model');
-  r = await start('veo-3.1-lite-generate-preview', { durationSeconds: 8 }, { tools: [{}] });
-  assert.equal(await codeOf(r), 'tester_model');
+  assert.equal((await r.json()).scope, 'call', '8 s at 720p reserves $1.0136, over $1.00');
+  r = await start({ seconds: 4, resolution: '1080p' });
+  assert.equal(r.status, 402, '1080p 4 s reserves $1.0136 too');
+  for (const body of [{ seconds: 10 }, { seconds: 3 }, { seconds: 6, resolution: '4k' }, { seconds: 4, aspect: '1:1' }, { prompt: '' }, { seconds: 4, image: 'https://example.com/a.png' }]) {
+    r = await start(body);
+    assert.equal(r.status, 400, JSON.stringify(body));
+  }
+  r = await start({ seconds: 4, previous: 'v1_someone', task: 'edit' });
+  assert.equal(await codeOf(r), 'tester_owner', 'an edit names this tester’s own clip');
   assert.equal(upstream.calls.length, 0);
-  r = await start('veo-3.1-lite-generate-preview', { aspectRatio: '9:16', resolution: '720p', durationSeconds: 8, personGeneration: 'allow_all', enhancePrompt: false });
+  r = await start({ seconds: 4, aspect: '9:16', image: 'data:image/png;base64,iVBORw0KGgo=', junk: 1, background: false, model: 'veo-3.1-generate-preview' });
   assert.equal(r.status, 200);
-  assert.deepEqual(upstream.calls[0].json, { instances: [{ prompt: 'waves' }], parameters: { aspectRatio: '9:16', resolution: '720p', durationSeconds: 8 } });
-  const cost = veoCost({ model: 'gemini:veo-3.1-lite-generate-preview', seconds: 8, resolution: '720p' });
+  const j0 = await r.json();
+  assert.equal(j0.id, 'v1_job1');
+  assert.equal(upstream.calls[0].url, `${GEMINI_BASE}/v1beta/interactions`);
+  assert.equal(upstream.calls[0].headers.get('x-goog-api-key'), 'AQ.test-gemini-key-0123456789abcdef');
+  assert.deepEqual(upstream.calls[0].json, {
+    model: 'gemini-omni-1.1-flash',
+    input: [{ type: 'image', data: 'iVBORw0KGgo=', mime_type: 'image/png' }, { type: 'text', text: 'waves' }],
+    response_format: { type: 'video', aspect_ratio: '9:16', resolution: '720p', duration: '4s' },
+    background: true, store: true,
+  });
+  const cost = veoCost({ model: OMNI, seconds: 4, resolution: '720p' });
   assert.equal(allowanceOf(r).dayLeft, 1_000_000 - cost);
-  // another tester can't poll or download it
+  // another tester can't check, download or cancel it
   const stranger = await other();
-  const rs = await call(`x/gemini/v1beta/${OP}`, {}, { cookie: stranger });
-  assert.equal(rs.status, 403);
-  assert.equal(await codeOf(rs), 'tester_owner');
-  // still running, then done
-  r = await call(`x/gemini/v1beta/${OP}`);
-  assert.equal((await r.json()).done, undefined);
+  for (const path of ['omni/status/v1_job1', 'omni/video/v1_job1']) assert.equal(await codeOf(await call(path, {}, { cookie: stranger })), 'tester_owner');
+  assert.equal(await codeOf(await call('omni/cancel/v1_job1', post({}), { cookie: stranger })), 'tester_owner');
+  // still running, then done: settled from the reported usage
+  r = await call('omni/status/v1_job1');
+  assert.deepEqual(await r.json(), { id: 'v1_job1', status: 'in_progress', done: false, video: false, pollAfterMs: 10_000 });
   assert.equal(spent(L, sub).reserved, cost);
   done = true;
-  r = await call(`x/gemini/v1beta/${OP}`);
-  assert.equal((await r.json()).done, true);
-  assert.deepEqual(spent(L, sub), { spent: veoCost({ model: 'gemini:veo-3.1-lite-generate-preview', seconds: 8, resolution: '720p', margin: false }), reserved: 0, limit: 1_000_000 });
+  r = await call('omni/status/v1_job1');
+  const j = await r.json();
+  assert.deepEqual(j, { id: 'v1_job1', status: 'completed', done: true, video: true }, 'usage stays on the server');
+  assert.deepEqual(spent(L, sub), { spent: omniActual({ model: OMNI, usage }), reserved: 0, limit: 1_000_000 });
   assert.ok(allowanceOf(r));
-  r = await call('x/gemini/v1beta/files/vid42:download?alt=media');
+  r = await call('omni/video/v1_job1');
   assert.equal(r.status, 200);
-  assert.deepEqual([...new Uint8Array(await r.arrayBuffer())], [1, 2, 3]);
-  assert.ok(allowanceOf(r));
-  r = await call('x/gemini/v1beta/files/vid42:download?alt=media', {}, { cookie: stranger });
-  assert.equal(await codeOf(r), 'tester_owner');
-  r = await call('x/gemini/v1beta/files/someone-else:download?alt=media');
-  assert.equal(await codeOf(r), 'tester_owner');
+  assert.equal(r.headers.get('content-type'), 'video/mp4');
+  assert.deepEqual(Buffer.from(await r.arrayBuffer()), Buffer.from(OMNI_B64, 'base64'));
+  // an edit of the tester's own clip: previous_interaction_id, no duration or aspect ratio
+  r = await start({ seconds: 4, previous: 'v1_job1', task: 'edit', prompt: 'make it night' });
+  assert.equal(r.status, 200);
+  assert.deepEqual(upstream.calls.at(-1).json, { model: 'gemini-omni-1.1-flash', input: 'make it night', response_format: { type: 'video', resolution: '720p' },
+    background: true, store: true, previous_interaction_id: 'v1_job1', generation_config: { video_config: { task: 'edit' } } });
+});
+
+test('Omni: a filtered or failed clip settles at $0; a Google refusal at start refunds; a vanished interaction keeps the reservation', async () => {
+  const { L, sub, call } = await tester();
+  let state = 'filtered';
+  mockFetch([
+    [/^POST .*\/v1beta\/interactions$/, (c) => (c.json.input === 'refuse' ? reply(400, { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'bad prompt' } }) : reply(200, { id: 'v1_f', status: 'queued' }))],
+    [/^GET .*\/v1beta\/interactions\/v1_f$/, () => (state === 'gone' ? reply(404, { error: { code: 404 } }) : reply(200, { id: 'v1_f', status: state === 'filtered' ? 'completed' : 'failed', steps: [] }))],
+  ]);
+  let r = await call('omni/start', post({ prompt: 'refuse', seconds: 4 }));
+  assert.equal(r.status, 400);
+  assert.equal(await codeOf(r), 'omni_rejected');
+  assert.deepEqual(spent(L, sub), { spent: 0, reserved: 0, limit: 1_000_000 });
+  r = await call('omni/start', post({ prompt: 'waves', seconds: 4 }));
+  assert.equal(r.status, 200);
+  r = await call('omni/status/v1_f');
+  const j = await r.json();
+  assert.equal(j.filtered, true);
+  assert.match(j.error, /filtered/);
+  assert.deepEqual(spent(L, sub), { spent: 0, reserved: 0, limit: 1_000_000 });
+  r = await call('omni/video/v1_f');
+  assert.equal(r.status, 404);
 });
 
 // ── video uploads (A2) ──
@@ -723,7 +765,7 @@ test('tester/me: identity, the metered model lists (no NVIDIA, no free models), 
   const j = await r.json();
   assert.equal(j.sub, sub);
   assert.deepEqual(Object.keys(j).sort(), ['allowance', 'email', 'features', 'models', 'name', 'picture', 'pool', 'sub']);
-  assert.deepEqual(j.models, { chat: [...TESTER_MODELS], image: [...TESTER_IMAGE_MODELS], video: [...TESTER_VIDEO_MODELS], tts: ['atelier', 'cedar', 'sage', 'sulafat'] });
+  assert.deepEqual(j.models, { chat: [...TESTER_MODELS], image: [...TESTER_IMAGE_MODELS], video: [...TESTER_VIDEO_MODELS], tts: ['atelier', 'sulafat'] });
   for (const id of [...j.models.chat, ...j.models.image, ...j.models.video]) assert.match(id, /^(anthropic|openai|gemini|zai|deepseek|meta):/);
   assert.deepEqual(j.features, { web: true, video: true, veo: true, helpers: true, profile: true, sync: false, tts: true, dictation: true });
   assert.deepEqual(j.allowance, { day: { spent: 0, reserved: 0, limit: 1_000_000 }, month: { spent: 0, reserved: 0, limit: 10_000_000 } });
@@ -739,7 +781,8 @@ test('tester/me hides models whose provider key is missing', async () => {
 });
 
 test('tester/me: read-aloud voices (models.tts, features.tts) follow the provider keys', async () => {
-  for (const [missing, voices] of [[{ OPENAI_API_KEY: undefined }, ['sulafat']], [{ GEMINI_API_KEY: undefined }, ['atelier', 'cedar', 'sage']], [{ OPENAI_API_KEY: undefined, GEMINI_API_KEY: undefined }, []]]) {
+  // every voice is Gemini speech now: an OpenAI key alone reads nothing
+  for (const [missing, voices] of [[{ OPENAI_API_KEY: undefined }, ['atelier', 'sulafat']], [{ GEMINI_API_KEY: undefined }, []], [{ OPENAI_API_KEY: undefined, GEMINI_API_KEY: undefined }, []]]) {
     const { env, L } = makeEnv(missing);
     const t = await signIn(L, PROFILE());
     const j = await (await api(env, 'tester/me', {}, { cookie: t.token })).json();
@@ -749,14 +792,19 @@ test('tester/me: read-aloud voices (models.tts, features.tts) follow the provide
 });
 
 // ── read aloud: POST /api/tts ──
-const TTS_UP = /^POST https:\/\/api\.openai\.com\/v1\/audio\/speech$/;
-const TTS_MODEL = 'openai:gpt-4o-mini-tts-2025-12-15';
-const CLIP = Uint8Array.from({ length: 3_000 }, (_, i) => (i * 13) % 256);
-const speechEvents = (bytes = CLIP, usage = { input_tokens: 180, output_tokens: 1_700, total_tokens: 1_880 }) => [
-  `data: ${JSON.stringify({ type: 'speech.audio.delta', audio: Buffer.from(bytes.subarray(0, 1_000)).toString('base64') })}\n\n`,
-  `data: ${JSON.stringify({ type: 'speech.audio.delta', audio: Buffer.from(bytes.subarray(1_000)).toString('base64') })}\n\n`,
-  `data: ${JSON.stringify({ type: 'speech.audio.done', ...(usage ? { usage } : {}) })}\n\n`,
-];
+// Every voice is Gemini speech: the Atelier voice (and the retired cedar / sage ids) on gemini-3.8-flash-tts, Sulafat on
+// gemini-3.8-flash-lite-tts. OpenAI gpt-4o-mini-tts is gone (it retires 2027-01-06).
+const { mock } = await import('node:test');
+const TTS_UP = /^POST https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-3\.8-flash-tts:generateContent$/;
+const TTS_MODEL = 'gemini:gemini-3.8-flash-tts';
+const SULAFAT = 'gemini:gemini-3.8-flash-lite-tts';
+// A Gemini speech answer: `seconds` of 24 kHz s16le PCM, with usageMetadata unless null.
+const spoken = (seconds = 1, usageMetadata = { promptTokenCount: 40, candidatesTokenCount: 32, totalTokenCount: 72 }) => reply(200, {
+  candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: Buffer.alloc(Math.round(seconds * 48_000), 7).toString('base64') } }] }, finishReason: 'STOP' }],
+  ...(usageMetadata ? { usageMetadata } : {}),
+});
+// An answer with no audio and no usage: nothing to price it by, so the full reservation stands (and is visible).
+const unpriced = () => reply(200, { candidates: [{ finishReason: 'OTHER', content: { parts: [] } }] });
 const bytesOf = async (r) => new Uint8Array(await r.arrayBuffer());
 
 test('tts: an empty or invalid body reserves nothing and calls no provider', async () => {
@@ -787,117 +835,103 @@ test('tts: a request from another Origin is refused before it is read', async ()
   assert.equal(upstream.calls.length, 0);
 });
 
-test('tts: reserves the worst case, streams audio/mpeg and settles from the speech.audio.done usage', async () => {
+test('tts (Atelier): reserves the worst case on Flash TTS, sends Achernar held to the reserved audio, settles from usageMetadata', async () => {
   const { L, sub, call } = await tester();
-  const usage = { input_tokens: 180, output_tokens: 1_700, total_tokens: 1_880 };
-  mockFetch([[TTS_UP, () => sseOf(speechEvents(CLIP, usage))]]);
+  const usageMetadata = { promptTokenCount: 260, candidatesTokenCount: 2_100, totalTokenCount: 2_360 };
+  mockFetch([[TTS_UP, () => spoken(66, usageMetadata)]]);
   const text = 'A calm paragraph to read aloud. '.repeat(25).trim();
-  const r = await call('tts', post({ voice: 'atelier', text, instructions: 'Shout every word.', model: 'tts-1', speed: 3, response_format: 'wav' }));
+  const r = await call('tts', post({ voice: 'atelier', text, instructions: 'Shout every word.', model: 'tts-1', speed: 3, style: 'loud', voice_id: 'Puck' }));
   assert.equal(r.status, 200);
-  assert.equal(r.headers.get('content-type'), 'audio/mpeg');
+  assert.equal(r.headers.get('content-type'), 'audio/wav');
   assert.equal(r.headers.get('x-tts-voice'), 'atelier');
-  const worst = ttsWorstCase({ model: TTS_MODEL, chars: text.length });
+  const o = { model: TTS_MODEL, chars: text.length, units: ttsCeilingUnits(text), maxAudioTokens: GEMINI_MAX_OUTPUT_TOKENS };
+  const worst = ttsWorstCase(o), held = ttsReserved(o);
   assert.ok(worst > 0 && worst <= 250_000);
-  assert.equal(allowanceOf(r).dayLeft, 1_000_000 - worst, 'the header shows the reservation');
-  assert.deepEqual(await bytesOf(r), CLIP);
-  assert.deepEqual(upstream.calls[0].json, { model: 'gpt-4o-mini-tts-2025-12-15', voice: 'marin', input: text, instructions: TTS_BRIEF, response_format: 'mp3', stream_format: 'sse' });
-  assert.equal(upstream.calls[0].headers.get('authorization'), 'Bearer sk-openai-test');
-  const actual = ttsActual({ model: TTS_MODEL, usage });
+  assert.equal(held.audioTokens, Math.ceil(text.length / 8) * 32);
+  assert.equal((await bytesOf(r)).length, 44 + 66 * 48_000);
+  const call0 = upstream.calls[0];
+  assert.equal(call0.url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent');
+  assert.equal(call0.headers.get('x-goog-api-key'), 'AQ.test-gemini-key-0123456789abcdef');
+  assert.deepEqual(call0.json, {
+    contents: [{ role: 'user', parts: [{ text, speech_metadata: { style: TTS_VOICES.atelier.style } }] }],
+    generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { voice: 'Achernar' } }, maxOutputTokens: held.audioTokens },
+  });
+  const actual = ttsActual({ model: TTS_MODEL, usage: usageMetadata, seconds: 66, chars: text.length, maxAudioTokens: held.audioTokens });
   assert.ok(actual < worst);
+  assert.equal(allowanceOf(r).dayLeft, 1_000_000 - actual, 'the header shows the settled cost');
   assert.deepEqual(spent(L, sub), { spent: actual, reserved: 0, limit: 1_000_000 });
+  assert.ok(!upstream.calls.some((c) => /api\.openai\.com/.test(c.url)), 'nothing goes to OpenAI');
 });
 
-test('tts: a client that hangs up mid-read keeps the full reservation', async () => {
-  const { L, sub, call } = await tester();
-  const enc = new TextEncoder();
-  mockFetch([[TTS_UP, () => new Response(new ReadableStream({
-    start(c) { c.enqueue(enc.encode(speechEvents()[0])); },
-    pull() { return new Promise(() => {}); }, // the provider is still talking
-  }), { headers: { 'content-type': 'text/event-stream' } })]]);
-  const r = await call('tts', post({ voice: 'atelier', text: 'Hello there.' }));
+test('tts (Atelier): Flash TTS prices: $0.50 / $9.00 through 2026-12-31, then $1.00 / $18.00 (reserved at the standing price either way)', async () => {
+  const usageMetadata = { promptTokenCount: 36, candidatesTokenCount: 388, totalTokenCount: 424 };
+  const text = 'A calm sentence to read aloud. '.repeat(4).trim(); // 123 characters: 16 s x 32 = 512 audio tokens reserved
+  const o = { model: TTS_MODEL, chars: text.length, units: ttsCeilingUnits(text), maxAudioTokens: GEMINI_MAX_OUTPUT_TOKENS };
+  assert.equal(ttsReserved(o).audioTokens, 512);
+  // standing: 512 x $18 + (41 + 200) x $1 = 9,216 + 241 → 9,457 x 1.25
+  assert.equal(ttsWorstCase(o), Math.ceil(9_457 * 1.25));
+  for (const [now, want] of [['2026-11-15T12:00:00Z', 18 + 388 * 9], ['2026-12-31T23:59:00Z', 18 + 388 * 9], ['2027-01-02T12:00:00Z', 36 + 388 * 18]]) {
+    mock.timers.enable({ apis: ['Date'], now: new Date(now) });
+    try {
+      const { L, sub, call } = await tester();
+      mockFetch([[TTS_UP, () => spoken(12.2, usageMetadata)]]);
+      const r = await call('tts', post({ voice: 'atelier', text }));
+      assert.equal(r.status, 200, now);
+      await bytesOf(r);
+      assert.equal(upstream.calls[0].json.generationConfig.maxOutputTokens, 512, now);
+      assert.deepEqual(spent(L, sub), { spent: want, reserved: 0, limit: 1_000_000 }, now);
+      assert.equal(want, ttsActual({ model: TTS_MODEL, usage: usageMetadata, seconds: 12.2, date: now }));
+    } finally { mock.timers.reset(); }
+  }
+});
+
+test('tts: the retired voice ids (cedar, sage) are reserved, sent and settled as the Atelier voice', async () => {
+  for (const voice of ['cedar', 'sage']) {
+    const { L, sub, call } = await tester();
+    const usageMetadata = { promptTokenCount: 30, candidatesTokenCount: 40, totalTokenCount: 70 };
+    mockFetch([[TTS_UP, () => spoken(1.5, usageMetadata)]]);
+    const r = await call('tts', post({ voice, text: 'Hello there.' }));
+    assert.equal(r.status, 200, voice);
+    assert.equal(r.headers.get('x-tts-voice'), 'atelier');
+    await bytesOf(r);
+    assert.equal(upstream.calls[0].json.generationConfig.speechConfig.voiceConfig.voice, 'Achernar');
+    assert.equal(upstream.calls[0].json.generationConfig.maxOutputTokens, 64);
+    assert.deepEqual(spent(L, sub), { spent: ttsActual({ model: TTS_MODEL, usage: usageMetadata, seconds: 1.5, maxAudioTokens: 64 }), reserved: 0, limit: 1_000_000 }, voice);
+  }
+});
+
+test('tts: an answer without audio or usage keeps the full reservation; one with usage but no audio settles on it', async () => {
+  let t = await tester();
+  mockFetch([[TTS_UP, unpriced]]);
+  let r = await t.call('tts', post({ voice: 'atelier', text: 'Hello there.' }));
+  assert.equal(r.status, 502);
+  assert.equal(await codeOf(r), 'tts_unavailable');
+  const reserved = ttsWorstCase({ model: TTS_MODEL, chars: 12, maxAudioTokens: GEMINI_MAX_OUTPUT_TOKENS });
+  assert.deepEqual(spent(t.L, t.sub), { spent: reserved, reserved: 0, limit: 1_000_000 });
+  t = await tester();
+  mockFetch([[TTS_UP, () => reply(200, { candidates: [{ finishReason: 'SAFETY', content: { parts: [] } }], usageMetadata: { promptTokenCount: 40 } })]]);
+  r = await t.call('tts', post({ voice: 'atelier', text: 'Hello there.' }));
+  assert.equal(r.status, 502);
+  assert.deepEqual(spent(t.L, t.sub), { spent: ttsActual({ model: TTS_MODEL, usage: { promptTokenCount: 40 }, seconds: 0 }), reserved: 0, limit: 1_000_000 });
+  // an answer without usage but with audio settles on its seconds (at the published 25 tokens a second)
+  t = await tester();
+  mockFetch([[TTS_UP, () => spoken(2, null)]]);
+  r = await t.call('tts', post({ voice: 'atelier', text: 'Hello there.' }));
   assert.equal(r.status, 200);
-  const reader = r.body.getReader();
-  assert.equal((await reader.read()).value.length, 1_000);
-  await reader.cancel();
-  await new Promise((ok) => setTimeout(ok, 20));
-  assert.deepEqual(spent(L, sub), { spent: ttsWorstCase({ model: TTS_MODEL, chars: 12 }), reserved: 0, limit: 1_000_000 });
-});
-
-test('tts: a stream cut after the usage event settles at the reservation, or at the reported bill when that is bigger', async () => {
-  const enc = new TextEncoder();
-  // speech.audio.done with usage arrives, then the connection resets before the stream ends.
-  const cutAfterDone = (usage) => {
-    const events = speechEvents(CLIP, usage);
-    let n = 0;
-    return new Response(new ReadableStream({ pull(c) { if (n < events.length) c.enqueue(enc.encode(events[n++])); else c.error(new Error('connection reset')); } }),
-      { headers: { 'content-type': 'text/event-stream' } });
-  };
-  const reserved = ttsWorstCase({ model: TTS_MODEL, chars: 12 });
-  const small = { input_tokens: 10, output_tokens: 20, total_tokens: 30 }, big = { input_tokens: 180, output_tokens: 1_700, total_tokens: 1_880 };
-  assert.ok(ttsActual({ model: TTS_MODEL, usage: small }) < reserved && ttsActual({ model: TTS_MODEL, usage: big }) > reserved);
-  // A broken stream never settles below its reservation, even with usage in hand (f7f750f); one whose provider already
-  // reported more is charged that, capped at OVERRUN x by the Ledger (the rule 58781a9 set for stopped answers).
-  for (const [usage, want] of [[small, reserved], [big, Math.min(ttsActual({ model: TTS_MODEL, usage: big }), OVERRUN * reserved)]]) {
-    const { L, sub, call } = await tester();
-    mockFetch([[TTS_UP, () => cutAfterDone(usage)]]);
-    const r = await call('tts', post({ voice: 'atelier', text: 'Hello there.' }));
-    assert.equal(r.status, 200);
-    await assert.rejects(r.arrayBuffer());
-    await new Promise((ok) => setTimeout(ok, 20));
-    assert.deepEqual(spent(L, sub), { spent: want, reserved: 0, limit: 1_000_000 }, JSON.stringify(usage));
-  }
-});
-
-test('tts: usage missing, or no audio tokens, keeps the full reservation', async () => {
-  for (const usage of [null, { input_tokens: 12, output_tokens: 0, total_tokens: 12 }]) {
-    const { L, sub, call } = await tester();
-    mockFetch([[TTS_UP, () => sseOf(speechEvents(CLIP, usage))]]);
-    const r = await call('tts', post({ voice: 'sage', text: 'Hello there.' }));
-    assert.deepEqual(await bytesOf(r), CLIP, 'the audio still plays');
-    assert.deepEqual(spent(L, sub), { spent: ttsWorstCase({ model: TTS_MODEL, chars: 12 }), reserved: 0, limit: 1_000_000 }, JSON.stringify(usage));
-  }
-});
-
-test('tts: an OpenAI stream that finishes without usage (SSE or plain audio/mpeg) settles like a stopped one: no less than the audio it timed', async () => {
-  const enc = new TextEncoder();
-  // 4.8 s of MPEG-2 Layer III frames (200 x 24 ms): inside the 5 s cut-off of a 12-character text, longer than its 2 s.
-  const frames = Buffer.concat(Array.from({ length: 200 }, () => { const f = Buffer.alloc(480, 0x55); f.set([0xff, 0xf3, 0xe4, 0xc4]); return f; }));
-  const sseNoUsage = () => new Response(new ReadableStream({
-    start(c) {
-      for (let i = 0; i < frames.length; i += 12_000) c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'speech.audio.delta', audio: frames.subarray(i, i + 12_000).toString('base64') })}\n\n`));
-      c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'speech.audio.done' })}\n\n`)); // no usage
-      c.close();
-    },
-  }), { headers: { 'content-type': 'text/event-stream' } });
-  const plainMpeg = () => new Response(new ReadableStream({
-    start(c) { for (let i = 0; i < frames.length; i += 12_000) c.enqueue(new Uint8Array(frames.subarray(i, i + 12_000))); c.close(); },
-  }), { headers: { 'content-type': 'audio/mpeg' } });
-  const reserved = ttsWorstCase({ model: TTS_MODEL, chars: 12 });
-  const timed = ttsActual({ model: TTS_MODEL, seconds: 4.8, chars: 12 });
-  assert.deepEqual([reserved, timed], [1_653, 3_003], 'a finished 4.8 s read costs more than its reservation');
-  for (const [name, up] of [['sse without usage', sseNoUsage], ['plain audio/mpeg', plainMpeg]]) {
-    const { L, sub, call } = await tester();
-    mockFetch([[TTS_UP, up]]);
-    const r = await call('tts', post({ voice: 'atelier', text: 'Hello there.' }));
-    assert.equal(r.status, 200, name);
-    assert.equal((await bytesOf(r)).length, frames.length, `${name}: all of it plays`);
-    await new Promise((ok) => setTimeout(ok, 20));
-    // Before the fix both settled { usage: null } and kept exactly the reservation (1,653), less than a stream cut off
-    // with the same audio would pay.
-    assert.deepEqual(spent(L, sub), { spent: timed, reserved: 0, limit: 1_000_000 }, name);
-  }
+  await bytesOf(r);
+  assert.deepEqual(spent(t.L, t.sub), { spent: ttsActual({ model: TTS_MODEL, seconds: 2, chars: 12, maxAudioTokens: 64 }), reserved: 0, limit: 1_000_000 });
 });
 
 test('tts: a provider refusal settles at $0 and never passes the provider’s error through', async () => {
   const { L, sub, call } = await tester();
-  let status = 401;
-  mockFetch([[TTS_UP, () => reply(status, { error: { message: 'Incorrect API key provided: sk-proj-XYZ********1234.' } }, { 'retry-after': '3', 'x-request-id': 'req_1' })]]);
+  let status = 400;
+  mockFetch([[TTS_UP, () => reply(status, { error: { code: status, message: 'API key not valid: AQ.test-gemini-key', status: 'INVALID_ARGUMENT' } }, { 'retry-after': '3', 'x-goog-request-id': 'req_1' })]]);
   let r = await call('tts', post({ voice: 'atelier', text: 'Hi.' }));
   assert.equal(r.status, 502);
   const text = await r.text();
   assert.equal(JSON.parse(text).code, 'tts_unavailable');
-  assert.ok(!/sk-|1234|XYZ/.test(text));
-  assert.equal(r.headers.get('x-request-id'), null);
+  assert.ok(!/AQ\.|INVALID|test-gemini/.test(text));
+  assert.equal(r.headers.get('x-goog-request-id'), null);
   status = 429;
   r = await call('tts', post({ voice: 'atelier', text: 'Hi.' }));
   assert.equal(r.status, 429);
@@ -915,12 +949,14 @@ test('tts: a refused reservation is 402 tester_budget; a missing key is 503 tts_
   assert.equal(j.code, 'tester_budget');
   assert.equal(j.scope, 'day');
   assert.ok(allowanceOf(r));
-  const { env, L } = makeEnv({ OPENAI_API_KEY: undefined });
+  const { env, L } = makeEnv({ GEMINI_API_KEY: undefined });
   const t = await signIn(L, PROFILE());
   L.calls.length = 0;
-  const r2 = await api(env, 'tts', post({ voice: 'cedar', text: 'Hi.' }), { cookie: t.token });
-  assert.equal(r2.status, 503);
-  assert.deepEqual(await r2.json(), { error: 'OpenAI isn’t available to testers right now.', code: 'tts_unavailable' });
+  for (const voice of ['atelier', 'cedar', 'sulafat']) {
+    const r2 = await api(env, 'tts', post({ voice, text: 'Hi.' }), { cookie: t.token });
+    assert.equal(r2.status, 503, voice);
+    assert.deepEqual(await r2.json(), { error: 'Gemini isn’t available to testers right now.', code: 'tts_unavailable' });
+  }
   assert.ok(!L.calls.includes('reserve'));
   assert.equal(upstream.calls.length, 0);
 });
@@ -977,157 +1013,6 @@ test('tts (Sulafat): billed on the reported audio tokens when they pass seconds 
   assert.ok(capped <= ttsWorstCase({ model, chars: 12, units: spokenUnits('Hello there.'), maxAudioTokens: TTS_VOICES.sulafat.maxOutputTokens }));
 });
 
-test('tts: the reservation is priced on spoken units (numbers weigh more), and Gemini’s on its output bound too', async () => {
-  const { L, sub, call } = await tester();
-  mockFetch([[TTS_UP, () => sseOf(speechEvents(CLIP, null))]]); // no usage: the full reservation stands, so it is visible
-  const text = '987654321987654 '.repeat(15).trim(); // 239 characters, 15 numbers of 15 digits
-  let r = await call('tts', post({ voice: 'atelier', text }));
-  await bytesOf(r);
-  const units = spokenUnits(text);
-  assert.equal(units, 239 + 225 * 3);
-  const worst = ttsWorstCase({ model: TTS_MODEL, chars: text.length, units });
-  assert.ok(worst > 3 * ttsWorstCase({ model: TTS_MODEL, chars: text.length }));
-  assert.deepEqual(spent(L, sub), { spent: worst, reserved: 0, limit: 1_000_000 });
-  // 1,000 characters of digits is 4,000 units: over a tester's cap, refused before anything is reserved.
-  L.calls.length = 0;
-  r = await call('tts', post({ voice: 'atelier', text: '7'.repeat(1_000) }));
-  assert.equal(r.status, 413);
-  assert.ok(!L.calls.includes('reserve'));
-  // Sulafat: the reservation is the smaller of the spoken-length estimate and the maxOutputTokens bound, and Gemini is
-  // asked for no more audio than it reserved (750 units → 94 s x 32 → 3,008 tokens), so it can't bill past the reservation.
-  const pcm = new Uint8Array(48_000);
-  mockFetch([[/gemini-3\.8-flash-lite-tts:generateContent$/, () => reply(200, { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: Buffer.from(pcm).toString('base64') } }] } }] })]]);
-  const g = await tester({ config: { day_limit: 1_000_000 } });
-  const zh = '这是一个测试句子。'.repeat(30); // 270 characters, 750 units
-  r = await g.call('tts', post({ voice: 'sulafat', text: zh }));
-  assert.equal(r.status, 200);
-  const gModel = 'gemini:gemini-3.8-flash-lite-tts';
-  const held = ttsReserved({ model: gModel, chars: zh.length, units: spokenUnits(zh), maxAudioTokens: TTS_VOICES.sulafat.maxOutputTokens });
-  assert.equal(held.audioTokens, 3_008);
-  assert.equal(upstream.calls[0].json.generationConfig.maxOutputTokens, held.audioTokens);
-  assert.ok(held.audioTokens < TTS_VOICES.sulafat.maxOutputTokens);
-  const gWorst = ttsWorstCase({ model: gModel, chars: zh.length, units: spokenUnits(zh), maxAudioTokens: TTS_VOICES.sulafat.maxOutputTokens });
-  assert.ok(gWorst > ttsWorstCase({ model: gModel, chars: zh.length }));
-  assert.ok(g.L.calls.includes('reserve'));
-  // The owner keeps the voice's own bound.
-  const { env } = makeEnv();
-  await (await api(env, 'tts', post({ voice: 'sulafat', text: zh }), { pass: 'pw' })).arrayBuffer();
-  assert.equal(upstream.calls.at(-1).json.generationConfig.maxOutputTokens, TTS_VOICES.sulafat.maxOutputTokens);
-});
-
-test('tts: symbols and emoji are reserved for their spoken names; text too long to read in one call is refused before anything is reserved', async () => {
-  const { L, sub, call } = await tester();
-  mockFetch([[TTS_UP, () => sseOf(speechEvents(CLIP, null))]]); // no usage: the full reservation stands, so it is visible
-  const text = 'a ≤ b → c 🦒 '.repeat(20).trim();
-  const r = await call('tts', post({ voice: 'atelier', text }));
-  assert.equal(r.status, 200);
-  await bytesOf(r);
-  const units = ttsCeilingUnits(text);
-  assert.ok(units > 4 * spokenUnits(text), `${units} vs ${spokenUnits(text)}`);
-  assert.deepEqual(spent(L, sub), { spent: ttsWorstCase({ model: TTS_MODEL, chars: text.length, units }), reserved: 0, limit: 1_000_000 });
-  // 1,000 "≤" pass the 1,000-unit cap but take about half an hour to say: over the per-call cap, so refused with no
-  // reservation and no provider call (the app then reads with the device voice).
-  assert.ok(ttsWorstCase({ model: TTS_MODEL, chars: 1_000, units: ttsCeilingUnits('≤'.repeat(1_000)) }) > PER_CALL_RESERVE_CAP);
-  L.calls.length = 0;
-  const before = upstream.calls.length;
-  const r2 = await call('tts', post({ voice: 'atelier', text: '≤'.repeat(1_000) }));
-  assert.equal(r2.status, 402);
-  const j = await r2.json();
-  assert.deepEqual([j.code, j.scope], ['tester_budget', 'call']);
-  assert.ok(!L.calls.includes('reserve'));
-  assert.equal(upstream.calls.length, before);
-});
-
-test('tts: OpenAI audio running past twice the reserved reading time (+1 s) is cut off and the upstream cancelled; it pays at least for the audio it timed', async () => {
-  const enc = new TextEncoder();
-  // MPEG-2 Layer III frames, 24 kHz, 160 kbit/s (480 bytes, 24 ms each), as gpt-4o-mini-tts streams them.
-  const frames = (n) => Buffer.concat(Array.from({ length: n }, () => { const f = Buffer.alloc(480, 0x55); f.set([0xff, 0xf3, 0xe4, 0xc4]); return f; }));
-  const deltaOf = (n) => `data: ${JSON.stringify({ type: 'speech.audio.delta', audio: frames(n).toString('base64') })}\n\n`;
-  const usage = { input_tokens: 20, output_tokens: 3_000, total_tokens: 3_020 };
-  // `deltas` deltas of 25 frames (0.6 s each), then speech.audio.done with usage.
-  const speaking = (deltas) => {
-    const s = { cancelled: false };
-    let n = 0;
-    s.res = new Response(new ReadableStream({
-      pull(c) {
-        if (n++ < deltas) return c.enqueue(enc.encode(deltaOf(25)));
-        c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'speech.audio.done', usage })}\n\n`));
-        c.close();
-      },
-      cancel() { s.cancelled = true; },
-    }), { headers: { 'content-type': 'text/event-stream' } });
-    return s;
-  };
-  const readAll = async (r) => {
-    const got = [], reader = r.body.getReader();
-    let error = null;
-    try { for (let x = await reader.read(); !x.done; x = await reader.read()) got.push(x.value); } catch (e) { error = e; }
-    return { seconds: got.reduce((n, c) => n + c.length, 0) / 480 * 0.024, error };
-  };
-  const text = 'Hello there.'; // 12 units: 2 s reserved, cut off past 2 x 2 + 1 = 5 s
-  const held = ttsReserved({ model: TTS_MODEL, chars: 12, units: ttsCeilingUnits(text) });
-  assert.deepEqual([held.seconds, held.cutoffSeconds], [2, 5]);
-  const reserved = ttsWorstCase({ model: TTS_MODEL, chars: 12 });
-
-  // A runaway: 60 s of audio for a 12-character text. The tester gets at most 5 s; OpenAI never reports usage (it comes
-  // only in speech.audio.done), so the cut stream is charged the larger of the reservation and the audio it timed.
-  let t = await tester(), up;
-  mockFetch([[TTS_UP, () => (up = speaking(100)).res]]);
-  let got = await readAll(await t.call('tts', post({ voice: 'atelier', text })));
-  assert.ok(got.error, 'the response breaks off (the app reads the rest with the device voice)');
-  assert.ok(got.seconds <= 5 && got.seconds > 4, `${got.seconds} s reached the tester`);
-  await new Promise((ok) => setTimeout(ok, 20));
-  assert.equal(up.cancelled, true, 'OpenAI is told to stop');
-  // Charged no less than the audio it timed (9 deltas, 5.4 s) at the reserved 50 tokens a second: here more than the
-  // reservation (3,363 µ$ against 1,653).
-  const timed = ttsActual({ model: TTS_MODEL, seconds: 5.4, chars: 12 });
-  assert.ok(timed > reserved, `${timed} vs ${reserved}`);
-  assert.deepEqual(spent(t.L, t.sub), { spent: timed, reserved: 0, limit: 1_000_000 });
-
-  // Within the time (4.8 s), it all plays and settles from the usage.
-  t = await tester();
-  mockFetch([[TTS_UP, () => (up = speaking(8)).res]]);
-  got = await readAll(await t.call('tts', post({ voice: 'atelier', text })));
-  assert.equal(got.error, null);
-  assert.ok(Math.abs(got.seconds - 4.8) < 1e-6);
-  await new Promise((ok) => setTimeout(ok, 20));
-  assert.deepEqual(spent(t.L, t.sub), { spent: Math.min(ttsActual({ model: TTS_MODEL, usage }), OVERRUN * reserved), reserved: 0, limit: 1_000_000 });
-
-  // The cut lands in the chunk that also carries speech.audio.done (the upstream hasn't closed yet): the meter has read
-  // the usage, OpenAI's complete bill, so the stream settles at max(the reservation, that usage), never at the 5.4 s it
-  // timed x 50 tokens/s (3,363 µ$ for a 1,479 µ$ bill).
-  const small = { input_tokens: 204, output_tokens: 113, total_tokens: 317 };
-  assert.equal(ttsActual({ model: TTS_MODEL, usage: small }), 1_479);
-  assert.equal(reserved, 1_653);
-  t = await tester();
-  let cutCancelled = false;
-  mockFetch([[TTS_UP, () => {
-    let n = 0;
-    return new Response(new ReadableStream({
-      pull(c) {
-        if (n < 8) { n++; return c.enqueue(enc.encode(deltaOf(25))); }
-        if (n++ === 8) return c.enqueue(enc.encode(deltaOf(25) + `data: ${JSON.stringify({ type: 'speech.audio.done', usage: small })}
-
-`));
-        return new Promise(() => {}); // still open when the cut lands
-      },
-      cancel() { cutCancelled = true; },
-    }), { headers: { 'content-type': 'text/event-stream' } });
-  }]]);
-  got = await readAll(await t.call('tts', post({ voice: 'atelier', text })));
-  assert.ok(got.error, 'cut off past 5 s');
-  await new Promise((ok) => setTimeout(ok, 20));
-  assert.equal(cutCancelled, true);
-  assert.deepEqual(spent(t.L, t.sub), { spent: reserved, reserved: 0, limit: 1_000_000 });
-
-  // The owner is held only to the 8 MB cap.
-  const { env } = makeEnv();
-  mockFetch([[TTS_UP, () => (up = speaking(100)).res]]);
-  got = await readAll(await api(env, 'tts', post({ voice: 'atelier', text }), { pass: 'pw' }));
-  assert.equal(got.error, null);
-  assert.ok(Math.abs(got.seconds - 60) < 1e-6);
-});
-
 test('tts: a Sulafat answer longer than one request allows is settled at its real length, not dropped at the reservation', async () => {
   const { L, sub, call } = await tester();
   const usageMetadata = { promptTokenCount: 320, candidatesTokenCount: 4_427, totalTokenCount: 4_747 };
@@ -1149,11 +1034,78 @@ test('tts: a Sulafat answer longer than one request allows is settled at its rea
   assert.deepEqual(spent(L, sub), { spent: Math.min(actual, 4 * reserved), reserved: 0, limit: 1_000_000 });
 });
 
+test('tts: the reservation is priced on spoken units (numbers weigh more), and held to Gemini’s output bound', async () => {
+  const { L, sub, call } = await tester();
+  mockFetch([[TTS_UP, unpriced]]); // nothing to price it by: the full reservation stands, so it is visible
+  const text = '987654321987654 '.repeat(15).trim(); // 239 characters, 15 numbers of 15 digits
+  let r = await call('tts', post({ voice: 'atelier', text }));
+  await r.arrayBuffer();
+  const units = spokenUnits(text);
+  assert.equal(units, 239 + 225 * 3);
+  const worst = ttsWorstCase({ model: TTS_MODEL, chars: text.length, units: ttsCeilingUnits(text), maxAudioTokens: GEMINI_MAX_OUTPUT_TOKENS });
+  assert.ok(worst > 3 * ttsWorstCase({ model: TTS_MODEL, chars: text.length }));
+  assert.deepEqual(spent(L, sub), { spent: worst, reserved: 0, limit: 1_000_000 });
+  assert.equal(upstream.calls[0].json.generationConfig.maxOutputTokens, ttsReserved({ model: TTS_MODEL, chars: text.length, units: ttsCeilingUnits(text), maxAudioTokens: GEMINI_MAX_OUTPUT_TOKENS }).audioTokens);
+  // 1,000 characters of digits is 4,000 units: over a tester's cap, refused before anything is reserved.
+  L.calls.length = 0;
+  r = await call('tts', post({ voice: 'atelier', text: '7'.repeat(1_000) }));
+  assert.equal(r.status, 413);
+  assert.ok(!L.calls.includes('reserve'));
+  // Sulafat: the reservation is the smaller of the spoken-length estimate and the maxOutputTokens bound, and Gemini is
+  // asked for no more audio than it reserved (750 units → 94 s x 32 → 3,008 tokens), so it can't bill past the reservation.
+  const pcm = new Uint8Array(48_000);
+  mockFetch([[/gemini-3\.8-flash-lite-tts:generateContent$/, () => reply(200, { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: Buffer.from(pcm).toString('base64') } }] } }] })]]);
+  const g = await tester({ config: { day_limit: 1_000_000 } });
+  const zh = '这是一个测试句子。'.repeat(30); // 270 characters, 750 units
+  r = await g.call('tts', post({ voice: 'sulafat', text: zh }));
+  assert.equal(r.status, 200);
+  const held = ttsReserved({ model: SULAFAT, chars: zh.length, units: spokenUnits(zh), maxAudioTokens: TTS_VOICES.sulafat.maxOutputTokens });
+  assert.equal(held.audioTokens, 3_008);
+  assert.equal(upstream.calls[0].json.generationConfig.maxOutputTokens, held.audioTokens);
+  assert.ok(held.audioTokens < TTS_VOICES.sulafat.maxOutputTokens);
+  const gWorst = ttsWorstCase({ model: SULAFAT, chars: zh.length, units: spokenUnits(zh), maxAudioTokens: TTS_VOICES.sulafat.maxOutputTokens });
+  assert.ok(gWorst > ttsWorstCase({ model: SULAFAT, chars: zh.length }));
+  assert.ok(g.L.calls.includes('reserve'));
+  // The owner keeps the voice's own bound, for both voices.
+  const { env } = makeEnv();
+  await (await api(env, 'tts', post({ voice: 'sulafat', text: zh }), { pass: 'pw' })).arrayBuffer();
+  assert.equal(upstream.calls.at(-1).json.generationConfig.maxOutputTokens, TTS_VOICES.sulafat.maxOutputTokens);
+  mockFetch([[TTS_UP, () => spoken(1)]]);
+  await (await api(env, 'tts', post({ voice: 'atelier', text: zh }), { pass: 'pw' })).arrayBuffer();
+  assert.equal(upstream.calls.at(-1).json.generationConfig.maxOutputTokens, GEMINI_MAX_OUTPUT_TOKENS);
+});
+
+test('tts: symbols and emoji are reserved for their spoken names, held to the output bound; past the allowance nothing is sent', async () => {
+  const { L, sub, call } = await tester();
+  mockFetch([[TTS_UP, unpriced]]); // nothing to price it by: the full reservation stands, so it is visible
+  const text = 'a ≤ b → c 🦒 '.repeat(20).trim();
+  const r = await call('tts', post({ voice: 'atelier', text }));
+  await r.arrayBuffer();
+  const units = ttsCeilingUnits(text);
+  assert.ok(units > 4 * spokenUnits(text), `${units} vs ${spokenUnits(text)}`);
+  assert.deepEqual(spent(L, sub), { spent: ttsWorstCase({ model: TTS_MODEL, chars: text.length, units, maxAudioTokens: GEMINI_MAX_OUTPUT_TOKENS }), reserved: 0, limit: 1_000_000 });
+  // 1,000 "≤" pass the 1,000-unit cap but take about half an hour to say. The output bound (4,369 audio tokens) caps the
+  // Atelier voice's reservation at about $0.10, so it is reserved at that bound rather than refused.
+  const bounded = ttsWorstCase({ model: TTS_MODEL, chars: 1_000, units: ttsCeilingUnits('≤'.repeat(1_000)), maxAudioTokens: GEMINI_MAX_OUTPUT_TOKENS });
+  assert.ok(bounded <= PER_CALL_RESERVE_CAP, String(bounded));
+  assert.equal(ttsReserved({ model: TTS_MODEL, chars: 1_000, units: ttsCeilingUnits('≤'.repeat(1_000)), maxAudioTokens: GEMINI_MAX_OUTPUT_TOKENS }).audioTokens, GEMINI_MAX_OUTPUT_TOKENS);
+  // Past the per-call cap (a tester with no bound to hold it): refused with no reservation and no provider call.
+  assert.ok(ttsWorstCase({ model: TTS_MODEL, chars: 1_000, units: ttsCeilingUnits('≤'.repeat(1_000)) }) > PER_CALL_RESERVE_CAP);
+  const low = await tester({ config: { day_limit: 50_000 } });
+  low.L.calls.length = 0;
+  const before = upstream.calls.length;
+  const r2 = await low.call('tts', post({ voice: 'atelier', text: '≤'.repeat(1_000) }));
+  assert.equal(r2.status, 402);
+  const j = await r2.json();
+  assert.deepEqual([j.code, j.scope], ['tester_budget', 'day']);
+  assert.equal(upstream.calls.length, before);
+});
+
 test('tts: a per-tester rate limit (LI_LIMIT, keyed by sub) answers 429 tts_busy before anything is reserved', async () => {
   const { env, L, sub, call } = await tester();
   const keys = [];
   env.LI_LIMIT = { async limit({ key }) { keys.push(key); return { success: keys.length <= 2 }; } };
-  mockFetch([[TTS_UP, () => sseOf(speechEvents())]]);
+  mockFetch([[TTS_UP, () => spoken(1)]]);
   for (let i = 0; i < 2; i++) assert.equal((await call('tts', post({ voice: 'atelier', text: 'Hello there.' }))).status, 200);
   L.calls.length = 0;
   const r = await call('tts', post({ voice: 'atelier', text: 'Hello there.' }));
@@ -1171,22 +1123,26 @@ test('tts: a per-tester rate limit (LI_LIMIT, keyed by sub) answers 429 tts_busy
 test('tts preview: a cached clip costs nothing; a miss is reserved and settled like a segment', async () => {
   const store = new Map();
   globalThis.caches = { default: {
-    match: async (k) => (store.has(String(k)) ? new Response(store.get(String(k)), { headers: { 'content-type': 'audio/mpeg' } }) : undefined),
+    match: async (k) => (store.has(String(k)) ? new Response(store.get(String(k)), { headers: { 'content-type': 'audio/wav' } }) : undefined),
     put: async (k, res) => { store.set(String(k), new Uint8Array(await res.arrayBuffer())); },
   } };
   try {
     const { L, sub, call } = await tester();
-    const usage = { input_tokens: 60, output_tokens: 200, total_tokens: 260 };
-    mockFetch([[TTS_UP, () => sseOf(speechEvents(CLIP, usage))]]);
-    let r = await call('tts', post({ voice: 'cedar', preview: true }));
+    const usageMetadata = { promptTokenCount: 60, candidatesTokenCount: 200, totalTokenCount: 260 };
+    mockFetch([[TTS_UP, () => spoken(6, usageMetadata)]]);
+    let r = await call('tts', post({ voice: 'atelier', preview: true }));
     assert.equal(r.status, 200);
-    assert.deepEqual(await bytesOf(r), CLIP);
-    const actual = ttsActual({ model: TTS_MODEL, usage });
+    const clip = await bytesOf(r);
+    assert.equal(clip.length, 44 + 6 * 48_000);
+    const actual = ttsActual({ model: TTS_MODEL, usage: usageMetadata, seconds: 6 });
     assert.deepEqual(spent(L, sub), { spent: actual, reserved: 0, limit: 1_000_000 });
     assert.equal(allowanceOf(r).dayLeft, 1_000_000 - actual);
     L.calls.length = 0;
-    r = await call('tts', post({ voice: 'cedar', preview: true }));
-    assert.deepEqual(await bytesOf(r), CLIP);
+    // the same clip, again and under a retired id: from the cache, nothing reserved
+    for (const voice of ['atelier', 'cedar']) {
+      r = await call('tts', post({ voice, preview: true }));
+      assert.deepEqual(await bytesOf(r), clip, voice);
+    }
     assert.equal(upstream.calls.length, 1, 'served from the cache');
     assert.ok(!L.calls.includes('reserve'));
     assert.equal(spent(L, sub).spent, actual);
@@ -1215,12 +1171,12 @@ test('tester/profile: per tester, sanitized, 300 KB cap, never the owner’s me 
 });
 
 // ── owner regression: the owner path is unchanged and never metered ──
-test('owner calls are never metered and keep their old shapes (web search 5, fallbacks, raw image bodies, Veo standard, 1 GB clips)', async () => {
+test('owner calls are never metered and keep their old shapes (web search 5, fallbacks, raw image bodies, Omni up to 4K, 1 GB clips)', async () => {
   const { env, L } = makeEnv();
   mockFetch([
     [ANTHROPIC, () => claudeStream()],
     [/openai\.com\/v1\/images\/generations$/, () => reply(200, { data: [] })],
-    [/:predictLongRunning$/, () => reply(200, { name: 'models/veo-3.1-generate-preview/operations/o' })],
+    [/^POST .*\/v1beta\/interactions$/, () => reply(200, { id: 'v1_owner', status: 'queued' })],
     [/^POST .*\/upload\/v1beta\/files$/, () => reply(200, '', { 'x-goog-upload-url': SESSION('own'), 'x-goog-upload-chunk-granularity': '8388608' })],
     [/openai\.com\/v1\/chat\/completions$/, () => sseOf(['data: [DONE]\n\n'])],
   ]);
@@ -1244,8 +1200,13 @@ test('owner calls are never metered and keep their old shapes (web search 5, fal
   r = await owner('x/openai/images/generations', post({ model: 'gpt-image-9', prompt: 'x', n: 9, quality: 'max' }));
   assert.equal(r.status, 200);
   assert.equal((await new Response(upstream.calls.at(-1).body).json()).n, 9, 'the owner body passes through raw');
-  r = await owner('x/gemini/v1beta/models/veo-3.1-generate-preview:predictLongRunning', post({ instances: [{ prompt: 'p' }], parameters: { durationSeconds: 8 } }));
+  // the owner's Omni: any length 3–10 s and up to 4K, unmetered; Veo's old proxy routes are gone
+  r = await owner('omni/start', post({ prompt: 'p', seconds: 10, resolution: '4k', aspect: '16:9' }));
   assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { id: 'v1_owner', status: 'queued', seconds: 10, pollAfterMs: 10_000 });
+  assert.deepEqual(upstream.calls.at(-1).json.response_format, { type: 'video', aspect_ratio: '16:9', resolution: '4k', duration: '10s' });
+  r = await owner('x/gemini/v1beta/models/veo-3.1-generate-preview:predictLongRunning', post({ instances: [{ prompt: 'p' }], parameters: { durationSeconds: 8 } }));
+  assert.equal(r.status, 404);
   r = await owner('video/upload/start', post({ name: 'big.mp4', mime: 'video/mp4', size: 900 * 1024 * 1024 }));
   assert.equal(r.status, 200, 'the owner keeps 1 GB clips');
   assert.deepEqual(L.calls, [], 'the Ledger was never called');

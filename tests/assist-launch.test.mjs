@@ -177,7 +177,7 @@ const scope = (vars) => new Proxy(vars, {
   set: (t, k, v) => { t[k] = v; return true; },
 });
 const evalIn = (vars, body) => new Function('scope', `with (scope) { ${body} }`)(scope(vars));
-function holdRig({ mode = 'ask', video = { model: '', aspect: '16:9', secs: 4, enhance: true }, vm = { id: 'gemini:veo-3.1-lite-generate-preview', veo: true } } = {}) {
+function holdRig({ mode = 'ask', video = { model: '', aspect: '16:9', secs: 4, enhance: true }, vm = { id: 'gemini:gemini-omni-1.1-flash', omni: true, veo: true } } = {}) {
   const calls = [], due = new Map(); let id = 0;
   const timers = { setTimeout: (f, ms) => { due.set(++id, { f, ms }); return id; }, clearTimeout: (t) => due.delete(t) };
   const vars = {
@@ -204,18 +204,18 @@ test('the hold’s toast names the mode; Video says its length and price; the se
 
   const vid = holdRig({ mode: 'video' });
   vid.holdThenSend({ ms: HOLD_MS.video, mode: 'video', via: 'assist' });
-  assert.deepEqual(vid.calls[0], ['toast', 'Making a 4 s video · ≈ $0.25', 'Cancel']);
+  assert.deepEqual(vid.calls[0], ['toast', 'Making a 4 s video · ≈ $0.51', 'Cancel']);
   assert.equal([...vid.due.values()][0].ms, 4000);
   // 16:9 HD is always 8 s at 1080p; a model with no price here (Runway, local) shows no price rather than a wrong one.
-  assert.equal(holdRig({ mode: 'video', video: { model: '', aspect: '16:9hd', secs: 4 } }).holdNote('video'), 'Making a 8 s video · ≈ $0.80');
+  assert.equal(holdRig({ mode: 'video', video: { model: '', aspect: '16:9hd', secs: 4 } }).holdNote('video'), 'Making a 4 s video · ≈ $1.02'); // Omni HD (1080p) keeps the chosen length
   assert.equal(holdRig({ mode: 'video', vm: { id: 'runway:gen4.5', veo: false } }).holdNote('video'), 'Making a 4 s video');
 
   // The first-use dialog says where this send goes; Video also says its length and price.
   assert.equal(img.confirmWhat('image'), 'This one goes to Image, after a short pause you can cancel.');
-  assert.equal(vid.confirmWhat('video'), 'This one: Making a 4 s video · ≈ $0.25, after a 4-second pause you can cancel.');
+  assert.equal(vid.confirmWhat('video'), 'This one: Making a 4 s video · ≈ $0.51, after a 4-second pause you can cancel.');
   assert.equal(img.confirmWhat(undefined), 'This one goes to Ask, after a short pause you can cancel.');
   assert.equal(img.confirmWhat('image', 'assist'), 'This one goes to Image and sends right away.');
-  assert.equal(vid.confirmWhat('video', 'assist'), 'This one: Making a 4 s video · ≈ $0.25, after a 4-second pause you can cancel.');
+  assert.equal(vid.confirmWhat('video', 'assist'), 'This one: Making a 4 s video · ≈ $0.51, after a 4-second pause you can cancel.');
 
   // Atelier Assist (HOLD_MS.assist = 0): sends at once, no hold, no "Sending… Cancel" toast.
   const now = holdRig({ mode: 'code' });

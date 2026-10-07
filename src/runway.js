@@ -29,15 +29,21 @@ export const OUTPUT_MAX = 150 * 1024 * 1024; // what Atelier will carry back to 
 
 const I2V_RATIOS = Object.freeze(['1280:720', '720:1280', '1104:832', '832:1104', '960:960', '1584:672']);
 const T2V_RATIOS = Object.freeze(['1280:720', '720:1280']);
+// Google Veo 3.1 through Runway (OpenAPI schema, docs.dev.runwayml.com/openapi.json, read 2026-10-07): text and image →
+// video, these four ratios, 4/6/8 s, an `audio` flag (default true; audio doubles the price), no outputFormat field.
+const VEO_RATIOS = Object.freeze(['1280:720', '720:1280', '1080:1920', '1920:1080']);
+const VEO_DURATIONS = Object.freeze([4, 6, 8]);
 // The only Runway models Atelier sends. kinds: endpoint → allowed ratios (null: the model has no ratio).
-// mp4: the model takes outputFormat, which is always forced to 'mp4' (no ProRes/HDR surcharges).
+// mp4: the model takes outputFormat, which is always forced to 'mp4' (no ProRes/HDR surcharges). durations: the lengths
+// the model takes (else DURATION_MIN–DURATION_MAX). creditsNoAudio: the rate when audio: false is sent (Veo 3.1).
+// Prices: https://docs.dev.runwayml.com/guides/pricing/ (Veo 3.1: 40 credits/s with audio, 20 without; Fast 15 / 10).
 export const RUNWAY_MODELS = Object.freeze({
   'gen4.5': Object.freeze({ creditsPerSecond: 12, minCredits: 0, promptRequired: true, mp4: true, kinds: Object.freeze({ text_to_video: T2V_RATIOS, image_to_video: I2V_RATIOS }) }),
   gen4_turbo: Object.freeze({ creditsPerSecond: 5, minCredits: 0, promptRequired: false, mp4: false, kinds: Object.freeze({ image_to_video: I2V_RATIOS }) }),
   aleph2: Object.freeze({ creditsPerSecond: 28, minCredits: 56, promptRequired: true, mp4: true, kinds: Object.freeze({ video_to_video: null }) }),
+  'veo3.1': Object.freeze({ creditsPerSecond: 40, creditsNoAudio: 20, minCredits: 0, promptRequired: true, mp4: false, audio: true, durations: VEO_DURATIONS, kinds: Object.freeze({ text_to_video: VEO_RATIOS, image_to_video: VEO_RATIOS }) }),
+  'veo3.1_fast': Object.freeze({ creditsPerSecond: 15, creditsNoAudio: 10, minCredits: 0, promptRequired: true, mp4: false, audio: true, durations: VEO_DURATIONS, kinds: Object.freeze({ text_to_video: VEO_RATIOS, image_to_video: VEO_RATIOS }) }),
 });
-// Ids Runway switched off on 2026-07-30: calls with them fail, so say what to use instead.
-export const RETIRED = Object.freeze({ gen4_aleph: 'aleph2', gen3a_turbo: 'gen4.5 or gen4_turbo' });
 export const KINDS = Object.freeze(['image_to_video', 'text_to_video', 'video_to_video']);
 export const TARGET_ASPECTS = Object.freeze(['16:9', '4:3', '3:2', '1:1', '2:3', '3:4', '9:16', '21:9']);
 export const DURATION_MIN = 2, DURATION_MAX = 10, DURATION_DEFAULT = 5; // gen4_turbo's default is undocumented: always send one
@@ -68,10 +74,12 @@ const usd = (credits) => Math.round(credits) / 100;
 export const costOf = (credits) => (Number.isFinite(credits) && credits >= 0 ? { credits, usd: usd(credits) } : null);
 
 // What a generation should cost by Runway's price list → {credits, usd}, or null when the length is unknown.
-export function quote(model, seconds) {
+// audio: false only for a model that takes the flag (Veo 3.1's silent rate); anything else quotes with audio.
+export function quote(model, seconds, audio = true) {
   const m = RUNWAY_MODELS[model];
   if (!own(RUNWAY_MODELS, model) || !(Number(seconds) > 0)) return null;
-  return costOf(Math.max(m.minCredits, Math.ceil(Number(seconds)) * m.creditsPerSecond));
+  const rate = audio === false && m.creditsNoAudio ? m.creditsNoAudio : m.creditsPerSecond;
+  return costOf(Math.max(m.minCredits, Math.ceil(Number(seconds)) * rate));
 }
 
 // Text that may leave this module (responses and logs): no key, no links (signed CloudFront URLs carry a `_jwt`
@@ -168,7 +176,6 @@ export function shapeRequest(kind, input) {
   if (!KINDS.includes(kind)) throw new RunwayError('Unknown Runway route.', 404, { code: 'runway_route' });
   if (!isRecord(input)) throw bad('Bad JSON body');
   const model = typeof input.model === 'string' ? input.model : '';
-  if (own(RETIRED, model)) throw bad(`Runway retired ${model} on 2026-07-30 — use ${RETIRED[model]}.`, { code: 'runway_retired' });
   if (!own(RUNWAY_MODELS, model)) throw bad(`Atelier doesn’t offer the Runway model “${model.replace(/[^\w.-]/g, '').slice(0, 40)}”.`, { code: 'runway_model' });
   const spec = RUNWAY_MODELS[model];
   if (!own(spec.kinds, kind)) {
@@ -221,9 +228,15 @@ export function shapeRequest(kind, input) {
     const ratio = input.ratio == null ? ratios[0] : input.ratio;
     if (!ratios.includes(ratio)) throw bad(`Runway ${model} (${kind.replace(/_/g, ' ')}) takes the ratios ${ratios.join(', ')}.`);
     body.ratio = ratio;
-    const d = input.duration == null ? DURATION_DEFAULT : input.duration;
-    if (!intIn(d, DURATION_MIN, DURATION_MAX)) throw bad(`Runway clips are ${DURATION_MIN}–${DURATION_MAX} whole seconds.`);
+    const d = input.duration == null ? (spec.durations ? 6 : DURATION_DEFAULT) : input.duration;
+    if (spec.durations ? !spec.durations.includes(d) : !intIn(d, DURATION_MIN, DURATION_MAX)) {
+      throw bad(spec.durations ? `Runway ${model} clips are ${spec.durations.join(', ')} seconds.` : `Runway clips are ${DURATION_MIN}–${DURATION_MAX} whole seconds.`);
+    }
     body.duration = seconds = d;
+    if (spec.audio && input.audio != null) {
+      if (typeof input.audio !== 'boolean') throw bad('audio must be true or false.');
+      body.audio = input.audio;
+    }
   }
   if (input.seed != null) {
     if (!intIn(input.seed, 0, 4294967295)) throw bad('seed must be a whole number from 0 to 4294967295.');
@@ -235,7 +248,7 @@ export function shapeRequest(kind, input) {
     if (t) body.contentModeration = { publicFigureThreshold: t };
   }
   if (spec.mp4) body.outputFormat = 'mp4'; // whatever was asked: ProRes/HDR formats cost +5 to +40 credits a second
-  return { model, kind, body, seconds };
+  return { model, kind, body, seconds, audio: body.audio !== false };
 }
 
 // A task as the browser may see it: status, progress, costs and Runway's failure code — never the output links.
@@ -296,7 +309,7 @@ async function generate(req, env, key, kind) {
   // Optional spending cap (Worker var RUNWAY_MAX_CREDITS). Checked BEFORE the paid call from Runway's price list: exact
   // for gen4.5 / gen4_turbo (whole seconds), and at least Aleph's minimum when the clip length is unknown.
   const cap = maxCredits(env);
-  const pre = quote(shaped.model, shaped.seconds) || (RUNWAY_MODELS[shaped.model].minCredits > 0 ? costOf(RUNWAY_MODELS[shaped.model].minCredits) : null);
+  const pre = quote(shaped.model, shaped.seconds, shaped.audio) || (RUNWAY_MODELS[shaped.model].minCredits > 0 ? costOf(RUNWAY_MODELS[shaped.model].minCredits) : null);
   if (cap != null && pre && pre.credits > cap) {
     throw new RunwayError(`This Runway video would cost about ${pre.credits} credits ($${pre.usd.toFixed(2)}) — over this server’s cap of ${cap} (RUNWAY_MAX_CREDITS). Nothing was sent to Runway.`, 402, { code: 'runway_cap', estimatedCost: pre });
   }
@@ -315,7 +328,7 @@ async function generate(req, env, key, kind) {
     console.warn('runway cap cancel failed');
     throw new RunwayError(`${over} Atelier couldn’t cancel it at once and is trying again — check at dev.runway.com that it stopped.`, 402, { code: 'runway_cap_running', id: j.id, estimatedCost: est });
   }
-  return json({ id: j.id, model: shaped.model, kind, estimatedCost: est, quote: quote(shaped.model, shaped.seconds), pollAfterMs: POLL_MS });
+  return json({ id: j.id, model: shaped.model, kind, estimatedCost: est, quote: quote(shaped.model, shaped.seconds, shaped.audio), pollAfterMs: POLL_MS });
 }
 
 // GET runway/task/<id> → the cleaned task (see cleanTask); 404 {code:'runway_gone'} once Runway no longer has it.
@@ -418,7 +431,7 @@ async function output(key, id, params) {
   return new Response(capped(res.body, OUTPUT_MAX), { status: 200, headers });
 }
 
-// Runway's account → {creditBalance, usd, maxMonthlyCreditSpend, models: {gen4.5|gen4_turbo|aleph2: {maxConcurrentGenerations, maxDailyGenerations}}}
+// Runway's account → {creditBalance, usd, maxMonthlyCreditSpend, models: {<RUNWAY_MODELS key>: {maxConcurrentGenerations, maxDailyGenerations}}}
 async function account(key) {
   const what = 'Reading the Runway account';
   const r = await call(key, 'GET', 'organization', undefined, what, ACCOUNT_TIMEOUT_MS);
