@@ -20,12 +20,12 @@
 //   GET  omni/video/<id>   → video/mp4 (the finished clip)
 //   POST omni/cancel/<id>  → {ok}
 // The API key never leaves the Worker and never reaches a log or an error; prompts and media are never logged.
-// The owner's starts go through src/spend.js (opts.spend): held to the per-video and monthly limits before Google is
-// called (402 owner_cap_*), tied to the interaction once Google accepts it, and settled from its reported usage when a
-// status poll sees it finish ($0 for a filtered, failed or cancelled one: Google bills only a produced video).
+// The owner's starts go through src/spend.js (opts.spend), the owner's spend record: recorded at the quote (never
+// refused), tied to the interaction once Google accepts it, and settled from its reported usage when a status poll sees
+// it finish ($0 for a filtered, failed or cancelled one: Google bills only a produced video).
 import { GEMINI_BASE } from './gemini.js';
 import { veoCost, omniActual } from './tester/prices.js';
-import { SpendError, spendResponse, isGatewayStatus } from './spend.js';
+import { isGatewayStatus } from './spend.js';
 
 export const OMNI_MODEL = 'gemini-omni-1.1-flash';
 export const OMNI_PRICE_ID = `gemini:${OMNI_MODEL}`;
@@ -341,7 +341,7 @@ export async function readBody(req) {
   try { return JSON.parse(text); } catch { return null; }
 }
 
-// ── the owner's spending limits (src/spend.js) ──
+// ── the owner's spend record (src/spend.js) ──
 const jobOf = (id) => `omni:${id}`;
 /** What an owner clip is held at (µ$, Google's per-second price, no margin): an edit keeps its clip's length, so it is held at the longest (10 s). */
 export const ownerQuote = (shaped, seconds = shaped.edit ? OMNI_SECONDS_MAX : shaped.seconds) => veoCost({ model: OMNI_PRICE_ID, seconds, resolution: shaped.resolution, margin: false });
@@ -372,10 +372,7 @@ async function ownerStart(req, key, spend) {
   } catch (err) {
     if (!(err instanceof OmniError) || err.code !== 'omni_rejected' || !/duration/i.test(err.message) || !shaped.body.response_format.duration) { await settleRefused(hold, err); throw err; }
     console.warn('omni: duration refused, retrying without it');
-    if (hold) { // Omni picks the length now: hold the longest clip, and only if that still fits
-      const fit = await hold.resize(ownerQuote(shaped, OMNI_SECONDS_MAX));
-      if (!fit.ok) { await hold.release(); throw fit.error; }
-    }
+    await hold?.resize(ownerQuote(shaped, OMNI_SECONDS_MAX)); // Omni picks the length now: record the longest clip
     const { duration, ...rf } = shaped.body.response_format;
     try { return await made({ ...shaped.body, response_format: rf }, { seconds: null, durationIgnored: true }); }
     catch (again) { await settleRefused(hold, again); throw again; }
@@ -410,7 +407,6 @@ const ROUTES = [
 ];
 /** An OmniError (or anything else) → the JSON error response. */
 export function omniFail(err, key = '') {
-  if (err instanceof SpendError) return spendResponse(err);
   if (err instanceof OmniError) return json({ error: err.message, code: err.code }, err.status, err.headers);
   console.error('omni route failed', scrub(err?.message || err, key, 200));
   return json({ error: 'The Omni request failed — try again.', code: 'omni_failed' }, 502);
@@ -418,7 +414,7 @@ export function omniFail(err, key = '') {
 
 /**
  * /api/omni/* for the owner. path is relative to /api/ ('omni/status/<id>'); key: GEMINI_API_KEY behind the passcode;
- * spend: src/spend.js's ownerSpend(env), the owner's spending limits (worker.js always passes it).
+ * spend: src/spend.js's ownerSpend(env), the owner's spend record (worker.js always passes it).
  */
 export async function handleOmni(req, env, path, { key, spend = null } = {}) {
   if (!key) return json({ error: 'No Gemini key on the server (set GEMINI_API_KEY).' }, 401);

@@ -9,7 +9,7 @@ const { DEFAULTS, DAILY_UPLOADS, OVERRUN, REFUSED_TTL, dayKey, monthKey, resetsA
 // The real Ledger class on an in-memory SQLite shim; `ledger.clock` is pinned so days and months are deterministic.
 const T0 = Date.parse('2026-10-15T12:00:00Z');
 function setup({ open = true, ...config } = {}) {
-  const L = makeLedger({ SYNC_BUCKET: fakeR2() });
+  const L = makeLedger({ SYNC_BUCKET: fakeR2(), TESTERS_ENABLED: '1' }); // open: the alarm keeps live sessions
   let now = T0;
   L.ledger.clock = () => now;
   L.at = (t) => { now = t; };

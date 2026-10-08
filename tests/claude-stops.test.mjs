@@ -7,10 +7,9 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { claudeChat, afterFallback, turnAfterFallback, STOPS, PAUSE_CONTINUATIONS } from '../src/anthropic.js';
+import { claudeChat, afterFallback, turnAfterFallback, STOPS, PAUSE_CONTINUATIONS, CLAUDE_MAX_OUTPUT, CLAUDE_UNLISTED_MAX } from '../src/anthropic.js';
 import { followUpRoute, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, buildHistory } from '../public/context.js';
 import { isTesterCode } from '../public/tester.js';
-import { chatWorstCase } from '../src/tester/prices.js';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -258,7 +257,7 @@ function scope(vars) {
   });
 }
 const evalIn = (vars, body) => new Function('scope', `with (scope) { ${body} }`)(scope(vars));
-const CONSTS = ['EMPTY_NUDGE', 'shows', 'THINKING_BLOCKS', 'replayRounds', 'replayable', 'CLAUDE_ROOM', 'roomFor', 'SSE_ERRORS', 'EFFORT', 'FIRST_TOKEN_MS', 'providerOf', 'accountProblem', 'sleep', 'asksFirst', 'urlHost', 'githubOutside'];
+const CONSTS = ['EMPTY_NUDGE', 'shows', 'THINKING_BLOCKS', 'replayRounds', 'replayable', 'MAX_OUTPUT', 'HELPER_ROLES', 'UNLISTED_CLAUDE_ROOM', 'roomFor', 'SSE_ERRORS', 'EFFORT', 'FIRST_TOKEN_MS', 'providerOf', 'accountProblem', 'sleep', 'asksFirst', 'urlHost', 'githubOutside'];
 const FNS = ['withoutThinking', 'streamChat', 'streamChatOnce', 'streamChatRaw', 'apiHeaders', 'toApiError', 'runChat', 'runAgent'];
 
 // OpenAI-style providers (the Worker forwards their SSE as it is): script(body) → deltas, last one with finish.
@@ -309,7 +308,7 @@ test('app: a Claude reply that only thought is nudged (effort low, EMPTY_NUDGE l
   assert.deepEqual([sent[0].output_config, sent[1].output_config], [{ effort: 'high' }, { effort: 'low' }], 'Claude’s effort param takes the nudge’s low');
   assert.deepEqual(sent[1].messages.at(-1), { role: 'user', content: vars.EMPTY_NUDGE });
   assert.equal(sent[1].messages.filter((m) => m.role === 'assistant').length, 0, 'the thinking-only attempt is not replayed: a valid request');
-  assert.deepEqual([sent[0].max_tokens, sent[1].max_tokens], [64000, 64000], 'the owner’s Code room for Claude');
+  assert.deepEqual([sent[0].max_tokens, sent[1].max_tokens], [128000, 128000], 'the owner’s Code room for Claude: Opus 5.5’s whole 128K, the nudge too');
   assert.deepEqual(calls.toasts, []);
 });
 
@@ -362,7 +361,8 @@ test('app: a paused web answer completes (the Worker continues it) and reads "li
   assert.equal(e.text, 'Found it. Headline A.');
   assert.equal(e.meta.note, 'live web');
   assert.equal(sent.length, 2);
-  assert.equal(sent[0].max_tokens, 6000, 'web is a low-effort role: its budget is unchanged');
+  assert.equal(sent[0].max_tokens, 128000, 'web is user-facing: Sonnet 5.5’s whole 128K (effort stays low)');
+  assert.equal(sent[0].output_config.effort, 'low');
 });
 
 test('app (agent): a tool turn replays thinking + tool_use unchanged; max_tokens gives the length note; a call cut at the limit never runs', async () => {
@@ -418,6 +418,8 @@ test('app (agent, Assist): once web search is withdrawn, earlier thinking goes b
 });
 
 test('app: other providers keep their empty-answer rescue and length note (OpenAI, Gemini, DeepSeek, xAI)', async () => {
+  // Code is user-facing: each model's own maximum, the nudge too; Grok has no documented maximum, so its caller's 6,000
+  const room = { 'openai:gpt-6.1-sol': 128000, 'gemini:gemini-3.1-pro-preview': 65536, 'deepseek:deepseek-v4-pro': 393216, 'xai:grok-4.7': 6000 };
   for (const model of ['openai:gpt-6.1-sol', 'gemini:gemini-3.1-pro-preview', 'deepseek:deepseek-v4-pro', 'xai:grok-4.7']) {
     let n = 0;
     const other = () => (++n === 1 ? openaiSSE([{ delta: { reasoning_content: 'thinking…' } }, { finish: 'length' }])
@@ -427,7 +429,7 @@ test('app: other providers keep their empty-answer rescue and length note (OpenA
     await vars.runChat(e, null, { entries: [e] });
     assert.equal(e.text, 'Answer.', model);
     assert.match(e.meta.note, /reasoning ran long/);
-    assert.deepEqual(calls.bodies.map((b) => [b.max_tokens, b.reasoning_effort]), [[6000, 'high'], [6000, 'low']], `${model}: budgets unchanged, nudge at low`);
+    assert.deepEqual(calls.bodies.map((b) => [b.max_tokens, b.reasoning_effort]), [[room[model], 'high'], [room[model], 'low']], `${model}: the model’s maximum, nudge at low`);
     assert.equal(lastUser(calls.bodies[1]).content, vars.EMPTY_NUDGE);
     // cut with text: the note
     const cut = rig({ chains: { code: [model] }, other: () => openaiSSE([{ delta: { content: 'Half of it' } }, { finish: 'length' }]) });
@@ -449,18 +451,29 @@ test('app: other providers keep their empty-answer rescue and length note (OpenA
   assert.match(h.text, /hit the length limit/);
 });
 
-test('app: Claude budgets — the owner’s high-effort roles get 64K, medium 16K, low keep theirs; testers and other providers unchanged', () => {
+test('app: Claude budgets — every user-facing role gets the model’s 128K at the effort it chose; helpers, testers and unlisted ids keep theirs', () => {
   const { vars } = rig();
-  const room = (model, role, base) => vars.roomFor(model, role, base);
-  assert.deepEqual(['code', 'reason', 'build'].map((r) => room('anthropic:claude-opus-5-5', r, 6000)), [64000, 64000, 64000]);
-  assert.deepEqual(['agent', 'ideas', 'write'].map((r) => room('anthropic:claude-sonnet-5-5', r, 6000)), [16000, 16000, 16000]);
-  assert.deepEqual(['ask', 'web', 'smart', 'vision', 'watch', 'fast'].map((r) => room('anthropic:claude-haiku-5-5', r, 900)), [900, 900, 900, 900, 900, 900]);
-  assert.equal(room('anthropic:claude-opus-5-5', 'build', 32000), 64000);
-  assert.equal(room('openai:gpt-6.1-sol', 'code', 6000), 6000);
-  assert.equal(room('zai:glm-5.3', 'reason', 12000), 12000);
+  const room = (model, role, base, helper) => vars.roomFor(model, role, base, helper);
+  const USER = ['ask', 'smart', 'reason', 'code', 'web', 'vision', 'watch', 'ideas', 'write', 'build', 'agent'];
+  for (const model of ['anthropic:claude-opus-5-5', 'anthropic:claude-sonnet-5-5', 'anthropic:claude-fable-5-1', 'anthropic:claude-haiku-5-5']) {
+    assert.deepEqual(USER.map((r) => room(model, r, 6000)), USER.map(() => 128000), model);
+  }
+  assert.equal(room('anthropic:claude-opus-5-5', 'build', 32000), 128000);
+  assert.equal(room('anthropic:claude-sonnet-5-5', 'agent', 16000), 128000, 'every tool-loop turn of the accounts agent');
+  // effort is the role's own (EFFORT is untouched): only the ceiling moved
+  assert.deepEqual(vars.EFFORT, { agent: 'medium', web: 'low', ask: 'low', smart: 'low', reason: 'high', code: 'high', write: 'medium', vision: 'low', watch: 'low', ideas: 'medium', build: 'high', fast: 'low' });
+  // helpers: role 'fast', and calls marked helper (learning a writing style, a history import's profile)
+  assert.equal(room('anthropic:claude-haiku-5-5', 'fast', 900), 900);
+  assert.equal(room('anthropic:claude-sonnet-5-5', 'write', 2500, true), 2500);
+  assert.equal(room('anthropic:claude-sonnet-5-5', 'smart', 8000, true), 8000);
+  assert.equal(room('anthropic:claude-opus-5-5', undefined, 4096), 4096, 'no role: never inflated');
+  // an unlisted Claude id keeps the pre-v85 room (64K at high and up, 16K at medium, the caller's at low)
+  assert.deepEqual(['code', 'agent', 'ask'].map((r) => room('anthropic:claude-opus-5', r, 6000)), [64000, 16000, 6000]);
   vars.S.tester = { models: {} };
   assert.equal(room('anthropic:claude-opus-5-5', 'code', 6000), 6000, 'testers: the router prices the reservation from this figure');
-  assert.match(APP, /max_tokens: think \? 12000 : 6000,/, 'runChat’s own figures (other providers, testers) are unchanged');
+  assert.match(APP, /max_tokens: think \? 12000 : 6000,/, 'runChat’s own figures (unlisted models, testers) are unchanged');
+  assert.match(APP, /completeChat\(\{ model: modelFor\('write'\), role: 'write', helper: true, max_tokens: 2500,/, 'learning a writing style is a helper');
+  assert.match(APP, /model, role: 'smart', helper: true, max_tokens: 8000,/, 'a history import’s profile is a helper');
 });
 
 test('app: a tester’s Claude request keeps the caller’s max_tokens (the router prices it)', async () => {
@@ -501,26 +514,22 @@ test('app: an answer declined partway stays on screen but is left out of later h
   assert.deepEqual(buildHistory([e0, { kind: 'ask', prompt: 'q', text: 'half', refused: true }, { kind: 'ask', prompt: 'q2', text: 'x', error: 'Failed.' }]).length, 2);
 });
 
-test('app: the owner’s Claude ceilings count the fallback attempt and the rescue (the CLAUDE_ROOM comment’s figures)', async () => {
-  const { vars } = rig();
-  // one call, output only, at the room roomFor gives each role: the model plus its dearest server-side fallback attempt
-  const usd = (model, role, base) => chatWorstCase({ model, inputTokens: 0, maxTokens: vars.roomFor(model, role, base), margin: false }) / 1e6;
-  const call = {
-    opus64: usd('anthropic:claude-opus-5-5', 'code', 6000), fable64: usd('anthropic:claude-fable-5-1', 'reason', 12000),
-    sonnet64: usd('anthropic:claude-sonnet-5-5', 'build', 32000), opus16: usd('anthropic:claude-opus-5-5', 'write', 6000),
-    sonnet16: usd('anthropic:claude-sonnet-5-5', 'ideas', 6000),
-  };
-  assert.deepEqual(call, { opus64: 2.88, fable64: 4.8, sonnet64: 1.28, opus16: 0.72, sonnet16: 0.32 });
-  assert.equal(chatWorstCase({ model: 'anthropic:claude-opus-5-5', inputTokens: 0, maxTokens: 64000, margin: false, fallbacks: false }) / 1e6, 1.28, 'the report’s old figure left the fallback out');
-  // one prompt: the first call and the nudge (same room) on each of at most two models
-  const prompt = (a, b) => Math.round(2 * (a + b) * 100) / 100;
-  assert.deepEqual([prompt(call.opus64, call.sonnet64), prompt(call.opus64, call.fable64), prompt(call.opus16, call.sonnet16)], [8.32, 15.36, 2.08]);
-  const comment = APP.slice(APP.indexOf("// The owner's room for Claude"), APP.indexOf('\nconst CLAUDE_ROOM'));
-  for (const fig of ['$2.88', '$4.80', '$1.28', '$0.72', '$0.32', '$8.32', '$15.36', '$2.08']) assert.ok(comment.includes(fig), fig);
-  // the fallback attempt is real for the owner: Opus 5.5 and Fable 5.1 go out at 64K with fallbacks 'default'
-  for (const model of ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5']) {
+test('Worker: each listed Claude model goes out with up to its 128K (streamed, fallbacks as before); an unlisted id keeps the 64K cap', async () => {
+  assert.deepEqual(CLAUDE_MAX_OUTPUT, { 'claude-opus-5-5': 128000, 'claude-sonnet-5-5': 128000, 'claude-fable-5-1': 128000, 'claude-haiku-5-5': 128000 });
+  for (const model of Object.keys(CLAUDE_MAX_OUTPUT)) {
     const sent = anthropic(() => claudeSSE([T('ok')], 'end_turn', { model }));
-    await (await chat({ model: `anthropic:${model}`, max_tokens: 64000 })).text();
-    assert.deepEqual([sent[0].max_tokens, sent[0].fallbacks], [64000, 'default'], model);
+    await (await chat({ model: `anthropic:${model}`, max_tokens: 128000 })).text();
+    assert.deepEqual([sent[0].max_tokens, sent[0].stream, sent[0].fallbacks ?? null], [128000, true, model === 'claude-haiku-5-5' ? null : 'default'], model);
+    const over = anthropic(() => claudeSSE([T('ok')], 'end_turn', { model }));
+    await (await chat({ model: `anthropic:${model}`, max_tokens: 1_000_000 })).text();
+    assert.equal(over[0].max_tokens, 128000, `${model}: never above its maximum`);
   }
+  const sent = anthropic(() => claudeSSE([T('ok')], 'end_turn', { model: 'claude-opus-5' }));
+  await (await chat({ model: 'anthropic:claude-opus-5', max_tokens: 128000 })).text();
+  assert.equal(sent[0].max_tokens, CLAUDE_UNLISTED_MAX);
+  assert.equal(CLAUDE_UNLISTED_MAX, 64000);
+  // a tester's priced cap still wins
+  const t = anthropic(() => claudeSSE([T('ok')], 'end_turn'));
+  await (await chat({ max_tokens: 128000 }, { maxTokens: 3000, webUses: 0, fallbacks: false })).text();
+  assert.equal(t[0].max_tokens, 3000);
 });

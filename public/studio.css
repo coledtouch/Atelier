@@ -88,6 +88,10 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
 .onboard input { font-size: 16px; }
 /* who is signed in: body.tester (LinkedIn tester) hides owner surfaces; body.owner (passcode) shows owner-only panels */
 body.tester .owner-only, body:not(.tester) .tester-only, body:not(.owner) .needs-owner { display: none !important; }
+/* LinkedIn tester access (TESTERS_ENABLED on the Worker; off by default): body.testers-open only while /api/health says
+   it is on. Off, every tester surface hides (sign-in button, spots, allowance pill, feedback, the owner's Testers panel)
+   and the sign-in sheet says it is closed. */
+body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: none !important; }
 .file-chip { position: relative; }
 .file-chip input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .file-chip:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }

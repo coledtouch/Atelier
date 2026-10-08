@@ -2,12 +2,13 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, makeLedger, mockFetch, restoreFetch, upstream, reply, api, signIn, PROFILE, resetTesterCaches } from './tester-env.mjs';
 
-// The owner's spending limits (src/spend.js; Settings → Spending): $25 a video and $200 a month for video and images by
-// default, checked in the Worker before any paid owner job reaches a provider, recorded in the Ledger (owner_spend) and
-// settled to what the provider reports. No provider is ever called for real: every upstream request goes to a fetch
-// mock, and an unmatched one fails (and is counted in upstream.calls, so "nothing was sent" is checked exactly).
+// The owner's spend record (src/spend.js; Settings → Spending → This month's spend). Since v85 there are no spending
+// limits: every paid owner video and image reaches its provider, is recorded in the Ledger (owner_spend) at its quote and
+// settled to what the provider reports, and nothing refuses a job for its price. No provider is ever called for real:
+// every upstream request goes to a fetch mock, and an unmatched one fails (and is counted in upstream.calls).
 const SP = await import('../src/spend.js');
 const { TESTER_ROUTES, matchTesterRoute } = await import('../src/tester/router.js');
+const { Ledger } = await import('../src/tester/ledger.js');
 const { omniActual, veoCost, imageCost, imageActual } = await import('../src/tester/prices.js');
 const { RUNWAY_BASE } = await import('../src/runway.js');
 const { GEMINI_BASE } = await import('../src/gemini.js');
@@ -19,13 +20,16 @@ const RUNWAY_KEY = `key_${'ab12'.repeat(32)}`;
 const TASK = '4a7b0c1d-2e3f-4a5b-8c6d-7e8f9a0b1c2d';
 const PNG = `data:image/png;base64,${'iVBORw0KGgo'.padEnd(64, 'A')}`;
 const OMNI = 'gemini:gemini-omni-1.1-flash';
-// The limits live in the Ledger (config 'owner_limits'); setLimits writes them straight in, as PUT /api/owner/limits would.
 const ledgers = new WeakMap();
-const setup = (extra = {}) => { const made = makeEnv({ RUNWAYML_API_SECRET: RUNWAY_KEY, ...extra }); ledgers.set(made.env, made.L); return made; };
+// Tester access off (the production default); the owner's routes are the same either way.
+const setup = (extra = {}) => { const made = makeEnv({ RUNWAYML_API_SECRET: RUNWAY_KEY, testers: false, ...extra }); ledgers.set(made.env, made.L); return made; };
 const owner = (env, path, init = {}) => api(env, path, init, { pass: 'pw', origin: null });
 const post = (body) => ({ method: 'POST', body, headers: { 'content-type': 'application/json' } });
 const put = (body) => ({ method: 'PUT', body, headers: { 'content-type': 'application/json' } });
-const setLimits = (env, perVideoUsd, monthlyMediaUsd) => ledgers.get(env).ledger.ownerSetLimits({ perVideoUsd, monthlyMediaUsd, updatedAt: 1 });
+// What v83–v84 saved as the owner's limits (the Ledger's config row 'owner_limits'). v85 never reads it: written here at
+// $0.01, it must change nothing.
+const legacyLimits = (env, perVideoUsd = 0.01, monthlyMediaUsd = 0.01) => ledgers.get(env).shim.db.prepare('INSERT OR REPLACE INTO config (k, v) VALUES (?, ?)')
+  .run('owner_limits', JSON.stringify({ perVideoUsd, monthlyMediaUsd, updatedAt: 1 }));
 const body = async (r) => { const t = await r.text(); try { return JSON.parse(t); } catch { return t; } };
 const month = (env, m) => owner(env, `owner/spend${m ? `?month=${m}` : ''}`).then(body);
 const rows = (L) => L.shim.db.prepare('SELECT * FROM owner_spend ORDER BY rowid').all().map((r) => ({ ...r }));
@@ -37,23 +41,6 @@ const finished = (id, extra = {}) => ({ id, status: 'completed', steps: [{ type:
 
 // ── the decision: price → limit, at the boundaries ──
 
-test('decide: equal to a limit is allowed, one micro-dollar over is not; images only count toward the month', () => {
-  const limits = { perVideoUsd: 25, monthlyMediaUsd: 200 };
-  assert.deepEqual(SP.decide({ amount: 25_000_000, kind: 'video', limits }), { ok: true });
-  assert.deepEqual(SP.decide({ amount: 25_000_001, kind: 'video', limits }), { ok: false, limit: 'video' });
-  assert.deepEqual(SP.decide({ amount: 10_000_000, kind: 'video', limits, spent: 190_000_000 }), { ok: true }, 'exactly reaches $200');
-  assert.deepEqual(SP.decide({ amount: 10_000_001, kind: 'video', limits, spent: 190_000_000 }), { ok: false, limit: 'month' });
-  assert.deepEqual(SP.decide({ amount: 30_000_000, kind: 'image', limits }), { ok: true }, 'the per-video limit is for videos');
-  assert.deepEqual(SP.decide({ amount: 1, kind: 'image', limits, spent: 200_000_000 }), { ok: false, limit: 'month' });
-  // the per-video limit is checked first: a $30 video in a full month names the per-video limit
-  assert.deepEqual(SP.decide({ amount: 30_000_000, kind: 'video', limits, spent: 200_000_000 }), { ok: false, limit: 'video' });
-  // 0 turns paid video (or all paid media) off; a free job still fits
-  assert.equal(SP.decide({ amount: 1, kind: 'video', limits: { perVideoUsd: 0, monthlyMediaUsd: 200 } }).ok, false);
-  assert.equal(SP.decide({ amount: 0, kind: 'video', limits: { perVideoUsd: 0, monthlyMediaUsd: 0 } }).ok, true);
-  // a job that can't be priced is never let through
-  for (const amount of [NaN, -1, 1.5, Infinity, '5']) assert.equal(SP.decide({ amount, kind: 'image', limits }).ok, false, String(amount));
-});
-
 test('months are UTC: resetsAt is 00:00 UTC on the 1st, December rolls into January', () => {
   assert.equal(SP.monthOf(Date.UTC(2026, 9, 31, 23, 59, 59, 999)), '2026-10');
   assert.equal(SP.monthOf(Date.UTC(2026, 10, 1)), '2026-11');
@@ -63,59 +50,35 @@ test('months are UTC: resetsAt is 00:00 UTC on the 1st, December rolls into Janu
   assert.equal(SP.toMicros(0.07), 70_000);
 });
 
-// ── limits: storage, validation, auth ──
+// ── the readout ──
 
-test('limits: cleanLimits rejects negatives, NaN, Infinity, text, absurd amounts and unknown fields; keeps cents; clamps per-video to the month', () => {
-  const cur = { perVideoUsd: 25, monthlyMediaUsd: 200 };
-  for (const [input, re] of [
-    [{ perVideoUsd: -1 }, /can’t be negative/], [{ monthlyMediaUsd: NaN }, /dollar amount/], [{ monthlyMediaUsd: Infinity }, /dollar amount/],
-    [{ perVideoUsd: '25' }, /dollar amount/], [{ perVideoUsd: null }, /dollar amount/], [{ monthlyMediaUsd: 1e9 }, /at most \$5,000/], [{ perVideoUsd: 501 }, /at most \$500/],
-    [{ budget: 5 }, /Unknown setting/], [{}, /Send perVideoUsd/], [null, /JSON object/], [[25, 200], /JSON object/],
-  ]) {
-    const r = SP.cleanLimits(input, cur);
-    assert.equal(r.ok, false, JSON.stringify(input));
-    assert.match(r.error, re, JSON.stringify(input));
-  }
-  assert.deepEqual(SP.cleanLimits({ perVideoUsd: 12.345 }, cur), { ok: true, limits: { perVideoUsd: 12.35, monthlyMediaUsd: 200 }, clamped: false }, 'merged, to the cent');
-  assert.deepEqual(SP.cleanLimits({ perVideoUsd: 0, monthlyMediaUsd: 0 }, cur), { ok: true, limits: { perVideoUsd: 0, monthlyMediaUsd: 0 }, clamped: false });
-  assert.deepEqual(SP.cleanLimits({ perVideoUsd: 50, monthlyMediaUsd: 30 }, cur), { ok: true, limits: { perVideoUsd: 30, monthlyMediaUsd: 30 }, clamped: true });
-  assert.deepEqual(SP.cleanLimits({ monthlyMediaUsd: 10 }, cur), { ok: true, limits: { perVideoUsd: 10, monthlyMediaUsd: 10 }, clamped: true });
-  // whatever KV holds is made usable (garbage → the defaults)
-  assert.deepEqual(SP.normalizeLimits(null), { perVideoUsd: 25, monthlyMediaUsd: 200, updatedAt: null });
-  assert.deepEqual(SP.normalizeLimits({ perVideoUsd: -3, monthlyMediaUsd: 'x' }), { perVideoUsd: 25, monthlyMediaUsd: 200, updatedAt: null });
-  assert.deepEqual(SP.normalizeLimits({ perVideoUsd: 40, monthlyMediaUsd: 30, updatedAt: 5 }), { perVideoUsd: 30, monthlyMediaUsd: 30, updatedAt: 5 });
-});
-
-test('GET/PUT /api/owner/limits: $25 / $200 until set, saved in the Ledger for every device, bad input refused with nothing written', async () => {
+test('GET /api/owner/spend is a read-only readout: the month, its spend and the breakdown — no limits; /api/owner/limits is gone', async () => {
   const { env, L } = setup();
-  let j = await body(await owner(env, 'owner/limits'));
-  assert.deepEqual([j.perVideoUsd, j.monthlyMediaUsd, j.updatedAt], [25, 200, null]);
-  assert.deepEqual(j.defaults, { perVideoUsd: 25, monthlyMediaUsd: 200 });
-  assert.deepEqual(j.bounds, { perVideoUsd: [0, 500], monthlyMediaUsd: [0, 5000] });
-  let r = await owner(env, 'owner/limits', put({ perVideoUsd: 10, monthlyMediaUsd: 150.5 }));
-  j = await body(r);
-  assert.equal(r.status, 200);
-  assert.deepEqual([j.ok, j.perVideoUsd, j.monthlyMediaUsd], [true, 10, 150.5]);
-  assert.ok(Number.isSafeInteger(j.updatedAt));
-  assert.deepEqual(L.ledger.ownerLimits(), { perVideoUsd: 10, monthlyMediaUsd: 150.5, updatedAt: j.updatedAt });
-  assert.equal(env.ATELIER_KV.m.size, 0, 'nothing in KV: a KV write can take a minute to reach other locations');
-  assert.equal((await body(await owner(env, 'owner/limits'))).monthlyMediaUsd, 150.5);
-  // refused: nothing written
-  const saved = JSON.stringify(L.ledger.ownerLimits());
-  for (const b of [{ perVideoUsd: -5 }, { monthlyMediaUsd: 'NaN' }, { monthlyMediaUsd: 99_999_999 }, { perVideoUsd: 5, extra: 1 }, 'not json', '[]', JSON.stringify({ perVideoUsd: 'x'.repeat(5000) })]) {
-    r = await owner(env, 'owner/limits', put(b));
-    assert.equal(r.status, typeof b === 'string' && b.length > 4096 ? 413 : 400, JSON.stringify(b).slice(0, 60));
-    assert.equal((await body(r)).code, 'owner_limits_input');
+  let s = await month(env);
+  assert.deepEqual(Object.keys(s).sort(), ['byProvider', 'heldUsd', 'jobs', 'month', 'resetsAt', 'settledUsd', 'totalUsd']);
+  assert.deepEqual([s.month, s.totalUsd, s.heldUsd, s.jobs, s.byProvider], [SP.monthOf(), 0, 0, 0, []]);
+  assert.equal(s.resetsAt, SP.resetsAt(SP.monthOf()));
+  for (const k of ['limits', 'leftUsd', 'perVideoUsd', 'monthlyMediaUsd']) assert.equal(k in s, false, k);
+  L.ledger.ownerReserve({ provider: 'runway', kind: 'video', model: 'gen4.5', amount: 1_200_000 });
+  const b = L.ledger.ownerReserve({ provider: 'xai', kind: 'image', amount: 40_000 });
+  L.ledger.ownerSettle(b.id, 35_000);
+  s = await month(env);
+  assert.deepEqual([s.totalUsd, s.settledUsd, s.heldUsd, s.jobs], [1.235, 0.035, 1.2, 2]);
+  assert.deepEqual(s.byProvider, [{ provider: 'runway', kind: 'video', usd: 1.2, heldUsd: 1.2, jobs: 1 }, { provider: 'xai', kind: 'image', usd: 0.035, heldUsd: 0, jobs: 1 }]);
+  // the limits route is gone (GET and PUT): 410 with a reason a v83–v84 device shows as is (its Save limits shows
+  // j.error), and nothing is written; the readout is read only
+  for (const init of [{}, put({ perVideoUsd: 500, monthlyMediaUsd: 5000 }), post({})]) {
+    const r = await owner(env, 'owner/limits', init);
+    assert.equal(r.status, 410);
+    assert.deepEqual(await body(r), { error: 'Spending limits were removed in Atelier v85 — reload the app to update.', code: 'owner_limits_removed' });
   }
-  assert.equal(JSON.stringify(L.ledger.ownerLimits()), saved);
-  // a per-video limit above the month is clamped to it, and says so
-  j = await body(await owner(env, 'owner/limits', put({ perVideoUsd: 80, monthlyMediaUsd: 60 })));
-  assert.deepEqual([j.perVideoUsd, j.monthlyMediaUsd, j.clamped], [60, 60, true]);
-  // only GET and PUT
-  r = await owner(env, 'owner/limits', { method: 'DELETE' });
-  assert.equal(r.status, 405);
+  assert.equal((await owner(env, 'owner/limits/x')).status, 404);
   assert.equal((await owner(env, 'owner/spend', post({}))).status, 405);
+  assert.equal((await owner(env, 'owner/spend', put({}))).status, 405);
   assert.equal((await owner(env, 'owner/probe')).status, 404);
+  assert.deepEqual([(await owner(env, 'owner/spend?month=2026-13')).status, (await body(await owner(env, 'owner/spend?month=2026-13'))).code], [400, 'owner_spend_input']);
+  assert.equal(L.shim.db.prepare("SELECT COUNT(*) AS n FROM config WHERE k = 'owner_limits'").get().n, 0, 'nothing writes limits any more');
+  assert.equal(env.ATELIER_KV.m.size, 0);
 });
 
 test('owner routes: the passcode only — none and a wrong one get 401; a tester gets 403 owner_only before the KV or the Ledger is touched', async () => {
@@ -124,22 +87,27 @@ test('owner routes: the passcode only — none and a wrong one get 401; a tester
     assert.equal((await api(env, path, init)).status, 401, `${path}: no passcode`);
     assert.equal((await api(env, path, init, { pass: 'nope' })).status, 401, `${path}: wrong passcode`);
   }
-  const t = await signIn(L, PROFILE());
-  L.calls.length = 0;
+  // with tester access switched on, a live tester session is refused by the deny-by-default router
+  const { env: on, L: Lon } = makeEnv({ RUNWAYML_API_SECRET: RUNWAY_KEY });
+  const t = await signIn(Lon, PROFILE());
+  Lon.calls.length = 0;
   for (const method of ['GET', 'PUT', 'POST', 'DELETE', 'PATCH']) {
     for (const path of ['owner/limits', 'owner/spend', 'owner/spend/x', 'owner/']) {
-      const r = await api(env, path, { method, ...(method === 'GET' ? {} : { body: JSON.stringify({ perVideoUsd: 500, monthlyMediaUsd: 5000 }) }) }, { cookie: t.token });
+      const r = await api(on, path, { method, ...(method === 'GET' ? {} : { body: JSON.stringify({ perVideoUsd: 500, monthlyMediaUsd: 5000 }) }) }, { cookie: t.token });
       assert.deepEqual([r.status, (await body(r)).code], [403, 'owner_only'], `${method} ${path}`);
       assert.equal(matchTesterRoute(method, path), null);
     }
   }
-  assert.ok(L.calls.every((m) => m === 'session'), `${L.calls}`);
-  assert.equal(L.ledger.ownerLimits(), null, 'a tester never writes the owner’s limits');
+  assert.ok(Lon.calls.every((m) => m === 'session'), `${Lon.calls}`);
+  // with it off (the default), the same cookie is nobody: 401, and the Ledger is never asked about it
+  L.calls.length = 0;
+  for (const path of ['owner/spend', 'owner/limits']) assert.equal((await api(env, path, {}, { cookie: t.token })).status, 401, path);
+  assert.deepEqual(L.calls, []);
   // the tester table stays deny-by-default: no owner route was added to it
   assert.ok(TESTER_ROUTES.every((r) => !String(r.sample ?? r.match).startsWith('owner')));
 });
 
-// ── every paid route refuses an over-limit job before any upstream fetch ──
+// ── nothing refuses a paid job for its price ──
 
 const RUNWAY_JOBS = [
   ['text_to_video', { model: 'gen4.5', promptText: 'x', ratio: '1280:720', duration: 10 }, 1.2],
@@ -151,109 +119,118 @@ const RUNWAY_JOBS = [
   ['image_to_video', { model: 'grok_imagine_1_5_lite', promptImage: PNG, ratio: 'auto_1080p', duration: 15 }, 2.11],
   ['text_to_video', { model: 'seedance2_5', promptText: 'x', ratio: '1920:1080', duration: 30 }, 20.4],
 ];
+const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
-test('Runway, every model: over the per-video limit → 402 owner_cap_video, nothing sent to Runway, nothing recorded', async () => {
+test('no spending refusal on any video or image route: every Runway model (even $20.40 Seedance), Omni 4K, Grok, the image passthrough — each reaches its provider and is recorded', async () => {
   const { env, L } = setup();
-  setLimits(env, 0.4, 200);
-  mockFetch([]);
+  legacyLimits(env); // v83–v84's limits, at $0.01: ignored
+  let n = 0;
+  mockFetch([
+    [rw('(text_to_video|image_to_video|video_to_video)'), () => reply(200, { id: uuid(++n) })],
+    [OMNI_CREATE, () => reply(200, { id: `v1_n${++n}`, status: 'queued' })],
+    [/x\.ai\/v1\/videos\/generations$/, () => reply(200, { request_id: `vid${++n}` })],
+    [/x\.ai\/v1\/images\/generations$/, () => reply(200, { data: [{ b64_json: 'QUJD' }], usage: { cost_in_usd_ticks: 400_000_000 } })],
+    [/openai\.com\/v1\/images\/(generations|edits)$/, () => reply(200, { data: [{ b64_json: 'QUJD' }] })],
+    [/generateContent$/, () => reply(200, { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'QUJD' } }] } }] })],
+    [/meta\.ai\/v1\/images\/generations$/, () => reply(200, { data: [{ b64_json: 'QUJD' }] })],
+  ]);
   for (const [kind, b, usd] of RUNWAY_JOBS) {
     const r = await owner(env, `runway/generate/${kind}`, post(b));
+    assert.equal(r.status, 200, b.model);
     const j = await body(r);
-    assert.deepEqual([r.status, j.code, j.limit], [402, 'owner_cap_video', 'video'], b.model);
-    assert.equal(j.costUsd, usd, b.model);
-    assert.equal(j.perVideoUsd, 0.4);
-    assert.match(j.error, /over your \$0\.40 limit per video\. Nothing was sent to Runway\. Change it in Settings → Spending\./);
-    assert.ok(!/credit|billing|quota/i.test(j.error), 'never worded like a provider out of credit');
+    assert.equal(j.code, undefined, b.model);
+    assert.equal(rows(L).at(-1).amount, Math.round(usd * 1_000_000), `${b.model}: recorded at its quote`);
   }
-  assert.equal(upstream.calls.length, 0);
-  assert.deepEqual(rows(L), []);
-});
-
-test('Runway: over the monthly limit → 402 owner_cap_month with what was used and when it resets; Seedance at $20.40 fits the $25 default', async () => {
-  const { env, L } = setup();
-  setLimits(env, 25, 1);
-  L.ledger.ownerReserve({ provider: 'omni', kind: 'video', amount: 900_000, monthly: 1e12 }); // $0.90 already this month
-  mockFetch([]);
-  const r = await owner(env, 'runway/generate/image_to_video', post(RUNWAY_JOBS[1][1]));
-  const j = await body(r);
-  assert.deepEqual([r.status, j.code, j.limit, j.costUsd, j.spentUsd, j.leftUsd, j.monthlyMediaUsd], [402, 'owner_cap_month', 'month', 0.5, 0.9, 0.1, 1]);
-  assert.equal(j.resetsAt, SP.resetsAt(SP.monthOf()));
-  assert.match(j.error, /would bring this month’s video and image spending to \$1\.40, over your \$1\.00 monthly limit \(\$0\.90 used, resets \w{3} 1\)\. Nothing was sent to Runway\./);
-  assert.equal(upstream.calls.length, 0);
-  assert.equal(rows(L).length, 1);
-  // the default limits: the dearest Runway video Atelier sends ($20.40) goes through
-  const { env: e2 } = setup();
-  mockFetch([[rw('text_to_video'), () => reply(200, { id: TASK, estimatedCost: { credits: 2040 } })]]);
-  assert.equal((await owner(e2, 'runway/generate/text_to_video', post(RUNWAY_JOBS[7][1]))).status, 200);
-});
-
-test('Gemini Omni, Grok video and Grok images: refused over the limits before Google or xAI is called', async () => {
-  const { env, L } = setup();
-  mockFetch([]);
-  setLimits(env, 1, 200);
-  let r = await owner(env, 'omni/start', post({ prompt: 'p', seconds: 10, resolution: '4k' }));
-  let j = await body(r);
-  assert.deepEqual([r.status, j.code, j.costUsd], [402, 'owner_cap_video', 4.0544]);
-  assert.match(j.error, /Nothing was sent to Google/);
-  // an edit keeps its clip's length, so it is held at the longest (10 s): 10 × $0.10136 = $1.01 > $1
-  r = await owner(env, 'omni/start', post({ prompt: 'p', seconds: 4, resolution: '720p', previous: 'v1_prev', task: 'edit' }));
-  assert.deepEqual([r.status, (await body(r)).costUsd], [402, 1.0136]);
-  r = await owner(env, 'xai/video/start', post({ model: 'grok-imagine-video-1.5', prompt: 'waves', seconds: 15 }));
-  j = await body(r);
-  assert.deepEqual([r.status, j.code, j.costUsd], [402, 'owner_cap_video', 1.2]);
-  assert.match(j.error, /Nothing was sent to xAI/);
-  // images are held to the month only: a $0 per-video limit doesn't stop one, a $0.03 month does
-  setLimits(env, 0, 0.03);
-  r = await owner(env, 'xai/image', post({ model: 'grok-imagine-image-2.0', prompt: 'a fox' }));
-  j = await body(r);
-  assert.deepEqual([r.status, j.code, j.limit, j.costUsd], [402, 'owner_cap_month', 'month', 0.04]);
-  assert.match(j.error, /^This image request \(about \$0\.04\)/);
-  assert.equal(upstream.calls.length, 0);
-  assert.deepEqual(rows(L), []);
-});
-
-test('image passthrough (GPT Image, Nano Banana, Muse): over the monthly limit → 402 before the provider; unpriced → 400 owner_cap_unpriced', async () => {
-  const { env, L } = setup();
-  mockFetch([]);
-  setLimits(env, 25, 0); // 0: paid images (and video) off
   const jobs = [
-    ['x/openai/images/generations', { model: 'gpt-image-2.5-flare', prompt: 'x', n: 1, quality: 'high', size: '1024x1024' }],
+    ['omni/start', { prompt: 'p', seconds: 10, resolution: '4k' }],
+    ['omni/start', { prompt: 'p', seconds: 4, resolution: '720p', previous: 'v1_prev', task: 'edit' }],
+    ['xai/video/start', { model: 'grok-imagine-video-1.5', prompt: 'waves', seconds: 15 }],
+    ['xai/image', { model: 'grok-imagine-image-2.0', prompt: 'a fox' }],
+    ['x/openai/images/generations', { model: 'gpt-image-2.5-flare', prompt: 'x', n: 4, quality: 'high', size: '1024x1024' }],
     ['x/openai/images/edits', { model: 'gpt-image-2.5-sunburst', prompt: 'x', n: 1, quality: 'high', images: [{ image_url: PNG }] }],
-    ['x/gemini/v1beta/models/gemini-3-pro-image:generateContent', { contents: [{ parts: [{ text: 'x' }] }], generationConfig: { responseModalities: ['IMAGE'], imageConfig: { imageSize: '2K' } } }],
+    ['x/gemini/v1beta/models/gemini-3-pro-image:generateContent', { contents: [{ parts: [{ text: 'x' }] }], generationConfig: { responseModalities: ['IMAGE'], imageConfig: { imageSize: '4K' } } }],
     ['x/gemini/v1/models/gemini-nano-banana-2.1:generateContent', { contents: [{ parts: [{ text: 'x' }] }], generationConfig: { imageConfig: { imageSize: '2K' } } }],
     ['x/meta/images/generations', { model: 'muse-image-1.0', prompt: 'x', n: 1, size: '1024x1024' }],
   ];
   for (const [path, b] of jobs) {
     const r = await owner(env, path, post(b));
-    const j = await body(r);
-    assert.deepEqual([r.status, j.code, j.limit], [402, 'owner_cap_month', 'month'], path);
-    assert.match(j.error, /Change it in Settings → Spending/);
+    assert.equal(r.status, 200, path);
+    assert.ok(!/^owner_cap/.test((await body(r)).code || ''), path);
   }
-  // nothing Atelier can't price is ever sent
-  for (const [path, b] of [['x/openai/images/generations', { model: 'gpt-image-9', prompt: 'x' }], ['x/gemini/v1beta/models/gemini-3.8-flash:generateContent', { contents: [{ parts: [{ text: 'x' }] }] }],
-    ['x/meta/images/generations', { model: 'muse-image-9', prompt: 'x' }], ['x/openai/images/generations', { model: 'gpt-image-2.5-flare', prompt: 'x', n: 50 }], ['x/openai/images/generations', 'not json']]) {
+  assert.equal(upstream.calls.length, RUNWAY_JOBS.length + jobs.length, 'every job reached its provider, once');
+  assert.equal(rows(L).length, RUNWAY_JOBS.length + jobs.length, 'and every one is in the record');
+  const s = await month(env);
+  assert.ok(s.totalUsd > 40, `well past the old $25 / $200 defaults’ per-video limit and the $0.01 legacy row: ${s.totalUsd}`);
+  // nothing in the Worker can refuse for a price any more
+  for (const k of ['decide', 'capRefusal', 'cleanLimits', 'readLimits', 'normalizeLimits', 'DEFAULT_LIMITS', 'LIMIT_BOUNDS', 'CAP_CODES', 'SpendError']) assert.equal(k in SP, false, k);
+  for (const m of ['ownerLimits', 'ownerSetLimits']) assert.equal(typeof Ledger.prototype[m], 'undefined', m);
+});
+
+test('concurrent paid starts through the Worker: every one reaches the provider and is recorded', async () => {
+  const { env, L } = setup();
+  legacyLimits(env, 25, 2); // a v84 “$2 a month” row: three of these would have fit
+  let n = 0;
+  mockFetch([[/videos\/generations$/, () => reply(200, { request_id: `v${++n}` })]]);
+  const rs = await Promise.all(Array.from({ length: 5 }, () => owner(env, 'xai/video/start', post({ model: 'grok-imagine-video-1.5', prompt: 'x', seconds: 8 }))));
+  assert.deepEqual(rs.map((r) => r.status), [200, 200, 200, 200, 200]);
+  assert.equal(upstream.calls.length, 5);
+  assert.equal(rows(L).length, 5);
+  assert.equal((await month(env)).totalUsd, 3.2);
+});
+
+test('image passthrough: a request Atelier can’t price still goes out — forwarded byte for byte, just not recorded', async () => {
+  const { env, L } = setup();
+  mockFetch([
+    [/openai\.com\/v1\/images\/generations$/, () => reply(200, { data: [{ b64_json: 'QUJD' }] })],
+    [/generateContent$/, () => reply(200, { candidates: [] })],
+    [/meta\.ai\/v1\/images\/generations$/, () => reply(200, { data: [] })],
+  ]);
+  const odd = [['x/openai/images/generations', { model: 'gpt-image-9', prompt: 'x' }], ['x/gemini/v1beta/models/gemini-3.8-flash:generateContent', { contents: [{ parts: [{ text: 'x' }] }] }],
+    ['x/meta/images/generations', { model: 'muse-image-9', prompt: 'x' }], ['x/openai/images/generations', { model: 'gpt-image-2.5-flare', prompt: 'x', n: 50 }], ['x/openai/images/generations', 'not json']];
+  for (const [path, b] of odd) {
     const r = await owner(env, path, post(b));
-    assert.deepEqual([r.status, (await body(r)).code], [400, 'owner_cap_unpriced'], `${path} ${JSON.stringify(b)}`);
+    assert.equal(r.status, 200, `${path} ${JSON.stringify(b)}`);
+    const sent = upstream.calls.at(-1).body;
+    assert.equal(typeof sent === 'string' ? sent : new TextDecoder().decode(sent), typeof b === 'string' ? b : JSON.stringify(b), 'as the owner sent it');
   }
-  assert.equal(upstream.calls.length, 0);
+  assert.equal(upstream.calls.length, odd.length);
+  assert.deepEqual(rows(L), []);
+  for (const [provider, sub, b] of [['openai', 'images/generations', { model: 'gpt-image-9' }], ['meta', 'images/generations', { model: 'muse-image-1.0', n: 0 }], ['gemini', 'v1beta/models/x:generateContent', {}], ['openai', 'images/generations', null], ['nope', 'x', {}]]) {
+    assert.equal(SP.imageQuote(provider, sub, b), null, `${provider} ${JSON.stringify(b)}`);
+  }
+});
+
+test('no Ledger: paid owner media still goes out (unrecorded), and the readout says it can’t be read; chat is untouched', async () => {
+  const { env } = setup({ ledger: null });
+  mockFetch([
+    [rw('text_to_video'), () => reply(200, { id: TASK })],
+    [OMNI_CREATE, () => reply(200, { id: 'v1_nl', status: 'queued' })],
+    [/x\.ai\/v1\/images\/generations$/, () => reply(200, { data: [{ b64_json: 'QUJD' }] })],
+    [/meta\.ai\/v1\/images\/generations$/, () => reply(200, { data: [{ b64_json: 'QUJD' }] })],
+  ]);
+  for (const [path, b] of [['runway/generate/text_to_video', RUNWAY_JOBS[0][1]], ['omni/start', { prompt: 'p' }], ['xai/image', { model: 'grok-imagine-image-2.0', prompt: 'x' }], ['x/meta/images/generations', { model: 'muse-image-1.0', prompt: 'x' }]]) {
+    assert.equal((await owner(env, path, post(b))).status, 200, path);
+  }
+  assert.equal(upstream.calls.length, 4);
+  const r = await owner(env, 'owner/spend');
+  assert.deepEqual([r.status, (await body(r)).code], [503, 'owner_spend_unavailable']);
+});
+
+test('a Ledger that fails never holds a job back: the job goes out, the record just misses it', async () => {
+  const { env, L } = setup();
+  const real = L.ledger.ownerReserve;
+  L.ledger.ownerReserve = () => { throw new Error('storage down'); };
+  mockFetch([[rw('text_to_video'), () => reply(200, { id: TASK })], [rw(`tasks/${TASK}`), () => reply(200, { id: TASK, status: 'SUCCEEDED', cost: { credits: 120 } })]]);
+  assert.equal((await owner(env, 'runway/generate/text_to_video', post(RUNWAY_JOBS[0][1]))).status, 200);
+  assert.equal((await owner(env, `runway/task/${TASK}`)).status, 200);
+  L.ledger.ownerReserve = real;
   assert.deepEqual(rows(L), []);
 });
 
-test('no Ledger: paid owner media is paused (503 owner_cap_unavailable) rather than unmetered; chat is untouched', async () => {
-  const { env } = setup({ ledger: null });
-  mockFetch([]);
-  for (const [path, b] of [['runway/generate/text_to_video', RUNWAY_JOBS[0][1]], ['omni/start', { prompt: 'p' }], ['xai/image', { model: 'grok-imagine-image-2.0', prompt: 'x' }], ['x/meta/images/generations', { model: 'muse-image-1.0', prompt: 'x' }]]) {
-    const r = await owner(env, path, post(b));
-    assert.deepEqual([r.status, (await body(r)).code], [503, 'owner_cap_unavailable'], path);
-  }
-  assert.equal((await owner(env, 'owner/spend')).status, 503);
-  assert.equal(upstream.calls.length, 0);
-});
-
-test('RUNWAY_MAX_CREDITS stays a separate hard backstop, checked before the owner’s limits (no hold is made)', async () => {
+test('RUNWAY_MAX_CREDITS (optional, unset in production) stays a separate hard backstop, checked before anything is recorded', async () => {
   const { env, L } = setup({ RUNWAY_MAX_CREDITS: '100' });
   mockFetch([]);
-  const r = await owner(env, 'runway/generate/text_to_video', post(RUNWAY_JOBS[0][1])); // 120 credits, well under $25
+  const r = await owner(env, 'runway/generate/text_to_video', post(RUNWAY_JOBS[0][1])); // 120 credits, over the server's 100
   assert.deepEqual([r.status, (await body(r)).code], [402, 'runway_cap']);
   assert.deepEqual(rows(L), []);
   assert.equal(upstream.calls.length, 0);
@@ -314,24 +291,16 @@ test('Runway: a refusal settles to $0, no answer at all counts the quote, FAILED
   assert.equal(rows(L).find((x) => x.job === `runway:${gone}`).actual, 1_200_000);
 });
 
-test('Runway: an estimate over the owner’s limits (an Aleph clip longer than said) is cancelled at once and settles to $0; a failed cancel hands back the id', async () => {
+test('Runway: its own estimate replaces the quote in the record — a longer Aleph clip than the browser said goes on, never cancelled for its price', async () => {
   const { env, L } = setup();
-  setLimits(env, 10, 200);
-  let del = 200;
-  mockFetch([[rw('video_to_video'), () => reply(200, { id: TASK, estimatedCost: { credits: 1500 } })], [rw(`tasks/${TASK}`), (c) => { assert.equal(c.method, 'DELETE'); return reply(del, {}); }]]);
-  // the browser says 5 s (140 credits); Runway estimates 1,500 ($15) — over the $10 per-video limit
-  const aleph = { model: 'aleph2', promptText: 'snow', videoUri: 'runway://upload/abc123def456', seconds: 5 };
-  let r = await owner(env, 'runway/generate/video_to_video', post(aleph));
-  let j = await body(r);
-  assert.deepEqual([r.status, j.code, j.costUsd, j.id], [402, 'owner_cap_video', 15, undefined]);
-  assert.match(j.error, /Runway estimated \$15\.00 for this, over your \$10\.00 limit per video\. Atelier cancelled it straight away\./);
-  assert.deepEqual(rows(L).map((x) => [x.amount, x.actual]), [[1_400_000, 0]]);
-  del = 500;
-  r = await owner(env, 'runway/generate/video_to_video', post(aleph));
-  j = await body(r);
-  assert.deepEqual([r.status, j.code, j.id], [402, 'owner_cap_video', TASK]);
-  assert.match(j.error, /couldn’t cancel it at once/);
-  assert.equal(rows(L)[1].actual, 15_000_000, 'it may run: counted at Runway’s estimate');
+  legacyLimits(env, 10, 200);
+  mockFetch([[rw('video_to_video'), () => reply(200, { id: TASK, estimatedCost: { credits: 1500 } })]]);
+  // the browser says 5 s (140 credits); Runway estimates 1,500 ($15)
+  const r = await owner(env, 'runway/generate/video_to_video', post({ model: 'aleph2', promptText: 'snow', videoUri: 'runway://upload/abc123def456', seconds: 5 }));
+  assert.equal(r.status, 200);
+  assert.deepEqual((await body(r)).estimatedCost, { credits: 1500, usd: 15 });
+  assert.deepEqual(upstream.calls.map((c) => c.method), ['POST'], 'no DELETE: nothing cancels it');
+  assert.deepEqual(rows(L).map((x) => [x.amount, x.actual, x.job]), [[15_000_000, null, `runway:${TASK}`]]);
 });
 
 test('Gemini Omni: held at the per-second price, settled from the interaction’s usage once; filtered, failed and cancelled settle to $0', async () => {
@@ -364,20 +333,18 @@ test('Gemini Omni: held at the per-second price, settled from the interaction’
   assert.equal(g.actual, g.amount);
 });
 
-test('Gemini Omni: when Google refuses the duration, the retry is held at the longest clip — and refused if that no longer fits', async () => {
+test('Gemini Omni: when Google refuses the duration, the retry is recorded at the longest clip and always sent', async () => {
   const { env, L } = setup();
+  legacyLimits(env, 0.5, 200); // v84's $0.50 a video would have refused the 10 s retry
   let n = 0;
-  mockFetch([[OMNI_CREATE, (c) => (++n === 1 ? reply(400, { error: { message: 'Invalid duration value' } }) : reply(200, { id: 'v1_r', status: 'queued' }))]]);
-  let r = await owner(env, 'omni/start', post({ prompt: 'p', seconds: 4 }));
-  assert.equal(r.status, 200);
-  assert.deepEqual(rows(L).map((x) => [x.amount, x.job]), [[veoCost({ model: OMNI, seconds: 10, resolution: '720p', margin: false }), 'omni:v1_r']]);
-  // $0.50 a video: 4 s (≈ $0.41) fits, the 10 s retry (≈ $1.01) doesn't — refused, released, never sent again
-  setLimits(env, 0.5, 200);
-  n = 0;
-  r = await owner(env, 'omni/start', post({ prompt: 'p', seconds: 4 }));
-  assert.deepEqual([r.status, (await body(r)).code], [402, 'owner_cap_video']);
-  assert.equal(n, 1, 'the retry without a duration was not sent');
-  assert.equal(rows(L).at(-1).actual, 0);
+  mockFetch([[OMNI_CREATE, (c) => (++n % 2 === 1 ? reply(400, { error: { message: 'Invalid duration value' } }) : reply(200, { id: `v1_r${n}`, status: 'queued' }))]]);
+  for (let i = 0; i < 2; i++) {
+    const r = await owner(env, 'omni/start', post({ prompt: 'p', seconds: 4 }));
+    assert.equal(r.status, 200);
+    assert.equal((await body(r)).durationIgnored, true);
+  }
+  assert.equal(n, 4, 'each first try and its retry went to Google');
+  assert.deepEqual(rows(L).map((x) => [x.amount, x.actual]), [1, 2].map(() => [veoCost({ model: OMNI, seconds: 10, resolution: '720p', margin: false }), null]));
 });
 
 test('Grok: an image settles to xAI’s cost (filtered or refused → $0); a video settles once when its poll or download sees it done', async () => {
@@ -451,27 +418,19 @@ test('month rollover: a job started on Oct 31 (UTC) counts in October even when 
   await owner(env, 'xai/video/status/late');
   const oct = await month(env, '2026-10'), nov = await month(env, '2026-11');
   assert.deepEqual([oct.totalUsd, oct.jobs, oct.resetsAt], [1.2, 1, '2026-11-01T00:00:00.000Z']);
-  assert.deepEqual([nov.totalUsd, nov.jobs, nov.leftUsd], [0, 0, 200]);
-  // a full October doesn't block November
-  L.ledger.clock = () => Date.UTC(2026, 9, 15);
-  L.ledger.ownerReserve({ provider: 'runway', kind: 'video', amount: 199_000_000, monthly: 200_000_000 });
-  L.ledger.clock = () => Date.UTC(2026, 10, 1);
-  assert.equal(L.ledger.ownerReserve({ provider: 'runway', kind: 'video', amount: 20_000_000, monthly: 200_000_000 }).ok, true);
-  assert.equal((await month(env, '2026-13')).totalUsd, undefined, 'a bad month is refused');
+  assert.deepEqual([nov.totalUsd, nov.jobs], [0, 0]);
+  assert.equal((await owner(env, 'owner/spend?month=2026-13')).status, 400, 'a bad month is refused');
 });
 
 // ── the Ledger's owner_spend rows ──
 
-test('Ledger: reserve is all-or-nothing at the boundary; settle happens once, by hold id or provider id; resize must still fit', () => {
+test('Ledger: a row at the quote, never refused; settle happens once, by row id or provider id; resize follows a new quote', () => {
   const { ledger } = makeLedger();
-  const M = 200_000_000;
-  const a = ledger.ownerReserve({ provider: 'runway', kind: 'video', model: 'gen4.5', amount: 150_000_000, monthly: M });
-  assert.equal(a.ok, true);
-  assert.deepEqual(ledger.ownerReserve({ provider: 'omni', kind: 'video', amount: 50_000_001, monthly: M }), { ok: false, scope: 'month', month: a.month, spent: 150_000_000 });
-  const b = ledger.ownerReserve({ provider: 'omni', kind: 'video', amount: 50_000_000, monthly: M });
-  assert.deepEqual([b.ok, b.spent], [true, M], 'exactly the limit');
-  assert.equal(ledger.ownerReserve({ provider: 'xai', kind: 'image', amount: 1, monthly: M }).ok, false);
-  assert.equal(ledger.ownerReserve({ provider: 'xai', kind: 'image', amount: 0, monthly: M }).ok, true, 'a free job always fits');
+  const a = ledger.ownerReserve({ provider: 'runway', kind: 'video', model: 'gen4.5', amount: 150_000_000 });
+  assert.deepEqual([a.ok, a.spent], [true, 150_000_000]);
+  const b = ledger.ownerReserve({ provider: 'omni', kind: 'video', amount: 900_000_000, monthly: 1 }); // an older Worker's monthly: ignored
+  assert.deepEqual([b.ok, b.spent], [true, 1_050_000_000], 'nothing caps the month');
+  assert.equal(ledger.ownerReserve({ provider: 'xai', kind: 'image', amount: 0 }).ok, true, 'a free job too');
   // settle: by provider id after attach; a second settle (a resumed poll) changes nothing
   assert.equal(ledger.ownerAttach(a.id, 'runway:task-1'), true);
   assert.equal(ledger.ownerAttach(b.id, 'runway:task-1'), false, 'one row per provider job');
@@ -479,84 +438,53 @@ test('Ledger: reserve is all-or-nothing at the boundary; settle happens once, by
   assert.deepEqual(ledger.ownerSettle('runway:task-1', 100_000_000), { ok: true, charged: 100_000_000, amount: 150_000_000, month: a.month });
   assert.deepEqual(ledger.ownerSettle('runway:task-1', 1), { ok: false });
   assert.deepEqual(ledger.ownerSettle(a.id, 1), { ok: false });
-  assert.equal(ledger.ownerSpend(a.month).total, 150_000_000);
-  // resize: shrinking always fits, growing must fit the month (with the old quote taken out)
-  assert.deepEqual(ledger.ownerResize(b.id, 100_000_000, M), { ok: true }, '100 settled + 100 = 200');
-  assert.deepEqual(ledger.ownerResize(b.id, 100_000_001, M), { ok: false, scope: 'month', spent: 200_000_000 });
-  assert.deepEqual(ledger.ownerResize(a.id, 1, M), { ok: false, gone: true }, 'a settled row keeps its cost');
+  // resize: any new quote while it runs, growing or shrinking; a settled row keeps its cost
+  assert.deepEqual(ledger.ownerResize(b.id, 2_000_000_000), { ok: true });
+  assert.deepEqual(ledger.ownerResize(b.id, 100_000_000), { ok: true });
+  assert.deepEqual(ledger.ownerResize(a.id, 1), { ok: false, gone: true });
+  assert.throws(() => ledger.ownerResize(b.id, 1.5));
   // settle(null) = its quote; garbage = its quote; negative = $0; a sane ceiling
   assert.equal(ledger.ownerSettle(b.id, null).charged, 100_000_000);
-  const c = ledger.ownerReserve({ provider: 'xai', kind: 'image', amount: 40_000, monthly: 1e12 });
+  const c = ledger.ownerReserve({ provider: 'xai', kind: 'image', amount: 40_000 });
   assert.equal(ledger.ownerSettle(c.id, 'x').charged, 40_000);
-  const d = ledger.ownerReserve({ provider: 'xai', kind: 'image', amount: 40_000, monthly: 1e12 });
+  const d = ledger.ownerReserve({ provider: 'xai', kind: 'image', amount: 40_000 });
   assert.equal(ledger.ownerSettle(d.id, -5).charged, 0);
-  const e = ledger.ownerReserve({ provider: 'xai', kind: 'image', amount: 40_000, monthly: 1e12 });
+  const e = ledger.ownerReserve({ provider: 'xai', kind: 'image', amount: 40_000 });
   assert.equal(ledger.ownerSettle(e.id, 1e20).charged, 10_000_000_000);
   // inputs the Worker never sends are refused outright
-  assert.throws(() => ledger.ownerReserve({ provider: 'runway', kind: 'video', amount: 1.5, monthly: M }));
-  assert.throws(() => ledger.ownerReserve({ provider: 'Runway!', kind: 'video', amount: 1, monthly: M }));
-  // the breakdown: biggest first (ties by name); a still-running $0 hold counts as $0
+  assert.throws(() => ledger.ownerReserve({ provider: 'runway', kind: 'video', amount: 1.5 }));
+  assert.throws(() => ledger.ownerReserve({ provider: 'Runway!', kind: 'video', amount: 1 }));
+  // the breakdown: biggest first (ties by name); a still-running $0 row counts as $0
   const s = ledger.ownerSpend(a.month);
   assert.deepEqual(s.byProvider.map((x) => [x.provider, x.kind, x.jobs, x.total, x.held]),
     [['xai', 'image', 4, 10_000_040_000, 0], ['omni', 'video', 1, 100_000_000, 0], ['runway', 'video', 1, 100_000_000, 0]]);
   assert.deepEqual([s.jobs, s.total, s.held], [6, 10_200_040_000, 0]);
   assert.equal(ledger.ownerSpend('not a month').month, a.month, 'a bad month reads this one');
+  // the limits are gone from the Ledger: no methods, and the Testers panel's config route can't write one either
+  assert.equal(typeof ledger.ownerLimits, 'undefined');
+  assert.equal(typeof ledger.ownerSetLimits, 'undefined');
+  assert.equal(ledger.setConfig({ owner_limits: '{}' }).ok, false);
 });
 
-test('Ledger: concurrent starts through the RPC stub never take the month past its limit', async () => {
+test('Ledger: concurrent starts through the RPC stub are all recorded', async () => {
   const L = makeLedger();
   const results = await Promise.all(Array.from({ length: 30 }, () => L.stub.ownerReserve({ provider: 'runway', kind: 'video', amount: 10_000_000, monthly: 200_000_000 })));
-  assert.equal(results.filter((r) => r.ok).length, 20);
-  assert.equal(L.ledger.ownerSpend(results[0].month).total, 200_000_000);
-});
-
-test('concurrent paid starts through the Worker: exactly as many as fit reach the provider', async () => {
-  const { env, L } = setup();
-  setLimits(env, 25, 2); // $2 a month; each Grok video is 8 s × $0.08 = $0.64 → three fit
-  let n = 0;
-  mockFetch([[/videos\/generations$/, () => reply(200, { request_id: `v${++n}` })]]);
-  const rs = await Promise.all(Array.from({ length: 5 }, () => owner(env, 'xai/video/start', post({ model: 'grok-imagine-video-1.5', prompt: 'x', seconds: 8 }))));
-  assert.deepEqual(rs.map((r) => r.status).sort(), [200, 200, 200, 402, 402]);
-  assert.equal(upstream.calls.length, 3);
-  assert.equal(rows(L).length, 3);
+  assert.equal(results.filter((r) => r.ok).length, 30);
+  assert.equal(L.ledger.ownerSpend(results[0].month).total, 300_000_000);
 });
 
 test('Ledger alarm: owner spend rows are kept 13 months', async () => {
   const L = makeLedger();
   L.ledger.clock = () => Date.UTC(2025, 8, 15);
-  L.ledger.ownerReserve({ provider: 'runway', kind: 'video', amount: 1, monthly: 10 });
+  L.ledger.ownerReserve({ provider: 'runway', kind: 'video', amount: 1 });
   L.ledger.clock = () => Date.UTC(2025, 9, 15);
-  L.ledger.ownerReserve({ provider: 'runway', kind: 'video', amount: 1, monthly: 10 });
+  L.ledger.ownerReserve({ provider: 'runway', kind: 'video', amount: 1 });
   L.ledger.clock = () => Date.UTC(2026, 9, 20);
   await L.ledger.alarm();
   assert.deepEqual(rows(L).map((x) => x.month), ['2025-10']);
 });
 
-// ── review fixes (v83) ──
-
-test('limits live in the Ledger: a PUT applies to the very next start (no KV delay between devices); no Ledger, no saving', async () => {
-  const { env, L } = setup();
-  mockFetch([[rw('text_to_video'), () => reply(200, { id: TASK })]]);
-  assert.equal((await owner(env, 'owner/limits', put({ perVideoUsd: 1, monthlyMediaUsd: 200 }))).status, 200);
-  let r = await owner(env, 'runway/generate/text_to_video', post(RUNWAY_JOBS[0][1])); // $1.20
-  assert.deepEqual([r.status, (await body(r)).code], [402, 'owner_cap_video']);
-  assert.equal((await owner(env, 'owner/limits', put({ perVideoUsd: 2 }))).status, 200);
-  r = await owner(env, 'runway/generate/text_to_video', post(RUNWAY_JOBS[0][1]));
-  assert.equal(r.status, 200, 'the raised limit applies at once');
-  assert.deepEqual(await SP.readLimits(env), { perVideoUsd: 2, monthlyMediaUsd: 200, updatedAt: L.ledger.ownerLimits().updatedAt });
-  assert.equal(env.ATELIER_KV.m.size, 0);
-  // whatever the row holds is made usable; the Ledger refuses to store garbage
-  assert.throws(() => L.ledger.ownerSetLimits({ perVideoUsd: -1, monthlyMediaUsd: 5, updatedAt: 1 }), /bad limits/);
-  assert.throws(() => L.ledger.ownerSetLimits({ perVideoUsd: 'x', monthlyMediaUsd: 5, updatedAt: 1 }), /bad limits/);
-  L.shim.db.prepare("UPDATE config SET v = '{oops' WHERE k = 'owner_limits'").run();
-  assert.deepEqual(await SP.readLimits(env), { perVideoUsd: 25, monthlyMediaUsd: 200, updatedAt: null });
-  // the Testers panel's config route can't touch it
-  assert.equal(L.ledger.setConfig({ owner_limits: '{}' }).ok, false);
-  const { env: none } = setup({ ledger: null });
-  r = await owner(none, 'owner/limits', put({ perVideoUsd: 5 }));
-  assert.deepEqual([r.status, (await body(r)).code], [503, 'owner_cap_unavailable']);
-  assert.equal((await body(await owner(none, 'owner/limits'))).perVideoUsd, 25, 'GET still shows the defaults');
-});
+// ── review fixes (v83), still true ──
 
 test('Gemini Omni: a status Atelier doesn’t know (missing, uppercase, requires_action, new) never settles the hold; the real finish does', async () => {
   const { env, L } = setup();

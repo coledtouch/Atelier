@@ -22,7 +22,7 @@
   "kv_namespaces": [{ "binding": "ATELIER_KV", "id": "069567aa1d9a426588b90757d49c6c71" }],
   // Remote browser relay: one Durable Object holds the extension's WebSocket.
   // Ledger: LinkedIn tester roster, sessions and spend meter (one "main" instance, SQLite; starts paused), plus the owner's
-  // monthly video and image spend (owner_spend) and spending limits (config owner_limits; src/spend.js, Settings → Spending).
+  // monthly video and image spend record (owner_spend; src/spend.js, Settings → Spending; no limits since v85).
   "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "Relay" }, { "name": "LEDGER", "class_name": "Ledger" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }, { "tag": "v2", "new_sqlite_classes": ["Ledger"] }],
   // Per-IP throttle on the public LinkedIn sign-in routes (/api/li/start, /api/li/callback), ahead of the Ledger.
@@ -44,7 +44,10 @@
   // turns Look up off (503 lookup_off; the app then hides it for the session).
   // RUNWAY_MAX_CREDITS (optional per-video Runway cap, src/runway.js; unset = none, the most one video costs is 2,040
   // credits): add it here or with `wrangler secret put` — a var set in the dashboard is wiped by the next deploy.
-  "vars": { "SYNC_QUOTA_BYTES": "53687091200", "CANVA_CLIENT_ID": "OC-AaD0HxvGYkj2", "WIKI_CONTACT": "cole@ciprari.ai", "LOOKUP_DISABLED": "0" },
+  // TESTERS_ENABLED: LinkedIn tester access (src/worker.js testersOn). "1" turns it on; "0" (or no var) keeps it off: the
+  // sign-in routes /api/li/* answer 410, tester cookies are ignored and cleared, every tester route refuses, and the app
+  // hides every tester surface. The tester code and the Ledger stay, so "1" and a deploy switch it back on.
+  "vars": { "SYNC_QUOTA_BYTES": "53687091200", "CANVA_CLIENT_ID": "OC-AaD0HxvGYkj2", "WIKI_CONTACT": "cole@ciprari.ai", "LOOKUP_DISABLED": "0", "TESTERS_ENABLED": "0" },
   // Workers Logs keep our own console output, but not the automatic per-request invocation logs: those record full
   // request URLs, which can carry OAuth codes and invite codes.
   "observability": { "enabled": true, "logs": { "invocation_logs": false } }

@@ -15,7 +15,7 @@
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Atelier" />
   <meta property="og:title" content="Atelier — Come make something yours." />
-  <meta property="og:description" content="25 LinkedIn tester spots. Paid models included. Built by Cole Ciprari." />
+  <meta property="og:description" content="A personal AI studio for answers, code, images, video, ideas and apps. Built by Cole Ciprari." />
   <meta property="og:url" content="https://atelier.ciprari.ai/" />
   <meta property="og:image" content="https://atelier.ciprari.ai/og/atelier-share.png" />
   <meta property="og:image:width" content="1200" />
@@ -73,7 +73,7 @@
     <div class="nav-bottom">
       <button class="nav-item" data-trigger="youBtn" title="Your profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span class="nav-label">Your profile</span></button>
       <button class="nav-item" data-trigger="settingsBtn" title="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg><span class="nav-label">Settings</span></button>
-      <button class="nav-item nav-feedback" id="feedbackBtn" type="button" title="Send feedback"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 13h5"/></svg><span class="nav-label">Send feedback</span></button>
+      <button class="nav-item nav-feedback tester-ui" id="feedbackBtn" type="button" title="Send feedback"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 13h5"/></svg><span class="nav-label">Send feedback</span></button>
       <span class="nav-local" id="navLocal">Threads saved on this device</span>
     </div>
   </nav>
@@ -108,7 +108,7 @@
 
   <footer class="dock" id="dock">
     <div class="dock-inner">
-      <p class="allowance" id="allowance" hidden></p>
+      <p class="allowance tester-ui" id="allowance" hidden></p>
       <div class="composer" id="composer">
         <nav class="modes" id="modes" role="tablist" aria-label="Mode">
           <span class="mode-ink" id="modeInk" aria-hidden="true"></span>
@@ -235,7 +235,7 @@
         <button type="button" class="studio-menu-item" data-studio-target="library"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg><span>Library<small>Your images, videos and apps</small></span><span aria-hidden="true">→</span></button>
         <button type="button" class="studio-menu-item" data-studio-target="me"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Your profile<small>Your voice and memory</small></span><span aria-hidden="true">→</span></button>
         <button type="button" class="studio-menu-item" data-studio-target="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg><span>Settings<small>Make the studio feel like you</small></span><span aria-hidden="true">→</span></button>
-        <button type="button" class="studio-menu-item" data-studio-target="feedback"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 13h5"/></svg><span>Send feedback<small>A bug, an idea, or something unclear</small></span><span aria-hidden="true">→</span></button>
+        <button type="button" class="studio-menu-item tester-ui" data-studio-target="feedback"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 13h5"/></svg><span>Send feedback<small>A bug, an idea, or something unclear</small></span><span aria-hidden="true">→</span></button>
       </nav>
     </div>
   </dialog>
@@ -283,7 +283,7 @@
           <div class="testers spending" id="spendingPanel"></div>
         </section>
 
-        <section class="field-group needs-owner">
+        <section class="field-group needs-owner tester-ui">
           <h4>Testers</h4>
           <div class="testers" id="testersPanel"></div>
         </section>
@@ -478,15 +478,17 @@
     </form>
   </dialog>
 
-  <!-- Sign-in: mirrors the LinkedIn promo (brand/atelier-linkedin-promo-4x5.webp). Testers sign in with LinkedIn; the owner's passcode stays one tap away. -->
+  <!-- Sign-in: mirrors the LinkedIn promo (brand/atelier-linkedin-promo-4x5.webp). Testers sign in with LinkedIn; the owner's passcode stays one tap away.
+       Tester access off (TESTERS_ENABLED, /api/health → testers: false; the default): the .tester-ui parts hide, .tester-closed shows, and the passcode form opens. -->
   <dialog class="sheet onboard" id="onboard" aria-labelledby="onboardTitle" aria-describedby="onboardLead">
     <div class="sheet-body">
       <p class="ob-brand"><span class="ob-mark" aria-hidden="true"></span>Atelier</p>
       <h2 class="onboard-title" id="onboardTitle">Come make<br /><em>something yours.</em></h2>
       <p class="onboard-copy" id="onboardLead">A personal AI studio for answers, code, images, video, ideas and apps.</p>
       <p class="ob-note" id="signinNote" role="alert" hidden></p>
-      <a class="li-btn" id="liBtn" href="/api/li/start"><svg class="li-in" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zm1.78 13.02H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/></svg><span>Sign in with LinkedIn</span></a>
-      <p class="ob-spots" id="spotsLine"><b>25 tester spots.</b> Paid models included.</p>
+      <a class="li-btn tester-ui" id="liBtn" href="/api/li/start"><svg class="li-in" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zm1.78 13.02H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/></svg><span>Sign in with LinkedIn</span></a>
+      <p class="ob-spots tester-ui" id="spotsLine"><b>25 tester spots.</b> Paid models included.</p>
+      <p class="ob-spots tester-closed" id="closedLine">Tester sign-in is closed right now.</p>
       <details class="ob-owner" id="ownerEntry">
         <summary>Studio owner? Use your passcode</summary>
         <form method="dialog" class="ob-form" id="onboardForm">

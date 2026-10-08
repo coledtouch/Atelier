@@ -7,8 +7,8 @@ import { hasVideoPart, geminiNativeChat, handleVideoApi, VIDEO_NEEDS_GEMINI } fr
 import { toolList, runTool, GOOGLE_SCOPES, saveGoogleAccount, removeGoogleAccount, addTokenAccount, removeTokenAccount, googleTokenFor,
   CANVA_ID, CANVA_MAX_IMAGE, CanvaError, canvaConfigured, canvaAuthUrl, canvaTakeState, canvaCompleteAuth, removeCanvaAccount, canvaSendImage,
   canvaListDesigns, canvaDesignFormats, canvaImport, canvaFetchFile } from './tools.js';
-import { identify, handleLinkedIn, signedOut, fail } from './tester/auth.js';
-import { testerRouter, testerAdmin } from './tester/router.js';
+import { identify, handleLinkedIn, signedOut, fail, readCookie, clearSession, COOKIE } from './tester/auth.js';
+import { testerRouter, testerAdmin, matchTesterRoute } from './tester/router.js';
 import { handleTts } from './tts.js';
 import { handleSync } from './sync.js';
 import { handleFeedback } from './feedback.js';
@@ -17,7 +17,8 @@ import { handleOmni, OMNI_MODEL } from './omni.js';
 import { handleXai, xaiDiag, XAI_PROVIDER } from './xai.js';
 import { handleLookup } from './lookup.js';
 import { handleTranscribe } from './transcribe.js';
-import { ownerSpend, handleOwnerApi, imageQuote, imageSettle, SpendError, spendResponse, IMAGE_BODY_MAX, isGatewayStatus } from './spend.js';
+import { ownerSpend, handleOwnerApi, imageQuote, imageSettle, IMAGE_BODY_MAX, isGatewayStatus } from './spend.js';
+import { testersOn } from './tester/ledger.js';
 export { Relay } from './relay.js';
 export { Ledger } from './tester/ledger.js';
 
@@ -108,6 +109,16 @@ function safeEqual(a, b) {
 }
 
 const passOk = (req, env) => Boolean(env.APP_PASSCODE) && safeEqual(req.headers.get('x-app-pass') || '', env.APP_PASSCODE);
+
+// LinkedIn tester access is a reversible switch: the wrangler.jsonc var TESTERS_ENABLED. "1" turns it on; anything else,
+// or no var at all, keeps it off (the default since v85: the owner has no testers). Off, the tester code stays in place
+// but nothing reaches it: /api/li/* answers 410 tester_closed (sign-in, spots, the callback, sign-out), a tester cookie
+// is never looked up (identify() isn't called), so an old or forged one is just a signed-out visitor and every owner
+// route still asks for the passcode; a request that only a tester could make (tester/*, or one of TESTER_ROUTES carrying
+// a tester cookie and no passcode) answers 410 tester_closed, and the cookie is cleared on the way out. The Ledger stays:
+// the owner's spend record (src/spend.js) lives in it, and its alarm deletes every tester session while access is off.
+export { testersOn };
+const testersClosed = () => fail(410, 'tester_closed', 'Tester access is closed.', {}, { 'set-cookie': clearSession() });
 
 function resolveKey(req, env, provider) {
   const secret = env[PROVIDERS[provider].secret];
@@ -236,8 +247,8 @@ async function handleChat(req, env) {
 }
 
 // Every allow-listed passthrough route makes images (OpenAI / Meta images, Gemini image generateContent), so each POST
-// is priced (src/spend.js imageQuote) and held to the owner's monthly limit before it is forwarded, then settled from
-// the answer's reported usage. A request Atelier can't price is never sent (400 owner_cap_unpriced).
+// is priced (src/spend.js imageQuote) and recorded in the owner's spend before it is forwarded, then settled from the
+// answer's reported usage. Nothing is refused for its price: a request Atelier can't price goes out unrecorded.
 async function handlePassthrough(req, env, provider, sub, search) {
   const cfg = PASSTHRU[provider];
   if (!cfg || !cfg.allow.some(([m, re]) => m === req.method && re.test(sub))) return json({ error: 'Route not allowed' }, 404);
@@ -253,18 +264,13 @@ async function handlePassthrough(req, env, provider, sub, search) {
   if (text == null) return json({ error: 'This image request is too large.' }, 413);
   let body = null;
   try { body = JSON.parse(text); } catch {}
-  let quote, hold;
-  try {
-    quote = imageQuote(provider, sub, body);
-    hold = await ownerSpend(env).start({ provider, kind: 'image', model: quote.model, amount: quote.amount });
-  } catch (err) {
-    if (err instanceof SpendError) return spendResponse(err);
-    throw err;
-  }
+  const quote = imageQuote(provider, sub, body);
+  const hold = quote ? await ownerSpend(env).start({ provider, kind: 'image', model: quote.model, amount: quote.amount }) : null;
   let unreachable = false;
   const res = await forward(`${cfg.base}/${sub}${qs}`, { ...init, body: text }, () => { unreachable = true; });
   // refused: nothing billed; no answer, or a gateway's 502/504/52x (the provider may have made it): the quote
-  if (!res.ok) { await hold.settle(unreachable || isGatewayStatus(res.status) ? null : 0); return res; }
+  if (!res.ok) { await hold?.settle(unreachable || isGatewayStatus(res.status) ? null : 0); return res; }
+  if (!hold) return res;
   const out = await res.text().catch(() => null);
   let j = null;
   try { j = JSON.parse(out); } catch {}
@@ -390,16 +396,18 @@ async function handleApi(req, env, url) {
 
   if (path === 'health') {
     const server = Object.fromEntries(Object.entries(PROVIDERS).map(([n, p]) => [n, Boolean(env[p.secret] && env.APP_PASSCODE)]));
-    return json({ ok: true, serverKey: server.nvidia, server });
+    return json({ ok: true, serverKey: server.nvidia, server, testers: testersOn(env) });
   }
   // POST /api/csp-report → CSP violation reports from browsers (public; see handleCspReport).
   if (path === 'csp-report') return handleCspReport(req, env);
 
-  // ── LinkedIn testers (docs/superpowers/specs/2026-09-30-atelier-tester-access-*.md) ──
+  // ── LinkedIn testers (docs/superpowers/specs/2026-09-30-atelier-tester-access-*.md), behind TESTERS_ENABLED ──
   // Public before identity: health, csp-report, the sign-in routes and relay/ws. Then: passcode → owner (wins over a
-  // tester cookie); a live tester cookie → the tester router, which allows only its own list (deny by default);
-  // otherwise everything below behaves as it always has.
-  if (path.startsWith('li/')) return handleLinkedIn(req, env, url, path);
+  // tester cookie); with tester access on, a live tester cookie → the tester router, which allows only its own list
+  // (deny by default); otherwise everything below behaves as it always has. With it off (testersOn above), no cookie is
+  // ever looked up and the sign-in routes are closed.
+  const testers = testersOn(env);
+  if (path.startsWith('li/')) return testers ? handleLinkedIn(req, env, url, path) : testersClosed();
   // GET /api/relay/ws → the extension's persistent connection. The Relay authenticates it only by the device token,
   // which travels as a WebSocket subprotocol (no query string is passed on), never by the passcode or a cookie. So it
   // is dispatched before identify(): a tester cookie in the owner's browser can't turn the extension away, and a tester
@@ -411,7 +419,15 @@ async function handleApi(req, env, url) {
   if ((path === 'sync' || path.startsWith('sync/')) && req.headers.get('x-app-pass') && !passOk(req, env)) {
     return json({ error: 'Thread sync needs the server passcode.', code: 'sync_passcode' }, 401);
   }
-  const who = await identify(req, env, passOk);
+  if (!testers) {
+    // Tester access off: tester/* is closed for everyone, and so is any tester route a tester cookie comes back for
+    // without a passcode (a browser that was signed in as a tester: told plainly, its cookie cleared). With a passcode,
+    // or without a cookie, the request goes on as the owner's or a signed-out visitor's, where every owner route still
+    // checks the passcode.
+    if (path === 'tester' || path.startsWith('tester/')) return testersClosed();
+    if (!req.headers.get('x-app-pass') && readCookie(req, COOKIE) && matchTesterRoute(req.method, path)) return testersClosed();
+  }
+  const who = testers ? await identify(req, env, passOk) : { kind: passOk(req, env) ? 'owner' : 'none' };
   if (who.kind === 'tester') return testerRouter(req, env, url, path, who, UPSTREAM);
   if (who.stale && !req.headers.get('x-app-pass')) return signedOut(); // an ended tester session, not a passcode problem
   if (path === 'feedback') {
@@ -424,7 +440,7 @@ async function handleApi(req, env, url) {
     if (!passOk(req, env)) return json({ error: 'Enter your passcode.' }, 401);
     return testerAdmin(req, env, path);
   }
-  // GET/PUT /api/owner/limits, GET /api/owner/spend → Settings → Spending (src/spend.js). Passcode only: testers were
+  // GET /api/owner/spend → Settings → Spending, this month's spend (src/spend.js; read only). Passcode only: testers were
   // already answered 403 owner_only by the deny-by-default router above. Never add an owner/ route to TESTER_ROUTES.
   if (path.startsWith('owner/')) {
     if (!passOk(req, env)) return json({ error: 'Enter your passcode.' }, 401);
@@ -747,7 +763,7 @@ async function handleApi(req, env, url) {
   }
 
   // /api/omni/* → Gemini Omni video (src/omni.js), owner behind the passcode. Testers reach their own metered copies of
-  // these routes in the tester router above. spend: the owner's spending limits (src/spend.js), on every paid start.
+  // these routes in the tester router above. spend: the owner's spend record (src/spend.js), on every paid start.
   if (path.startsWith('omni/')) {
     const key = resolveKey(req, env, 'gemini');
     if (!key) return missingKey(req, env, 'gemini');
@@ -852,6 +868,8 @@ export default {
         secured.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
         // public/_headers covers static assets only; Worker responses set HSTS themselves (ignored over plain http).
         if (url.protocol === 'https:') secured.headers.set('Strict-Transport-Security', HSTS);
+        // Tester access off: a tester cookie still in this browser is cleared on the way out (signed out for good).
+        if (!testersOn(env) && readCookie(req, COOKIE) && !secured.headers.has('set-cookie')) secured.headers.append('set-cookie', clearSession());
         return secured;
       } catch (err) {
         return apiFailed(url, err);

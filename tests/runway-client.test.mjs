@@ -11,7 +11,7 @@ const {
   pollDelay, statusText, failureOf, mentionsRunway, runwayHint, connectionRow, isRunwayId, runwayModelOf,
   waitForTask, runwayVideo, takeSlot, slotState, uploadToRunway, runwayAccount, forgetAccount, accountLimit, cancelTask, downloadOutput, POWERED_BY,
   stillPlan, INPUT_ASPECT, createTask, createTimeout, VEO_RATIOS, runwaySecondsFor, veoRatio, optionNote, GROK_SECONDS, grokShape,
-  SEEDANCE_SECONDS, SEEDANCE_RATIOS, seedanceShape, rangeCrop, cropStill, runwayMenuSeconds, spendQuestion, ASK_OVER_CREDITS,
+  SEEDANCE_SECONDS, SEEDANCE_RATIOS, seedanceShape, rangeCrop, cropStill, runwayMenuSeconds,
 } = R;
 
 // app.js's own errorKind (+ accountProblem), lifted from the source so the card a Runway error gets is the real one.
@@ -728,61 +728,35 @@ test('runwayVideo: resuming a task an earlier Stop cancelled starts a new one', 
   assert.equal(out.id, NEW);
 });
 
-test('a big Runway spend asks first: spendQuestion over $5; approve runs right before a new paid task, and no sends nothing', async () => {
-  assert.equal(ASK_OVER_CREDITS, 500);
-  assert.equal(spendQuestion('seedance2_5', 30, { resolution: '1080p' }), 'Make this 30 s Seedance 2.5 (Runway) video at 1080p? It costs about 2,040 credits ($20.40) of your Runway balance.');
-  assert.match(spendQuestion('seedance2_5', 20, { resolution: '720p' }), /^Make this 20 s Seedance 2\.5 \(Runway\) video at 720p\? It costs about 600 credits \(\$6\.00\)/);
-  assert.match(spendQuestion('seedance2_5', 8, { resolution: '1080p' }), /544 credits \(\$5\.44\)/);
-  // at or under $5: no question (Seedance 15 s at 720p 450, Veo 3.1 8 s 320, Grok 1.5 15 s 1080p + still 436, Gen-4.5 10 s 120)
-  for (const [model, secs, opts] of [['seedance2_5', 15, { resolution: '720p' }], ['seedance2_5', 6, { resolution: '1080p' }], ['veo3.1', 8], ['grok_imagine_1_5', 15, { resolution: '1080p', still: true }], ['gen4.5', 10], ['gen4_turbo', 10], ['nope', 30], ['seedance2_5', 0]]) {
-    assert.equal(spendQuestion(model, secs, opts), '', `${model} ${secs}`);
-  }
-  // what app.js passes for every Video-mode choice: only Seedance's long or 1080p ones ask
-  const asks = [];
-  for (const { runway: model } of RUNWAY_VIDEO_MODELS) for (const secs of runwaySecondsFor(model)) for (const aspect of ['16:9', '16:9hd']) {
-    const req = buildRequest({ model, prompt: 'x', still: model === 'gen4_turbo' ? JPEG : undefined, stillSize: { w: 1280, h: 720 }, aspect, secs });
-    if (spendQuestion(model, req.seconds, { resolution: req.resolution, still: req.kind === 'image_to_video' })) asks.push(`${model} ${secs} ${req.resolution}`);
-  }
-  assert.deepEqual(asks, ['seedance2_5 8 1080p', 'seedance2_5 10 1080p', 'seedance2_5 15 1080p', 'seedance2_5 20 720p', 'seedance2_5 20 1080p', 'seedance2_5 30 720p', 'seedance2_5 30 1080p']);
-
+test('no Runway price confirm (v85): even the dearest video (Seedance 2.5, 30 s, 1080p, $20.40) starts at once; nothing asks', async () => {
+  assert.equal('spendQuestion' in R, false, 'the over-$5 question is gone');
+  assert.equal('ASK_OVER_CREDITS' in R, false);
   const req = buildRequest({ model: 'seedance2_5', prompt: 'A paper boat', aspect: '16:9hd', secs: 30 });
-  // No: an AbortError (app.js's “Stopped.”), nothing sent, nothing to resume, the queue slot freed
-  mockFetch([]);
+  assert.equal(quote('seedance2_5', req.seconds, { resolution: req.resolution }).credits, 2040);
+  const realConfirm = globalThis.confirm;
   let asked = 0;
-  await assert.rejects(runwayVideo(req, { apiHeaders: headers, sleep: fakeSleep().sleep, approve: () => { asked++; return false; } }), (e) => e.name === 'AbortError' && !e.resumable && !e.task);
-  assert.equal(asked, 1);
-  assert.equal(calls.length, 0, 'nothing went to Runway');
-  assert.deepEqual(slotState(), { busy: 0, waiting: 0 });
-  // Yes (sync or async): it goes as built
-  for (const approve of [() => true, async () => true]) {
+  globalThis.confirm = () => { asked++; return false; };
+  try {
     mockFetch([
       [/^POST \/api\/runway\/generate\/text_to_video$/, () => reply(200, { id: ID, estimatedCost: { credits: 2040 } })],
       [new RegExp(`^GET /api/runway/task/${ID}$`), () => reply(200, task('SUCCEEDED', { cost: { credits: 2040 } }))],
       [/^GET \/api\/runway\/output\//, () => new Response(MP4, { headers: { 'content-type': 'video/mp4' } })],
     ]);
     const lines = [];
-    const out = await runwayVideo(req, { apiHeaders: headers, sleep: fakeSleep().sleep, approve, onStatus: (t) => lines.push(t) });
+    // an approve hook from an older caller is simply not an option any more: it is never called
+    const out = await runwayVideo(req, { apiHeaders: headers, sleep: fakeSleep().sleep, approve: () => { asked++; return false; }, onStatus: (t) => lines.push(t) });
     assert.equal(out.credits, 2040);
-    assert.deepEqual(calls[0].json, req.body);
+    assert.deepEqual(calls[0].json, req.body, 'it goes as built');
     assert.equal(lines[0], 'Sending to Runway');
-  }
-  // Resuming a task that is still there costs nothing more: no question
-  mockFetch([
-    [new RegExp(`^GET /api/runway/task/${ID}$`), () => reply(200, task('SUCCEEDED', { cost: { credits: 2040 } }))],
-    [/^GET \/api\/runway\/output\//, () => new Response(MP4, { headers: { 'content-type': 'video/mp4' } })],
-  ]);
-  asked = 0;
-  await runwayVideo(req, { apiHeaders: headers, sleep: fakeSleep().sleep, resume: ID, approve: () => { asked++; return false; } });
-  assert.equal(asked, 0);
-  // …but a resumed task an earlier Stop cancelled means a new charge: asked, and no stops it there
-  mockFetch([[new RegExp(`^GET /api/runway/task/${ID}$`), () => reply(200, task('CANCELLED'))]]);
-  await assert.rejects(runwayVideo(req, { apiHeaders: headers, sleep: fakeSleep().sleep, resume: ID, approve: () => { asked++; return false; } }), (e) => e.name === 'AbortError' && !e.resumable);
-  assert.equal(asked, 1);
-  assert.ok(!calls.some((c) => c.method === 'POST' || c.method === 'DELETE'), calls.map((c) => `${c.method} ${c.url}`).join());
-  // app.js asks with confirm(spendQuestion(…)) through approve
-  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(app, /const ask = runwaySpendQuestion\(cfg\.runway, req\.seconds, \{ resolution: req\.resolution, still: req\.kind === 'image_to_video' \}\);/);
-  assert.match(app, /apiHeaders, signal, resume, approve: ask \? \(\) => confirm\(ask\) : null,/);
+    assert.equal(asked, 0, 'no confirm, no approve');
+  } finally { globalThis.confirm = realConfirm; }
+  // app.js starts it with no confirm: runRunway passes no approve and never calls confirm()
+  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const runRunway = app.slice(app.indexOf('\nasync function runRunway('), app.indexOf('\n}\n', app.indexOf('\nasync function runRunway(')));
+  assert.ok(runRunway.length > 200, 'runRunway found');
+  assert.doesNotMatch(runRunway, /confirm\(|approve|spendQuestion|SpendQuestion/);
+  assert.match(runRunway, /out = await runwayVideo\(req, \{\n\s+apiHeaders, signal, resume,\n/);
+  assert.doesNotMatch(app, /runwaySpendQuestion|spendQuestion/);
 });
 
 test('runwayVideo: Stop during “Downloading from Runway” never deletes the paid video; Try again downloads it', async () => {

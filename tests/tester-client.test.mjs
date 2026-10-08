@@ -203,16 +203,17 @@ test('tester mode never reaches owner surfaces from the client: app.js gates the
   assert.match(html, /<section class="field-group owner-only">\s*<h4>Connections<\/h4>/);
   assert.match(html, /class="model-grid owner-only" id="modelFields"/);
   assert.match(html, /class="chip owner-only" id="refreshModels"/);
-  assert.match(html, /class="field-group needs-owner">\s*<h4>Testers<\/h4>/);
-  assert.match(html, /<a class="li-btn" id="liBtn" href="\/api\/li\/start">/);
+  assert.match(html, /class="field-group needs-owner tester-ui">\s*<h4>Testers<\/h4>/);
+  assert.match(html, /<a class="li-btn tester-ui" id="liBtn" href="\/api\/li\/start">/);
   assert.doesNotMatch(html, /w_member_social/);
 });
 
-test('link previews carry the A7a launch copy; the privacy page names both sign-in cookies', async () => {
+test('link previews no longer advertise tester spots while tester access is closed; the privacy page names both sign-in cookies', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const privacy = await readFile(new URL('../public/privacy.html', import.meta.url), 'utf8');
   assert.match(html, /<meta property="og:title" content="Atelier — Come make something yours\." \/>/);
-  assert.match(html, /<meta property="og:description" content="25 LinkedIn tester spots\. Paid models included\. Built by Cole Ciprari\." \/>/);
+  assert.match(html, /<meta property="og:description" content="A personal AI studio for answers, code, images, video, ideas and apps\. Built by Cole Ciprari\." \/>/);
+  assert.doesNotMatch(html, /og:description" content="[^"]*tester/i);
   assert.match(html, /<meta name="twitter:card" content="summary_large_image" \/>/);
   for (const c of ['__Host-atelier_tester', '__Host-atelier_li']) assert.ok(privacy.includes(`<code>${c}</code>`), c);
   assert.doesNotMatch(privacy, /the only cookie is/);

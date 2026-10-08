@@ -70,9 +70,13 @@ export const KEYS = {
   ZAI_API_KEY: 'zai-test', DEEPSEEK_API_KEY: 'ds-test', META_API_KEY: 'meta-test', NVIDIA_API_KEY: 'nvapi-test', XAI_API_KEY: 'xai-test-key-0123456789',
   LINKEDIN_CLIENT_ID: 'li-client', LINKEDIN_CLIENT_SECRET: 'li-secret-xyz',
 };
-// env with every provider key, a fake KV and a real Ledger (pass ledger: null for none).
-export function makeEnv({ ledger = makeLedger(), ...extra } = {}) {
-  return { env: { ...KEYS, ATELIER_KV: fakeKV(), ...(ledger ? { LEDGER: ledger.ns } : {}), ...extra }, L: ledger };
+// env with every provider key, a fake KV and a real Ledger (pass ledger: null for none). Tester access is switched ON
+// here (TESTERS_ENABLED "1"), because the tester suites exercise the tester code the switch can turn back on; the
+// Worker's default is off, so pass testers: false for the production default (no TESTERS_ENABLED var at all). The
+// default Ledger sees the same switch, as the Durable Object shares the Worker's vars (its alarm ends sessions while off).
+export function makeEnv({ ledger, testers = true, ...extra } = {}) {
+  if (ledger === undefined) ledger = makeLedger(testers ? { TESTERS_ENABLED: '1' } : {});
+  return { env: { ...KEYS, ATELIER_KV: fakeKV(), ...(ledger ? { LEDGER: ledger.ns } : {}), ...(testers ? { TESTERS_ENABLED: '1' } : {}), ...extra }, L: ledger };
 }
 
 // ── fetch mock: routes [regex on "METHOD url", handler(call)]; an unmatched call throws ──

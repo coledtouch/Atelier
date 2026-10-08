@@ -1205,11 +1205,12 @@ test('owner calls never touch the tester meter and keep their old shapes (web se
   r = await owner('x/openai/images/generations', post({ model: 'gpt-image-2.5-flare', prompt: 'x', n: 9, quality: 'max' }));
   assert.equal(r.status, 200);
   assert.equal((await new Response(upstream.calls.at(-1).body).json()).n, 9, 'the owner body passes through raw');
-  // an image Atelier has no price for is never sent: the owner's spending limits need one (src/spend.js)
-  const before = upstream.calls.length;
+  // an image Atelier has no price for still goes out (no spending limits since v85), just unrecorded (src/spend.js)
+  const before = upstream.calls.length, recorded = L.calls.filter((m) => m === 'ownerReserve').length;
   r = await owner('x/openai/images/generations', post({ model: 'gpt-image-9', prompt: 'x' }));
-  assert.deepEqual([r.status, (await r.json()).code], [400, 'owner_cap_unpriced']);
-  assert.equal(upstream.calls.length, before);
+  assert.equal(r.status, 200);
+  assert.equal(upstream.calls.length, before + 1);
+  assert.equal(L.calls.filter((m) => m === 'ownerReserve').length, recorded);
   // the owner's Omni: any length 3–10 s and up to 4K, unmetered; Veo's old proxy routes are gone
   r = await owner('omni/start', post({ prompt: 'p', seconds: 10, resolution: '4k', aspect: '16:9' }));
   assert.equal(r.status, 200);

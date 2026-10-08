@@ -12,10 +12,10 @@
 // Testers never reach any of it: the tester router answers xai/* with 403 owner_only (deny by default), and no xai:
 // model is in a tester plan. Nothing here can search the web (Grok's web/X search is a Responses-API tool Atelier
 // never sends). The key never leaves the Worker and never reaches a log or an error; prompts are never logged.
-// Every paid start goes through src/spend.js (opts.spend), the owner's spending limits: images count toward the monthly
-// limit, videos toward it and the per-video limit; over either → 402 owner_cap_*, and nothing reaches xAI. A finished
-// job settles to xAI's reported cost (usage.cost_in_usd_ticks), else its quote; a failed or filtered one to $0.
-import { SpendError, spendResponse, isGatewayStatus } from './spend.js';
+// Every paid start goes through src/spend.js (opts.spend), the owner's spend record: recorded at its quote (never
+// refused). A finished job settles to xAI's reported cost (usage.cost_in_usd_ticks), else its quote; a failed or
+// filtered one to $0.
+import { isGatewayStatus } from './spend.js';
 
 export const XAI_BASE = 'https://api.x.ai/v1';
 export const XAI_SECRET = 'XAI_API_KEY';
@@ -150,7 +150,7 @@ export async function upstreamError(r, what, key) {
   return new XaiError(`${what} failed (${s}).`, 502, 'xai_failed');
 }
 const usdOf = (usage) => { const t = Number(usage?.cost_in_usd_ticks); return Number.isSafeInteger(t) && t >= 0 ? round(t / USD_TICKS) : null; };
-// ── owner spending limits (src/spend.js), in micro-dollars ──
+// ── the owner's spend record (src/spend.js), in micro-dollars ──
 const TICKS_PER_MICRO = USD_TICKS / 1e6;
 /** usage.cost_in_usd_ticks → µ$ (rounded up), or null when xAI reported none. */
 export const microsOf = (usage) => { const t = Number(usage?.cost_in_usd_ticks); return Number.isSafeInteger(t) && t >= 0 ? Math.ceil(t / TICKS_PER_MICRO) : null; };
@@ -310,7 +310,6 @@ const ROUTES = [
 ];
 /** An XaiError (or anything else) → the JSON error response. */
 export function xaiFail(err, key = '') {
-  if (err instanceof SpendError) return spendResponse(err);
   if (err instanceof XaiError) return json({ error: err.message, code: err.code }, err.status, err.headers);
   console.error('xai route failed', scrub(err?.message || err, key, 200));
   return json({ error: 'The xAI request failed — try again.', code: 'xai_failed' }, 502);
@@ -318,7 +317,7 @@ export function xaiFail(err, key = '') {
 
 /**
  * /api/xai/* for the owner. path is relative to /api/ ('xai/video/status/<id>'); key: XAI_API_KEY behind the passcode;
- * spend: src/spend.js's ownerSpend(env), the owner's spending limits (worker.js always passes it).
+ * spend: src/spend.js's ownerSpend(env), the owner's spend record (worker.js always passes it).
  */
 export async function handleXai(req, env, path, { key, spend = null } = {}) {
   if (!key) return json({ error: 'No xAI key on the server (set XAI_API_KEY).' }, 401);

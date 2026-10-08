@@ -986,17 +986,14 @@ a.chip { text-decoration: none; display: inline-flex; align-items: center; }
 .tp-tester.off > :not(.chip) { opacity: 0.55; }
 .tp-spend { margin: 0; display: flex; flex-direction: column; align-items: flex-end; font: 400 11px/1.5 var(--mono); color: var(--ink-3); white-space: nowrap; }
 .tp-spend b { color: var(--ink); font-weight: 500; }
-/* owner: Settings → Spending (the Testers panel's pool bar, labels and limit fields, in two columns) */
-.tp-bar.full .s { background: var(--c-ideas); }
+/* owner: Settings → Spending, this month's spend (read only: the Testers panel's labels, the breakdown list) */
+.sp-total .tp-num b { font-family: var(--serif); font-size: 26px; font-weight: 400; letter-spacing: -0.01em; }
+.sp-total .hint { margin: 0; }
 .sp-list { list-style: none; margin: 0; padding: 0; }
 .sp-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 13.5px; }
 .sp-list li > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sp-list li > span:last-child { flex: none; font: 400 12px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
 .sp-list b { color: var(--ink); font-weight: 500; }
-.tp-limits.sp-limits { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 440px; }
-/* the options strip: this send wouldn't fit the owner's spending limits */
-.opt-note.cap-warn, .essential-note.cap-warn { color: var(--c-ideas); }
-.essential-note.cap-warn { font-family: var(--mono); }
 .tester-welcome { width: min(440px, calc(100vw - 32px)); }
 .tester-welcome .eyebrow { margin-bottom: 12px; }
 .tester-welcome h3 em { color: var(--c-ask); }

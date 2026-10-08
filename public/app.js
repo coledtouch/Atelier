@@ -9,7 +9,7 @@
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
 import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=85';
 import * as Sync from './sync.js?v=85';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, spendQuestion as runwaySpendQuestion, RUNWAY_MODELS as RUNWAY_SPECS, quote as runwayQuoteUsd } from './runway.js?v=85';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=85';
 import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=85';
 import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=85';
 import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint } from './context.js?v=85';
@@ -25,7 +25,7 @@ import * as ClaudeImport from './claude-import.js?v=85';
 import { createFeedback } from './feedback.js?v=85';
 import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=85';
 import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=85';
-import { isCapCode, capOf, cleanCap, capTitle, capWarning, imageUsd, usd as capUsd, resetDay, limitsBody, breakdownRows, loadSpend, saveLimits, partialCapNote } from './spend.js?v=85';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=85';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -245,6 +245,12 @@ function migrateOpts(o) {
 
 // Last known provider list (refreshed from /api/health at boot) so startup never waits on the network.
 let server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, runway: false, xai: false, ...LS.get('server', {}) };
+// LinkedIn tester access is a switch on the Worker (TESTERS_ENABLED, off by default): /api/health says testers: true only
+// while it is on. Off, every tester surface stays hidden (body.testers-open, studio.css .tester-ui): the sign-in button and
+// spots, the allowance pill, feedback, the owner's Testers panel. Until health answers, the last answer (or off) holds.
+let testersOpen = LS.get('testersOpen', false) === true;
+const syncTesters = () => document.body.classList.toggle('testers-open', testersOpen);
+syncTesters();
 // A tester device starts in tester mode from its last /api/tester/me (boot checks it again). The owner passcode always wins.
 if (!S.settings.passcode) S.tester = normalizeMe(LS.get('tester', null));
 // Each page is bound to one workspace. A role change reloads before another
@@ -637,8 +643,7 @@ async function toApiError(r) {
   if (/^\s*<(!doctype|html|head|body)/i.test(detail)) detail = 'The provider answered with an error page instead of a response.';
   const code = typeof j?.code === 'string' && /^[a-z_]{1,40}$/.test(j.code) ? j.code : undefined;
   // Tester refusals are already worded for people (and never mention a passcode): keep them as they are.
-  // So are the owner's spending-limit refusals (owner_cap_*, src/spend.js): a limit, never a provider problem.
-  if (isTesterCode(code) || code === 'model_no_images' || isCapCode(code)) return new ApiError(r.status, detail || `Request failed (${r.status}).`, { code, scope: typeof j.scope === 'string' ? j.scope : undefined, resetsAt: j.resetsAt });
+  if (isTesterCode(code) || code === 'model_no_images') return new ApiError(r.status, detail || `Request failed (${r.status}).`, { code, scope: typeof j.scope === 'string' ? j.scope : undefined, resetsAt: j.resetsAt });
   if (r.status === 401 && /passcode|key on the server/i.test(detail)) return new ApiError(401, detail);
   if (/^error code: \d+$/i.test(detail.trim())) detail = '';
   const lead = {
@@ -658,20 +663,15 @@ async function toApiError(r) {
 // Streams a chat completion, falling back through the role's model chain when a model is retired,
 // or to another provider when one is unusable (bad key, workspace, billing, quota).
 // onModel(id) reports the model that actually answered; onSkip(provider, err) reports a provider switch.
-// The owner's own spending limits (402 owner_cap_*, Settings → Spending) are never one: no fallback, no dead provider.
-const accountProblem = (err) => !/^owner_cap/.test(err.code || '') && (err.status === 401 || err.status === 403 || err.status === 402
+const accountProblem = (err) => (err.status === 401 || err.status === 403 || err.status === 402
   || ((err.status === 400 || err.status === 429) && /workspace|api key|credit|billing|quota|balance|permission|not enabled|organization|spending limit/i.test(err.message))
   // out of credit reported mid-stream or as a 5xx (DeepSeek "Insufficient Balance", OpenAI insufficient_quota…): same as a 402
   || (err.status >= 500 && /insufficient[ _](balance|quota|credit|funds)|out of credits?|credit balance is too low|exceeded your current quota|billing|spending limit|(?:does not|doesn[’']t) have any credits/i.test(err.message)));
 // Friendly error kinds. New entries store e.errorKind; older/restored entries only have e.error, so text is classified too.
 function errorKind(msg = '', status, code) {
   const m = String(msg || '');
-  if (code === 'tester_signin') return 'signin';
+  if (code === 'tester_signin' || code === 'tester_closed') return 'signin'; // tester_closed: tester access is switched off
   if (isTesterCode(code)) return 'budget'; // tester limits: never a dead provider, never the passcode screen
-  if (/^owner_cap_(video|month)$/.test(code || '')) return 'cap'; // the owner's spending limits (Settings → Spending)
-  // owner_cap_unpriced / owner_cap_unavailable: the Worker couldn't check the limits (no price, no Ledger). Its words say
-  // so; worded with "spending limits", they must not read as a provider key problem.
-  if (/^owner_cap_/.test(code || '')) return 'error';
   if (m === 'Stopped.') return 'stopped';
   if (/interrupted/i.test(m)) return 'interrupted'; // renderThread + data-safety recoverThread/prepareImport messages
   if (/passcode/i.test(m)) return 'passcode';
@@ -683,7 +683,7 @@ function errorKind(msg = '', status, code) {
   if (/safety|filtered|rephras/i.test(m)) return 'filtered';
   return 'error';
 }
-const ERROR_TITLE = { offline: 'Couldn’t reach the studio', passcode: 'Passcode needed', key: 'A provider key needs attention', rate: 'Too many requests', model: 'That model isn’t available', busy: 'The model is busy', filtered: 'Try rephrasing', stopped: 'Stopped', interrupted: 'Interrupted', budget: 'Over the tester allowance', signin: 'Sign in again', cap: 'Over your spending limit', error: 'Couldn’t finish' };
+const ERROR_TITLE = { offline: 'Couldn’t reach the studio', passcode: 'Passcode needed', key: 'A provider key needs attention', rate: 'Too many requests', model: 'That model isn’t available', busy: 'The model is busy', filtered: 'Try rephrasing', stopped: 'Stopped', interrupted: 'Interrupted', budget: 'Over the tester allowance', signin: 'Sign in again', error: 'Couldn’t finish' };
 // The 'budget' card's title by what stopped it (e.budget.scope, from the 402/403/413/503 code).
 const BUDGET_TITLE = { day: 'Today’s allowance is used up', month: 'This month’s allowance is used up', pool: 'The tester budget is used up this month', call: 'Too much for one request', paused: 'Tester access is paused', model: 'Not in the tester plan', owner: 'Not part of tester mode', large: 'That request is too large', origin: 'Request blocked', video: 'This clip isn’t ready yet' };
 // A day/month/pool refusal while at least a cent is still left: this request was bigger than what remains (short).
@@ -696,9 +696,9 @@ function budgetOf(err) {
   const short = RESET_SCOPES.includes(scope) && Boolean(S.tester) && (leftOf(S.tester)[scope] ?? 0) >= 10_000; // the pill already has the refusal's figures
   return { scope, ...(resetsAt ? { resetsAt } : {}), ...(short ? { short: true } : {}) };
 }
-function errorTitle(kind, msg = '', budget, cap) {
+function errorTitle(kind, msg = '', budget) {
   if (kind === 'budget') return (budget?.short && SHORT_TITLE[budget.scope]) || BUDGET_TITLE[budget?.scope] || ERROR_TITLE.budget;
-  if (kind === 'cap') return capTitle(cleanCap(cap)?.limit);
+  if (kind === 'signin' && /tester access is closed/i.test(msg)) return 'Tester access is closed';
   if (kind === 'key' && S.tester) return 'That model isn’t available';
   if (kind === 'key' && /insufficient|balance|credit|quota/i.test(msg)) return 'Out of credit on every available model';
   if (/only thought and never wrote/i.test(msg)) return 'No answer came back'; // kind stays 'busy': synced/backed-up kinds are a fixed list // testers have no provider keys to check
@@ -837,31 +837,52 @@ async function streamChatOnce(opts) {
   }
 }
 
-// The owner's room for Claude by the role's effort. Claude 5.x counts adaptive thinking toward max_tokens (thinking plus
-// answer), and at effort high it can think through most of a small budget before writing a word; the docs ask for a large
-// max_tokens at high and above (64K is their starting point; 128K is the 5.x output limit, src/anthropic.js caps at 64K).
-// Billing is for the tokens used: this is only the ceiling. Low-effort roles and helpers keep the caller's figure.
-// Testers keep it too: the tester router prices each call's reservation from max_tokens (≤ 8,192, src/tester/router.js).
-// The ceiling of one owner call counts the server-side fallback (src/anthropic.js sends fallbacks 'default' on Opus 5.5,
-// Fable 5.1 and Sonnet 5.5): the fallback attempt gets the same max_tokens and bills at its own model's rate, as
-// chatWorstCase (src/tester/prices.js) prices it. Output only: at 64K, Opus 5.5 $2.88 (→ Opus 5), Fable 5.1 $4.80,
-// Sonnet 5.5 $1.28; at 16K, Opus 5.5 $0.72, Sonnet 5.5 $0.32. One prompt can make two such calls per model (the
-// empty-answer nudge goes out with the same room) on at most two models (streamChat). With the default lists: Code and
-// Build up to $8.32 (Opus 5.5 + Sonnet 5.5), Deep think up to $15.36 (Opus 5.5 + Fable 5.1, also the most any 64K mode
-// can reach with Fable 5.1 picked in Settings), Ideas and "As me" up to $2.08. A paused web search (web and agent roles
-// only, at 6K and 16K) adds up to 3 continuation requests at the same room. tests/claude-stops.test.mjs checks these.
-const CLAUDE_ROOM = { medium: 16000, high: 64000, xhigh: 64000, max: 64000 };
-const roomFor = (model, role, max_tokens) => (!S.tester && providerOf(model) === 'anthropic' ? Math.max(max_tokens, CLAUDE_ROOM[EFFORT[role]] || 0) : max_tokens);
+// Each chat model's full official output maximum: what a user-facing request asks for as max_tokens (src/worker.js
+// shapeChatBody sends it as max_completion_tokens to OpenAI, Meta and xAI; src/gemini.js as maxOutputTokens on Gemini's
+// video route; src/anthropic.js streams Claude, which values this large need). Read from each provider's docs on
+// 2026-10-08. Claude, OpenAI, Gemini, Meta and NVIDIA count thinking inside it (xAI doesn't), so a high-effort answer
+// gets its whole room for thinking plus the answer. Billing is for the tokens used: this is only the ceiling.
+// Not listed, so the caller's own figure goes as today: a model with no documented maximum (Meta's Muse Spark 1.3, the
+// xAI Grok models, NVIDIA's GLM 5.3 / GLM 5.3 Flash and Nemotron Nano 3) — a max_tokens above a model's real limit gets
+// the request refused, so none is guessed. NVIDIA's DeepSeek V4.1 Flash allows its whole 1,048,576-token context, which
+// no prompt fits beside, so it gets NVIDIA's documented default and recommendation (262,144).
+const MAX_OUTPUT = {
+  'anthropic:claude-opus-5-5': 128000, 'anthropic:claude-sonnet-5-5': 128000, 'anthropic:claude-fable-5-1': 128000, 'anthropic:claude-haiku-5-5': 128000,
+  'openai:gpt-6-astra': 128000, 'openai:gpt-6-luna': 128000, 'openai:gpt-6.1-sol': 128000,
+  'gemini:gemini-3.8-flash': 65536, 'gemini:gemini-3.1-pro-preview': 65536, 'gemini:gemini-3.5-flash-lite': 65536,
+  'zai:glm-5.3': 131072, 'zai:glm-5.3-flash': 131072, 'zai:glm-4.7-flash': 128000,
+  'deepseek:deepseek-flash': 393216, 'deepseek:deepseek-v4-pro': 393216,
+  'deepseek-ai/deepseek-v4.1-flash': 262144, 'moonshotai/kimi-k3': 65536, 'nvidia/nemotron-3-super-120b-a12b': 32768, 'google/gemma-4-31b-it': 32768,
+  'nvidia/nemotron-3-ultra-550b-a55b': 32768, 'poolside/laguna-xs-2.1': 16384, 'meta/llama-3.2-90b-vision-instruct': 8192,
+  'nvidia/nemotron-3.5-lightning-30b-a3b': 32768, 'openai/gpt-oss-20b': 4096,
+};
+// Background helpers keep the caller's small budget so they stay quick: role 'fast' (thread titles, prompt polish,
+// memory learning, routing, Remix plan repair) and calls marked helper (learning a writing style, a history import's
+// profile). An unlisted Claude id (one typed in Settings) keeps the room it had before v85: 64K at effort high and up,
+// 16K at medium (src/anthropic.js caps such ids at 64K).
+const HELPER_ROLES = new Set(['fast']);
+const UNLISTED_CLAUDE_ROOM = { medium: 16000, high: 64000, xhigh: 64000, max: 64000 };
+// The max_tokens a request goes out with. Every user-facing role (Ask, smart, Deep think, Code, Web, Vision, Video
+// watch, Ideas, "As me", Build and every turn of the accounts agent's tool loop) gets the model's whole maximum; effort
+// stays as the role chose it (EFFORT). Helpers get the caller's figure, never above the model's maximum. Testers keep the
+// caller's figure: the tester router prices each call's reservation from it (≤ 8,192, src/tester/router.js).
+const roomFor = (model, role, max_tokens, helper = false) => {
+  const max = Object.hasOwn(MAX_OUTPUT, model) ? MAX_OUTPUT[model] : null;
+  if (S.tester) return max_tokens;
+  if (helper || !role || HELPER_ROLES.has(role)) return max ? Math.min(max_tokens, max) : max_tokens;
+  if (max) return max;
+  return providerOf(model) === 'anthropic' ? Math.max(max_tokens, UNLISTED_CLAUDE_ROOM[EFFORT[role]] || 0) : max_tokens;
+};
 // Errors the Worker sends inside a Claude stream when a turn ended with nothing to show (src/anthropic.js STOPS) → status.
 // A refusal (400, "Try rephrasing") isn't retried on another provider; an overflowing thread (413) wouldn't fit there either.
 const SSE_ERRORS = { refusal: 400, context_window: 413 };
 
-async function streamChatRaw({ model, messages, temperature, max_tokens = 4096, signal, onDelta, extra = {}, role, onServed, onNote }) {
+async function streamChatRaw({ model, messages, temperature, max_tokens = 4096, signal, onDelta, extra = {}, role, helper = false, onServed, onNote }) {
   const effort = providerOf(model) === 'nvidia' ? null : EFFORT[role];
   const r = await fetch('/api/chat', {
     method: 'POST', signal,
     headers: apiHeaders({ accept: 'text/event-stream' }),
-    body: JSON.stringify({ model, messages, temperature: temperature ?? S.settings.temperature, top_p: 0.95, max_tokens: roomFor(model, role, max_tokens), stream: true, ...(effort ? { reasoning_effort: effort } : {}), ...extra }),
+    body: JSON.stringify({ model, messages, temperature: temperature ?? S.settings.temperature, top_p: 0.95, max_tokens: roomFor(model, role, max_tokens, helper), stream: true, ...(effort ? { reasoning_effort: effort } : {}), ...extra }),
   });
   if (!r.ok) throw await toApiError(r);
   noteAllowance(r);
@@ -1504,7 +1525,7 @@ const reader = createReader({
   allowedVoices: readAllowed,
   // A tester refusal (allowance used up, access paused, …) in the allowance card's words; the device voice reads instead
   // (a Settings preview just stops).
-  onRefusal: (err, o) => toast(`${errorTitle('budget', '', budgetOf(err))}${o?.preview ? '.' : ' — reading with the device voice.'}`, { error: true }),
+  onRefusal: (err, o) => { if (err?.code === 'tester_closed') return refreshTesterSoon(); toast(`${errorTitle('budget', '', budgetOf(err))}${o?.preview ? '.' : ' — reading with the device voice.'}`, { error: true }); },
   // A tester's session ended (401): signed out as a chat would be, which stops the read and opens sign-in.
   onSignedOut: () => testerSignedOut('expired'),
 });
@@ -1557,13 +1578,10 @@ function errorBox(e) {
   const kind = typeof e.errorKind === 'string' && Object.hasOwn(ERROR_TITLE, e.errorKind) ? e.errorKind : errorKind(e.error);
   const soft = kind === 'stopped' || kind === 'interrupted';
   const extra = kind === 'passcode' ? btn('settings', '', 'Enter passcode') : kind === 'key' && !S.tester ? btn('settings', '', 'Settings') : kind === 'filtered' ? btn('edit-prompt', ICON.pen, 'Edit prompt')
-    : kind === 'budget' && S.tester ? btn('allowance', '', 'See allowance') : kind === 'signin' && !S.tester ? btn('signin', '', 'Sign in')
-    : kind === 'cap' && !S.tester ? btn('spending', '', 'Change limits') : '';
+    : kind === 'budget' && S.tester ? btn('allowance', '', 'See allowance') : kind === 'signin' && !S.tester ? btn('signin', '', 'Sign in') : '';
   const detail = kind === 'stopped' ? '' : `<p class="error-detail">${esc(e.error)}</p>`;
-  const capAt = kind === 'cap' ? cleanCap(e.cap)?.resetsAt : null; // the owner's monthly limit: 00:00 UTC on the 1st
-  const reset = kind === 'budget' && Number.isFinite(e.budget?.resetsAt) ? `<p class="error-reset">${e.budget.resetsAt > Date.now() ? `Resets ${esc(resetIn(e.budget.resetsAt))}` : 'It has reset — try again'} <span>· ${esc(new Date(e.budget.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }))}</span></p>`
-    : Number.isFinite(capAt) ? `<p class="error-reset">${capAt > Date.now() ? `Resets ${esc(resetDay(capAt))}` : 'A new month has started — try again'} <span>· 00:00 UTC</span></p>` : '';
-  return `<div class="error-box${soft ? ' soft' : ''}" data-error="${esc(kind)}"><p class="error-title">${esc(errorTitle(kind, e.error, e.budget, e.cap))}</p>${detail}${reset}<div class="error-acts">${btn('retry', ICON.retry, soft ? 'Run again' : 'Try again')}${extra}</div></div>`;
+  const reset = kind === 'budget' && Number.isFinite(e.budget?.resetsAt) ? `<p class="error-reset">${e.budget.resetsAt > Date.now() ? `Resets ${esc(resetIn(e.budget.resetsAt))}` : 'It has reset — try again'} <span>· ${esc(new Date(e.budget.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }))}</span></p>` : '';
+  return `<div class="error-box${soft ? ' soft' : ''}" data-error="${esc(kind)}"><p class="error-title">${esc(errorTitle(kind, e.error, e.budget))}</p>${detail}${reset}<div class="error-acts">${btn('retry', ICON.retry, soft ? 'Run again' : 'Try again')}${extra}</div></div>`;
 }
 // The ONE 'working' line: spinner (.status::before) + sheen label + elapsed time kept current by tickAll().
 const elapsedLabel = (t0) => { const s = Math.round((Date.now() - t0) / 1000); return s < 3 ? '' : s < 60 ? `· ${s}s` : `· ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -1754,7 +1772,7 @@ async function run(e) {
   const thread = S.thread;
   if (thread) { liveThreads.set(thread.id, thread); liveRuns.set(thread.id, (liveRuns.get(thread.id) || 0) + 1); }
   const signal = ctrl.signal;
-  e.pending = true; e.error = null; e.errorKind = null; e.cut = null; delete e.budget; delete e.cap; delete e.web; // e.web: this run's own searches (runChat, runAgent)
+  e.pending = true; e.error = null; e.errorKind = null; e.cut = null; delete e.budget; delete e.cap; delete e.web; // e.web: this run's own searches (runChat, runAgent); e.cap: a v83–v84 spending-limit card
   delete e.refused; // set when this run's answer is declined partway (finish 'content_filter'): buildHistory leaves it out
   delete e.recovered; const releaseRun = Sync.holdRunLock(e.id); // another tab never syncs this entry mid-run
   const t0 = e.startedAt = Date.now();
@@ -1775,9 +1793,9 @@ async function run(e) {
       e.error = /failed to fetch|networkerror|\bload failed/i.test(err.message || '') ? 'Couldn’t reach Atelier — the connection dropped. Tap Try again.' : err.message || String(err);
       e.errorKind = errorKind(e.error, err.status, err.code);
       if (isTesterCode(err.code)) e.budget = budgetOf(err);
-      else if (isCapCode(err.code)) { const cap = capOf(err); if (cap) e.cap = cap; } // which spending limit, and when the month resets
       if (err.status === 401) updateKeyState(false);
       if (err.code === 'tester_signin') testerSignedOut('expired');
+      else if (err.code === 'tester_closed') testerSignedOut('closed');
       else if (err.status === 401 && /passcode/i.test(e.error)) { Sync.pause('passcode'); S.settings.passcode = ''; saveSettings(); syncRole(); DB.ownerPasscodeSet('').catch(() => {}); signinReason = 'rejected'; openOnboard('rejected'); }
     }
   } finally {
@@ -1787,7 +1805,7 @@ async function run(e) {
       if (left > 0) liveRuns.set(thread.id, left);
       else { liveRuns.delete(thread.id); liveThreads.delete(thread.id); }
     }
-    $('#activityStatus').textContent = e.error ? `${errorTitle(e.errorKind || errorKind(e.error), e.error, e.budget, e.cap)}.` : e.cut === 'stopped' ? 'Stopped early.' : 'Your response is ready.';
+    $('#activityStatus').textContent = e.error ? `${errorTitle(e.errorKind || errorKind(e.error), e.error, e.budget)}.` : e.cut === 'stopped' ? 'Stopped early.' : 'Your response is ready.';
     delete e.stage; delete e.chars; delete e.status; delete e.startedAt;
     for (const st of e.steps || []) {
       if (st.status === 'awaiting') { st.status = 'declined'; approvals.delete(st.id); }
@@ -1806,7 +1824,7 @@ async function run(e) {
     if (thread?.entries.length === 1 && !e.error) nameThread(e, thread);
     if (!e.error && !e.group) learnFrom(e, thread);
     if (S.tester) refreshTesterSoon(); // reservations settle after the stream: show the settled numbers
-    else if (e.kind === 'image' || e.kind === 'video') refreshSpendSoon(); // the owner's month moved: the cost notes follow
+    else if (e.kind === 'image' || e.kind === 'video') refreshSpendSoon(); // the owner's month moved: an open Spending readout follows
   }
 }
 
@@ -2386,7 +2404,7 @@ async function runImage(e, signal) {
         return m.run ? await m.run(prompt, { aspect: e.params.aspect, seed }, signal)
           : extractMedia(await genai(m.id, m.body(prompt, { ...e.params, seed }), { signal, onTick: (ms) => tick(e, ms) }), 'image');
       } catch (err) {
-        const skippable = !isTesterCode(err.code) && !isCapCode(err.code) && (accountProblem(err) || err.status === 429 || err.status === 503);
+        const skippable = !isTesterCode(err.code) && (accountProblem(err) || err.status === 429 || err.status === 503);
         if (err.name === 'AbortError' || !skippable || ci >= candidates.length - 1) throw err;
         if (candidates[ci] === m) { ci++; e.meta.model = candidates[ci].id; toast(`${m.label} unavailable — using ${candidates[ci].label}`); repaint(e); }
       }
@@ -2399,9 +2417,6 @@ async function runImage(e, signal) {
   const res = await Promise.allSettled(jobs);
   const fail = res.find((r) => r.status === 'rejected');
   if (!e.media.length && fail) throw fail.reason;
-  // ×N where only some fit this month's limit (each image is its own request): say why fewer came back
-  const short = res.some((r) => r.status === 'rejected' && isCapCode(r.reason?.code)) ? partialCapNote(e.media.length, e.expect) : '';
-  if (short) { e.meta.note = [e.meta.note, short].filter(Boolean).join(' · '); toast(short, { action: { label: 'Change limits', onClick: openSpending } }); }
   e.expect = e.media.length;
 }
 
@@ -2504,9 +2519,6 @@ async function runRunway(e, cfg, still, signal) {
   const req = runwayRequest({ model: cfg.runway, prompt, still: img, stillSize: size, ratio, aspect: e.params.aspect, secs: e.params.secs });
   e.ratio = req.ratio; // the 'developing' placeholder takes the clip's shape
   e.meta.note = `${req.note} · ${req.seconds} s · ${runwayQuote(cfg.runway, req.seconds, { resolution: req.resolution, still: req.kind === 'image_to_video' })}`;
-  // Over $5 the owner confirms the price right before a new paid task (not a resumed one): one Seedance send can reach
-  // $20.40, and an Ask-mode message can start several videos on the saved Video options. No → Stopped, nothing sent.
-  const ask = runwaySpendQuestion(cfg.runway, req.seconds, { resolution: req.resolution, still: req.kind === 'image_to_video' });
   const prev = e.runway, resume = prev?.task && prev.model === cfg.runway && Date.now() - prev.at < 864e5 ? prev.task : null;
   // The thread this entry lives in. The owner may have opened another thread since sending, and persist() saves S.thread.
   const home = () => [...liveThreads.values()].find((t) => t.entries.includes(e)) || (S.thread?.entries.includes(e) ? S.thread : null);
@@ -2514,7 +2526,7 @@ async function runRunway(e, cfg, still, signal) {
   let out;
   try {
     out = await runwayVideo(req, {
-      apiHeaders, signal, resume, approve: ask ? () => confirm(ask) : null,
+      apiHeaders, signal, resume,
       onTask: (id) => {
         e.runway = { task: id, model: cfg.runway, at: Date.now() };
         // Save the task id now: if the app is closed or killed before the video lands, Try again resumes it (no second charge).
@@ -2781,7 +2793,6 @@ stream.addEventListener('click', async (ev) => {
     case 'edit-prompt': setMode(e.kind); input.value = e.prompt; setMark(e.untrustedFiles ? '' : e.untrusted); autosize(); return input.focus(); // a link/share prompt stays marked (only the shared photos marked it: they don't come back, the typed text is yours)
     case 'settings': return openSettings();
     case 'allowance': openSettings(); return selectSettings('general');
-    case 'spending': return openSpending();
     case 'signin': return openOnboard('expired');
     case 'view-media': return openViewer({ title: e.prompt, img: e.media[k].src, dl: () => dlMedia(e, k), more: { id: e.id, k } });
     case 'view-video': {
@@ -2991,22 +3002,6 @@ function omniNote(o) {
   const { seconds, resolution } = veoShape(o), usd = (VEO_PER_SECOND[OMNI_ID]?.[resolution] || 0) * seconds;
   return `Gemini Omni · ${seconds} s ${resolution} ≈ $${usd.toFixed(2)}${resolution === '720p' ? '' : ' (estimate)'}`;
 }
-// The owner's spending limits (Settings → Spending): what one send in Video / Image mode should cost, warned about in
-// the options strip when it wouldn't fit (the Worker refuses it before the provider is called anyway).
-function videoUsd(vm, o) {
-  if (vm.xai) return xaiQuote(vm.xai, xaiSeconds(o.secs));
-  if (vm.runway) {
-    const tiered = Boolean(RUNWAY_SPECS[vm.runway]?.rates);
-    return runwayQuoteUsd(vm.runway, +o.secs, { resolution: tiered ? (o.aspect === '16:9hd' ? '1080p' : '720p') : undefined, still: S.attachments.length > 0 })?.usd ?? null;
-  }
-  if (vm.omni) { const { seconds, resolution } = veoShape(o); return (VEO_PER_SECOND[OMNI_ID]?.[resolution] || 0) * (omniEdit ? 10 : seconds); } // an edit is held at the longest clip
-  return null; // Cosmos and the motion still are free
-}
-const videoCapNote = (vm, o) => capNote(videoUsd(vm, o), 'video');
-function imageCapNote(o) {
-  const cfg = imageModel(o.model), edit = S.attachments.length > 0, per = cfg && imageUsd(cfg.id, { edit });
-  return per ? capNote(per * (edit ? 1 : Math.max(1, +o.count || 1)), 'image') : '';
-}
 // Video mode, after Edit on an Omni clip: the chip that says the next prompt edits it (tap to film a new clip instead).
 function omniEditChip() {
   if (!omniEdit || !videoModel(S.opts.video.model)?.omni) return '';
@@ -3037,8 +3032,7 @@ function renderOptions() {
         + '<span class="opt-sep"></span>'
         + selectOpt('', 'count', [[1, '×1'], [2, '×2'], [4, '×4']], o.count)
         + `<button class="chip ${o.enhance ? 'on' : ''}" data-toggle="enhance" title="Let an LLM enrich your prompt"><span aria-hidden="true">✦</span> Enhance</button>`
-        + `<span class="opt-note">attach a photo to edit it</span>`
-        + imageCapNote(o);
+        + `<span class="opt-note">attach a photo to edit it</span>`;
       break;
     case 'video': {
       if (S.video) { // a clip in Video mode: Remix (Labs) or, with it off, a plain way over to Ask
@@ -3073,8 +3067,7 @@ function renderOptions() {
         // kept on phones whenever a length or HD was left out of the menus, so the tester sees why (A7b)
         + (xm ? `<span class="opt-note keep">${esc(xaiOptNote(vm, o))}</span>`
           : rw ? `<span class="opt-note keep">${esc(runwayOptNote(vm, o.secs, o.aspect))} · ${RUNWAY_POWERED}</span>`
-          : `<span class="opt-note${fit && (!fit.hd || fit.secs.length < 3) ? ' keep' : ''}">${esc(fit ? veoNote(vm, fit, o) : vm.omni ? omniNote(o) : vm.note || 'attach an image to animate it')}</span>`)
-        + (fit ? '' : videoCapNote(vm, o)); // the owner's spending limits: a warning when this clip wouldn't fit
+          : `<span class="opt-note${fit && (!fit.hd || fit.secs.length < 3) ? ' keep' : ''}">${esc(fit ? veoNote(vm, fit, o) : vm.omni ? omniNote(o) : vm.note || 'attach an image to animate it')}</span>`);
       h = rxChoice + h;
       break;
     }
@@ -3147,8 +3140,7 @@ $('#options').addEventListener('change', (ev) => {
   S.opts[S.mode][s.dataset.opt] = /^\d+$/.test(v) ? +v : v;
   saveOpts();
   // Video: the cost note follows the length and HD choice (Omni, Runway and a tester's reserve all price by them).
-  // Image (owner): the spending-limit warning follows the model and the count.
-  if ((S.mode === 'video' && ['model', 'secs', 'aspect'].includes(s.dataset.opt)) || (S.mode === 'image' && !S.tester && ['model', 'count'].includes(s.dataset.opt))) {
+  if (S.mode === 'video' && ['model', 'secs', 'aspect'].includes(s.dataset.opt)) {
     const key = s.dataset.opt; // keep focus on the select that changed
     renderOptions(); saveOpts(); // renderOptions may snap the length/aspect to what the new model takes: keep that
     $(`[data-opt="${key}"]`, $('#options'))?.focus({ preventScroll: true });
@@ -3612,7 +3604,7 @@ const dictation = createDictation({
     else if (final && auto && !micSendAfter) armSend();
   },
   onResponse: (r) => noteAllowance(r), // x-tester-allowance
-  onRefusal: (r) => { if (r.code === 'tester_signin') refreshTesterSoon(); },
+  onRefusal: (r) => { if (r.code === 'tester_signin' || r.code === 'tester_closed') refreshTesterSoon(); },
   toast: (msg, o) => toast(msg, o),
 });
 function paintMic(state, { engine, reason, fallback } = {}) {
@@ -3894,15 +3886,12 @@ function renderComposerControls() {
     if (select) h += select.closest('label').outerHTML.replace(/data-opt=/g, 'data-essential-opt=');
   }
   if (S.mode === 'video') {
-    const note = $('.opt-note:not(.cap-warn)', advanced);
+    const note = $('.opt-note', advanced);
     if (note) h += `<span class="essential-note">${esc(note.textContent)}</span>`;
     for (const sel of ['[data-rx-choice]', '[data-ask-about]']) {
       const b = $(sel, advanced); if (b) h += `<button type="button" class="chip" data-show-options>${esc(b.textContent)}</button>`;
     }
   }
-  // The owner's spending limits (Settings → Spending): this send wouldn't fit, said here too when the options are folded.
-  const warn = $('.cap-warn', advanced);
-  if (warn) h += `<span class="essential-note cap-warn" role="note">${esc(warn.textContent)}</span>`;
   box.innerHTML = h;
   // outerHTML retains the original selected attribute; copy the live select value.
   $$('[data-essential-opt]', box).forEach((s) => { s.value = $(`[data-opt="${s.dataset.essentialOpt}"]`, advanced).value; });
@@ -4623,7 +4612,7 @@ function openSettings() {
       return `<span class="${on ? 'ok' : 'bad'}">${PROVIDER_NAMES[p]}${why ? `<small>${why}</small>` : ''}</span>`;
     }).join('');
   }
-  if (S.settings.passcode && !S.tester) { loadSpending(); loadTesters(); }
+  if (S.settings.passcode && !S.tester) { loadSpending(); if (testersOpen) loadTesters(); }
   const dl = $('#modelList');
   if (!dl.children.length) dl.innerHTML = [...new Set(Object.values(CHAT_MODELS).flat().map(([id]) => id))].map((id) => `<option value="${id}">`).join('');
   $('#passResult').textContent = ''; $('#passResult').className = 'hint';
@@ -4680,14 +4669,6 @@ $('#settingsForm').addEventListener('submit', async (ev) => {
     m.scrollIntoView({ block: 'center' });
     return;
   }
-  // ...and so do the owner's Spending limits, edited but not yet saved with their own button.
-  const caps = spEdited();
-  if (caps?.error) {
-    selectSettings('general');
-    const m = $('#spMsg'); m.hidden = false; m.textContent = caps.error;
-    m.scrollIntoView({ block: 'center' });
-    return;
-  }
   const f = ev.target;
   const s = S.settings;
   s.passcode = f.passcode.value.trim();
@@ -4708,8 +4689,7 @@ $('#settingsForm').addEventListener('submit', async (ev) => {
   syncClip(); // the Video model pin decides clip vs frames
   retitleReads(); // a passcode added or cleared changes which voice Read aloud uses
   if (lim) testersPost('config', lim.body, null).then((ok) => { if (ok) { toast('Saved · tester limits updated'); loadTesters(); } });
-  else if (!caps) toast('Saved');
-  if (caps) spSave(null, caps); // toasts "Spending limits saved" (or the server's reason it couldn't)
+  else toast('Saved');
   if (sub) tpAddPreview(sub, null);
 });
 // Verifies every stored provider key with its provider (free calls) and shows the exact error.
@@ -5225,6 +5205,7 @@ $('#keyState').onclick = openSettings;
 
 // Shown above the LinkedIn button: why this screen is up (tester results come back as /?tester=…).
 const SIGNIN_NOTES = {
+  closed: 'Tester access is closed right now. The threads you made stay on this device.',
   cleared: 'This browser cleared Atelier’s saved sign-in (a private window, or a “clear on exit” setting). Sign in again — threads on this device are still here.',
   expired: 'Your tester session ended. Sign in with LinkedIn again to pick up where you left off.',
   signedout: 'You’re signed out. The threads you made stay on this device.',
@@ -5236,14 +5217,16 @@ const SIGNIN_NOTES = {
   nocookie: 'LinkedIn said yes, but this browser didn’t keep the sign-in. Allow cookies for atelier.ciprari.ai, then try again.',
 };
 const SIGNIN_REASONS = { rejected: 'The server didn’t accept the saved passcode (it may have changed). Enter the current one.' };
+// Notes that send someone to LinkedIn: while tester access is closed they read as "closed" instead.
+const TESTER_NOTES = new Set(['expired', 'full', 'revoked', 'paused', 'denied', 'error', 'nocookie']);
 let onboardReason = '';
 function openOnboard(reason = 'new') {
   onboardReason = reason;
-  const note = SIGNIN_NOTES[reason] || '';
+  const note = SIGNIN_NOTES[!testersOpen && TESTER_NOTES.has(reason) ? 'closed' : reason] || '';
   $('#signinNote').textContent = note; $('#signinNote').hidden = !note;
   $('#onboardMsg').textContent = SIGNIN_REASONS[reason] || ''; $('#onboardMsg').className = 'hint';
-  if (reason === 'rejected' || LS.get('owner', false)) $('#ownerEntry').open = true; // owner devices keep owner mode
-  loadSpots();
+  if (reason === 'rejected' || LS.get('owner', false) || !testersOpen) $('#ownerEntry').open = true; // owner devices keep owner mode; with tester access closed the passcode is the only way in
+  if (testersOpen) loadSpots();
   if ($('#onboard').open) return;
   console.info('[atelier] sign-in screen:', reason);
   $('#onboard').showModal();
@@ -5339,18 +5322,20 @@ function setTester(raw) {
   if ($('#settings').open && !$('#readVoices').contains(document.activeElement)) renderReadAloud(); // the voices this account may use
   retitleReads();
 }
-// GET /api/tester/me → 'ok' | 'none' (no tester session) | 'error' (offline or server trouble: keep what we had).
+// GET /api/tester/me → 'ok' | 'none' (no tester session) | 'closed' (tester access is switched off: 410 tester_closed)
+// | 'error' (offline or server trouble: keep what we had).
 async function loadTester() {
   try {
     const r = await fetch('/api/tester/me', { cache: 'no-store', signal: AbortSignal.timeout(12000) });
     if (r.ok) { const j = await r.json().catch(() => null); if (!normalizeMe(j)) return 'error'; if (!S.settings.passcode) { setTester(j); noteAllowance(r); } return 'ok'; }
+    if (r.status === 410) return 'closed';
     return [401, 403, 404].includes(r.status) ? 'none' : 'error';
   } catch { return 'error'; }
 }
 let testerTimer;
 function refreshTesterSoon() {
   clearTimeout(testerTimer);
-  testerTimer = setTimeout(() => loadTester().then((st) => { if (st === 'none') testerSignedOut('expired'); }), 2500);
+  testerTimer = setTimeout(() => loadTester().then((st) => { if (st === 'none' || st === 'closed') testerSignedOut(st === 'closed' ? 'closed' : 'expired'); }), 2500);
 }
 // Every metered response carries x-tester-allowance: {"dayLeft","monthLeft","poolLeft"} in micro-dollars.
 function noteAllowance(r) {
@@ -5391,9 +5376,10 @@ async function testerSignOut(b) {
   const done = busyBtn(b, 'Signing out…');
   const r = await fetch('/api/li/logout', { method: 'POST' }).catch(() => null);
   done();
-  if (!r || (!r.ok && r.status !== 401)) return toast('Couldn’t sign out — check your connection and try again.', { error: true });
+  // 410 tester_closed: tester access is switched off, the session is already over (and the cookie cleared).
+  if (!r || (!r.ok && r.status !== 401 && r.status !== 410)) return toast('Couldn’t sign out — check your connection and try again.', { error: true });
   LS.set('meTester', null);
-  testerSignedOut('signedout');
+  testerSignedOut(r.status === 410 ? 'closed' : 'signedout');
 }
 const initials = (name) => ((String(name || '').trim().split(/\s+/).slice(0, 2).map((w) => [...w][0] || '').join('')) || '?').toUpperCase();
 function avatar(url, name) {
@@ -5585,135 +5571,55 @@ $('#testersPanel').addEventListener('keydown', (ev) => {
   else $('#testersPanel [data-tp="limits"]')?.click();
 });
 
-// ── owner: Settings → General → Spending (GET /api/owner/spend, PUT /api/owner/limits; public/spend.js, src/spend.js) ──
-// The Worker holds every paid owner video to the per-video limit and every paid video and image to the monthly one, and
-// refuses a job over either before the provider is called. This panel shows the month and edits the limits (saved on
-// the server, so they apply on every device). Testers never see it (needs-owner) and the routes answer them 403.
-const SP = { data: null, at: 0, seq: 0, pending: false, loading: null };
-function loadSpending(opts) { return (SP.loading = fetchSpending(opts)); } // SP.loading: the latest load, for openSpending
-async function fetchSpending({ paint = true } = {}) {
+// ── owner: Settings → General → Spending: this month's spend (GET /api/owner/spend; public/spend.js, src/spend.js) ──
+// A read-only record of the owner's paid video and images this month, by provider: the Worker records every paid owner
+// job at its quote and settles it to what the provider reports. Nothing here limits or refuses a job (the spending limits
+// were removed in v85). Testers never see it (needs-owner) and the route answers them 403.
+const SP = { data: null, seq: 0 };
+async function loadSpending() {
   const box = $('#spendingPanel'), seq = ++SP.seq;
   if (!S.settings.passcode || S.tester) return null;
-  SP.at = Date.now(); // a failure waits as long as a success before the cost notes ask again
-  if (paint && !SP.data) { box.setAttribute('aria-busy', 'true'); box.innerHTML = skel('58%', 14) + skel('100%', 6) + skel('44%', 12) + skel('80%', 14); }
+  if (!SP.data) { box.setAttribute('aria-busy', 'true'); box.innerHTML = skel('58%', 14) + skel('44%', 12) + skel('80%', 14); }
   try {
     const j = await loadSpend({ apiHeaders, signal: AbortSignal.timeout(15000) });
     if (seq !== SP.seq) return SP.data;
     SP.data = j;
-    if (paint || $('#settings').open) paintSpending();
-    if (S.mode === 'video' || S.mode === 'image') keepOptFocus(renderOptions); // the cost note's warning follows the new numbers
+    paintSpending();
     return j;
   } catch (err) {
     if (seq !== SP.seq) return null;
-    if (paint) {
-      box.removeAttribute('aria-busy');
-      box.innerHTML = `<p class="hint bad" role="alert">${esc(err?.name === 'TimeoutError' ? 'Your spending is taking too long to load — try again.' : netText(err))}</p><button type="button" class="chip" data-sp="reload">Try again</button>`;
-    }
+    box.removeAttribute('aria-busy');
+    box.innerHTML = `<p class="hint bad" role="alert">${esc(err?.name === 'TimeoutError' ? 'Your spending is taking too long to load — try again.' : netText(err))}</p><button type="button" class="chip" data-sp="reload">Try again</button>`;
     return null;
   }
 }
-// A background re-render of the options strip (the spend numbers arrived) rebuilds its selects: put focus back on the
-// one the owner was using, as the options' own change handler does, instead of dropping it to <body>.
-function keepOptFocus(render) {
-  const a = document.activeElement, key = a?.dataset?.opt || a?.dataset?.essentialOpt, host = key ? a.closest('#options, #essentialOptions') : null;
-  render();
-  if (!host || document.contains(a)) return;
-  const attr = host.id === 'options' ? 'data-opt' : 'data-essential-opt';
-  $(`[${attr}="${key}"]`, host.isConnected ? host : $(`#${host.id}`))?.focus({ preventScroll: true });
-}
-// The cost notes' numbers, fetched in the background when they are over five minutes old (never for testers).
-function ensureSpend() {
-  if (S.tester || !S.settings.passcode || SP.pending || Date.now() - SP.at < 300_000) return;
-  SP.pending = true;
-  loadSpending({ paint: false }).finally(() => { SP.pending = false; });
-}
+// A paid video or image just finished: an open readout follows once the job's settle has reached the Ledger (Settings
+// loads it afresh every time it opens).
 let spendTimer = 0;
 function refreshSpendSoon() {
-  if (S.tester || !S.settings.passcode) return;
+  if (S.tester || !S.settings.passcode || !$('#settings').open) return;
   clearTimeout(spendTimer);
-  spendTimer = setTimeout(() => loadSpending({ paint: $('#settings').open }), 1500); // after the job's settle reached the Ledger
+  spendTimer = setTimeout(() => { if ($('#settings').open) loadSpending(); }, 1500);
 }
-const spDollars = (v) => (Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '');
 function paintSpending() {
-  const box = $('#spendingPanel'), d = SP.data || {}, lim = d.limits || {};
-  // A repaint (a job just settled) keeps limits being typed, and the field being typed in.
-  const typed = spEdited() ? [$('#spVideo').value, $('#spMonth').value] : null;
-  const focused = ['spVideo', 'spMonth'].includes(document.activeElement?.id) ? document.activeElement.id : null;
+  const box = $('#spendingPanel'), d = SP.data || {};
   box.removeAttribute('aria-busy');
-  const month = Math.max(0, Number(lim.monthlyMediaUsd) || 0), total = Math.max(0, Number(d.totalUsd) || 0), held = Math.max(0, Number(d.heldUsd) || 0);
-  const frac = (x) => (month ? Math.min(1, x / month) : x > 0 ? 1 : 0).toFixed(3);
+  const total = Math.max(0, Number(d.totalUsd) || 0), held = Math.max(0, Number(d.heldUsd) || 0);
   const name = /^\d{4}-\d{2}$/.test(d.month || '') ? new Date(`${d.month}-01T12:00:00Z`).toLocaleDateString([], { month: 'long', year: 'numeric', timeZone: 'UTC' }) : 'This month';
-  const reset = Date.parse(d.resetsAt || ''), rows = breakdownRows(d);
-  const resetText = resetDay(reset); // the Worker's month is UTC
-  box.innerHTML = `<div class="tp-pool">
-      <p class="tp-row"><span class="tp-label">Video + images · ${esc(name)}</span><span class="tp-num"><b>${capUsd(total, { up: true })}</b> of ${capUsd(month)}</span></p>
-      <span class="tp-bar${total >= month ? ' full' : ''}" style="--s:${frac(total - held)};--r:${frac(total)}" aria-hidden="true"><i class="r"></i><i class="s"></i></span>
-      <p class="hint">${capUsd(Math.max(0, month - total))} left${resetText ? ` · resets ${esc(resetText)}` : ''}${held ? ` · ${capUsd(held, { up: true })} held for jobs still running` : ''}</p>
+  const resetText = resetDay(Date.parse(d.resetsAt || '')), rows = breakdownRows(d); // the Worker's month is UTC
+  box.innerHTML = `<div class="tp-pool sp-total">
+      <p class="tp-row"><span class="tp-label">This month’s spend · ${esc(name)}</span><span class="tp-num"><b>${spendUsd(total, { up: true })}</b></span></p>
+      <p class="hint">Paid video and images on your own keys${held ? ` · ${spendUsd(held, { up: true })} of it for jobs still running` : ''}${resetText ? ` · starts again ${esc(resetText)}` : ''}. Chat, free FLUX images and Cosmos video aren’t counted.</p>
     </div>
     <div class="tp-block">
-      <p class="tp-label">This month by provider</p>
-      ${rows.length ? `<ul class="sp-list">${rows.map((x) => `<li><span>${esc(x.label)}</span><span>${x.jobs} ${x.jobs === 1 ? 'job' : 'jobs'} · <b>${capUsd(x.usd, { up: true })}</b></span></li>`).join('')}</ul>` : '<p class="hint">Nothing paid for yet this month.</p>'}
-    </div>
-    <div class="tp-block">
-      <p class="tp-label">Limits <small>Checked before anything paid starts, on every device. Free FLUX images and Cosmos video never count.</small></p>
-      <div class="tp-limits sp-limits">
-        <label class="field"><span>Per video <small>$</small></span><input id="spVideo" inputmode="decimal" autocomplete="off" enterkeyhint="done" value="${spDollars(lim.perVideoUsd)}" /></label>
-        <label class="field"><span>Video + images a month <small>$</small></span><input id="spMonth" inputmode="decimal" autocomplete="off" enterkeyhint="done" value="${spDollars(lim.monthlyMediaUsd)}" /></label>
-      </div>
-      <p class="hint tp-hint">Runway, Gemini Omni and Grok videos count toward both; GPT Image, Nano Banana, Muse and Grok images toward the month. 0 pauses paid video, or all paid media.</p>
-      <p class="hint bad" id="spMsg" role="alert" hidden></p>
-      <button type="button" class="chip" data-sp="save">Save limits</button>
+      <p class="tp-label">By provider</p>
+      ${rows.length ? `<ul class="sp-list">${rows.map((x) => `<li><span>${esc(x.label)}</span><span>${x.jobs} ${x.jobs === 1 ? 'job' : 'jobs'} · <b>${spendUsd(x.usd, { up: true })}</b></span></li>`).join('')}</ul>` : '<p class="hint">Nothing paid for yet this month.</p>'}
     </div>`;
-  if (typed) [$('#spVideo').value, $('#spMonth').value] = typed;
-  if (focused) $(`#${focused}`).focus({ preventScroll: true });
-}
-// The limit fields as PUT /api/owner/limits (limitsBody: {body} | {error}) when either differs from what was loaded, else null.
-function spEdited() {
-  if (S.tester || !SP.data || !$('#spVideo') || ['#spVideo', '#spMonth'].every((id) => $(id).value.trim() === $(id).defaultValue)) return null;
-  return limitsBody({ perVideo: $('#spVideo').value, monthly: $('#spMonth').value });
-}
-async function spSave(b, res = limitsBody({ perVideo: $('#spVideo').value, monthly: $('#spMonth').value })) {
-  const msg = $('#spMsg');
-  if (msg) { msg.hidden = !res.error; msg.textContent = res.error || ''; }
-  if (res.error) return false;
-  const done = busyBtn(b, 'Saving…');
-  try {
-    const j = await saveLimits(res.body, { apiHeaders });
-    // what the server kept (a per-video limit above the month comes back lowered): the fields show it, not what was typed
-    for (const [id, v] of [['#spVideo', j.perVideoUsd], ['#spMonth', j.monthlyMediaUsd]]) { const f = $(id); if (f) f.value = f.defaultValue = spDollars(v); }
-    toast(j.clamped ? 'Limits saved · per video lowered to the monthly limit' : 'Spending limits saved');
-    await loadSpending({ paint: $('#settings').open });
-    return true;
-  } catch (err) {
-    if (msg && $('#settings').open) { msg.hidden = false; msg.textContent = netText(err); } else toast(netText(err), { error: true });
-    return false;
-  } finally { done(); }
-}
-// The error card's "Change limits": Settings, General, scrolled to the Spending limits.
-function openSpending() {
-  openSettings(); selectSettings('general');
-  const go = () => { const f = $('#spVideo'); if (f) { f.scrollIntoView({ block: 'center' }); if (!COARSE.matches) f.focus({ preventScroll: true }); } else $('#spendingSection').scrollIntoView({ block: 'start' }); };
-  (SP.loading || loadSpending()).then(() => setTimeout(go, 30)); // after openSettings' own load repaints the panel
 }
 $('#spendingPanel').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-sp]');
-  if (!b || b.disabled) return;
-  if (b.dataset.sp === 'reload') loadSpending();
-  else if (b.dataset.sp === 'save') spSave(b);
+  if (b && !b.disabled && b.dataset.sp === 'reload') loadSpending();
 });
-// Enter in a limit field saves the limits — it must not submit (and close) the Settings form.
-$('#spendingPanel').addEventListener('keydown', (ev) => {
-  if (ev.key !== 'Enter' || ev.isComposing || ev.target.tagName !== 'INPUT') return;
-  ev.preventDefault();
-  $('#spendingPanel [data-sp="save"]')?.click();
-});
-// The cost note's warning for one send of `costUsd` (owner only; '' when it fits or nothing is known yet).
-function capNote(costUsd, kind) {
-  if (S.tester || !S.settings.passcode) return '';
-  ensureSpend();
-  const w = capWarning(costUsd, { kind, data: SP.data });
-  return w ? `<span class="opt-note keep cap-warn" role="note">${esc(`${capUsd(costUsd, { up: true })} · ${w}`)}</span>` : '';
-}
 
 // ───────────────────────── You: profile, voice, memory, imports ─────────────────────────
 const ME_DEFAULT = { bio: '', learned: '', style: '', samples: '', memory: [], sources: {}, updatedAt: 0 };
@@ -5861,7 +5767,7 @@ $('#learnStyle').onclick = async () => {
   if (b.disabled) return;
   const done = busyBtn(b, 'Studying your writing…');
   try {
-    const raw = await completeChat({ model: modelFor('write'), role: 'write', max_tokens: 2500, messages: [{ role: 'system', content: SYS.styleOnly() }, { role: 'user', content: samples.slice(0, 30000) }] });
+    const raw = await completeChat({ model: modelFor('write'), role: 'write', helper: true, max_tokens: 2500, messages: [{ role: 'system', content: SYS.styleOnly() }, { role: 'user', content: samples.slice(0, 30000) }] });
     const style = tagged(raw, 'style');
     if (!style) throw new Error('No style guide came back — try again.');
     ME.style = style; saveMe(); renderYou(); toast('Style guide updated');
@@ -5926,7 +5832,7 @@ async function analyzeCorpus(label, items, extra = '') {
   const model = modelReady('gemini:gemini-3.8-flash') ? 'gemini:gemini-3.8-flash' : modelFor('smart');
   let raw = '';
   await streamChat({
-    model, role: 'smart', max_tokens: 8000, temperature: 0.3, firstTokenMs: 150000,
+    model, role: 'smart', helper: true, max_tokens: 8000, temperature: 0.3, firstTokenMs: 150000,
     messages: [{ role: 'system', content: SYS.profile(label, ME.learned) }, { role: 'user', content: (extra ? extra + '\n\n' : '') + picked.map((t) => '• ' + t).join('\n') }],
     onDelta: ({ content }) => { raw += content; impStatus(`Distilling who you are… ${Math.min(99, Math.round(raw.length / 40))}%`); },
   });
@@ -6103,7 +6009,7 @@ $('#studioDialog').addEventListener('click', (ev) => {
   const targets = { new: 'newBtn', threads: 'threadsBtn', library: 'libraryBtn', me: 'youBtn', settings: 'settingsBtn' };
   const id = targets[b.dataset.studioTarget]; if (id) $('#' + id).click();
 });
-$('#settingsScroll').insertAdjacentHTML('beforeend', '<section class="field-group owner-only" id="feedbackSection"><h4>Feedback</h4><p class="hint">Reports and suggestions from your testers.</p><button type="button" class="chip" id="feedbackInboxBtn">Read feedback</button><div id="feedbackInbox" hidden></div></section>');
+$('#settingsScroll').insertAdjacentHTML('beforeend', '<section class="field-group owner-only tester-ui" id="feedbackSection"><h4>Feedback</h4><p class="hint">Reports and suggestions from your testers.</p><button type="button" class="chip" id="feedbackInboxBtn">Read feedback</button><div id="feedbackInbox" hidden></div></section>');
 $('#feedbackInboxBtn').onclick = () => { $('#feedbackInbox').hidden = false; feedback.showInbox($('#feedbackInbox')); };
 
 // Keyboard and focus behavior shared by the desktop and compact layouts.
@@ -6164,6 +6070,12 @@ async function refreshServer(tries = 4) {
         serverKey = h.serverKey;
         server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, runway: false, xai: false, ...(h.server || {}) };
         LS.set('server', server);
+        const open = h.testers === true;
+        if (open !== testersOpen) {
+          testersOpen = open; LS.set('testersOpen', open); syncTesters();
+          if ($('#onboard').open) openOnboard(onboardReason || signinReason); // the sheet's note, LinkedIn button and passcode form follow
+          if (open && $('#settings').open && S.settings.passcode && !S.tester) loadTesters();
+        }
         renderOptions();
         syncMic();
         syncClip();
@@ -6447,9 +6359,9 @@ remix = createRemix({
         updateKeyState(null); health.then(() => pullMe());
         if (S.tester.features.sync) Sync.verified();
         if (testerResult === 'welcome') welcomeTester(); else if (!cached) resumeLaunch(); // a session found now is a sign-in
-      } else if (st === 'none') {
-        if (cached) testerSignedOut('expired');
-        else if (testerResult === 'welcome') openOnboard('nocookie');
+      } else if (st === 'none' || st === 'closed') {
+        if (cached) testerSignedOut(st === 'closed' ? 'closed' : 'expired');
+        else if (testerResult === 'welcome') openOnboard(st === 'closed' ? 'closed' : 'nocookie');
       }
     });
   }

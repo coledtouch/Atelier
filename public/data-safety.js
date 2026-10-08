@@ -6,15 +6,17 @@ const record = value => value && typeof value === 'object' && !Array.isArray(val
 const text = value => typeof value === 'string';
 const validDate = value => Number.isFinite(value) && value >= 0 && value <= 8640000000000000;
 const safeId = value => text(value) && /^[\w-]{1,120}$/.test(value);
-// Error kinds app.js renders (errorBox); 'budget' and 'signin' are LinkedIn tester refusals (402/403/413/503, 401);
-// 'cap' is the owner's own spending limits (402 owner_cap_video / owner_cap_month, Settings → Spending).
-export const ERROR_KINDS = Object.freeze(['offline', 'passcode', 'key', 'rate', 'model', 'busy', 'filtered', 'stopped', 'interrupted', 'budget', 'signin', 'cap', 'error']);
+// Error kinds app.js renders (errorBox); 'budget' and 'signin' are LinkedIn tester refusals (402/403/413/503, 401, 410).
+// An entry saved with v83–v84's 'cap' (the owner's spending limits, removed in v85) still imports: errorBox doesn't know
+// the kind any more, so it classifies the entry's text instead.
+export const ERROR_KINDS = Object.freeze(['offline', 'passcode', 'key', 'rate', 'model', 'busy', 'filtered', 'stopped', 'interrupted', 'budget', 'signin', 'error']);
 // What stopped a tester request (e.budget): its scope, when a day/month/pool allowance resets (ms), and short: true when
 // money was still left in that scope (the request was just bigger than what remained).
 const BUDGET_SCOPES = new Set(['day', 'month', 'pool', 'call', 'paused', 'model', 'owner', 'large', 'origin']);
 const validBudget = b => record(b) && BUDGET_SCOPES.has(b.scope) && (b.resetsAt == null || validDate(b.resetsAt)) && (b.short == null || b.short === true)
   && Object.keys(b).every(k => k === 'scope' || k === 'resetsAt' || k === 'short');
-// Which owner spending limit stopped a request (e.cap, public/spend.js capOf): 'video' or 'month', and when the month resets.
+// v83–v84 only: which owner spending limit stopped a request (e.cap): 'video' or 'month', and when the month reset. No
+// longer written (v85 removed the limits); a backup that holds one still imports, and a malformed one is still refused.
 const validCap = c => record(c) && (c.limit === 'video' || c.limit === 'month') && (c.resetsAt == null || validDate(c.resetsAt))
   && Object.keys(c).every(k => k === 'limit' || k === 'resetsAt');
 export function safeMediaUrl(value) {

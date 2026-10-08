@@ -41,6 +41,12 @@ Connected accounts use more secrets (GITHUB_TOKEN, STRIPE_API_KEY, CLOUDFLARE_AP
 SLACK_USER_TOKEN, GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET, CANVA_CLIENT_ID + CANVA_CLIENT_SECRET) — see Settings → Connections.
 
 ### LinkedIn testers
+**Switched off since v85** (`TESTERS_ENABLED` in wrangler.jsonc `vars`: `"1"` on, `"0"` or unset off). Off, every
+`/api/li/*` route answers `410 {code:"tester_closed"}`, a tester cookie is never looked up (and is cleared), every tester
+route refuses with `410 tester_closed`, owner routes still need the passcode, and the app hides the sign-in button,
+spots, allowance pill, feedback and the Testers panel (`/api/health` → `testers: false`). The code and the Ledger stay;
+set `"1"` and deploy to switch it back on. What follows describes it while it is on.
+
 Up to 25 people can sign in with LinkedIn and use paid models under a hard spending ceiling. The passcode path is
 unchanged: a request with the passcode is always the owner, even if it also carries a tester cookie.
 Design: `docs/superpowers/specs/2026-09-30-atelier-tester-access-design.md` plus the addendum (the addendum wins).

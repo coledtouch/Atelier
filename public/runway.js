@@ -117,17 +117,6 @@ export function optionNote(entry, secs, aspect) {
   const s = runwaySeconds(secs, model), tiered = Boolean(RUNWAY_MODELS[model].rates), resolution = tiered ? (aspect === '16:9hd' ? '1080p' : '720p') : undefined;
   return `${RUNWAY_MODELS[model].label} · ${s} s ${quoteNote(model, s, { resolution })}${tiered ? ` · ${resolution}` : ''}${entry.needsImage ? ' · attach a still' : ''}`;
 }
-// Over this many credits ($5) app.js asks before a new paid task (runwayVideo's approve): Seedance 2.5 at 30 s, 1080p is
-// 2,040 credits ($20.40) for one send, and an Ask-mode message can start several videos on the saved Video options
-// without the price note on screen. The Worker's RUNWAY_MAX_CREDITS, when set, is the hard cap behind it.
-export const ASK_OVER_CREDITS = 500;
-// The confirm() question for `seconds` of `model` (opts as quote's) when it costs over ASK_OVER_CREDITS, else ''.
-export function spendQuestion(model, seconds, opts = {}) {
-  const q = quote(model, seconds, opts);
-  if (!q || q.credits <= ASK_OVER_CREDITS) return '';
-  const res = RUNWAY_MODELS[model].rates && opts.resolution ? ` at ${opts.resolution}` : '';
-  return `Make this ${Math.ceil(Number(seconds))} s ${RUNWAY_MODELS[model].label} video${res}? It costs about ${n$(q.credits)} credits (${credits$(q.credits)}) of your Runway balance.`;
-}
 // '48 credits ($0.48)' for a finished task's real cost; '' when unknown.
 export const creditsNote = (c) => (Number.isFinite(c) && c >= 0 ? `${n$(c)} credit${c === 1 ? '' : 's'} (${credits$(c)})` : '');
 
@@ -612,9 +601,9 @@ const AGAIN_FREE = ' Tap Try again to download it again — it won’t make (or 
 // one: a timeout or drop while it ran, any download failure once it SUCCEEDED (it is paid for; Runway hands out fresh
 // links), and Stop. Stop cancels a task that is still queued or running (the Worker leaves a finished one alone) and
 // never touches one that already SUCCEEDED; resuming a task that turns out cancelled or gone starts a new one.
-// approve(): asked (and awaited) just before a new paid task is created — never for a resumed one; false stops there
-// with an AbortError and nothing sent (app.js: confirm(spendQuestion(…)) for a big spend).
-export async function runwayVideo(req, { apiHeaders, signal, onStatus, onTask, resume = null, approve = null, limit, sleep: wait, random, now } = {}) {
+// A new task starts without asking first (the price shows in the options strip and on the card; v85 removed the
+// over-$5 confirm). The Worker's RUNWAY_MAX_CREDITS, when set, is the only cap.
+export async function runwayVideo(req, { apiHeaders, signal, onStatus, onTask, resume = null, limit, sleep: wait, random, now } = {}) {
   if (signal?.aborted) throw abortError();
   const say = (text, task) => { if (text) try { onStatus?.(text, task); } catch (err) { console.error(err); } };
   const release = await takeSlot(limit ?? accountLimit(req?.body?.model), signal, () => say('Waiting for your other Runway video'));
@@ -633,8 +622,6 @@ export async function runwayVideo(req, { apiHeaders, signal, onStatus, onTask, r
       }
     }
     if (!task) {
-      if (signal?.aborted) throw abortError();
-      if (approve && !(await approve())) throw abortError(); // the owner said no to the price: nothing was sent
       if (signal?.aborted) throw abortError();
       say('Sending to Runway');
       let made;

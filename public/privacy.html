@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Privacy Policy · Atelier</title>
-  <meta name="description" content="How Atelier collects, uses, stores, shares and deletes data, including LinkedIn tester sign-in, cookieless page analytics and data from Google APIs (Gmail, Calendar, Drive and Photos)." />
+  <meta name="description" content="How Atelier collects, uses, stores, shares and deletes data, including LinkedIn tester sign-in (currently closed), cookieless page analytics and data from Google APIs (Gmail, Calendar, Drive and Photos)." />
   <link rel="icon" href="/icons/atelier-v2-32.png" type="image/png" sizes="32x32" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -23,7 +23,7 @@
   </div>
 
   <h2>1. Who can use Atelier</h2>
-  <p>Atelier is a private application. The owner signs in with a passcode. A limited number of invited testers (currently 25 spots) can sign in with their LinkedIn account; there is no other sign-up. It is not directed at children under 13, and we do not knowingly collect data from them.</p>
+  <p>Atelier is a private application. The owner signs in with a passcode. <b>Tester access is currently closed:</b> LinkedIn sign-in is switched off, existing tester sessions no longer work, and no one can sign up. When tester access is open, a limited number of invited testers (25 spots) can sign in with their LinkedIn account; there is no other sign-up. It is not directed at children under 13, and we do not knowingly collect data from them.</p>
 
   <h2>2. Data we access and collect</h2>
   <h3>Information you provide</h3>
@@ -38,6 +38,7 @@
     <li id="feedback"><b>Voluntary feedback</b> — if you choose Send feedback, Atelier stores the message and category you submit so the studio owner can read and respond to bugs, confusing behavior and suggestions. You may choose to attach a PNG, JPEG or WebP screenshot under 350 KB and include basic diagnostics: the active mode, app version, online status and screen size. Prompts, conversation contents and private connected-account details are not automatically collected with feedback. Review your message and screenshot before submitting them; they contain whatever you choose to include.</li>
   </ul>
   <h3 id="testers">If you sign in as a LinkedIn tester</h3>
+  <p><b>Tester access is currently closed.</b> No one can sign in as a tester right now, and a tester sign-in cookie still in a browser is no longer accepted and is removed the next time that browser opens Atelier. This section describes what applies while tester access is open; the retention and deletion rules for tester records that already exist (sections 6 and 8) apply either way.</p>
   <ul>
     <li><b>LinkedIn sign-in</b> — Atelier asks LinkedIn only for your basic profile and email address (the <code>openid profile email</code> permissions) and keeps your LinkedIn member ID, name, email address and profile photo link. It never asks to post on your behalf. The LinkedIn access token is used once at sign-in and is not stored. If your sign-in is turned away, only a short-lived note of it is kept (see “Refused tester sign-ins” in section 6).</li>
     <li><b>Usage ledger</b> — for each request, how much it cost and when, so your daily and monthly allowance can be enforced. The ledger holds amounts and dates, not prompts or answers. Server-stored profile and memory, optional synced threads, voluntary feedback and the Look up cache are described separately below.</li>
@@ -115,7 +116,7 @@
     <tbody>
       <tr><td>Cloudflare</td><td>Hosting, network security, cookieless page-view and page-speed analytics (Cloudflare Web Analytics), and storage of your profile, memory, connection tokens, synced threads when enabled, voluntary feedback and — for testers — the tester record and usage ledger. Tester synced threads are stored in their own private R2 namespace.</td></tr>
       <tr><td>Google Fonts</td><td>Delivers the typefaces Atelier’s pages use. Your browser fetches them directly from Google, which sees your IP address and browser details; no cookies are set (see <a href="#technical">Technical data</a>).</td></tr>
-      <tr><td>LinkedIn</td><td>Tester sign-in only: confirms who you are and shares your basic profile and email address with Atelier.</td></tr>
+      <tr><td>LinkedIn</td><td>Tester sign-in only (currently closed, so LinkedIn isn’t contacted): confirms who you are and shares your basic profile and email address with Atelier.</td></tr>
       <tr><td>Anthropic (Claude), OpenAI, Google (Gemini, Gemini Omni video) and NVIDIA</td><td>AI models that generate responses, images and video. Only the content needed for the request is sent, via their business APIs, which do not use API data to train their models by default. Testers never use NVIDIA models.</td></tr>
       <tr><td>Z.ai, DeepSeek and Meta</td><td>Further AI models. Atelier uses them when you pick one, or when Auto or a fallback does: for testers, Auto starts Code and Build on Z.ai’s GLM 5.3, and other requests can fall back to Z.ai, DeepSeek or Meta when the first model is busy or unavailable. Only the content needed for the request is sent, under each provider’s own API data terms.</td></tr>
       <tr><td>Google (Read aloud)</td><td>When you use Read aloud with an AI voice, the answer’s text is sent to Google’s Gemini API to generate the speech. The voice you hear is AI-generated. The Device voice uses your browser’s own speech engine and sends nothing to Atelier.</td></tr>
@@ -151,7 +152,7 @@
   </ul>
 
   <h2>7. Security</h2>
-  <p>Traffic is encrypted with HTTPS, and browsers are told to use only HTTPS for Atelier (HSTS). API keys and account tokens are stored as encrypted server-side secrets and never sent to your browser. Access requires the owner’s passcode, with automatic lockout after repeated wrong attempts, or a LinkedIn tester sign-in; tester sessions are stored only as a one-way hash, and testers can never reach the owner’s accounts, tools or profile. Actions that send, post, pay or change something require your explicit approval.</p>
+  <p>Traffic is encrypted with HTTPS, and browsers are told to use only HTTPS for Atelier (HSTS). API keys and account tokens are stored as encrypted server-side secrets and never sent to your browser. Access requires the owner’s passcode, with automatic lockout after repeated wrong attempts, or a LinkedIn tester sign-in while tester access is open (it is currently closed); tester sessions are stored only as a one-way hash, and testers can never reach the owner’s accounts, tools or profile. Actions that send, post, pay or change something require your explicit approval.</p>
 
   <h2>8. Your choices and deletion</h2>
   <ul>

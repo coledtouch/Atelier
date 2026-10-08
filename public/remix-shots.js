@@ -148,8 +148,8 @@ export async function runwayStart(deps, request) {
     return { op };
   } catch (err) {
     if (err instanceof ShotError) throw err;
-    // A refusal naming a task (runway_cap_running, or owner_cap_* when the Worker's cancel of an over-limit estimate
-    // failed): the task exists and may bill, and the Worker's words promise another try at cancelling it, as Video mode does.
+    // A refusal naming a task (runway_cap_running: the Worker's cancel of an estimate over RUNWAY_MAX_CREDITS failed): the
+    // task exists and may bill, and the Worker's words promise another try at cancelling it, as Video mode does.
     if (err?.task) cancelTask(err.task, { apiHeaders: deps.apiHeaders });
     if (err?.status === 0 || err?.code === 'runway_unconfirmed' || GATEWAY.has(err?.status)) throw new ShotError('unknown', err.message || 'Runway didn’t confirm the new shot — it may have started anyway.');
     throw new ShotError('definitive', err?.message || 'Runway refused the shot.', { status: err?.status ?? 500, code: err?.code ?? null, ...(err?.retryAfter ? { retryAfter: err.retryAfter } : {}) });

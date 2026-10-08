@@ -11,7 +11,11 @@ import { shapeOmni, ownerQuote as omniOwnerQuote } from '../src/omni.js';
 import { videoQuoteMicros } from '../src/xai.js';
 const root = resolve('public');
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
-// REVIEW_SYNC=1 enables owner sync; REVIEW_TESTER=<subject> enables simulated tester sign-in and private sync.
+// REVIEW_SYNC=1 enables owner sync; REVIEW_TESTER=<subject> enables simulated tester sign-in and private sync. Without
+// it, tester access is closed, as the Worker's default (TESTERS_ENABLED unset): /api/health says testers: false and
+// /api/li/* and /api/tester/* answer 410 tester_closed.
+// Every /api/chat request prints one line (model, max_tokens, reasoning_effort; never the messages), and with --providers
+// so does every Claude request the Worker adapter sends on (model, max_tokens, effort), to check the output budgets.
 // REVIEW_PROVIDERS=1 (or --providers) reports Anthropic, OpenAI, Gemini, Runway and xAI as configured for the owner too (Video mode's
 // Omni, Runway and Grok menus, Settings → models and voices); their /api/omni, /api/runway, /api/xai and /api/tts calls get local stubs below.
 // It also connects a stub Gmail with one read-only tool (gmail_search): an inbox question goes to the accounts agent, whose
@@ -58,6 +62,7 @@ function claudeStream(blocks, stop) {
 const PLAN = 'Planning the answer: the files it needs, the edge cases, the tests, what to leave out… (local fixture thinking) ';
 async function claudeStandIn(request) {
   const b = await request.json();
+  console.log('anthropic messages', JSON.stringify({ model: b.model, max_tokens: b.max_tokens, effort: b.output_config?.effort ?? null, stream: b.stream ?? null }));
   const which = (promptOf(b.messages).match(CLAUDE_TRIGGER)?.[1] || '').toLowerCase();
   const last = b.messages?.at(-1) || {};
   const nudged = /wrote no answer/.test(textOf(last.content));
@@ -94,22 +99,21 @@ if (Boolean(process.env.REVIEW_PROVIDERS) || process.argv.includes('--providers'
 // The stub Gmail tool --providers connects (the Worker's real tool list is far longer; this one is read-only).
 const FIXTURE_GMAIL ={ type: 'function', function: { name: 'gmail_search', description: 'Search the user’s Gmail (local fixture).', parameters: { type: 'object', properties: { q: { type: 'string', description: 'Gmail search query' } }, required: ['q'], additionalProperties: false } }, 'x-write': false, 'x-label': 'Search Gmail', 'x-service': 'gmail' };
 const syncEnvs = new Map(), profiles = new Map(), feedback = new Map(), omniJobs = new Map(), xaiJobs = new Map(), runwayJobs = new Map(), omniRows = new Map();
-// Owner spending limits (src/spend.js; Settings → Spending): the Worker's own rules and words (decide, capRefusal,
-// cleanLimits, the price quotes) over an in-memory month. REVIEW_SPENT=<usd> starts this month with that much spent, so
-// the monthly refusal can be seen; a refused job never reaches its stub below.
-const owner = { limits: { ...Spend.DEFAULT_LIMITS, updatedAt: null }, rows: [] };
+// The owner's spend record (src/spend.js; Settings → Spending → This month's spend) over an in-memory month: every paid
+// owner job is recorded at the Worker's own quote, and nothing is ever refused for its price (no limits since v85).
+// REVIEW_SPENT=<usd> starts this month with that much already spent.
+const owner = { rows: [] };
 if (Number(process.env.REVIEW_SPENT) > 0) owner.rows.push({ provider: 'runway', kind: 'video', amount: Spend.toMicros(process.env.REVIEW_SPENT), actual: Spend.toMicros(process.env.REVIEW_SPENT), month: Spend.monthOf() });
 const monthSpent = (m = Spend.monthOf()) => owner.rows.filter((r) => r.month === m).reduce((n, r) => n + (r.actual ?? r.amount), 0);
-// → the row held for the job, or a SpendError (402 owner_cap_video / owner_cap_month) to answer with.
+// → the row recorded for the job (never a refusal).
 function spendStart(provider, kind, amount) {
-  const month = Spend.monthOf(), spent = monthSpent(month), d = Spend.decide({ amount, kind, limits: owner.limits, spent });
-  if (!d.ok) return Spend.capRefusal({ limit: d.limit, amount, limits: owner.limits, spent, month, provider, kind });
-  const row = { provider, kind, amount, actual: null, month };
+  const row = { provider, kind, amount: Number.isSafeInteger(amount) && amount >= 0 ? amount : 0, actual: null, month: Spend.monthOf() };
   owner.rows.push(row);
   return row;
 }
-const refuse = (res, err) => { res.statusCode = err.status; return res.end(JSON.stringify(err.body)); };
 const fixtureTester = process.env.REVIEW_TESTER || '';
+const testersOpen = Boolean(fixtureTester); // TESTERS_ENABLED: on only for a simulated tester session
+const testersClosed = (res) => { res.statusCode = 410; return res.end('{"error":"Tester access is closed.","code":"tester_closed"}'); };
 let testerActive = Boolean(fixtureTester);
 const feedbackEnv = { ATELIER_KV: {
   async get(key) { return feedback.get(key) || null; },
@@ -153,7 +157,8 @@ createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     const allProviders = Boolean(process.env.REVIEW_PROVIDERS) || process.argv.includes('--providers');
-    if (url.pathname === '/api/health') return res.end(JSON.stringify({ server: { nvidia: true, ...(process.env.REVIEW_STT || fixtureTester || allProviders ? { openai: true } : {}), ...(fixtureTester || allProviders ? { anthropic: true, gemini: true } : {}), ...(allProviders ? { runway: true, xai: true } : {}) } }));
+    if (url.pathname === '/api/health') return res.end(JSON.stringify({ testers: testersOpen, server: { nvidia: true, ...(process.env.REVIEW_STT || fixtureTester || allProviders ? { openai: true } : {}), ...(fixtureTester || allProviders ? { anthropic: true, gemini: true } : {}), ...(allProviders ? { runway: true, xai: true } : {}) } }));
+    if (!testersOpen && (url.pathname.startsWith('/api/li/') || url.pathname.startsWith('/api/tester/'))) return testersClosed(res);
     if (url.pathname === '/api/li/spots') return res.end('{"spotsLeft":24,"cap":25,"paused":false}');
     // REVIEW_TESTER=<subject> is a local, simulated session. No LinkedIn call or production cookie is used.
     if (url.pathname === '/api/li/start' && fixtureTester) { testerActive = true; res.statusCode = 303; res.setHeader('Location', '/?tester=welcome'); return res.end(); }
@@ -201,24 +206,15 @@ createServer(async (req, res) => {
       const title = url.searchParams.get('title') || 'Domus Aurea';
       return res.end(JSON.stringify({ v: 1, found: true, kind: 'article', via: search ? 'search' : q.includes('(') ? 'inner' : 'title', lang: 'en', dir: 'ltr', query: raw, title, description: 'Roman palace (fixture)', extract: 'Local fixture summary. No Wikipedia call was made. A third sentence checks the three-line clamp on phones and the four-line clamp on desktop.', trimmed: true, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`, image: q.includes('plain') ? null : img, others: search ? [{ title: 'Palace Tomb', description: 'Fixture alternative' }, { title: 'Nero', description: 'Roman emperor' }] : [], license: lic }));
     }
-    // Settings → Spending (owner only; a tester gets the router's 403 owner_only, as in production)
+    // Settings → Spending, this month's spend (owner only, read only; a tester gets the router's 403 owner_only, as in production)
     if (url.pathname.startsWith('/api/owner/')) {
       if (identity.role !== 'owner') { res.statusCode = 403; return res.end('{"error":"That part of Atelier is only for its owner.","code":"owner_only"}'); }
-      if (url.pathname === '/api/owner/limits' && req.method === 'GET') return res.end(JSON.stringify({ ...owner.limits, defaults: Spend.DEFAULT_LIMITS, bounds: Spend.LIMIT_BOUNDS }));
-      if (url.pathname === '/api/owner/limits' && req.method === 'PUT') {
-        const parts = []; for await (const p of req) parts.push(p);
-        let b = null; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
-        const r = Spend.cleanLimits(b, owner.limits);
-        if (!r.ok) { res.statusCode = 400; return res.end(JSON.stringify({ error: r.error, code: 'owner_limits_input' })); }
-        owner.limits = { ...r.limits, updatedAt: Date.now() };
-        return res.end(JSON.stringify({ ok: true, ...owner.limits, ...(r.clamped ? { clamped: true } : {}) }));
-      }
       if (url.pathname === '/api/owner/spend' && req.method === 'GET') {
         const m = Spend.monthOf(), rows = owner.rows.filter((r) => r.month === m), total = monthSpent(m), held = rows.filter((r) => r.actual == null).reduce((n, r) => n + r.amount, 0);
         const groups = new Map();
         for (const r of rows) { const k = `${r.provider}/${r.kind}`, g = groups.get(k) || { provider: r.provider, kind: r.kind, total: 0, held: 0, jobs: 0 }; g.total += r.actual ?? r.amount; g.held += r.actual == null ? r.amount : 0; g.jobs++; groups.set(k, g); }
-        return res.end(JSON.stringify({ month: m, resetsAt: Spend.resetsAt(m), limits: { perVideoUsd: owner.limits.perVideoUsd, monthlyMediaUsd: owner.limits.monthlyMediaUsd },
-          totalUsd: Spend.toUsd(total), settledUsd: Spend.toUsd(total - held), heldUsd: Spend.toUsd(held), leftUsd: Spend.toUsd(Math.max(0, Spend.toMicros(owner.limits.monthlyMediaUsd) - total)), jobs: rows.length,
+        return res.end(JSON.stringify({ month: m, resetsAt: Spend.resetsAt(m),
+          totalUsd: Spend.toUsd(total), settledUsd: Spend.toUsd(total - held), heldUsd: Spend.toUsd(held), jobs: rows.length,
           byProvider: [...groups.values()].sort((a, b) => b.total - a.total).map((g) => ({ provider: g.provider, kind: g.kind, usd: Spend.toUsd(g.total), heldUsd: Spend.toUsd(g.held), jobs: g.jobs })) }));
       }
       res.statusCode = 404; return res.end('{"error":"Not found"}');
@@ -240,10 +236,9 @@ createServer(async (req, res) => {
       const parts = []; for await (const p of req) parts.push(p);
       let b = {}; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
       let row = null;
-      if (identity.role === 'owner') { // the owner's spending limits (testers have their own allowance)
+      if (identity.role === 'owner') { // the owner's spend record (testers have their own allowance)
         let shaped; try { shaped = shapeOmni(b); } catch (err) { res.statusCode = err.status || 400; return res.end(JSON.stringify({ error: err.message, code: err.code })); }
         row = spendStart('omni', 'video', omniOwnerQuote(shaped));
-        if (row instanceof Spend.SpendError) return refuse(res, row);
       }
       const id = `v1_review${Date.now().toString(36)}`; omniJobs.set(id, 0);
       if (row) omniRows.set(id, row);
@@ -262,7 +257,6 @@ createServer(async (req, res) => {
       const parts = []; for await (const p of req) parts.push(p);
       let b = {}; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
       const row = spendStart('xai', 'video', videoQuoteMicros(b.model, b.seconds ?? 6));
-      if (row instanceof Spend.SpendError) return refuse(res, row);
       row.actual = row.amount;
       const id = `review-${Date.now().toString(36)}`; xaiJobs.set(id, 0);
       return res.end(JSON.stringify({ id, model: b.model, seconds: b.seconds ?? 6, resolution: b.resolution ?? '720p', quote: 0.12, pollAfterMs: 5000 }));
@@ -276,7 +270,6 @@ createServer(async (req, res) => {
     }
     if (url.pathname === '/api/xai/image' && req.method === 'POST') {
       const row = spendStart('xai', 'image', 40_000);
-      if (row instanceof Spend.SpendError) return refuse(res, row);
       row.actual = row.amount;
     }
     if (url.pathname === '/api/xai/image' && req.method === 'POST') return res.end(JSON.stringify({ data: [{ b64_json: (await readFile(resolve(root, 'icons/atelier-v2-512.png'))).toString('base64'), mime_type: 'image/png' }], usd: 0.04 }));
@@ -294,8 +287,8 @@ createServer(async (req, res) => {
       try { shaped = runwayShape(rwGen[1], b); } catch (err) { res.statusCode = err.status || 400; return res.end(JSON.stringify({ error: err.message, ...(err.extra || {}) })); }
       if (process.env.REVIEW_RUNWAY_LOG) console.log('runway', rwGen[1], JSON.stringify({ ...shaped.body, ...(shaped.body.promptImage ? { promptImage: `${shaped.body.promptImage.slice(0, 24)}…` } : {}) }));
       const row = spendStart('runway', 'video', runwayOwnerQuote(shaped).credits * 10_000);
-      if (row instanceof Spend.SpendError) return refuse(res, row);
       row.actual = row.amount;
+      console.log('runway generate', JSON.stringify({ kind: rwGen[1], model: shaped.model, seconds: shaped.seconds ?? null, credits: runwayOwnerQuote(shaped).credits }));
       const q = runwayQuote(shaped.model, shaped.seconds, shaped.audio, shaped);
       const id = crypto.randomUUID(); runwayJobs.set(id, { n: 0, q });
       return res.end(JSON.stringify({ id, model: shaped.model, kind: rwGen[1], estimatedCost: q, quote: q, pollAfterMs: 5000 }));
@@ -313,18 +306,16 @@ createServer(async (req, res) => {
       res.setHeader('Content-Type', 'video/mp4'); return res.end(await readFile(resolve(root, 'icons/atelier-v2-512.png')));
     }
     if (url.pathname === '/api/runway/account') return res.end('{"creditBalance":1200,"usd":12,"maxMonthlyCreditSpend":null,"models":{}}');
-    // Owner image stubs (worker.js handlePassthrough): priced with the Worker's imageQuote and held to the monthly limit;
-    // the image is the app icon. --providers reports OpenAI and Gemini as configured, so Image mode offers them.
+    // Owner image stubs (worker.js handlePassthrough): priced with the Worker's imageQuote and recorded (an unpriceable one
+    // goes unrecorded, never refused); the image is the app icon. --providers reports OpenAI and Gemini as configured.
     const xImg = url.pathname.match(/^\/api\/x\/(openai|gemini|meta)\/(.+)$/);
     if (xImg && req.method === 'POST' && identity.role === 'owner') {
       const parts = []; for await (const p of req) parts.push(p);
       let b = null; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
-      let q; try { q = Spend.imageQuote(xImg[1], xImg[2], b); } catch (err) { return refuse(res, err); }
-      const row = spendStart(xImg[1], 'image', q.amount);
-      if (row instanceof Spend.SpendError) return refuse(res, row);
-      row.actual = row.amount;
+      const q = Spend.imageQuote(xImg[1], xImg[2], b);
+      if (q) spendStart(xImg[1], 'image', q.amount).actual = q.amount;
       const png = (await readFile(resolve(root, 'icons/atelier-v2-512.png'))).toString('base64');
-      return res.end(JSON.stringify(xImg[1] === 'gemini' ? { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: png } }] } }] } : { data: Array.from({ length: q.n }, () => ({ b64_json: png })) }));
+      return res.end(JSON.stringify(xImg[1] === 'gemini' ? { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: png } }] } }] } : { data: Array.from({ length: q?.n ?? 1 }, () => ({ b64_json: png })) }));
     }
     // Read aloud stub: half a second of silence as WAV (the Gemini voices' format), any voice.
     if (url.pathname === '/api/tts' && req.method === 'POST') {
@@ -349,6 +340,7 @@ createServer(async (req, res) => {
     if (url.pathname === '/api/chat') {
       const parts = []; for await (const p of req) parts.push(p);
       const body = JSON.parse(Buffer.concat(parts).toString());
+      console.log('chat', JSON.stringify({ model: body.model, max_tokens: body.max_tokens, reasoning_effort: body.reasoning_effort ?? null, tools: Array.isArray(body.tools) ? body.tools.length : 0 }));
       // --providers: a Claude request with a stop-reason trigger goes through the real Worker adapter (claudeStandIn above).
       if (allProviders && String(body.model || '').startsWith('anthropic:') && CLAUDE_TRIGGER.test(promptOf(body.messages))) {
         const { claudeChat } = await import('../src/anthropic.js');

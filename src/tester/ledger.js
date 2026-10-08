@@ -1,5 +1,5 @@
 // Ledger: the LinkedIn tester roster, sessions, job ownership and the spend meter (spec §5-§7, §9; addendum A2-A4, A7b),
-// plus the owner's own monthly video and image spend (owner_spend, src/spend.js: Settings → Spending).
+// plus the owner's own monthly video and image spend record (owner_spend, src/spend.js: Settings → Spending).
 // One instance ("main") with SQLite storage. Money is integer micro-dollars; days and months are UTC.
 // Every RPC method runs its reads and writes synchronously inside transactionSync, so each call is atomic and
 // interleaved callers can never push a tester or the pool past a limit.
@@ -25,6 +25,10 @@ const OWNER_JOB_MAX = 10_000_000_000;
 const OWNER_TAG = /^[a-z0-9_-]{1,20}$/;
 const OWNER_JOB = /^[a-z]{1,12}:[A-Za-z0-9_.:-]{1,256}$/;
 const MAX_STATES = 2000; // sign-ins in flight (10 minutes each); a flood of /api/li/start can't grow the table past it
+
+// The LinkedIn tester switch (wrangler.jsonc var TESTERS_ENABLED): on only for an exact "1", off when unset (src/worker.js
+// imports it from here). While it is off the alarm deletes every tester session, so switching back on never revives one.
+export const testersOn = (env) => String(env?.TESTERS_ENABLED ?? '').trim() === '1';
 
 export const dayKey = (t) => new Date(t).toISOString().slice(0, 10);
 export const monthKey = (t) => new Date(t).toISOString().slice(0, 7);
@@ -249,7 +253,9 @@ export class Ledger extends DurableObject {
     const now = this.clock();
     this.expireStale();
     this.#tx(() => {
-      this.#run('DELETE FROM sessions WHERE exp <= ?', now);
+      // Tester access closed: every session ends (the testers stay on the roster and must sign in again if it reopens).
+      if (testersOn(this.#syncEnv)) this.#run('DELETE FROM sessions WHERE exp <= ?', now);
+      else this.#run('DELETE FROM sessions');
       this.#run('DELETE FROM oauth_state WHERE exp <= ?', now);
       this.#run('DELETE FROM jobs WHERE created_at <= ?', now - JOB_TTL);
       // ...and a refused sign-in goes 7 days after the attempt, whether or not the owner ever looked at it.
@@ -329,45 +335,28 @@ export class Ledger extends DurableObject {
     return true;
   }
 
-  // ── the owner's spending limits (src/spend.js; owner routes only, never a tester's) ──
-  // The limits themselves, {perVideoUsd, monthlyMediaUsd, updatedAt} as src/spend.js saved them (it validates and
-  // normalises them), in the config table: read on every paid start, so a change applies at once on every device
-  // (KV could serve the old limits for up to a minute elsewhere). → the saved object, or null when never set.
-  ownerLimits() {
-    const r = this.#row("SELECT v FROM config WHERE k = 'owner_limits'");
-    if (!r) return null;
-    try { const v = JSON.parse(r.v); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
-  }
-  ownerSetLimits({ perVideoUsd, monthlyMediaUsd, updatedAt } = {}) {
-    const usd = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1e6;
-    if (!usd(perVideoUsd) || !usd(monthlyMediaUsd) || !Number.isSafeInteger(updatedAt)) throw new Error('ownerSetLimits: bad limits');
-    this.#run('INSERT INTO config (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', 'owner_limits', JSON.stringify({ perVideoUsd, monthlyMediaUsd, updatedAt }));
-    return true;
-  }
-  // A paid owner job about to start: holds `amount` µ$ in this UTC month unless that would take the month's spend past
-  // `monthly` µ$ (equal is allowed). The check and the hold are one transaction, so concurrent starts can't both slip
-  // under the limit. → {ok: true, id, month, spent (with this hold)} | {ok: false, scope: 'month', month, spent (before)}
-  ownerReserve({ provider, kind, model = '', amount, monthly } = {}) {
-    if (!Number.isSafeInteger(amount) || amount < 0 || !Number.isSafeInteger(monthly) || monthly < 0) throw new Error('ownerReserve: amounts must be whole micro-dollars');
+  // ── the owner's spend record (src/spend.js; owner routes only, never a tester's) ──
+  // Since v85 there are no owner spending limits: these rows are a record, never a refusal. (A config row 'owner_limits'
+  // that v83–v84 saved may still be in the config table; nothing reads it.)
+  // A paid owner job about to start: a row at `amount` µ$ (its quote) in this UTC month. → {ok: true, id, month, spent
+  // (this month, with this row)}. A `monthly` argument from an older Worker is ignored.
+  ownerReserve({ provider, kind, model = '', amount } = {}) {
+    if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('ownerReserve: amounts must be whole micro-dollars');
     if (!OWNER_TAG.test(String(provider)) || !OWNER_TAG.test(String(kind))) throw new Error('ownerReserve: bad provider or kind');
     return this.#tx(() => {
       const now = this.clock(), month = monthKey(now), spent = this.#ownerTotal(month);
-      if (spent + amount > monthly) return { ok: false, scope: 'month', month, spent };
       const id = crypto.randomUUID();
       this.#run('INSERT INTO owner_spend (id, month, provider, kind, model, amount, actual, job, created_at, settled_at) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL)',
         id, month, String(provider), String(kind), str(model, 120), amount, now);
       return { ok: true, id, month, spent: spent + amount };
     });
   }
-  // A running hold's new quote. Growing it must still fit `monthly` in the hold's own month. → {ok: true} |
-  // {ok: false, scope: 'month', spent (with the old quote)} | {ok: false, gone: true} (settled or unknown)
-  ownerResize(id, amount, monthly) {
-    if (!Number.isSafeInteger(amount) || amount < 0 || !Number.isSafeInteger(monthly) || monthly < 0) throw new Error('ownerResize: amounts must be whole micro-dollars');
+  // A running row's new quote (Runway's own estimate, Omni without a duration). → {ok: true} | {ok: false, gone: true}
+  // (settled or unknown: a settled row keeps its cost)
+  ownerResize(id, amount) {
+    if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('ownerResize: amounts must be whole micro-dollars');
     return this.#tx(() => {
-      const r = this.#row('SELECT month, amount FROM owner_spend WHERE id = ? AND actual IS NULL', String(id));
-      if (!r) return { ok: false, gone: true };
-      const spent = this.#ownerTotal(r.month);
-      if (amount > r.amount && spent - r.amount + amount > monthly) return { ok: false, scope: 'month', spent };
+      if (!this.#row('SELECT 1 AS y FROM owner_spend WHERE id = ? AND actual IS NULL', String(id))) return { ok: false, gone: true };
       this.#run('UPDATE owner_spend SET amount = ? WHERE id = ?', amount, String(id));
       return { ok: true };
     });

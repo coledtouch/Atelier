@@ -87,6 +87,15 @@ function toClaudeMessages(messages) {
   return out;
 }
 
+// Each Claude model's official output maximum (max_tokens; thinking counts inside it): 128K for all four models Atelier
+// lists (platform.claude.com/docs/en/about-claude/models/overview, read 2026-10-08). Values that large need streaming
+// (the SDKs refuse a non-streaming request expected to run past 10 minutes); claudeChat always streams. A Claude id that
+// isn't listed (one typed in Settings) keeps the earlier 64K ceiling: its own maximum isn't known here, and a max_tokens
+// above a model's limit is rejected.
+export const CLAUDE_MAX_OUTPUT = Object.freeze({ 'claude-opus-5-5': 128_000, 'claude-sonnet-5-5': 128_000, 'claude-fable-5-1': 128_000, 'claude-haiku-5-5': 128_000 });
+export const CLAUDE_UNLISTED_MAX = 64_000;
+export const claudeMaxOutput = (model) => (Object.hasOwn(CLAUDE_MAX_OUTPUT, model) ? CLAUDE_MAX_OUTPUT[model] : CLAUDE_UNLISTED_MAX);
+
 // tester (LinkedIn testers only): {maxTokens, webUses, fallbacks} as the tester router priced them.
 function buildParams(body, tester = null) {
   const model = body.model.replace(/^anthropic:/, '');
@@ -95,7 +104,7 @@ function buildParams(body, tester = null) {
     .map((m) => (typeof m.content === 'string' ? m.content : ''))
     .join('\n\n');
 
-  let maxTokens = Math.min(Math.max(body.max_tokens || 16000, 1024), 64000);
+  let maxTokens = Math.min(Math.max(body.max_tokens || 16000, 1024), claudeMaxOutput(model));
   if (tester) maxTokens = Math.min(maxTokens, Math.max(tester.maxTokens || 0, 1024)); // the reserve was priced at this cap
   const params = { model, max_tokens: maxTokens, messages: toClaudeMessages(body.messages) };
   if (system) params.system = system;
