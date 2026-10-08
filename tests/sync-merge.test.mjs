@@ -7,7 +7,7 @@ import {
   FORMAT, LIMITS, TRANSIENT, MEDIA_RE, MEDIA_SYNC, INLINE_MAX, canonical, sha256hex, entryHash, strip, dehydrate, hydrate, validateDehydrated,
   checkPush, checkDelete, checkView, applyPush, applyDelete, applyRestore, docView, newRefs, planPull, planPush, planPushResult, pushBodies,
   applyPlan, forkEntry, betterFileRef, quickPrint, utf8Length, newRecord, mediaKinds, gateHeld, refsOf, syncId, docMeta, sortEntries,
-  fullPrint, snapOf, sameSnap, validFileRef, MEDIA_HELD,
+  fullPrint, snapOf, sameSnap, validFileRef, MEDIA_HELD, STICKY,
 } from '../public/sync-merge.js';
 import { validVideo } from '../public/video.js';
 
@@ -1121,4 +1121,79 @@ test('planPull (full): an entry gone from both the server and this device keeps 
   assert.ok(p2.record.e.e1.old.includes(fOld));
   const push = await planPush({ thread: thread('t1', [e1, e2]), record: p2.record });
   assert.deepEqual([push.entries.length, push.refetch], [0, true], 'the stale copy is never pushed over the newer answer');
+});
+
+// ── marks that make a later accounts-agent turn ask first (e.untrusted, e.imported, e.web, steps) ──
+test('the untrusted mark, the live-web count, the imported flag and agent steps all sync; STICKY names the marks that never come off', () => {
+  const e = ask('e1', 1, 'a', { untrusted: 'share', web: 2, imported: true, steps: [{ id: 's', name: 'browser_read', service: 'browser', status: 'done' }], meta: { note: 'live web' } });
+  const s = strip(e);
+  for (const k of ['untrusted', 'web', 'imported', 'steps', 'meta']) assert.deepEqual(s[k], e[k], k);
+  assert.deepEqual([...STICKY], ['untrusted', 'imported']);
+  for (const k of STICKY) assert.equal(TRANSIENT.includes(k), false, `${k} is not transient`);
+});
+
+test('a pulled version that lacks a mark the local copy has never unmarks it: the mark stays, goes back up, and the server keeps it', async () => {
+  const e1 = ask('e1', 1, 'answer', { untrusted: 'share' });
+  const doc = await docOf('t1', [e1]);
+  const rec = await recordFor(doc);
+  // another device (an old build, a bug) pushes a version without the mark
+  const { untrusted, ...bare } = e1;
+  const doc2 = applyPush(doc, await bodyOf([{ ...bare, text: 'answer, edited' }], { bases: { e1: 1 } }), NOW).doc;
+  assert.equal('untrusted' in doc2.entries[0].d, false);
+  const local = thread('t1', [structuredClone(e1)]);
+  const plan = await planPull({ local, record: rec, remote: viewOf(doc2, rec.rev), uid });
+  assert.deepEqual(plan.slots.map((s) => [s.id, s.from, s.keep]), [['e1', 'remote', ['untrusted']]]);
+  assert.equal(plan.push, true);
+  assert.equal(plan.how.e1, 'adopt+marks');
+  const r = applyPlan(local, plan, await hydrateAll(plan));
+  assert.equal(r.ok, true);
+  assert.equal(local.entries[0].text, 'answer, edited', 'the other change is taken');
+  assert.equal(local.entries[0].untrusted, 'share', 'the mark is not');
+  // the marked copy goes up over the server's (never mistaken for a stale write-back) and the server stores it
+  const push = await planPush({ thread: local, record: r.record });
+  assert.deepEqual(push.entries.map((x) => [x.id, x.base, x.d.untrusted]), [['e1', 2, 'share']]);
+  const doc3 = applyPush(doc2, pushBodies(push)[0], NOW).doc;
+  assert.equal(doc3.entries[0].d.untrusted, 'share');
+  assert.equal(doc3.entries[0].d.text, 'answer, edited');
+  // the device that dropped it takes the marked version back (its copy is unchanged since it pushed)
+  const other = thread('t1', [{ ...structuredClone(bare), text: 'answer, edited' }]);
+  const otherRec = await recordFor(doc2);
+  const back = await planPull({ local: other, record: otherRec, remote: viewOf(doc3, otherRec.rev), uid });
+  assert.deepEqual(back.slots.map((s) => [s.from, s.keep]), [['remote', undefined]]);
+  applyPlan(other, back, await hydrateAll(back));
+  assert.equal(other.entries[0].untrusted, 'share');
+  // an entry that never had a mark adopts as before
+  const bdoc = await docOf('t3', [bare]);
+  const bdoc2 = applyPush(bdoc, await bodyOf([{ ...bare, text: 'x' }], { bases: { e1: 1 } }), NOW).doc;
+  const p2 = await planPull({ local: thread('t3', [structuredClone(bare)]), record: await recordFor(bdoc), remote: viewOf(bdoc2, 1), uid });
+  assert.deepEqual(p2.slots.map((s) => [s.from, s.keep]), [['remote', undefined]]);
+  assert.equal(p2.how.e1, 'adopt');
+  // the imported flag is sticky the same way
+  const i1 = ask('i1', 1, 'restored', { imported: true });
+  const idoc = await docOf('t2', [i1]);
+  const { imported, ...ibare } = i1;
+  const idoc2 = applyPush(idoc, await bodyOf([{ ...ibare, text: 'x' }], { bases: { i1: 1 } }), NOW).doc;
+  const ilocal = thread('t2', [structuredClone(i1)]);
+  const iplan = await planPull({ local: ilocal, record: await recordFor(idoc), remote: viewOf(idoc2, 1), uid });
+  applyPlan(ilocal, iplan, await hydrateAll(iplan));
+  assert.equal(ilocal.entries[0].imported, true);
+});
+
+test('a push answered with a version that lacks the mark (stale or conflict) keeps it the same way', async () => {
+  const e1 = ask('e1', 1, 'answer', { untrusted: 'link' });
+  const doc = await docOf('t1', [e1]);
+  const rec = await recordFor(doc);
+  const { untrusted, ...bare } = e1;
+  const doc2 = applyPush(doc, await bodyOf([{ ...bare, text: 'from elsewhere' }], { bases: { e1: 1 } }), NOW).doc;
+  // this device edits the marked entry offline and pushes on base 1: the server answers with a conflict
+  const local = thread('t1', [{ ...structuredClone(e1), text: 'edited here' }]);
+  const push = await planPush({ thread: local, record: rec });
+  const res = applyPush(doc2, pushBodies(push)[0], NOW).response;
+  assert.equal(res.conflicts.length, 1);
+  const plan = await planPushResult({ thread: local, record: rec, sent: push.sent, res, uid });
+  const adopted = plan.slots.find((s) => s.id === 'e1');
+  assert.deepEqual([adopted.from, adopted.keep], ['remote', ['untrusted']]);
+  applyPlan(local, plan, await hydrateAll(plan));
+  assert.equal(local.entries.find((x) => x.id === 'e1').untrusted, 'link');
+  assert.ok(local.entries.every((x) => x.untrusted === 'link'), 'the fork of the local edit keeps it too');
 });

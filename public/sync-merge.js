@@ -28,6 +28,12 @@ export const LIMITS = Object.freeze({
 export const INLINE_MAX = LIMITS.inline;
 // Device-local entry keys that never leave the device. 'recovered' marks a crash-recovered or interrupted entry.
 export const TRANSIENT = Object.freeze(['pending', 'stage', 'status', 'startedAt', 'chars', 'recovered']);
+// Marks that only ever go onto an entry and never come off it (the app sets them when the entry is made and nothing
+// removes them, a retry included): 'untrusted' (its text came from a link or a share) and 'imported' (restored from a
+// backup file). Both make later accounts-agent turns in the thread ask before reading (context.js threadTaint). They
+// sync like any key; on top of that a pulled version that lacks one the local copy has never takes it off here: the
+// mark stays and that copy goes back up (keepMarks), so another device (an old build, a bug) can't unmark it everywhere.
+export const STICKY = Object.freeze(['untrusted', 'imported']);
 // Identical to the data: branch of data-safety.js safeMediaUrl (tests/sync-merge.test.mjs checks parity).
 export const MEDIA_RE = /^data:(image\/(png|jpe?g|webp|gif|avif)|video\/(mp4|webm));base64,[a-z\d+/=\s]+$/i;
 const MEDIA_PREFIX = /^data:(image\/(png|jpe?g|webp|gif|avif)|video\/(mp4|webm));base64,/i;
@@ -586,6 +592,18 @@ function resolveEntry(L, S, k, hashed, gS, { uid, now, restarted = false }) {
   }
   return { slots: [adopt(), fork()], k: past(kS), push: true, how: 'fork' };
 }
+// A decision that has local entry L's id take server version S (a 'remote' slot) while S lacks a STICKY mark L has:
+// the slot keeps L's marks (applyPlan puts them on the adopted copy), the result is pushed, and its hash (S's d plus
+// the marks) leaves k.old so planPush sends it rather than taking it for a stale write-back. Anything else: out as is.
+async function keepMarks(out, L, S) {
+  const keep = STICKY.filter((k) => L?.[k] && !(record(S?.d) && S.d[k]));
+  if (!keep.length || !out.slots.some((s) => s.id === L.id && s.from === 'remote')) return out;
+  const d = { ...S.d };
+  for (const k of keep) d[k] = jsonClone(L[k]);
+  const h = await sha256hex(canonical(d));
+  return { ...out, slots: out.slots.map((s) => (s.id === L.id && s.from === 'remote' ? { ...s, keep } : s)),
+    k: { ...out.k, old: (out.k.old || []).filter((x) => x !== h) }, push: true, how: `${out.how}+marks` };
+}
 const keyOf = (s, local) => (s.from === 'remote' ? s.r : s.from === 'fork' ? s.entry : local.get(s.id));
 const cmpKey = entryOrder;
 // The local order with each decision in place; then every new entry — remote-only ones and this plan's forks — goes
@@ -666,7 +684,7 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
     const hashed = await hashOf(l);
     if (hashed.h === r.h) { rec.e[r.id] = recordOf(r, gR, k); continue; } // converged
     if (isBusy(l)) { busy = true; continue; }
-    const out = resolveEntry(l, r, k, hashed, gR, { uid, now, restarted });
+    const out = await keepMarks(resolveEntry(l, r, k, hashed, gR, { uid, now, restarted }), l, r);
     decisions.set(r.id, out.slots); rec.e[r.id] = out.k; how[r.id] = out.how;
     if (out.push) push = true;
   }
@@ -850,8 +868,13 @@ export async function planPushResult({ thread, record: rec0 = null, sent = {}, t
       if (isBusy(l)) { pull = true; continue; }
       const hashed = await hashOf(l);
       if (hashed.h === S.h) { rec.e[S.id] = recordOf(S, gS, k); continue; }
-      if (stale && (!sent[S.id] || hashed.h === sent[S.id].h)) { decisions.set(S.id, [{ id: S.id, from: 'remote', r: S }]); rec.e[S.id] = recordOf(S, gS, k); continue; }
-      const out = resolveEntry(l, S, k, hashed, gS, { uid, now, restarted });
+      if (stale && (!sent[S.id] || hashed.h === sent[S.id].h)) {
+        const kept = await keepMarks({ slots: [{ id: S.id, from: 'remote', r: S }], k: recordOf(S, gS, k), push: false, how: 'stale' }, l, S);
+        decisions.set(S.id, kept.slots); rec.e[S.id] = kept.k;
+        if (kept.push) { push = true; how[S.id] = kept.how; }
+        continue;
+      }
+      const out = await keepMarks(resolveEntry(l, S, k, hashed, gS, { uid, now, restarted }), l, S);
       decisions.set(S.id, out.slots); rec.e[S.id] = out.k; how[S.id] = out.how;
       if (out.push) push = true;
     }
@@ -931,8 +954,8 @@ const setFile = (e, file) => {
 };
 // Re-checks the plan against the thread (every entry's snapshot and the title; anything changed → {ok: false} and
 // nothing is touched: re-plan). Then rebuilds thread.entries IN PLACE from the slots, so the open thread object is
-// never swapped: a replaced entry keeps its object (keys absent remotely are deleted except TRANSIENT ones,
-// 'recovered' is cleared, then Object.assign). hydrated: Map(entryId → hydrated remote entry); a remote slot without
+// never swapped: a replaced entry keeps its object (keys absent remotely are deleted except TRANSIENT ones and the
+// STICKY marks a slot keeps, 'recovered' is cleared, then Object.assign). hydrated: Map(entryId → hydrated remote entry); a remote slot without
 // one (quarantined, or its blobs not there yet) keeps the local copy (or is left out), its record rolls back, the
 // record is flagged refetch, and any fork this plan made of that local copy is left out too (the local version is
 // still in place under its own id: a fork would only duplicate it, again on every retry).
@@ -958,6 +981,7 @@ export function applyPlan(thread, plan, hydrated = new Map()) {
       continue;
     }
     if (s.file !== undefined) setFile(next, s.file);
+    if (cur && Array.isArray(s.keep)) for (const k of s.keep) if (STICKY.includes(k) && cur[k] && !next[k]) next[k] = jsonClone(cur[k]); // keepMarks
     if (cur) {
       for (const k of Object.keys(cur)) if (!own(next, k) && !KEEP_LOCAL.has(k)) delete cur[k];
       delete cur.recovered;

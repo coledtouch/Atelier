@@ -9,10 +9,10 @@
 //     that names a retired Veo id is read as Omni (omni.js migrateVideoId; migrateRemix rewrites it).
 //   - Plan strings are untrusted (on-screen text in the footage can steer Gemini): they are cleaned and capped here and
 //     must still be escaped wherever they are shown. No plan field ever reaches a URL, a tool or a model id.
-import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=83';
-import { quote as runwayQuote, RUNWAY_MODELS, GROK_SECONDS } from './runway.js?v=83';
-import { stripThink } from './context.js?v=83';
-import { OMNI_ID, migrateVideoId } from './omni.js?v=83';
+import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=84';
+import { quote as runwayQuote, RUNWAY_MODELS, GROK_SECONDS } from './runway.js?v=84';
+import { stripThink } from './context.js?v=84';
+import { OMNI_ID, migrateVideoId } from './omni.js?v=84';
 
 export const REMIX_V = 1;
 export const LIMITS = Object.freeze({

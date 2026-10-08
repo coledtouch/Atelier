@@ -48,13 +48,50 @@ code is in `public/launch.js` (pure logic), `public/sw.js` (share intake), `src/
     "shared content · tools off for this turn — ask again without it to use your accounts".
   - The owner uses the tools on purpose by asking in their own words.
   - `runAgent` also asks for approval before every tool on a marked turn, as a backstop.
+  - **The mark holds for the rest of the thread (after v83).** A marked turn is replayed as history to later turns, and
+    an answer can quote it after it leaves the history window, so `runAgent` checks the whole thread before the turn
+    (`threadTaint` in context.js). While a marked entry is anywhere in it, every account and browser tool waits for the
+    owner's OK, reads included, and the card says why ("This thread contains … Start a new thread to skip this.").
+    The same holds for a live-web answer (`e.web`, or the older "live web" note), an agent step that read a page in the
+    browser, imported Claude chats and Claude-history reads (these never hold back more Claude history), entries
+    restored from a backup file (`e.imported`), entries from before the mark existed, and the earlier photos or video a
+    follow-up shows again. In such a thread Atelier Assist doesn't offer web search. Photos or a video that came with a
+    share mark their turn `'share'` too. The owner's own account reads (mail, Slack, Drive…) never count, so a normal
+    inbox thread stays approval-free.
+  - **v84 additions** (review of the thread rule):
+    - The turn being run counts its own words too (`ownTaint`): retrying the first turn of a restored or pre-mark
+      thread asks before every read, like any later turn there.
+    - `'claude'` ranks last, so Claude text is the reason only when nothing else applies; with a restored or pre-mark
+      entry in the thread, Claude history asks too. Imported Claude chats keep claude.ai's dates and never count as
+      pre-mark.
+    - Photos or a video from before shared files were marked (`MEDIA_MARKS_SINCE`, 2026-10-10 UTC) count as pre-mark.
+      That date must not be earlier than the day v84 reached every device.
+    - A GitHub search, and a GitHub file or issue list from a repo none of the connected accounts owns, count as a
+      page read (`st.outside`). The owner's own repos and notifications are account data.
+    - In-answer holds: after a page read (or tab titles), another look at a tab runs unasked only while the tab is on
+      the same site it was read on (for a page opened in this answer: the address the owner approved). The look is
+      checked after it runs (`browser_read` reports the address its text came from; `browser_elements` is checked
+      with `browser_tabs` again). If the page sent its tab elsewhere, what came back never reaches the model, and the
+      card says which site the tab shows now. After `browser_tabs`, the first look at a tab it listed runs unasked, as
+      in v83; any other tab or account read waits. A Claude chat holding a shared or linked turn holds back the rest
+      of that answer, Claude history included, with its own card line (`'shared-chat'`).
+    - The Web route (`runChat`) offers no web search in a thread that holds both an account read and outside text;
+      the meta line says so. Either one alone keeps search.
+    - Memory never learns from a turn in a thread holding outside text, or from a turn whose own words may not be the
+      owner's: To app, an idea's Expand or Look up's ask can quote it while carrying only their entry's mark.
+    - A turn marked only by its shared photos says so (`untrustedFiles`): Edit prompt and Animate give the typed text
+      back unmarked (the photos don't come back). The turn itself still keeps tools off and taints the thread.
+  - The marks survive sync (`STICKY` in sync-merge.js: a pulled version without a mark the local copy has keeps it and
+    goes back up) and backups (`validateBackup` checks them; `prepareImport` keeps settled agent steps instead of
+    dropping them, so v79's "no web search after an account read" still sees earlier reads).
   - Text made from a marked entry carries its mark: an idea's Expand, Build and Image, To app, Vary, Edit prompt,
     Animate, and Look up's "Ask about this" on words selected in a marked answer (`submit(…, { untrusted })`).
   - A marked turn never teaches memory (`learnFrom`). Memory goes into every later system prompt, the agent's
     included, and syncs to the owner's other devices.
 - **Some reads always ask first (v56).** `browser_open`, and `browser_read` with a `url`, wait for the owner's approval
   like a write. They load an address the model chose in the owner's logged-in browser, so the address itself could
-  carry data out. Reading an already-open tab (`browser_read` with `tabId`) does not ask.
+  carry data out. Reading an already-open tab (`browser_read` with `tabId`) does not ask in a clean thread until a page
+  or tab titles have entered the answer (see the v84 in-answer holds above).
 - **Replies load nothing remote (v56).** `md()` lets a rendered reply load only same-origin, `data:` and `blob:` URLs.
   - A remote `<img>` becomes a small "Image from <host> blocked" link that opens in a new tab.
   - Remote `src`, `srcset`, `poster`, `background`, SVG `href` and CSS `url()` / `image-set()` attributes are removed.

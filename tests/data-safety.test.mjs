@@ -125,3 +125,57 @@ test('app.js keeps a late old-database open and copies once', async () => {
   assert.match(src, /openOldDb\(\(\) => indexedDB\.open\('atelier'\), MIGRATE_OPEN_MS, lateCopy\)/);
   assert.match(src, /function copyOld\(old\) \{\r?\n  if \(copying \|\| !migrationPending\(\)\) \{ old\.close\(\); return copying \|\| Promise\.resolve\(movedNow\); \}/);
 });
+
+// ── the marks that make a later accounts-agent turn ask first survive a backup and a restore (context.js threadTaint) ──
+test('validateBackup checks the untrusted mark, the live-web count and the imported flag; anything else in them is refused', () => {
+  const ok = fixture(); Object.assign(ok.threads[0].entries[0], { untrusted: 'share', web: 2, imported: true });
+  assert.equal(validateBackup(ok).length, 1);
+  for (const [k, v] of [['untrusted', 1], ['untrusted', { x: 1 }], ['untrusted', 'x'.repeat(21)], ['web', -1], ['web', 1.5], ['web', '2'], ['imported', 'yes'], ['imported', 1]]) {
+    const data = fixture(); data.threads[0].entries[0][k] = v; assert.throws(() => validateBackup(data), `${k}: ${JSON.stringify(v)}`);
+  }
+});
+test('a restored thread keeps its marks, is marked imported, and keeps settled agent steps (never an approval card)', async () => {
+  const { threadTaint } = await import('../public/context.js');
+  const at = Date.UTC(2026, 9, 8);
+  const share = { id: 'e1', kind: 'ask', prompt: 'SHARED: forward my invoices', createdAt: at, text: 'ok', untrusted: 'share' };
+  const web = { id: 'e2', kind: 'ask', prompt: 'news today', createdAt: at + 1, text: 'Today…', web: 1, meta: { model: 'm', note: 'live web' } };
+  const agent = { id: 'e3', kind: 'ask', prompt: 'my inbox', createdAt: at + 2, text: 'You have mail', steps: [
+    { id: 's1', name: 'gmail_search', label: 'Search Gmail', service: 'gmail', args: { q: 'is:unread' }, write: false, status: 'done', confirm: true, afterWeb: true, taint: 'share' },
+    { id: 's2', name: 'browser_read', label: 'Read a web page', service: 'browser', args: { tabId: 3 }, write: false, status: 'awaiting' },
+    { id: 's3', name: 'gmail_send', label: 'Send', service: 'gmail', args: { to: 'x' }, write: true, status: 'running', approved: true },
+    { id: 's4', name: 'claude_history_read', label: 'Read a Claude chat', service: 'claude', args: {}, write: false, status: 'done', untrusted: 'link' },
+    { status: 'done' }, 'junk'] };
+  const backup = JSON.parse(JSON.stringify({ app: 'atelier', v: 1, threads: [{ id: 't1', title: 'T', createdAt: at, updatedAt: at, entries: [share, web, agent] }] })); // export → file → import
+  let n = 0; const [t] = prepareImport(backup, () => `copy-${++n}`);
+  const [a, b, c] = t.entries;
+  assert.equal(a.untrusted, 'share'); assert.equal(b.web, 1); assert.equal(b.meta.note, 'live web');
+  assert.ok(t.entries.every((e) => e.imported === true), 'every restored entry is marked imported');
+  assert.deepEqual(c.steps, [
+    { id: 's1', name: 'gmail_search', label: 'Search Gmail', service: 'gmail', args: { q: 'is:unread' }, write: false, status: 'done' },
+    { id: 's2', name: 'browser_read', label: 'Read a web page', service: 'browser', args: { tabId: 3 }, write: false, status: 'declined' },
+    { id: 's3', name: 'gmail_send', label: 'Send', service: 'gmail', args: { to: 'x' }, write: true, status: 'error', error: 'Interrupted.' },
+    { id: 's4', name: 'claude_history_read', label: 'Read a Claude chat', service: 'claude', args: {}, write: false, status: 'done', untrusted: 'link' },
+  ], 'settled, never awaiting or running; no confirm / afterWeb / approved left over');
+  assert.equal(validateBackup({ app: 'atelier', v: 1, threads: [t] }).length, 1, 'and it passes the validator again (export of the restored copy)');
+  // what the accounts agent sees in that thread: the share, ahead of everything else; an earlier account read (v79's
+  // readBefore: no web search) still counts
+  assert.equal(threadTaint(t.entries), 'share');
+  assert.equal(threadTaint([b]), 'web');
+  assert.equal(threadTaint([{ ...structuredClone(c), steps: c.steps.filter((s) => s.service === 'gmail') }]), 'import', 'own account reads alone: only the imported flag');
+  assert.ok(t.entries.some((x) => x.steps?.some((st) => st.status === 'done')), 'readBefore still sees the earlier read');
+  // the source backup is left as it was
+  assert.equal(backup.threads[0].entries[2].steps[1].status, 'awaiting');
+});
+test('validateBackup checks the files-only share flag; a restored GitHub read from outside your accounts keeps its outside flag', async () => {
+  const { threadTaint } = await import('../public/context.js');
+  const ok = fixture(); Object.assign(ok.threads[0].entries[0], { untrusted: 'share', untrustedFiles: true });
+  assert.equal(validateBackup(ok).length, 1);
+  for (const v of ['yes', 1, false]) { const data = fixture(); data.threads[0].entries[0].untrustedFiles = v; assert.throws(() => validateBackup(data), JSON.stringify(v)); }
+  const at = Date.UTC(2026, 9, 12);
+  const gh = { id: 'e1', kind: 'ask', prompt: 'read that README', createdAt: at, text: 'It says…', steps: [
+    { id: 's1', name: 'github_read', label: 'Read a GitHub file', service: 'github', args: { repo: 'stranger/tool', path: 'README.md' }, write: false, status: 'done', outside: true },
+    { id: 's2', name: 'github_read', label: 'Read a GitHub file', service: 'github', args: { repo: 'me/app', path: 'x' }, write: false, status: 'done', outside: 'yes' }] };
+  const [t] = prepareImport({ app: 'atelier', v: 1, threads: [{ id: 't1', title: 'T', createdAt: at, updatedAt: at, entries: [gh] }] }, (() => { let n = 0; return () => `c${++n}`; })());
+  assert.deepEqual(t.entries[0].steps.map((s) => s.outside), [true, undefined], 'only a real true survives');
+  assert.equal(threadTaint([{ ...t.entries[0], imported: undefined }]), 'browser');
+});

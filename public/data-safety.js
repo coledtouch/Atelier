@@ -1,5 +1,5 @@
-import { validVideo } from './video.js?v=83';
-import { validRemix, recoverRemix } from './remix.js?v=83';
+import { validVideo } from './video.js?v=84';
+import { validRemix, recoverRemix } from './remix.js?v=84';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -55,16 +55,41 @@ export function validateBackup(data) {
       if (e.remixOf != null) assert(safeId(e.remixOf));
       if (e.refineOf != null) assert(safeId(e.refineOf)); // Build: the version this one changed (builds.js)
       if (e.baseAt != null) assert(validDate(e.baseAt)); // Build: when Restore made it the base for the next change
+      // What makes a later accounts-agent turn ask first (context.js threadTaint): the mark of link / share text, a live
+      // web answer's search count, a restored-from-backup flag. Only these shapes: the app tests them for truth.
+      if (e.untrusted != null) assert(text(e.untrusted) && e.untrusted.length <= 20);
+      if (e.web != null) assert(Number.isSafeInteger(e.web) && e.web >= 0);
+      if (e.imported != null) assert(e.imported === true);
+      if (e.untrustedFiles != null) assert(e.untrustedFiles === true); // only the shared photos / video marked it (submit)
     }
   }
   return data.threads;
 }
+// What an imported entry keeps of its agent steps: a settled record of each (never awaiting or running, so no approval
+// card comes back), enough for the agent's rules about the thread — an earlier account read withdraws web search
+// (app.js runAgent readBefore), an earlier page read or Claude history read holds back reads (context.js threadTaint).
+const STEP_DONE = new Set(['done', 'error', 'declined']);
+const short = (v, n) => (text(v) ? v.slice(0, n) : '');
+export function importedSteps(steps) {
+  if (!Array.isArray(steps)) return [];
+  return steps.filter(record).slice(0, 200).map(st => ({
+    id: short(st.id, 120) || 'step', name: short(st.name, 120), label: short(st.label, 200) || short(st.name, 120), ...(text(st.service) ? { service: short(st.service, 40) } : {}),
+    args: record(st.args) ? structuredClone(st.args) : {}, write: st.write === true,
+    status: STEP_DONE.has(st.status) ? st.status : st.status === 'awaiting' ? 'declined' : 'error',
+    ...(text(st.error) ? { error: short(st.error, 500) } : st.status === 'running' ? { error: 'Interrupted.' } : {}),
+    ...(text(st.untrusted) && st.untrusted ? { untrusted: st.untrusted === 'link' ? 'link' : 'share' } : {}),
+    ...(st.outside === true ? { outside: true } : {}), // GitHub content from outside your accounts (context.js readsPage)
+  })).filter(st => st.name);
+}
 export function prepareImport(data, makeId) {
-  // New IDs preserve existing work. Imported approvals must never remain actionable.
+  // New IDs preserve existing work. Imported approvals must never remain actionable (importedSteps settles them).
+  // Every imported entry is marked imported: a backup file can come from anywhere, and an entry without a link / share
+  // mark in it is not proof the text was the owner's (older backups predate the mark), so a later accounts-agent turn
+  // in that thread asks before reading (context.js threadTaint).
   return validateBackup(data).map(t => {
     const id = makeId(), ids = new Map();
     const entries = t.entries.map(e => {
-      const copy = { ...structuredClone(e), id: makeId(), pending: false, steps: [],
+      const copy = { ...structuredClone(e), id: makeId(), pending: false, steps: importedSteps(e.steps), imported: true,
         ...(e.pending ? { error: 'This response was interrupted before the backup was made. You can try again.', errorKind: 'interrupted' } : {}) };
       delete copy.startedAt; // transient: only meaningful while a generation is live
       recoverRemix(copy, { imported: true }); // shots → missing/unknown/failed, approval dropped: nothing imported can spend

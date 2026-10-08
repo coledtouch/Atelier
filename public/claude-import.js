@@ -236,6 +236,10 @@ function snippet(text, w, n = 240) {
   const start = Math.max(0, i - Math.floor(n / 3));
   return (start ? '…' : '') + clip(flat.slice(start), n);
 }
+// A turn made in Atelier from a share or a link (e.untrusted): 'share' | 'link', else ''. Search results and read turns
+// carry it as `untrusted`, so the model sees those words weren't the user's, and the accounts agent holds back every
+// later tool in that answer (app.js runAgent).
+const markOf = (e) => (!e?.untrusted ? '' : e.untrusted === 'link' ? 'link' : 'share');
 // threads: imported chats (isClaudeThread). Ranks by how many of the query's words a chat has, then by how often
 // (a title match counts more), then newest. → { query, results: [{ id, title, created, updated, turns, snippet }] }.
 export function searchHistory(threads, query, limit = 8) {
@@ -255,12 +259,12 @@ export function searchHistory(threads, query, limit = 8) {
       if (hit) { words++; score += Math.min(hit, 40); }
     }
     if (!words) continue;
-    scored.push({ t, words, score, at: listAt(t), snip: best >= 0 ? snippet(texts[best], bestWord) : clip(texts[0] || '', 240) });
+    scored.push({ t, words, score, at: listAt(t), snip: best >= 0 ? snippet(texts[best], bestWord) : clip(texts[0] || '', 240), mark: markOf(t.entries[best >= 0 ? best : 0]) });
   }
   scored.sort((a, b) => b.words - a.words || b.score - a.score || b.at - a.at);
   return {
     query: str(query), total: scored.length,
-    results: scored.slice(0, n).map(({ t, snip }) => ({ id: t.id, title: t.title || 'Untitled', created: day(t.createdAt), updated: day(listAt(t)), turns: t.entries.length, snippet: snip })),
+    results: scored.slice(0, n).map(({ t, snip, mark }) => ({ id: t.id, title: t.title || 'Untitled', created: day(t.createdAt), updated: day(listAt(t)), turns: t.entries.length, snippet: snip, ...(mark && { untrusted: mark }) })),
   };
 }
 // One chat's turns from..to (1-based, at most 12 and about 24,000 characters; each side cut to 4,000).
@@ -275,7 +279,8 @@ export function readHistory(thread, from = 1, to) {
     const e = thread.entries[k - 1];
     const you = clip(str(e.prompt), 4000), answer = clip(str(e.text), 4000);
     budget -= you.length + answer.length;
-    turns.push({ turn: k, date: day(e.createdAt), you, answer, ...(e.via === VIA ? {} : { madeIn: 'Atelier' }) });
+    const mark = markOf(e);
+    turns.push({ turn: k, date: day(e.createdAt), you, answer, ...(e.via === VIA ? {} : { madeIn: 'Atelier' }), ...(mark && { untrusted: mark }) });
   }
   const last = turns.length ? turns.at(-1).turn : a - 1;
   return { id: thread.id, title: thread.title || 'Untitled', created: day(thread.createdAt), turns: total, from: a, to: last, ...(last < total ? { more: `Turns ${last + 1}–${total} not shown: ask for from=${last + 1}.` } : {}), messages: turns };

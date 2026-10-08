@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=83';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=84';
 
 export const CHAT_KINDS = ['ask', 'code'];
 export const HISTORY_TURNS = 10; // earlier turns replayed (chat answers and notes alike)
@@ -170,3 +170,96 @@ export function mediaTurn(prompt, ctx, { cap = CTX_IMAGES, sees = true } = {}) {
   return { content: `[Earlier in this conversation the user attached ${plural((ctx.src.images || []).length, 'image')}. This model can’t see them — answer from the earlier replies about them, and say so if they don’t cover the question.]\n\n${prompt}`,
     note: 'earlier images as a text note', n: 0 };
 }
+
+// ── untrusted text in an accounts-agent turn's context ──
+// The accounts agent (app.js runAgent) reads the user's accounts without asking only while everything in its context is
+// the user's own: an earlier turn replays as history (buildHistory), and an answer can quote a turn long after that
+// turn has left the history window, so the whole thread before the turn counts, not just the replayed part — and so do
+// the turn's own words when they may not be the user's (ownTaint: a retried old or restored turn). Reasons, most telling
+// first (the approval card names the first that applies):
+//   share    e.untrusted 'share' (text or files shared from another app or site: anyone can POST a share), or a Claude
+//            history read that returned such a turn (step.untrusted)
+//   link     e.untrusted 'link' (an unkeyed or wrong-key link, a restored link draft)
+//   web      an answer from a live web search (e.web = searches it ran; older entries: meta.note 'live web')
+//   browser  an agent step that read a page in the browser (any browser tool but browser_show; titles count), or GitHub
+//            content from outside your accounts (st.outside: another owner's repo; any GitHub search)
+//   import   an entry restored from a backup file (e.imported, set by data-safety prepareImport): a file can say anything
+//   legacy   an entry from before shares and links were marked (MARKS_SINCE), or photos / a video from before shared
+//            files were marked (MEDIA_MARKS_SINCE): an old share looks like your own words
+//   claude   a turn imported from claude.ai (via 'claude': pasted articles, documents, Claude's own web results) or a
+//            Claude history read (claude_history_*). It holds back account and browser tools, never more Claude history —
+//            and it ranks last, so it is the reason only when it is the only one: with any other, Claude history waits too.
+// Own words (typed, pasted, dictated, a keyed launch), your own photos, and what your accounts returned (mail, Slack,
+// Drive…) never taint: asking before every read in an inbox thread is the cost this avoids.
+export const TAINTS = Object.freeze(['share', 'link', 'web', 'browser', 'import', 'legacy', 'claude']);
+// v56 (2026-10-02) began marking link and share turns (e.untrusted); entries made before the next day may be unmarked shares.
+export const MARKS_SINCE = Date.UTC(2026, 9, 3);
+// v84 began marking photos and videos that came with a share (never marked before): an entry with photos or a video
+// made before this day may be an unmarked share. It must not be earlier than the day v84 reached every device.
+export const MEDIA_MARKS_SINCE = Date.UTC(2026, 9, 10);
+const markOf = (v) => (!v ? '' : v === 'link' ? 'link' : 'share');
+const isBrowserStep = (st) => st.service === 'browser' || /^browser_/.test(String(st.name || ''));
+const isClaudeStep = (st) => st.service === 'claude' || /^claude_history_/.test(String(st.name || ''));
+const hasMedia = (x) => (Array.isArray(x.images) && x.images.length > 0) || Boolean(x.video);
+// An agent step whose result put outside text in the context: every browser tool but browser_show (which only brings a
+// tab to the front) returns page text, controls or at least titles, all written by whoever made the page; so does a
+// GitHub search (it spans all of GitHub) or a GitHub read from a repo none of your accounts owns (st.outside, runAgent).
+export const readsPage = (st) => Boolean(st) && ((isBrowserStep(st) && st.name !== 'browser_show') || st.outside === true || st.name === 'github_search');
+// The origin of a browser result's address ('' for none, or an opaque one: about:blank, data:, file:). Another look at a
+// tab runs unasked only while the tab is still on the origin read before (app.js runAgent).
+export function pageOrigin(url) {
+  try { const o = new URL(String(url ?? '')).origin; return o && o !== 'null' ? o : ''; } catch { return ''; }
+}
+// The first of two reasons in TAINTS order ('' counts as none).
+export const worseTaint = (a, b) => (!a ? b || '' : !b ? a : TAINTS.indexOf(b) >= 0 && TAINTS.indexOf(b) < TAINTS.indexOf(a) ? b : a);
+// Why an entry's own words may not be the user's ('' when they are): its mark, an imported Claude turn, a restored
+// entry, one older than the marks. Not what its run did (searches, steps): entryTaint adds those. A turn being run (or
+// retried) counts its own (app.js runAgent), and the memory learner skips it (learnFrom).
+export function ownTaint(x) {
+  if (!x || typeof x !== 'object') return '';
+  let why = markOf(x.untrusted);
+  if (x.imported) why = worseTaint(why, 'import');
+  // An imported Claude chat keeps claude.ai's dates: it is Claude text, never 'legacy' (which would hold back Claude history).
+  if (x.via === 'claude') return worseTaint(why, 'claude');
+  if (Number.isFinite(x.createdAt) && (x.createdAt < MARKS_SINCE || (hasMedia(x) && x.createdAt < MEDIA_MARKS_SINCE))) why = worseTaint(why, 'legacy');
+  return why;
+}
+// Why one entry taints whatever follows it in its thread ('' when it doesn't). Defensive: synced and restored entries
+// are only shape-checked (data-safety validateBackup), so steps or meta may be anything.
+export function entryTaint(x) {
+  if (!x || typeof x !== 'object') return '';
+  const steps = Array.isArray(x.steps) ? x.steps.filter((st) => st && typeof st === 'object' && st.status === 'done') : [];
+  let why = ownTaint(x);
+  for (const st of steps) if (st.untrusted) why = worseTaint(why, markOf(st.untrusted));
+  if ((Number.isFinite(x.web) && x.web > 0) || /\blive web\b/.test(typeof x.meta?.note === 'string' ? x.meta.note : '')) why = worseTaint(why, 'web');
+  if (steps.some(readsPage)) why = worseTaint(why, 'browser');
+  if (steps.some(isClaudeStep)) why = worseTaint(why, 'claude');
+  return why;
+}
+// Why an agent turn's context carries untrusted text: any entry before it in the thread (prior), and the earlier video or
+// photos a follow-up shows again (ctx, pickContext: its src is one of prior's, counted on its own too). '' when none.
+export function threadTaint(prior, ctx = null) {
+  let why = '';
+  for (const x of prior || []) { why = worseTaint(why, entryTaint(x)); if (why === TAINTS[0]) return why; }
+  return worseTaint(why, entryTaint(ctx?.src));
+}
+// Whether reason why holds back a tool of this service: every reason holds back every tool, except that text from
+// Claude chats alone ('claude' ranks last, so it is never the reason when another applies) doesn't hold back reading
+// more of the same chats.
+export const taintGates = (why, service) => Boolean(why) && !(why === 'claude' && service === 'claude');
+// The approval card's sentence for a step that waits because of why (thread reasons, plus reasons from earlier in the
+// same answer: 'page' a page read, 'chats' Claude chats read, 'shared-chat' a Claude chat holding a shared or linked
+// turn). '' for anything else.
+const TAINT_NOTES = Object.freeze({
+  share: 'This thread contains something shared from another app or site, so reading your accounts waits for your OK. Start a new thread to skip this.',
+  link: 'This thread contains text that came from a link, so reading your accounts waits for your OK. Start a new thread to skip this.',
+  web: 'This thread contains web search results, and a page can try to steer the assistant, so reading your accounts waits for your OK. Start a new thread to skip this.',
+  browser: 'This thread contains a web page or someone else’s GitHub content the assistant read, which can try to steer it, so reading your accounts waits for your OK. Start a new thread to skip this.',
+  claude: 'This thread contains text from your Claude chats, which can hold pasted or web text, so reading your accounts waits for your OK. Start a new thread to skip this.',
+  import: 'This thread was restored from a backup file, so reading your accounts waits for your OK. Start a new thread to skip this.',
+  legacy: 'This thread is older than Atelier’s check for shared text and photos, so reading your accounts waits for your OK. Start a new thread to skip this.',
+  page: 'Asked after reading a web page or someone else’s GitHub content in this answer: it can try to steer what the assistant does next, so reading your accounts now waits for your OK.',
+  chats: 'Asked after reading your Claude chats in this answer: they can hold pasted or web text, so reading your accounts now waits for your OK.',
+  'shared-chat': 'Asked after reading a Claude chat that holds something shared from another app or site, or text from a link: it can try to steer the assistant, so reading your accounts now waits for your OK.',
+});
+export const taintNote = (why) => (Object.hasOwn(TAINT_NOTES, why) ? TAINT_NOTES[why] : '');

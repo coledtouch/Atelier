@@ -14,9 +14,13 @@ const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript
 // REVIEW_SYNC=1 enables owner sync; REVIEW_TESTER=<subject> enables simulated tester sign-in and private sync.
 // REVIEW_PROVIDERS=1 (or --providers) reports Anthropic, OpenAI, Gemini, Runway and xAI as configured for the owner too (Video mode's
 // Omni, Runway and Grok menus, Settings → models and voices); their /api/omni, /api/runway, /api/xai and /api/tts calls get local stubs below.
+// It also connects a stub Gmail with one read-only tool (gmail_search): an inbox question goes to the accounts agent, whose
+// /api/chat turn calls that tool once, so its approval cards can be checked. No Gmail is ever read.
 // Both run the real src/sync.js over separate account buckets in memory (tests/fake-r2.mjs), shared by every browser
 // profile on this port; restarting empties them. workerRequest gives a body with a Content-Length the known length the
 // Workers runtime would (the strict fake, like R2, refuses a stream without one).
+// The stub Gmail tool --providers connects (the Worker's real tool list is far longer; this one is read-only).
+const FIXTURE_GMAIL = { type: 'function', function: { name: 'gmail_search', description: 'Search the user’s Gmail (local fixture).', parameters: { type: 'object', properties: { q: { type: 'string', description: 'Gmail search query' } }, required: ['q'], additionalProperties: false } }, 'x-write': false, 'x-label': 'Search Gmail', 'x-service': 'gmail' };
 const syncEnvs = new Map(), profiles = new Map(), feedback = new Map(), omniJobs = new Map(), xaiJobs = new Map(), runwayJobs = new Map(), omniRows = new Map();
 // Owner spending limits (src/spend.js; Settings → Spending): the Worker's own rules and words (decide, capRefusal,
 // cleanLimits, the price quotes) over an in-memory month. REVIEW_SPENT=<usd> starts this month with that much spent, so
@@ -151,7 +155,13 @@ createServer(async (req, res) => {
       if (identity.role !== 'owner') { res.statusCode = 403; return res.end('{"error":"Use the local owner passcode."}'); }
       return res.end('{}');
     }
-    if (url.pathname === '/api/tools') return res.end('{"services":{},"list":[]}');
+    if (url.pathname === '/api/tools') return res.end(allProviders ? JSON.stringify({ services: { gmail: true }, list: [FIXTURE_GMAIL] }) : '{"services":{},"list":[]}');
+    if (url.pathname === '/api/tools/run' && req.method === 'POST' && allProviders) {
+      const parts = []; for await (const p of req) parts.push(p);
+      let b = {}; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
+      if (b.name !== 'gmail_search') { res.statusCode = 400; return res.end('{"error":"Unknown fixture tool."}'); }
+      return res.end(JSON.stringify({ ok: true, result: { messages: [{ from: 'Fixture Sender', subject: 'Local fixture — no Gmail was read', snippet: 'Two unread messages, both made up.' }] } }));
+    }
     if (url.pathname === '/api/relay/status') return res.end('{"online":false}');
     // Gemini Omni stub (src/omni.js routes): start → two "in_progress" polls → completed; the video is a placeholder.
     if (url.pathname === '/api/omni/start' && req.method === 'POST') {
@@ -267,6 +277,21 @@ createServer(async (req, res) => {
     if (url.pathname === '/api/chat') {
       const parts = []; for await (const p of req) parts.push(p);
       const body = JSON.parse(Buffer.concat(parts).toString());
+      // --providers: the accounts agent (a request offering gmail_search) calls it once for an inbox question, then answers
+      // from the fixture result (or says it was declined).
+      if (allProviders && Array.isArray(body.tools) && body.tools.some((t) => t?.function?.name === 'gmail_search')) {
+        const lastMsg = body.messages?.at(-1) || {};
+        const sse = (o) => res.write(`data: ${JSON.stringify(o)}\n\n`);
+        res.setHeader('Content-Type', 'text/event-stream');
+        if (lastMsg.role === 'user' && /\b(inbox|e-?mails?|gmail|unread)\b/i.test(JSON.stringify(lastMsg.content ?? ''))) {
+          sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_fixture_1', type: 'function', function: { name: 'gmail_search', arguments: JSON.stringify({ q: 'is:unread newer_than:2d' }) } }] } }] });
+          sse({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] });
+          return res.end('data: [DONE]\n\n');
+        }
+        const declined = lastMsg.role === 'tool' && /declined/.test(String(lastMsg.content));
+        sse({ choices: [{ delta: { content: lastMsg.role !== 'tool' ? 'Local fixture answer from the accounts agent. No provider was called.' : declined ? 'OK — I won’t read your inbox. (Local fixture.)' : 'You have 2 unread messages (local fixture — no Gmail was read).' } }] });
+        return res.end('data: [DONE]\n\n');
+      }
       const system = body.messages?.find(m => m.role === 'system')?.content || '';
       const slow = /slow stream/i.test(JSON.stringify(body.messages?.at(-1) ?? ''));
       const answer = /single-file web apps/.test(system) ? '```html\n<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Review counter</title></head><body style="font:18px system-ui;padding:32px;background:#f3eee3;color:#1b1a16"><h1>Review counter</h1><p>Local fixture. No provider was called.</p><button onclick="this.textContent=Number(this.textContent)+1" style="font:inherit;padding:12px 24px">0</button></body></html>\n```'
