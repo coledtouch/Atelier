@@ -37,6 +37,8 @@
   // Canva app client ID (public - it appears in the sign-in URL). CANVA_CLIENT_SECRET is a Worker secret.
   // WIKI_CONTACT: the public contact in Atelier's Wikimedia User-Agent (the address on /privacy). LOOKUP_DISABLED "1"
   // turns Look up off (503 lookup_off; the app then hides it for the session).
+  // RUNWAY_MAX_CREDITS (optional per-video Runway cap, src/runway.js; unset = none, the most one video costs is 2,040
+  // credits): add it here or with `wrangler secret put` — a var set in the dashboard is wiped by the next deploy.
   "vars": { "SYNC_QUOTA_BYTES": "53687091200", "CANVA_CLIENT_ID": "OC-AaD0HxvGYkj2", "WIKI_CONTACT": "cole@ciprari.ai", "LOOKUP_DISABLED": "0" },
   // Workers Logs keep our own console output, but not the automatic per-request invocation logs: those record full
   // request URLs, which can carry OAuth codes and invite codes.

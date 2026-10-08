@@ -252,6 +252,19 @@ test('Grok Imagine on Runway: a 16:9 / 9:16 frame as is; a still → auto_720p (
   }
 });
 
+test('Seedance 2.5 on Runway: a 16:9 / 9:16 frame as is; still or text, any whole length 4–10 s, sent as built', async () => {
+  const W = await import('../src/runway.js');
+  const id = 'runway:seedance2_5';
+  assert.equal(S.providerOf(id), 'runway');
+  assert.deepEqual(S.firstFrameShape(id, { w: 1080, h: 1350 }), { w: 720, h: 1280 });
+  assert.deepEqual(S.firstFrameShape(id, { w: 1920, h: 1080 }), { w: 1280, h: 720 });
+  const still = S.shotRequest({ prompt: 'p', camera: 'static', seconds: 5 }, { model: id, seconds: 5, image: JPEG, out: { w: 1080, h: 1350 } });
+  const text = S.shotRequest({ prompt: 'p', camera: 'static', seconds: 7 }, { model: id, seconds: 7, out: { w: 1920, h: 1080 } });
+  assert.deepEqual([still.runway.kind, still.runway.body.model, still.runway.body.ratio, still.runway.body.duration], ['image_to_video', 'seedance2_5', '720:1280', 5]);
+  assert.deepEqual([text.runway.kind, text.runway.body.ratio, text.runway.body.duration], ['text_to_video', '1280:720', 7]);
+  for (const r of [still, text]) assert.deepEqual(W.shapeRequest(r.runway.kind, r.runway.body).body, r.runway.body, 'the Worker sends it as built');
+});
+
 // ── Runway (owner only) through public/runway.js, so the mock stands in for the global fetch ──
 test('runway: create → op "runway:<id>"; a dropped create is unknown; FAILED by safety is filtered; SUCCEEDED downloads', async () => {
   const req = S.shotRequest({ prompt: 'p', camera: 'static', seconds: 5 }, { model: 'runway:gen4.5', seconds: 5, image: JPEG, out: { w: 1080, h: 1350 } });

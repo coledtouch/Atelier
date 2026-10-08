@@ -85,7 +85,7 @@ test('the app\'s paid models are listed for testers; fallback-only targets and r
   // (Veo 3.1 included) is owner-only and never priced for testers. Retired ids are gone from the table.
   assert.deepEqual([...TESTER_VIDEO_MODELS], ['gemini:gemini-omni-1.1-flash']);
   for (const id of ['gemini:veo-3.1-generate-preview', 'gemini:veo-3.1-fast-generate-preview', 'gemini:veo-3.1-lite-generate-preview', 'gemini:gemini-3.1-flash-image',
-    'runway:veo3.1', 'runway:veo3.1_fast', 'runway:gen4.5', 'deepseek:deepseek-chat', 'deepseek:deepseek-reasoner', 'deepseek:deepseek-v4-flash', 'openai:gpt-image-1']) {
+    'runway:veo3.1', 'runway:veo3.1_fast', 'runway:gen4.5', 'runway:seedance2_5', 'deepseek:deepseek-chat', 'deepseek:deepseek-reasoner', 'deepseek:deepseek-v4-flash', 'openai:gpt-image-1']) {
     assert.equal(priceOf(id), null, id);
   }
   assert.ok(TESTER_IMAGE_MODELS.includes('gemini:gemini-nano-banana-2.1'));

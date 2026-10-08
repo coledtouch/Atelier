@@ -14,7 +14,7 @@ registerHooks({
 // src/runway.js — the owner's /api/runway/* routes. Runway is never called for real: every upstream request goes to a
 // fetch mock, and an unmatched one fails the test.
 const {
-  handleRunway, runwayDiag, shapeRequest, cleanTask, quote, scrub, outputUrlOk, RunwayError, grokLiteResolution,
+  handleRunway, runwayDiag, shapeRequest, cleanTask, quote, scrub, outputUrlOk, RunwayError, grokLiteResolution, seedanceResolution,
   RUNWAY_BASE, RUNWAY_VERSION, RUNWAY_MODELS, BODY_MAX, DATA_URI_MAX, UPLOAD_MAX, OUTPUT_MAX, PROMPT_MAX,
 } = await import('../src/runway.js');
 
@@ -172,6 +172,42 @@ test('generate: Grok Imagine 1.5 — aspect ratio and resolution for text, resol
   assert.deepEqual(quote('grok_imagine_1_5', 4, true, { resolution: '1080p' }), { credits: 116, usd: 1.16 });
 });
 
+test('generate: Seedance 2.5 (Runway 2026-08-07) — the schema’s fields only, the ratio sets the tier, 4–30 s, priced per tier', async () => {
+  mockFetch([created(180)]);
+  // text → video: model, promptText, ratio, duration, audio, seed; no outputFormat, moderation, resolution, draft or references
+  const res = await rw('runway/generate/text_to_video', { method: 'POST', body: { model: 'seedance2_5', promptText: 'A paper boat', ratio: '1280:720', duration: 6, audio: true, seed: 7,
+    outputFormat: 'mp4', contentModeration: { publicFigureThreshold: 'low' }, draft: true, references: [{ uri: PNG }], referenceVideos: [{ type: 'video', uri: RUNWAY_URI }], referenceAudio: [{ type: 'audio', uri: 'https://x.example/a.mp3' }], junk: 1 } });
+  const j = await read(res);
+  assert.equal(res.status, 200);
+  assert.equal(calls[0].url, `${RUNWAY_BASE}/text_to_video`);
+  assert.equal(calls[0].headers.get('x-runway-version'), RUNWAY_VERSION);
+  assert.deepEqual(calls[0].json, { model: 'seedance2_5', promptText: 'A paper boat', ratio: '1280:720', duration: 6, audio: true, seed: 7 });
+  assert.deepEqual(j.quote, { credits: 180, usd: 1.8 }, '30 credits a second at 720p');
+  // image → video: the still, the prompt optional, 1080p portrait, 30 s
+  const r2 = await rw('runway/generate/image_to_video', { method: 'POST', body: { model: 'seedance2_5', promptImage: PNG, ratio: '1080:1920', duration: 30, audio: false } });
+  assert.equal(calls[1].url, `${RUNWAY_BASE}/image_to_video`);
+  assert.deepEqual(calls[1].json, { model: 'seedance2_5', promptImage: PNG, ratio: '1080:1920', duration: 30, audio: false });
+  assert.deepEqual((await read(r2)).quote, { credits: 2040, usd: 20.4 }, '68 credits a second at 1080p; no audio discount');
+  // defaults: 1280:720, 6 s, Runway's own audio default (not sent)
+  await rw('runway/generate/text_to_video', { method: 'POST', body: { model: 'seedance2_5', promptText: 'x' } });
+  assert.deepEqual(calls[2].json, { model: 'seedance2_5', promptText: 'x', ratio: '1280:720', duration: 6 });
+  // a 15,000-character prompt goes as is
+  await rw('runway/generate/text_to_video', { method: 'POST', body: { model: 'seedance2_5', promptText: 'y'.repeat(15000), duration: 4 } });
+  assert.equal(calls[3].json.promptText.length, 15000);
+  // price by tier (pricing guide): 20 / 30 / 68 credits a second, at least 80 a generation, audio free
+  assert.deepEqual(quote('seedance2_5', 4, true, { resolution: '480p' }), { credits: 80, usd: 0.8 });
+  assert.deepEqual(quote('seedance2_5', 10, false, { resolution: '480p' }), { credits: 200, usd: 2 });
+  assert.deepEqual(quote('seedance2_5', 10, true, { resolution: '720p' }), { credits: 300, usd: 3 });
+  assert.deepEqual(quote('seedance2_5', 10, true, { resolution: '1080p' }), { credits: 680, usd: 6.8 });
+  assert.deepEqual(quote('seedance2_5', 10), { credits: 300, usd: 3 }, 'no resolution: 720p');
+  assert.equal(RUNWAY_MODELS.seedance2_5.minCredits, 80);
+  // the 18 schema ratios, six per tier
+  const tiers = RUNWAY_MODELS.seedance2_5.kinds.text_to_video.map(seedanceResolution);
+  assert.deepEqual(tiers, [...Array(6).fill('480p'), ...Array(6).fill('720p'), ...Array(6).fill('1080p')]);
+  assert.deepEqual([...RUNWAY_MODELS.seedance2_5.kinds.image_to_video], [...RUNWAY_MODELS.seedance2_5.kinds.text_to_video]);
+  assert.deepEqual([seedanceResolution('640:640'), seedanceResolution('960:960'), seedanceResolution('1440:1440'), seedanceResolution('16:9')], ['480p', '720p', '1080p', null]);
+});
+
 test('generate: aleph2 edits only runway:// clips, drops the deprecated ratio and shapes keyframes', async () => {
   mockFetch([created(56)]);
   const res = await rw('runway/generate/video_to_video', { method: 'POST', body: {
@@ -208,6 +244,18 @@ test('generate refuses bad input with 400 and never calls Runway', async () => {
     ['image_to_video', { model: 'grok_imagine_1_5', promptImage: PNG, ratio: '16:9' }, /takes no ratio for image to video/],
     ['text_to_video', { model: 'grok_imagine_1_5', promptText: 'x'.repeat(2501) }, /limited to 2500 characters/],
     ['video_to_video', { model: 'grok_imagine_1_5', promptText: 'x', videoUri: RUNWAY_URI }, /can’t do video to video/],
+    ['text_to_video', { model: 'seedance2_5', promptText: 'x', duration: 31 }, /seedance2_5 clips are 4–30 whole seconds/],
+    ['text_to_video', { model: 'seedance2_5', promptText: 'x', duration: 3 }, /4–30 whole seconds/],
+    ['text_to_video', { model: 'seedance2_5', promptText: 'x', duration: 'auto' }, /4–30 whole seconds/],
+    ['text_to_video', { model: 'seedance2_5', promptText: 'x', ratio: '16:9' }, /takes the ratios 992:432/],
+    ['text_to_video', { model: 'seedance2_5', promptText: 'x', resolution: '1080p' }, /takes no resolution field/],
+    ['text_to_video', { model: 'seedance2_5', promptText: 'x', audio: 'yes' }, /audio must be true or false/],
+    ['text_to_video', { model: 'seedance2_5', promptText: 'x', seed: -1 }, /seed must be/],
+    ['text_to_video', { model: 'seedance2_5' }, /Describe the video/],
+    ['text_to_video', { model: 'seedance2_5', promptText: 'x'.repeat(15001) }, /limited to 15000 characters/],
+    ['image_to_video', { model: 'seedance2_5', promptText: 'x' }, /The image is missing/],
+    ['image_to_video', { model: 'seedance2_5', promptImage: 'https://example.com/a.png' }, /sent from Atelier/],
+    ['video_to_video', { model: 'seedance2_5', promptText: 'x', videoUri: RUNWAY_URI }, /can’t do video to video/],
     ['text_to_video', { ...t2v(), model: '__proto__' }, /doesn’t offer/],
     ['text_to_video', { ...t2v(), model: 'gen4_turbo' }, /only animates a still image/],
     ['image_to_video', { model: 'aleph2', promptText: 'x', promptImage: PNG }, /only edits a video/],
@@ -252,7 +300,7 @@ test('generate refuses bad input with 400 and never calls Runway', async () => {
 });
 
 test('the Runway catalogue: only current ids (Runway retired gen3a_turbo and gen4_aleph on 2026-07-30)', () => {
-  assert.deepEqual(Object.keys(RUNWAY_MODELS).sort(), ['aleph2', 'gen4.5', 'gen4_turbo', 'grok_imagine_1_5', 'grok_imagine_1_5_lite', 'veo3.1', 'veo3.1_fast']);
+  assert.deepEqual(Object.keys(RUNWAY_MODELS).sort(), ['aleph2', 'gen4.5', 'gen4_turbo', 'grok_imagine_1_5', 'grok_imagine_1_5_lite', 'seedance2_5', 'veo3.1', 'veo3.1_fast']);
   for (const old of ['gen3a_turbo', 'gen4_aleph']) {
     assert.throws(() => shapeRequest('text_to_video', { model: old, promptText: 'x' }), (e) => e instanceof RunwayError && e.status === 400 && /doesn’t offer/.test(e.message), old);
   }
@@ -717,6 +765,25 @@ test('worker: testers get 403 owner_only on every runway route, before any upstr
   } finally { restoreFetch(); }
 });
 
+test('worker: a tester’s Seedance 2.5 request is refused 403 owner_only before Runway or the Ledger', { skip: notWired }, async () => {
+  const { makeEnv, api, signIn, PROFILE, mockFetch: mf, restoreFetch, upstream, resetTesterCaches } = await import('./tester-env.mjs');
+  resetTesterCaches();
+  mf([[/./, () => reply(500, { error: 'should not be called' })]]);
+  try {
+    const { env, L } = makeEnv({ RUNWAYML_API_SECRET: KEY });
+    const t = await signIn(L, PROFILE());
+    for (const [kind, body] of [['text_to_video', { model: 'seedance2_5', promptText: 'A paper boat', ratio: '1280:720', duration: 6 }],
+      ['image_to_video', { model: 'seedance2_5', promptImage: PNG, ratio: '1920:1080', duration: 4 }]]) {
+      L.calls.length = 0;
+      const res = await api(env, `runway/generate/${kind}`, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }, { cookie: t.token });
+      assert.equal(res.status, 403, kind);
+      assert.equal((await res.json()).code, 'owner_only', kind);
+      assert.ok(L.calls.every((m) => m === 'session'), `${kind} touched the Ledger: ${L.calls}`);
+    }
+    assert.equal(upstream.calls.length, 0);
+  } finally { restoreFetch(); }
+});
+
 test('worker: /api/diag includes Runway when the secret is set', { skip: wired && /runwayDiag/.test(workerSrc) ? false : 'runwayDiag isn’t wired into /api/diag yet' }, async () => {
   const { makeEnv, api, restoreFetch } = await import('./tester-env.mjs');
   mockFetch([[up('organization'), () => reply(200, { creditBalance: 100, tier: { maxMonthlyCreditSpend: 10000, models: {} } })], [/./, () => reply(200, {})]]);
@@ -725,4 +792,40 @@ test('worker: /api/diag includes Runway when the secret is set', { skip: wired &
     const j = await (await api(env, 'diag', {}, { pass: 'pw' })).json();
     assert.equal(j.runway?.ok, true);
   } finally { restoreFetch(); }
+});
+
+test('review fixture: a simulated tester gets 403 owner_only on every /api/runway/* stub, as from the Worker; the owner still films', async () => {
+  const [{ spawn }, { createServer }, { fileURLToPath }] = await Promise.all([import('node:child_process'), import('node:net'), import('node:url')]);
+  const port = await new Promise((res, rej) => { const s = createServer().once('error', rej).listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+  // scripts/review-server.mjs as `REVIEW_TESTER=<sub> … --providers`: no passcode = the simulated tester session
+  const child = spawn(process.execPath, ['scripts/review-server.mjs', '--providers'], { cwd: fileURLToPath(new URL('..', import.meta.url)), env: { ...process.env, REVIEW_TESTER: 'review-tester', REVIEW_PORT: String(port), REVIEW_SYNC: '', REVIEW_RUNWAY_LOG: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let timer;
+  try {
+    await new Promise((res, rej) => {
+      timer = setTimeout(() => rej(new Error('the review fixture didn’t start')), 15_000);
+      child.stdout.on('data', (d) => { if (/Isolated review/.test(d)) res(); });
+      child.once('exit', (code) => rej(new Error(`the review fixture exited (${code})`)));
+    });
+    const base = `http://127.0.0.1:${port}/api/runway/`, json = { 'content-type': 'application/json' };
+    const body = JSON.stringify({ model: 'seedance2_5', promptText: 'A paper boat', ratio: '1280:720', duration: 6 });
+    for (const [method, path] of [['POST', 'generate/text_to_video'], ['POST', 'generate/image_to_video'], ['POST', 'generate/video_to_video'],
+      ['GET', `task/${ID}`], ['DELETE', `task/${ID}`], ['GET', `output/${ID}`], ['POST', 'upload'], ['GET', 'account']]) {
+      const res = await realFetch(base + path, { method, ...(method === 'POST' ? { body, headers: json } : {}) });
+      assert.equal(res.status, 403, `${method} ${path}`);
+      assert.deepEqual(await res.json(), { error: 'That part of Atelier is only for its owner.', code: 'owner_only' }, `${method} ${path}`);
+    }
+    // the owner's passcode still reaches the stubs: create → poll → SUCCEEDED
+    const own = { ...json, 'x-app-pass': 'review-only' };
+    const made = await realFetch(base + 'generate/text_to_video', { method: 'POST', body, headers: own });
+    assert.equal(made.status, 200);
+    const { id } = await made.json();
+    // …and the tester can't poll the owner's task either
+    assert.equal((await realFetch(base + `task/${id}`)).status, 403);
+    let status;
+    for (let i = 0; i < 3; i++) status = (await (await realFetch(base + `task/${id}`, { headers: own })).json()).status;
+    assert.equal(status, 'SUCCEEDED');
+  } finally {
+    clearTimeout(timer);
+    child.kill();
+  }
 });

@@ -57,6 +57,25 @@ export function grokLiteResolution(ratio) {
   const short = Math.min(+m[1], +m[2]);
   return short <= 480 ? '480p' : short <= 720 ? '720p' : '1080p';
 }
+// ByteDance's Seedance 2.5 through Runway (OpenAPI schema, docs.dev.runwayml.com/openapi.json, read 2026-10-08; released
+// 2026-08-07). Text and image → video (video → video exists too; Atelier doesn't send it), 4–30 whole seconds (or
+// "auto", never sent: billed at the maximum up front), prompts up to 15,000 characters, an `audio` flag (default true),
+// `seed`; no outputFormat, no contentModeration, no `resolution` field — the ratio carries it (six per tier below).
+// No `draft` field is in the schema (additionalProperties: false), although the pricing guide mentions draft previews:
+// Atelier never sends one. Price (https://docs.dev.runwayml.com/guides/pricing/): 20 / 30 / 68 credits per output second
+// at 480p / 720p / 1080p, audio free, at least 80 credits a generation (input/reference video would add 10 / 15 / 34 a
+// second — Atelier sends none; reference images are free).
+const SEEDANCE_RATIOS = Object.freeze([
+  '992:432', '854:480', '752:560', '640:640', '560:752', '480:854', // 480p
+  '1470:630', '1280:720', '1112:834', '960:960', '834:1112', '720:1280', // 720p
+  '2206:946', '1920:1080', '1664:1248', '1440:1440', '1248:1664', '1080:1920', // 1080p
+]);
+const SEEDANCE_PROMPT_MAX = 15000;
+/** A Seedance 2.5 ratio → the resolution tier it is billed at (by its place in the schema's list), or null. */
+export function seedanceResolution(ratio) {
+  const i = SEEDANCE_RATIOS.indexOf(String(ratio));
+  return i < 0 ? null : ['480p', '720p', '1080p'][Math.floor(i / 6)];
+}
 // The only Runway models Atelier sends. kinds: endpoint → allowed ratios (null: the model has no ratio).
 // mp4: the model takes outputFormat, which is always forced to 'mp4' (no ProRes/HDR surcharges). durations: the lengths
 // the model takes (else DURATION_MIN–DURATION_MAX). creditsNoAudio: the rate when audio: false is sent (Veo 3.1).
@@ -72,6 +91,9 @@ export const RUNWAY_MODELS = Object.freeze({
     grok: true, resolution: true, durationRange: Object.freeze([1, 15]), kinds: Object.freeze({ text_to_video: GROK_T2V_RATIOS, image_to_video: null }) }),
   grok_imagine_1_5_lite: Object.freeze({ creditsPerSecond: 3, rates: Object.freeze({ '480p': 2, '720p': 3, '1080p': 14 }), stillCredits: 1, minCredits: 0, promptRequired: false, promptMax: GROK_PROMPT_MAX, mp4: false,
     grok: true, resolution: false, durationRange: Object.freeze([1, 15]), kinds: Object.freeze({ text_to_video: GROK_LITE_T2V_RATIOS, image_to_video: GROK_LITE_I2V_RATIOS }) }),
+  // seedance: per-resolution rates set by the ratio (creditsPerSecond is 720p's), 4–30 s, an 80-credit minimum.
+  seedance2_5: Object.freeze({ creditsPerSecond: 30, rates: Object.freeze({ '480p': 20, '720p': 30, '1080p': 68 }), minCredits: 80, promptRequired: false, promptMax: SEEDANCE_PROMPT_MAX, mp4: false,
+    seedance: true, audio: true, durationRange: Object.freeze([4, 30]), kinds: Object.freeze({ text_to_video: SEEDANCE_RATIOS, image_to_video: SEEDANCE_RATIOS }) }),
 });
 export const KINDS = Object.freeze(['image_to_video', 'text_to_video', 'video_to_video']);
 export const TARGET_ASPECTS = Object.freeze(['16:9', '4:3', '3:2', '1:1', '2:3', '3:4', '9:16', '21:9']);
@@ -219,8 +241,9 @@ export function shapeRequest(kind, input) {
   const promptMax = spec.promptMax || PROMPT_MAX;
   if (prompt.length > promptMax) throw bad(`Runway prompts are limited to ${promptMax} characters.`);
   if (prompt) body.promptText = prompt;
-  else if (spec.promptRequired || (spec.grok && kind === 'text_to_video')) throw bad(kind === 'video_to_video' ? 'Describe the edit you want Runway to make.' : 'Describe the video you want Runway to make.');
+  else if (spec.promptRequired || ((spec.grok || spec.seedance) && kind === 'text_to_video')) throw bad(kind === 'video_to_video' ? 'Describe the edit you want Runway to make.' : 'Describe the video you want Runway to make.');
   if (spec.grok) return shapeGrok(kind, input, spec, body);
+  if (spec.seedance) return shapeSeedance(kind, input, spec, body);
 
   let seconds = null;
   if (kind === 'video_to_video') {
@@ -313,6 +336,32 @@ function shapeGrok(kind, input, spec, body) {
   return { model, kind, body, seconds: d, audio: true, resolution, still: kind === 'image_to_video' };
 }
 
+// Seedance 2.5 (spec.seedance): one of its 18 ratios (the ratio sets 480p / 720p / 1080p; default 1280:720), 4–30 whole
+// seconds (default 6), the audio flag and a seed. Never a resolution, outputFormat, moderation setting, draft or any
+// reference (images, video or audio). → {model, kind, body, seconds, audio, resolution, still}.
+function shapeSeedance(kind, input, spec, body) {
+  const { model } = body;
+  if (kind === 'image_to_video') body.promptImage = dataOrRunwayUri(input.promptImage, 'The image');
+  if (input.resolution != null) throw bad(`Runway ${model} takes no resolution field — pick a ratio of that size.`);
+  const ratios = spec.kinds[kind];
+  const ratio = input.ratio == null ? '1280:720' : input.ratio;
+  if (!ratios.includes(ratio)) throw bad(`Runway ${model} (${kind.replace(/_/g, ' ')}) takes the ratios ${ratios.join(', ')}.`);
+  body.ratio = ratio;
+  const [lo, hi] = spec.durationRange;
+  const d = input.duration == null ? 6 : input.duration;
+  if (!intIn(d, lo, hi)) throw bad(`Runway ${model} clips are ${lo}–${hi} whole seconds.`);
+  body.duration = d;
+  if (input.audio != null) {
+    if (typeof input.audio !== 'boolean') throw bad('audio must be true or false.');
+    body.audio = input.audio;
+  }
+  if (input.seed != null) {
+    if (!intIn(input.seed, 0, 4294967295)) throw bad('seed must be a whole number from 0 to 4294967295.');
+    body.seed = input.seed;
+  }
+  return { model, kind, body, seconds: d, audio: body.audio !== false, resolution: seedanceResolution(ratio), still: false };
+}
+
 // A task as the browser may see it: status, progress, costs and Runway's failure code — never the output links.
 export function cleanTask(t, id) {
   if (!isRecord(t)) throw new RunwayError('Runway returned an unexpected task.', 502, { code: 'runway_failed' });
@@ -368,8 +417,11 @@ async function generate(req, env, key, kind) {
   let input = null;
   try { input = JSON.parse(text); } catch {}
   const shaped = shapeRequest(kind, input);
-  // Optional spending cap (Worker var RUNWAY_MAX_CREDITS). Checked BEFORE the paid call from Runway's price list: exact
-  // for gen4.5 / gen4_turbo (whole seconds), and at least Aleph's minimum when the clip length is unknown.
+  // Optional spending cap (Worker var RUNWAY_MAX_CREDITS; unset = no cap, and the most one request can cost is Seedance
+  // 2.5 at 30 s, 1080p: 2,040 credits — the browser asks the owner over $5 first, public/runway.js spendQuestion).
+  // Checked BEFORE the paid call from Runway's price list: exact for the per-second models (Gen-4.5, Gen-4 Turbo, Veo 3.1,
+  // and Grok Imagine and Seedance 2.5 at the request's resolution; whole seconds), at least Aleph's minimum when the
+  // clip length is unknown.
   const cap = maxCredits(env);
   const pre = quote(shaped.model, shaped.seconds, shaped.audio, shaped) || (RUNWAY_MODELS[shaped.model].minCredits > 0 ? costOf(RUNWAY_MODELS[shaped.model].minCredits) : null);
   if (cap != null && pre && pre.credits > cap) {

@@ -5,6 +5,7 @@ import { resolve, extname, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { handleFeedback } from '../src/feedback.js';
 import { cleanProfile, EMPTY_PROFILE } from '../src/tester/profile.js';
+import { shapeRequest as runwayShape, quote as runwayQuote } from '../src/runway.js';
 const root = resolve('public');
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 // REVIEW_SYNC=1 enables owner sync; REVIEW_TESTER=<subject> enables simulated tester sign-in and private sync.
@@ -13,7 +14,7 @@ const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript
 // Both run the real src/sync.js over separate account buckets in memory (tests/fake-r2.mjs), shared by every browser
 // profile on this port; restarting empties them. workerRequest gives a body with a Content-Length the known length the
 // Workers runtime would (the strict fake, like R2, refuses a stream without one).
-const syncEnvs = new Map(), profiles = new Map(), feedback = new Map(), omniJobs = new Map(), xaiJobs = new Map();
+const syncEnvs = new Map(), profiles = new Map(), feedback = new Map(), omniJobs = new Map(), xaiJobs = new Map(), runwayJobs = new Map();
 const fixtureTester = process.env.REVIEW_TESTER || '';
 let testerActive = Boolean(fixtureTester);
 const feedbackEnv = { ATELIER_KV: {
@@ -142,6 +143,35 @@ createServer(async (req, res) => {
       res.setHeader('Content-Type', 'video/mp4'); return res.end(await readFile(resolve(root, 'icons/atelier-v2-512.png')));
     }
     if (url.pathname === '/api/xai/image' && req.method === 'POST') return res.end(JSON.stringify({ data: [{ b64_json: (await readFile(resolve(root, 'icons/atelier-v2-512.png'))).toString('base64'), mime_type: 'image/png' }], usd: 0.04 }));
+    // Runway is owner only: a tester session gets what src/tester/router.js answers (it has no runway route), so a client
+    // slip that offered Runway to testers fails here as it would in production instead of filming a stub.
+    if (url.pathname.startsWith('/api/runway/') && identity.role !== 'owner') { res.statusCode = 403; return res.end('{"error":"That part of Atelier is only for its owner.","code":"owner_only"}'); }
+    // Runway stubs (src/runway.js routes): the body goes through the Worker's real shapeRequest (a 400 for anything it
+    // refuses), the task is RUNNING for two polls, then SUCCEEDED at the quoted cost; the output is a placeholder.
+    // REVIEW_RUNWAY_LOG=1 prints each shaped body (what the Worker would send Runway).
+    const rwGen = url.pathname.match(/^\/api\/runway\/generate\/(text_to_video|image_to_video|video_to_video)$/);
+    if (rwGen && req.method === 'POST') {
+      const parts = []; for await (const p of req) parts.push(p);
+      let b = null; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
+      let shaped;
+      try { shaped = runwayShape(rwGen[1], b); } catch (err) { res.statusCode = err.status || 400; return res.end(JSON.stringify({ error: err.message, ...(err.extra || {}) })); }
+      if (process.env.REVIEW_RUNWAY_LOG) console.log('runway', rwGen[1], JSON.stringify({ ...shaped.body, ...(shaped.body.promptImage ? { promptImage: `${shaped.body.promptImage.slice(0, 24)}…` } : {}) }));
+      const q = runwayQuote(shaped.model, shaped.seconds, shaped.audio, shaped);
+      const id = crypto.randomUUID(); runwayJobs.set(id, { n: 0, q });
+      return res.end(JSON.stringify({ id, model: shaped.model, kind: rwGen[1], estimatedCost: q, quote: q, pollAfterMs: 5000 }));
+    }
+    const rwTask = url.pathname.match(/^\/api\/runway\/(task|output)\/([0-9a-f-]{36})$/);
+    if (rwTask) {
+      const [, what, id] = rwTask, job = runwayJobs.get(id);
+      if (!job) { res.statusCode = 404; return res.end('{"error":"That Runway task is gone — it was cancelled, deleted or has expired.","code":"runway_gone","status":"GONE"}'); }
+      if (what === 'task' && req.method === 'DELETE') { job.cancelled = true; return res.end('{"ok":true}'); }
+      if (what === 'task') {
+        job.n += 1;
+        const status = job.cancelled ? 'CANCELLED' : job.n > 2 ? 'SUCCEEDED' : 'RUNNING';
+        return res.end(JSON.stringify({ id, status, ...(status === 'RUNNING' ? { progress: job.n * 0.4, pollAfterMs: 5000 } : {}), ...(job.q ? { estimatedCost: job.q } : {}), ...(status === 'SUCCEEDED' && job.q ? { cost: job.q } : {}), outputs: status === 'SUCCEEDED' ? 1 : 0 }));
+      }
+      res.setHeader('Content-Type', 'video/mp4'); return res.end(await readFile(resolve(root, 'icons/atelier-v2-512.png')));
+    }
     if (url.pathname === '/api/runway/account') return res.end('{"creditBalance":1200,"usd":12,"maxMonthlyCreditSpend":null,"models":{}}');
     // Read aloud stub: half a second of silence as WAV (the Gemini voices' format), any voice.
     if (url.pathname === '/api/tts' && req.method === 'POST') {

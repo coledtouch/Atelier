@@ -27,6 +27,16 @@ export const VEO_SECONDS = Object.freeze([4, 6, 8]);
 // as is (the output follows it). src/runway.js keeps the ratio lists and prices; these are the ones Video mode sends.
 export const GROK_SECONDS = Object.freeze([4, 6, 8, 10, 15]);
 export const GROK_PROMPT_MAX = 2500;
+// ByteDance's Seedance 2.5 through Runway: 4–30 whole seconds (the Video menu offers SEEDANCE_SECONDS; Remix any whole
+// length in range), prompts up to 15,000 characters, 18 ratios whose size sets the price tier (six each at 480p / 720p /
+// 1080p, in that order — src/runway.js keeps the same list). Atelier sends 720p, or 1080p for '16:9 · HD'.
+export const SEEDANCE_SECONDS = Object.freeze([4, 6, 8, 10, 15, 20, 30]);
+export const SEEDANCE_PROMPT_MAX = 15000;
+export const SEEDANCE_RATIOS = Object.freeze({
+  '480p': Object.freeze(['992:432', '854:480', '752:560', '640:640', '560:752', '480:854']),
+  '720p': Object.freeze(['1470:630', '1280:720', '1112:834', '960:960', '834:1112', '720:1280']),
+  '1080p': Object.freeze(['2206:946', '1920:1080', '1664:1248', '1440:1440', '1248:1664', '1080:1920']),
+});
 
 // credits: per second; min: per generation. i2v / t2v / v2v: image → video, text → video, video → video.
 // seconds: the lengths the model takes (else RUNWAY_SECONDS); ratios: its own ratio list; hd: has a 1080p ratio.
@@ -40,6 +50,9 @@ export const RUNWAY_MODELS = Object.freeze({
   // Grok Imagine: credits per second by resolution (credits: 720p's), +1 credit for an image → video start frame.
   grok_imagine_1_5: Object.freeze({ label: 'Grok Imagine 1.5 (Runway)', credits: 16, rates: Object.freeze({ '480p': 10, '720p': 16, '1080p': 29 }), still: 1, min: 0, i2v: true, t2v: true, v2v: false, seconds: GROK_SECONDS, grok: true, hd: true }),
   grok_imagine_1_5_lite: Object.freeze({ label: 'Grok Imagine 1.5 Lite (Runway)', credits: 3, rates: Object.freeze({ '480p': 2, '720p': 3, '1080p': 14 }), still: 1, min: 0, i2v: true, t2v: true, v2v: false, seconds: GROK_SECONDS, grok: true, hd: true }),
+  // Seedance 2.5: 20 / 30 / 68 credits a second at 480p / 720p / 1080p (credits: 720p's), sound included, at least 80
+  // credits a generation. range: Runway takes any whole length in it (the menu offers `seconds`).
+  seedance2_5: Object.freeze({ label: 'Seedance 2.5 (Runway)', credits: 30, rates: Object.freeze({ '480p': 20, '720p': 30, '1080p': 68 }), min: 80, i2v: true, t2v: true, v2v: false, seconds: SEEDANCE_SECONDS, range: Object.freeze([4, 30]), seedance: true, hd: true }),
 });
 
 // Entries for app.js VIDEO_MODELS (appended after the Veo entries). auto:false — Auto never spends Runway credits;
@@ -53,6 +66,8 @@ export const RUNWAY_VIDEO_MODELS = Object.freeze([
   // xAI's Grok Imagine through Runway (owner only). Lite: Runway's 2026-10-01 addition.
   Object.freeze({ id: 'runway:grok_imagine_1_5_lite', label: 'Grok Imagine 1.5 Lite · Runway', runway: 'grok_imagine_1_5_lite', auto: false, note: 'Grok Imagine 1.5 Lite on Runway ≈ $0.03/sec at 720p · text or image → video' }),
   Object.freeze({ id: 'runway:grok_imagine_1_5', label: 'Grok Imagine 1.5 · Runway', runway: 'grok_imagine_1_5', auto: false, note: 'Grok Imagine 1.5 on Runway ≈ $0.16/sec at 720p with sound · text or image → video' }),
+  // ByteDance's Seedance 2.5 through Runway (owner only; Runway 2026-08-07).
+  Object.freeze({ id: 'runway:seedance2_5', label: 'Seedance 2.5 · Runway', runway: 'seedance2_5', auto: false, note: 'Seedance 2.5 on Runway ≈ $0.30/sec at 720p with sound · text or image → video' }),
 ]);
 // Video → video edits (a clip attached in Video mode). Not in the menu until app.js routes clips there (phase 1b).
 export const RUNWAY_EDIT_MODEL = Object.freeze({ id: 'runway:aleph2', label: 'Runway Aleph · edit a video', runway: 'aleph2', v2v: true, auto: false, note: 'Runway Aleph ≈ $0.28/sec · at least $0.56' });
@@ -99,8 +114,19 @@ export function quoteNote(model, seconds, opts) {
 export function optionNote(entry, secs, aspect) {
   const model = entry?.runway;
   if (!Object.hasOwn(RUNWAY_MODELS, model ?? '')) return '';
-  const s = runwaySeconds(secs, model), grok = RUNWAY_MODELS[model].grok, resolution = grok ? (aspect === '16:9hd' ? '1080p' : '720p') : undefined;
-  return `${RUNWAY_MODELS[model].label} · ${s} s ${quoteNote(model, s, { resolution })}${grok ? ` · ${resolution}` : ''}${entry.needsImage ? ' · attach a still' : ''}`;
+  const s = runwaySeconds(secs, model), tiered = Boolean(RUNWAY_MODELS[model].rates), resolution = tiered ? (aspect === '16:9hd' ? '1080p' : '720p') : undefined;
+  return `${RUNWAY_MODELS[model].label} · ${s} s ${quoteNote(model, s, { resolution })}${tiered ? ` · ${resolution}` : ''}${entry.needsImage ? ' · attach a still' : ''}`;
+}
+// Over this many credits ($5) app.js asks before a new paid task (runwayVideo's approve): Seedance 2.5 at 30 s, 1080p is
+// 2,040 credits ($20.40) for one send, and an Ask-mode message can start several videos on the saved Video options
+// without the price note on screen. The Worker's RUNWAY_MAX_CREDITS, when set, is the hard cap behind it.
+export const ASK_OVER_CREDITS = 500;
+// The confirm() question for `seconds` of `model` (opts as quote's) when it costs over ASK_OVER_CREDITS, else ''.
+export function spendQuestion(model, seconds, opts = {}) {
+  const q = quote(model, seconds, opts);
+  if (!q || q.credits <= ASK_OVER_CREDITS) return '';
+  const res = RUNWAY_MODELS[model].rates && opts.resolution ? ` at ${opts.resolution}` : '';
+  return `Make this ${Math.ceil(Number(seconds))} s ${RUNWAY_MODELS[model].label} video${res}? It costs about ${n$(q.credits)} credits (${credits$(q.credits)}) of your Runway balance.`;
 }
 // '48 credits ($0.48)' for a finished task's real cost; '' when unknown.
 export const creditsNote = (c) => (Number.isFinite(c) && c >= 0 ? `${n$(c)} credit${c === 1 ? '' : 's'} (${credits$(c)})` : '');
@@ -119,8 +145,9 @@ export function ratioFor(w, h, kind = 'image_to_video') {
 }
 // Runway refuses a prompt image whose width ÷ height is outside these (docs: assets/inputs, "Input asset aspect ratio
 // requirements") — it does NOT crop it first. Phone screenshots (≈ 0.45) and wide panoramas fall outside. Veo 3.1 has
-// no such range listed (the still goes as is; its output ratio follows the still's orientation).
-export const INPUT_ASPECT = Object.freeze({ 'gen4.5': Object.freeze([0.5, 2]), gen4_turbo: Object.freeze([0.5, 2.358]) });
+// no such range listed (the still goes as is; its output ratio follows the still's orientation). Seedance 2.5: 0.4–4
+// (a 4.4:1 panorama or a long scrolling screenshot is outside; cropStill cuts it in with rangeCrop).
+export const INPUT_ASPECT = Object.freeze({ 'gen4.5': Object.freeze([0.5, 2]), gen4_turbo: Object.freeze([0.5, 2.358]), seedance2_5: Object.freeze([0.4, 4]) });
 // A w×h still for `model` → {ratio, crop}: the output ratio (ratioFor), and the centre crop {x, y, w, h} that gives the
 // image that shape — what Runway would cut anyway — kept 1% inside the model's input range so later rounding can't push
 // it out (gen4.5's 1584:672 is wider than its 2:1 limit: the still is cut to ~2:1 and Runway trims the rest).
@@ -139,8 +166,24 @@ export function stillPlan(w, h, model = 'gen4.5') {
   while (cw / ch < lo && ch > 1) ch--;
   return { ratio, crop: { x: Math.floor((w - cw) / 2), y: Math.floor((h - ch) / 2), w: cw, h: ch } };
 }
-// Browser only (called at send time): a still data: URL → {src, ratio, w, h}, centre-cropped per stillPlan (a JPEG of
-// at most 2048 px a side; app.js's shrinkDataUrl sizes it for the request afterwards). Unchanged when no crop is needed.
+// A w×h still for a model whose output ratio buildRequest picks (Seedance 2.5) → the centre crop {x, y, w, h} that
+// brings it inside the model's INPUT_ASPECT range, kept 1% inside like stillPlan's; null when it is already ≥ 0.5%
+// inside (it goes as is). 4000×900 (4.44:1) → 3564×900 (3.96:1); 1080×2800 (0.39) → 1080×2673 (0.404).
+export function rangeCrop(w, h, model) {
+  const lim = INPUT_ASPECT[model];
+  if (!lim || !(w > 0 && h > 0 && Number.isFinite(w / h))) return null;
+  const [lo, hi] = lim, have = w / h;
+  if (have >= lo * 1.005 && have <= hi / 1.005) return null;
+  let cw = w, ch = h;
+  if (have > hi / 1.005) cw = Math.min(w, Math.max(1, Math.round((h * hi) / 1.01)));
+  else ch = Math.min(h, Math.max(1, Math.round(w / (lo * 1.01))));
+  while (cw / ch > hi && cw > 1) cw--;
+  while (cw / ch < lo && ch > 1) ch--;
+  return { x: Math.floor((w - cw) / 2), y: Math.floor((h - ch) / 2), w: cw, h: ch };
+}
+// Browser only (called at send time): a still data: URL → {src, ratio, w, h}, centre-cropped per stillPlan (Seedance:
+// rangeCrop) as a JPEG of at most 2048 px a side; app.js's shrinkDataUrl sizes it for the request afterwards. Unchanged
+// when no crop is needed. ratio null: buildRequest picks it (from the still's size and the Video-mode aspect).
 export async function cropStill(src, model = 'gen4.5') {
   const img = await new Promise((res, rej) => {
     const i = new Image();
@@ -149,9 +192,11 @@ export async function cropStill(src, model = 'gen4.5') {
     i.src = src;
   });
   const w = img.naturalWidth, h = img.naturalHeight;
-  if (RUNWAY_MODELS[model]?.ratios) return { src, ratio: veoRatio({ w, h }), w, h };
+  // Veo 3.1: buildRequest picks the ratio from the still's orientation and the aspect ('16:9 · HD' → 1920:1080 / 1080:1920)
+  if (RUNWAY_MODELS[model]?.ratios) return { src, ratio: null, w, h };
   if (RUNWAY_MODELS[model]?.grok) return { src, ratio: null, w, h }; // Grok Imagine: the output follows the still
-  const plan = stillPlan(w, h, model);
+  // Seedance: buildRequest picks the ratio (it knows HD); only a still outside Runway's 0.4–4 is cut, into that range
+  const plan = RUNWAY_MODELS[model]?.seedance ? { ratio: null, crop: rangeCrop(w, h, model) } : stillPlan(w, h, model);
   if (!plan.crop) return { src, ratio: plan.ratio, w, h };
   const { x, y, w: cw, h: ch } = plan.crop, k = Math.min(1, 2048 / Math.max(cw, ch));
   const c = document.createElement('canvas');
@@ -169,13 +214,21 @@ export const t2vRatio = (aspect) => (aspect === '9:16' ? '720:1280' : '1280:720'
 // A length Runway takes: whole seconds 2–10 (default 5); for a model with its own lengths (Veo 3.1: 4/6/8) the nearest
 // one of those at or below (else its shortest).
 export function runwaySeconds(secs, model) {
-  const s = Math.round(Number(secs)), list = RUNWAY_MODELS[model]?.seconds;
+  const s = Math.round(Number(secs)), list = RUNWAY_MODELS[model]?.seconds, range = RUNWAY_MODELS[model]?.range;
+  if (range && Number.isFinite(s) && s >= range[0] && s <= range[1]) return s; // Seedance: any whole length in range
   if (list) return list.includes(s) ? s : [...list].reverse().find((x) => x <= s) ?? (Number.isFinite(s) && s > 0 ? list[0] : 6);
   // (Grok Imagine's list is GROK_SECONDS: Runway takes any whole 1–15 s, the menu offers those)
   return Number.isFinite(s) && s >= 2 && s <= 10 ? s : 5;
 }
 /** The Video-mode length menu for a Runway model. */
 export const runwaySecondsFor = (model) => RUNWAY_MODELS[model]?.seconds || RUNWAY_SECONDS;
+// After a model switch (app.js): `secs` snapped to the model's menu — kept if the menu has it, else its longest length
+// at or below it, else its shortest — so the select, the note and the request agree (20 s from Seedance → 10 s on
+// Gen-4.5, where runwaySeconds' 5 s isn't in the menu and the select would show '2 s').
+export function runwayMenuSeconds(secs, model) {
+  const menu = runwaySecondsFor(model), s = Math.round(Number(secs));
+  return menu.includes(s) ? s : [...menu].reverse().find((x) => x <= s) ?? menu[0];
+}
 // Veo 3.1 on Runway: the ratio for the Video-mode aspect ('16:9hd' is 1920:1080), or for a still's orientation.
 export function veoRatio({ w, h, aspect } = {}) {
   if (w > 0 && h > 0) return h > w ? (aspect === '16:9hd' ? '1080:1920' : '720:1280') : aspect === '16:9hd' ? '1920:1080' : '1280:720';
@@ -189,6 +242,20 @@ export function grokShape(model, { aspect, still = false, wantRatio } = {}) {
   if (still) return { ratio: hd ? 'auto_1080p' : 'auto_720p', resolution };
   if (/^(720:1280|1280:720|1904:1072|1072:1904)$/.test(wantRatio || '')) return { ratio: wantRatio, resolution: /1904|1072/.test(wantRatio) ? '1080p' : '720p' };
   return { ratio: hd ? '1904:1072' : portrait ? '720:1280' : '1280:720', resolution };
+}
+// Seedance 2.5 on Runway → {ratio, resolution}: a ratio the caller already chose (Remix's 1280:720 frame), else 720p
+// ('16:9 · HD': 1080p) in the shape closest to the still (16:9, 4:3, 1:1, 3:4, 9:16 or 21:9), else the aspect's 16:9 / 9:16.
+export function seedanceShape({ aspect, w, h, wantRatio } = {}) {
+  for (const [res, list] of Object.entries(SEEDANCE_RATIOS)) if (list.includes(wantRatio)) return { ratio: wantRatio, resolution: res };
+  const resolution = aspect === '16:9hd' ? '1080p' : '720p', list = SEEDANCE_RATIOS[resolution];
+  if (!(w > 0 && h > 0 && Number.isFinite(w / h))) return { ratio: aspect === '9:16' ? list[5] : list[1], resolution };
+  const want = Math.log(w / h);
+  let best = list[1], gap = Infinity;
+  for (const r of list) {
+    const [a, b] = r.split(':').map(Number), d = Math.abs(Math.log(a / b) - want);
+    if (d < gap - 1e-9) { best = r; gap = d; }
+  }
+  return { ratio: best, resolution };
 }
 // After switching from Runway back to Omni / Cosmos: a length of 4/6/8 s.
 export const veoSeconds = (secs) => (VEO_SECONDS.includes(+secs) ? +secs : +secs > 8 ? 8 : 4);
@@ -249,6 +316,17 @@ export function buildRequest({ model, prompt, still, stillSize, ratio: wantRatio
     }
     if (!text) throw fail(400, 'Describe the video you want Grok Imagine to make.');
     return { kind: 'text_to_video', body: { model, promptText: text, ...r, ...res, duration }, ratio, resolution, seconds: duration, note: 'text → video' };
+  }
+  if (spec.seedance) { // Seedance 2.5: the still as is; a prompt is optional with a still, needed without one
+    const text = String(prompt ?? '').trim().slice(0, SEEDANCE_PROMPT_MAX).trim();
+    const { ratio, resolution } = seedanceShape({ aspect, w: stillSize?.w, h: stillSize?.h, wantRatio });
+    if (still) {
+      if (typeof still !== 'string' || !/^data:image\/(jpeg|jpg|png|webp);base64,/.test(still)) throw fail(400, 'Runway takes JPEG, PNG or WebP images.');
+      if (still.length > DATA_URI_MAX) throw fail(413, 'That image is too large for Runway (5 MB) — try a smaller one.');
+      return { kind: 'image_to_video', body: { model, ...(text ? { promptText: text } : {}), promptImage: still, ratio, duration, ...extra }, ratio, resolution, seconds: duration, note: 'image → video' };
+    }
+    if (!text) throw fail(400, 'Describe the video you want Seedance to make.');
+    return { kind: 'text_to_video', body: { model, promptText: text, ratio, duration, ...extra }, ratio, resolution, seconds: duration, note: 'text → video' };
   }
   if (spec.ratios) { // Veo 3.1: its own ratios, 4/6/8 s; the still goes as is
     if (!promptText) throw fail(400, 'Describe the video you want Veo to make.');
@@ -534,7 +612,9 @@ const AGAIN_FREE = ' Tap Try again to download it again — it won’t make (or 
 // one: a timeout or drop while it ran, any download failure once it SUCCEEDED (it is paid for; Runway hands out fresh
 // links), and Stop. Stop cancels a task that is still queued or running (the Worker leaves a finished one alone) and
 // never touches one that already SUCCEEDED; resuming a task that turns out cancelled or gone starts a new one.
-export async function runwayVideo(req, { apiHeaders, signal, onStatus, onTask, resume = null, limit, sleep: wait, random, now } = {}) {
+// approve(): asked (and awaited) just before a new paid task is created — never for a resumed one; false stops there
+// with an AbortError and nothing sent (app.js: confirm(spendQuestion(…)) for a big spend).
+export async function runwayVideo(req, { apiHeaders, signal, onStatus, onTask, resume = null, approve = null, limit, sleep: wait, random, now } = {}) {
   if (signal?.aborted) throw abortError();
   const say = (text, task) => { if (text) try { onStatus?.(text, task); } catch (err) { console.error(err); } };
   const release = await takeSlot(limit ?? accountLimit(req?.body?.model), signal, () => say('Waiting for your other Runway video'));
@@ -553,6 +633,8 @@ export async function runwayVideo(req, { apiHeaders, signal, onStatus, onTask, r
       }
     }
     if (!task) {
+      if (signal?.aborted) throw abortError();
+      if (approve && !(await approve())) throw abortError(); // the owner said no to the price: nothing was sent
       if (signal?.aborted) throw abortError();
       say('Sending to Runway');
       let made;

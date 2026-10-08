@@ -11,6 +11,7 @@ const {
   pollDelay, statusText, failureOf, mentionsRunway, runwayHint, connectionRow, isRunwayId, runwayModelOf,
   waitForTask, runwayVideo, takeSlot, slotState, uploadToRunway, runwayAccount, forgetAccount, accountLimit, cancelTask, downloadOutput, POWERED_BY,
   stillPlan, INPUT_ASPECT, createTask, createTimeout, VEO_RATIOS, runwaySecondsFor, veoRatio, optionNote, GROK_SECONDS, grokShape,
+  SEEDANCE_SECONDS, SEEDANCE_RATIOS, seedanceShape, rangeCrop, cropStill, runwayMenuSeconds, spendQuestion, ASK_OVER_CREDITS,
 } = R;
 
 // app.js's own errorKind (+ accountProblem), lifted from the source so the card a Runway error gets is the real one.
@@ -81,7 +82,7 @@ test('the client catalogue matches the Worker’s (models, prices, ratios, uploa
     assert.equal(S.RUNWAY_MODELS[id].creditsNoAudio * 2, S.RUNWAY_MODELS[id] === S.RUNWAY_MODELS['veo3.1'] ? 40 : 20, id);
   }
   // only current ids (gen3a_turbo and gen4_aleph were retired by Runway on 2026-07-30)
-  assert.deepEqual(Object.keys(RUNWAY_MODELS).sort(), ['aleph2', 'gen4.5', 'gen4_turbo', 'grok_imagine_1_5', 'grok_imagine_1_5_lite', 'veo3.1', 'veo3.1_fast']);
+  assert.deepEqual(Object.keys(RUNWAY_MODELS).sort(), ['aleph2', 'gen4.5', 'gen4_turbo', 'grok_imagine_1_5', 'grok_imagine_1_5_lite', 'seedance2_5', 'veo3.1', 'veo3.1_fast']);
   // Grok Imagine on Runway: the same per-resolution rates and start-frame credit on both sides
   for (const id of ['grok_imagine_1_5', 'grok_imagine_1_5_lite']) {
     assert.deepEqual({ ...RUNWAY_MODELS[id].rates }, { ...S.RUNWAY_MODELS[id].rates }, id);
@@ -121,6 +122,48 @@ test('Grok Imagine on Runway: requests the Worker accepts, the still as is, and 
   assert.equal(RUNWAY_MODELS.grok_imagine_1_5.hd, true);
 });
 
+test('Seedance 2.5 on Runway: requests the Worker accepts, 16:9 / 9:16 at 720p, “16:9 · HD” at 1080p, quotes per tier', () => {
+  const cases = [
+    [{ model: 'seedance2_5', prompt: 'a lighthouse', aspect: '16:9', secs: 6 }, { kind: 'text_to_video', body: { model: 'seedance2_5', promptText: 'a lighthouse', ratio: '1280:720', duration: 6 } }],
+    [{ model: 'seedance2_5', prompt: 'x', aspect: '9:16', secs: 10 }, { kind: 'text_to_video', body: { model: 'seedance2_5', promptText: 'x', ratio: '720:1280', duration: 10 } }],
+    [{ model: 'seedance2_5', prompt: 'x', aspect: '16:9hd', secs: 30 }, { kind: 'text_to_video', body: { model: 'seedance2_5', promptText: 'x', ratio: '1920:1080', duration: 30 } }],
+    [{ model: 'seedance2_5', prompt: '', still: PNG, stillSize: { w: 1000, h: 1000 }, aspect: '16:9hd', secs: 4 }, { kind: 'image_to_video', body: { model: 'seedance2_5', promptImage: PNG, ratio: '1440:1440', duration: 4 } }],
+    [{ model: 'seedance2_5', prompt: 'push in', still: JPEG, stillSize: { w: 720, h: 1600 }, aspect: '16:9', secs: 8, seed: 3 }, { kind: 'image_to_video', body: { model: 'seedance2_5', promptText: 'push in', promptImage: JPEG, ratio: '720:1280', duration: 8, seed: 3 } }],
+    [{ model: 'seedance2_5', prompt: 'x', still: PNG, ratio: '1280:720', secs: 5 }, { kind: 'image_to_video', body: { model: 'seedance2_5', promptText: 'x', promptImage: PNG, ratio: '1280:720', duration: 5 } }],
+  ];
+  for (const [input, want] of cases) {
+    const r = buildRequest(input);
+    assert.deepEqual({ kind: r.kind, body: r.body }, want, JSON.stringify(input).slice(0, 80));
+    assert.deepEqual(S.shapeRequest(r.kind, r.body).body, r.body, 'the Worker sends it as built');
+    assert.equal(r.resolution, S.shapeRequest(r.kind, r.body).resolution);
+  }
+  assert.equal(buildRequest({ model: 'seedance2_5', prompt: 'x'.repeat(16000), secs: 6 }).body.promptText.length, 15000, 'Seedance takes 15,000 characters');
+  assert.throws(() => buildRequest({ model: 'seedance2_5', prompt: '' }), (e) => e.status === 400 && /Describe the video/.test(e.message));
+  // the menu: 4–30 s in steps; any whole length in range passes (Remix), outside snaps into it
+  assert.deepEqual([...runwaySecondsFor('seedance2_5')], [4, 6, 8, 10, 15, 20, 30]);
+  assert.deepEqual([runwaySeconds(5, 'seedance2_5'), runwaySeconds(30, 'seedance2_5'), runwaySeconds(45, 'seedance2_5'), runwaySeconds(2, 'seedance2_5')], [5, 30, 30, 4]);
+  assert.ok(SEEDANCE_SECONDS.every((s) => s >= S.RUNWAY_MODELS.seedance2_5.durationRange[0] && s <= S.RUNWAY_MODELS.seedance2_5.durationRange[1]));
+  // the same ratios and rates on both sides
+  assert.deepEqual(Object.values(SEEDANCE_RATIOS).flat(), [...S.RUNWAY_MODELS.seedance2_5.kinds.text_to_video]);
+  assert.deepEqual({ ...RUNWAY_MODELS.seedance2_5.rates }, { ...S.RUNWAY_MODELS.seedance2_5.rates });
+  assert.equal(RUNWAY_MODELS.seedance2_5.min, S.RUNWAY_MODELS.seedance2_5.minCredits);
+  for (const resolution of ['480p', '720p', '1080p']) for (const secs of [4, 7, 30]) {
+    assert.deepEqual(quote('seedance2_5', secs, { resolution }), S.quote('seedance2_5', secs, true, { resolution }), `${resolution} ${secs}`);
+  }
+  // the live note in Video mode
+  const entry = RUNWAY_VIDEO_MODELS.find((m) => m.id === 'runway:seedance2_5');
+  assert.equal(entry.label, 'Seedance 2.5 · Runway');
+  assert.equal(entry.auto, false);
+  assert.equal(optionNote(entry, 6, '16:9'), 'Seedance 2.5 (Runway) · 6 s ≈ 180 credits ($1.80) · 720p');
+  assert.equal(optionNote(entry, 10, '16:9hd'), 'Seedance 2.5 (Runway) · 10 s ≈ 680 credits ($6.80) · 1080p');
+  assert.equal(optionNote(entry, 30, '9:16'), 'Seedance 2.5 (Runway) · 30 s ≈ 900 credits ($9.00) · 720p');
+  assert.equal(quoteNote('seedance2_5', 30, { resolution: '1080p' }), '≈ 2,040 credits ($20.40)');
+  assert.equal(RUNWAY_MODELS.seedance2_5.hd, true);
+  assert.deepEqual(seedanceShape({ aspect: '9:16' }), { ratio: '720:1280', resolution: '720p' });
+  assert.deepEqual(seedanceShape({ aspect: '16:9hd', w: 1600, h: 1200 }), { ratio: '1664:1248', resolution: '1080p' });
+  assert.deepEqual(seedanceShape({ aspect: '16:9hd', wantRatio: '1280:720' }), { ratio: '1280:720', resolution: '720p' }, 'a ratio already chosen wins');
+});
+
 test('Veo 3.1 on Runway: requests in its own ratios and lengths, the still as is, and a quote per second with sound', () => {
   assert.deepEqual(buildRequest({ model: 'veo3.1', prompt: 'a lighthouse', aspect: '16:9', secs: 8 }),
     { kind: 'text_to_video', body: { model: 'veo3.1', promptText: 'a lighthouse', ratio: '1280:720', duration: 8 }, ratio: '1280:720', seconds: 8, note: 'text → video' });
@@ -141,7 +184,7 @@ test('Veo 3.1 on Runway: requests in its own ratios and lengths, the still as is
 });
 
 test('menu entries: runway:<model> ids, never Auto, and the meta line reads runway:gen4.5', () => {
-  assert.deepEqual(RUNWAY_VIDEO_MODELS.map((m) => m.id), ['runway:gen4.5', 'runway:gen4_turbo', 'runway:veo3.1', 'runway:veo3.1_fast', 'runway:grok_imagine_1_5_lite', 'runway:grok_imagine_1_5']);
+  assert.deepEqual(RUNWAY_VIDEO_MODELS.map((m) => m.id), ['runway:gen4.5', 'runway:gen4_turbo', 'runway:veo3.1', 'runway:veo3.1_fast', 'runway:grok_imagine_1_5_lite', 'runway:grok_imagine_1_5', 'runway:seedance2_5']);
   for (const m of [...RUNWAY_VIDEO_MODELS, RUNWAY_EDIT_MODEL]) {
     assert.equal(m.auto, false, m.id);
     assert.equal(runwayModelOf(m.id), m.runway);
@@ -178,7 +221,7 @@ test('ratioFor picks the nearest allowed ratio', () => {
 
 test('stillPlan: stills outside Runway’s input range are centre-cropped to the clip’s shape (phone screenshots, panoramas)', () => {
   // Runway refuses a prompt image outside 0.5–2 (gen4.5) / 0.5–2.358 (gen4_turbo) instead of cropping it
-  assert.deepEqual(INPUT_ASPECT, { 'gen4.5': [0.5, 2], gen4_turbo: [0.5, 2.358] });
+  assert.deepEqual(INPUT_ASPECT, { 'gen4.5': [0.5, 2], gen4_turbo: [0.5, 2.358], seedance2_5: [0.4, 4] });
   const cases = [
     // [w, h, model, ratio]
     [1080, 2400, 'gen4.5', '720:1280'], [1179, 2556, 'gen4.5', '720:1280'], [1080, 2400, 'gen4_turbo', '720:1280'],
@@ -209,6 +252,96 @@ test('stillPlan: stills outside Runway’s input range are centre-cropped to the
   assert.equal(r.body.ratio, '1584:672');
   assert.equal(S.shapeRequest(r.kind, structuredClone(r.body)).body.ratio, '1584:672');
   assert.equal(buildRequest({ model: 'gen4.5', prompt: 'x', still: JPEG, stillSize: { w: 1980, h: 1000 }, ratio: '999:1' }).body.ratio, '1280:720', 'an unknown ratio is ignored');
+});
+
+// cropStill in node: an Image of `size` ([w, h]), and a canvas that records each cut and hands back JPEG.
+async function withStill(size, fn) {
+  const real = { Image: globalThis.Image, document: globalThis.document }, cuts = [];
+  globalThis.Image = class { set src(_) { [this.naturalWidth, this.naturalHeight] = size(); queueMicrotask(() => this.onload()); } };
+  globalThis.document = { createElement: () => { const c = { width: 0, height: 0, getContext: () => ({ drawImage: (_, x, y, w, h) => cuts.push({ x, y, w, h }) }), toDataURL: () => JPEG }; return c; } };
+  try { return await fn(cuts); } finally {
+    for (const [k, v] of Object.entries(real)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; }
+  }
+}
+
+test('Seedance 2.5: a still outside Runway’s 0.4–4 is centre-cut into it before it goes; in-range stills go as is', async () => {
+  // a 4000×900 panorama (4.44:1) and a 1080×2800 scrolling screenshot (0.39): cut 1% inside the range, evenly
+  assert.deepEqual(rangeCrop(4000, 900, 'seedance2_5'), { x: 218, y: 0, w: 3564, h: 900 });
+  assert.deepEqual(rangeCrop(1080, 2800, 'seedance2_5'), { x: 0, y: 63, w: 1080, h: 2673 });
+  for (const [w, h] of [[4000, 900], [1080, 2800], [5000, 100], [100, 5000], [9, 2], [2, 9], [401, 100], [3999, 1000]]) {
+    const c = rangeCrop(w, h, 'seedance2_5');
+    assert.ok(c, `${w}×${h} should be cut`);
+    assert.ok(c.w / c.h >= 0.4 && c.w / c.h <= 4, `${w}×${h}: ${c.w}×${c.h} = ${c.w / c.h}`);
+    assert.ok(c.x >= 0 && c.y >= 0 && c.x + c.w <= w && c.y + c.h <= h, 'inside the image');
+    assert.ok(Math.abs(c.x - (w - c.w - c.x)) <= 1 && Math.abs(c.y - (h - c.h - c.y)) <= 1, 'centred');
+    assert.ok(c.w === w || c.h === h, 'only one side is cut');
+  }
+  // inside the range (phone screenshots ≈ 0.45 included): left alone — Runway crops those to the ratio itself
+  for (const [w, h] of [[1280, 720], [1080, 2400], [1000, 1000], [3900, 1000], [1000, 2400], [2400, 1000]]) assert.equal(rangeCrop(w, h, 'seedance2_5'), null, `${w}×${h}`);
+  assert.equal(rangeCrop(0, 0, 'seedance2_5'), null);
+  assert.equal(rangeCrop(4000, 900, 'veo3.1'), null, 'no listed range: as is');
+  // the path app.js takes: cropStill → (shrink) → buildRequest → the Worker's check
+  let size;
+  await withStill(() => size, async (cuts) => {
+    for (const [w, h, aspect, ratio] of [[4000, 900, '16:9', '1470:630'], [4000, 900, '16:9hd', '2206:946'], [1080, 2800, '16:9', '720:1280']]) {
+      size = [w, h]; cuts.length = 0;
+      const cut = await cropStill(PNG, 'seedance2_5');
+      assert.equal(cut.src, JPEG, `${w}×${h} is re-encoded after the cut`);
+      assert.equal(cut.ratio, null, 'buildRequest picks the ratio');
+      assert.deepEqual(cuts[0], rangeCrop(w, h, 'seedance2_5'));
+      assert.ok(cut.w / cut.h >= 0.4 && cut.w / cut.h <= 4 && Math.max(cut.w, cut.h) <= 2048, `${cut.w}×${cut.h}`);
+      const r = buildRequest({ model: 'seedance2_5', prompt: 'x', still: cut.src, stillSize: { w: cut.w, h: cut.h }, ratio: cut.ratio, aspect, secs: 6 });
+      assert.equal(r.body.ratio, ratio, `${w}×${h} ${aspect}`);
+      assert.deepEqual(S.shapeRequest(r.kind, r.body).body, r.body);
+    }
+    size = [1600, 900]; cuts.length = 0;
+    assert.deepEqual(await cropStill(PNG, 'seedance2_5'), { src: PNG, ratio: null, w: 1600, h: 900 });
+    assert.equal(cuts.length, 0, 'an in-range still is not re-encoded');
+  });
+});
+
+test('Veo 3.1 on Runway: a still with “16:9 · HD” goes out at 1080p (cropStill leaves the ratio to buildRequest)', async () => {
+  let size;
+  await withStill(() => size, async (cuts) => {
+    for (const model of ['veo3.1', 'veo3.1_fast']) {
+      for (const [w, h, aspect, want] of [[1600, 900, '16:9hd', '1920:1080'], [900, 1600, '16:9hd', '1080:1920'], [1000, 1000, '16:9hd', '1920:1080'],
+        [1600, 900, '16:9', '1280:720'], [900, 1600, '9:16', '720:1280'], [900, 1600, '16:9', '720:1280'], [1600, 900, '9:16', '1280:720']]) {
+        size = [w, h];
+        const cut = await cropStill(PNG, model);
+        assert.deepEqual(cut, { src: PNG, ratio: null, w, h }, 'the still goes as is');
+        const r = buildRequest({ model, prompt: 'x', still: PNG, stillSize: { w, h }, ratio: cut.ratio, aspect, secs: 6 });
+        assert.equal(r.body.ratio, want, `${model} ${w}×${h} ${aspect}`);
+        assert.equal(S.shapeRequest(r.kind, r.body).body.ratio, want);
+      }
+    }
+    // Grok Imagine and Seedance (in range) keep the still and leave the ratio to buildRequest too
+    for (const model of ['grok_imagine_1_5', 'grok_imagine_1_5_lite', 'seedance2_5']) { size = [1600, 900]; assert.deepEqual(await cropStill(PNG, model), { src: PNG, ratio: null, w: 1600, h: 900 }, model); }
+    // Gen-4.5 still gets its ratio from stillPlan
+    size = [1280, 720]; assert.deepEqual(await cropStill(PNG, 'gen4.5'), { src: PNG, ratio: '1280:720', w: 1280, h: 720 });
+    assert.equal(cuts.length, 0);
+  });
+});
+
+test('runwayMenuSeconds: after a model switch the length snaps into that model’s menu, so the select, note and request agree', () => {
+  // Seedance's 15 / 20 / 30 s (or Grok's 15 s) → Gen-4.5 / Gen-4 Turbo: 10 s. runwaySeconds alone gave 5, which the
+  // menu lacks, so the select showed '2 s' while the note and the request said 5 s.
+  for (const entry of RUNWAY_VIDEO_MODELS.filter((m) => m.runway === 'gen4.5' || m.runway === 'gen4_turbo')) {
+    for (const from of [15, 20, 30]) {
+      const secs = runwayMenuSeconds(from, entry.runway);
+      assert.equal(secs, 10, `${from} s → ${entry.runway}`);
+      assert.equal(runwaySeconds(secs, entry.runway), secs, 'the request sends the menu’s length');
+      assert.match(optionNote(entry, secs), / · 10 s ≈ /);
+    }
+  }
+  assert.equal(buildRequest({ model: 'gen4.5', prompt: 'x', secs: runwayMenuSeconds(20, 'gen4.5') }).seconds, 10);
+  assert.deepEqual([5, 3, 7, 9, 1, 0, NaN, 'x', undefined].map((s) => runwayMenuSeconds(s, 'gen4.5')), [4, 2, 6, 8, 2, 2, 2, 2, 2]);
+  assert.deepEqual([12, 45, 25, 2, 30, 6].map((s) => runwayMenuSeconds(s, 'seedance2_5')), [10, 30, 20, 4, 30, 6]);
+  assert.deepEqual([10, 5, 2, 15].map((s) => runwayMenuSeconds(s, 'veo3.1')), [8, 4, 4, 8]);
+  assert.deepEqual([12, 3].map((s) => runwayMenuSeconds(s, 'grok_imagine_1_5')), [10, 4]);
+  for (const { runway: model } of RUNWAY_VIDEO_MODELS) for (let s = -1; s <= 40; s++) assert.ok(runwaySecondsFor(model).includes(runwayMenuSeconds(s, model)), `${model} ${s}`);
+  // app.js snaps with it whenever the saved length isn't in the Runway model's menu
+  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /if \(!runwaySecondsFor\(rw\)\.includes\(\+o\.secs\)\) o\.secs = runwayMenuSeconds\(o\.secs, rw\);/);
 });
 
 test('quotes: per-second credits, Aleph’s 56-credit minimum, whole seconds', () => {
@@ -593,6 +726,63 @@ test('runwayVideo: resuming a task an earlier Stop cancelled starts a new one', 
   ]);
   const out = await runwayVideo(buildRequest({ model: 'gen4.5', prompt: 'x' }), { apiHeaders: headers, sleep: fakeSleep().sleep, resume: ID });
   assert.equal(out.id, NEW);
+});
+
+test('a big Runway spend asks first: spendQuestion over $5; approve runs right before a new paid task, and no sends nothing', async () => {
+  assert.equal(ASK_OVER_CREDITS, 500);
+  assert.equal(spendQuestion('seedance2_5', 30, { resolution: '1080p' }), 'Make this 30 s Seedance 2.5 (Runway) video at 1080p? It costs about 2,040 credits ($20.40) of your Runway balance.');
+  assert.match(spendQuestion('seedance2_5', 20, { resolution: '720p' }), /^Make this 20 s Seedance 2\.5 \(Runway\) video at 720p\? It costs about 600 credits \(\$6\.00\)/);
+  assert.match(spendQuestion('seedance2_5', 8, { resolution: '1080p' }), /544 credits \(\$5\.44\)/);
+  // at or under $5: no question (Seedance 15 s at 720p 450, Veo 3.1 8 s 320, Grok 1.5 15 s 1080p + still 436, Gen-4.5 10 s 120)
+  for (const [model, secs, opts] of [['seedance2_5', 15, { resolution: '720p' }], ['seedance2_5', 6, { resolution: '1080p' }], ['veo3.1', 8], ['grok_imagine_1_5', 15, { resolution: '1080p', still: true }], ['gen4.5', 10], ['gen4_turbo', 10], ['nope', 30], ['seedance2_5', 0]]) {
+    assert.equal(spendQuestion(model, secs, opts), '', `${model} ${secs}`);
+  }
+  // what app.js passes for every Video-mode choice: only Seedance's long or 1080p ones ask
+  const asks = [];
+  for (const { runway: model } of RUNWAY_VIDEO_MODELS) for (const secs of runwaySecondsFor(model)) for (const aspect of ['16:9', '16:9hd']) {
+    const req = buildRequest({ model, prompt: 'x', still: model === 'gen4_turbo' ? JPEG : undefined, stillSize: { w: 1280, h: 720 }, aspect, secs });
+    if (spendQuestion(model, req.seconds, { resolution: req.resolution, still: req.kind === 'image_to_video' })) asks.push(`${model} ${secs} ${req.resolution}`);
+  }
+  assert.deepEqual(asks, ['seedance2_5 8 1080p', 'seedance2_5 10 1080p', 'seedance2_5 15 1080p', 'seedance2_5 20 720p', 'seedance2_5 20 1080p', 'seedance2_5 30 720p', 'seedance2_5 30 1080p']);
+
+  const req = buildRequest({ model: 'seedance2_5', prompt: 'A paper boat', aspect: '16:9hd', secs: 30 });
+  // No: an AbortError (app.js's “Stopped.”), nothing sent, nothing to resume, the queue slot freed
+  mockFetch([]);
+  let asked = 0;
+  await assert.rejects(runwayVideo(req, { apiHeaders: headers, sleep: fakeSleep().sleep, approve: () => { asked++; return false; } }), (e) => e.name === 'AbortError' && !e.resumable && !e.task);
+  assert.equal(asked, 1);
+  assert.equal(calls.length, 0, 'nothing went to Runway');
+  assert.deepEqual(slotState(), { busy: 0, waiting: 0 });
+  // Yes (sync or async): it goes as built
+  for (const approve of [() => true, async () => true]) {
+    mockFetch([
+      [/^POST \/api\/runway\/generate\/text_to_video$/, () => reply(200, { id: ID, estimatedCost: { credits: 2040 } })],
+      [new RegExp(`^GET /api/runway/task/${ID}$`), () => reply(200, task('SUCCEEDED', { cost: { credits: 2040 } }))],
+      [/^GET \/api\/runway\/output\//, () => new Response(MP4, { headers: { 'content-type': 'video/mp4' } })],
+    ]);
+    const lines = [];
+    const out = await runwayVideo(req, { apiHeaders: headers, sleep: fakeSleep().sleep, approve, onStatus: (t) => lines.push(t) });
+    assert.equal(out.credits, 2040);
+    assert.deepEqual(calls[0].json, req.body);
+    assert.equal(lines[0], 'Sending to Runway');
+  }
+  // Resuming a task that is still there costs nothing more: no question
+  mockFetch([
+    [new RegExp(`^GET /api/runway/task/${ID}$`), () => reply(200, task('SUCCEEDED', { cost: { credits: 2040 } }))],
+    [/^GET \/api\/runway\/output\//, () => new Response(MP4, { headers: { 'content-type': 'video/mp4' } })],
+  ]);
+  asked = 0;
+  await runwayVideo(req, { apiHeaders: headers, sleep: fakeSleep().sleep, resume: ID, approve: () => { asked++; return false; } });
+  assert.equal(asked, 0);
+  // …but a resumed task an earlier Stop cancelled means a new charge: asked, and no stops it there
+  mockFetch([[new RegExp(`^GET /api/runway/task/${ID}$`), () => reply(200, task('CANCELLED'))]]);
+  await assert.rejects(runwayVideo(req, { apiHeaders: headers, sleep: fakeSleep().sleep, resume: ID, approve: () => { asked++; return false; } }), (e) => e.name === 'AbortError' && !e.resumable);
+  assert.equal(asked, 1);
+  assert.ok(!calls.some((c) => c.method === 'POST' || c.method === 'DELETE'), calls.map((c) => `${c.method} ${c.url}`).join());
+  // app.js asks with confirm(spendQuestion(…)) through approve
+  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const ask = runwaySpendQuestion\(cfg\.runway, req\.seconds, \{ resolution: req\.resolution, still: req\.kind === 'image_to_video' \}\);/);
+  assert.match(app, /apiHeaders, signal, resume, approve: ask \? \(\) => confirm\(ask\) : null,/);
 });
 
 test('runwayVideo: Stop during “Downloading from Runway” never deletes the paid video; Try again downloads it', async () => {

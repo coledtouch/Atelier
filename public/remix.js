@@ -9,10 +9,10 @@
 //     that names a retired Veo id is read as Omni (omni.js migrateVideoId; migrateRemix rewrites it).
 //   - Plan strings are untrusted (on-screen text in the footage can steer Gemini): they are cleaned and capped here and
 //     must still be escaped wherever they are shown. No plan field ever reaches a URL, a tool or a model id.
-import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=81';
-import { quote as runwayQuote, RUNWAY_MODELS, GROK_SECONDS } from './runway.js?v=81';
-import { stripThink } from './context.js?v=81';
-import { OMNI_ID, migrateVideoId } from './omni.js?v=81';
+import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=82';
+import { quote as runwayQuote, RUNWAY_MODELS, GROK_SECONDS } from './runway.js?v=82';
+import { stripThink } from './context.js?v=82';
+import { OMNI_ID, migrateVideoId } from './omni.js?v=82';
 
 export const REMIX_V = 1;
 export const LIMITS = Object.freeze({
@@ -46,6 +46,7 @@ export const BANDS = Object.freeze({ upper: Object.freeze([80, 250]), center: Ob
 export const OWNER_VIDEO_USD = Object.freeze({ ...VEO_PER_SECOND });
 export const OWNER_VEO_USD = OWNER_VIDEO_USD; // the pre-Omni name
 const RUNWAY_LENGTHS = Object.freeze([2, 3, 4, 5, 6, 7, 8, 9, 10]);
+const SEEDANCE_SHOT_SECONDS = Object.freeze([4, 5, 6, 7, 8, 9, 10]);
 // What may film an insert. image: 'optional' | 'required' (Gen-4 Turbo only animates a still); tester: offered to
 // testers (testerSeconds: the lengths the tester route takes). provider 'omni' films through /api/omni/* (omni.js),
 // 'runway' through /api/runway/* (runway.js; `runway` is Runway's model name). Veo 3.1 stays the owner's via Runway.
@@ -58,6 +59,8 @@ export const SHOT_MODELS = Object.freeze([
   // xAI's Grok Imagine through Runway (owner only): priced per second by resolution (runway.js quote).
   Object.freeze({ id: 'runway:grok_imagine_1_5_lite', provider: 'runway', runway: 'grok_imagine_1_5_lite', label: 'Grok Imagine 1.5 Lite · Runway', seconds: GROK_SECONDS, res: Object.freeze(['720p']), image: 'optional', tester: false }),
   Object.freeze({ id: 'runway:grok_imagine_1_5', provider: 'runway', runway: 'grok_imagine_1_5', label: 'Grok Imagine 1.5 · Runway', seconds: GROK_SECONDS, res: Object.freeze(['720p']), image: 'optional', tester: false }),
+  // ByteDance's Seedance 2.5 through Runway (owner only): any whole 4–30 s; inserts use 4–10 (30 credits a second at 720p).
+  Object.freeze({ id: 'runway:seedance2_5', provider: 'runway', runway: 'seedance2_5', label: 'Seedance 2.5 · Runway', seconds: SEEDANCE_SHOT_SECONDS, res: Object.freeze(['720p']), image: 'optional', tester: false }),
 ]);
 export const DEFAULT_SHOT_MODEL = OMNI_ID;
 /** A shot model by id; a retired Veo id (a saved shot or setting) resolves to the model that films it now (Omni). */

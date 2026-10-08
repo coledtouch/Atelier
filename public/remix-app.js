@@ -8,14 +8,14 @@
 // Money rules kept here: nothing billable starts before an Approve tap (filmQueue only starts shots whose approval key
 // matches their cost key); a shot whose start may have reached the provider ('unknown') needs a fresh approval; global
 // Stop never touches filming; a reload never starts anything new (boot only polls ops it finds in rx:ops).
-import * as R from './remix.js?v=81';
-import { cutsFrom } from './remix-cuts.js?v=81';
-import { advanceShot, shotRequest, firstFrameShape } from './remix-shots.js?v=81';
-import { buildGraph } from './remix-graph.js?v=81';
-import { createRemixStore, keys as rxKeys, SOURCE_MAX } from './remix-store.js?v=81';
-import { cardThumb, padFrameAt, grabFrame, canvasToDataUrl, ensureFonts, makeCanvas, composeFrame } from './remix-draw.js?v=81';
-import { frameAt as graphFrameAt } from './remix-graph.js?v=81';
-import { videoParts, planFor, noteFor, fmtDur } from './video.js?v=81';
+import * as R from './remix.js?v=82';
+import { cutsFrom } from './remix-cuts.js?v=82';
+import { advanceShot, shotRequest, firstFrameShape } from './remix-shots.js?v=82';
+import { buildGraph } from './remix-graph.js?v=82';
+import { createRemixStore, keys as rxKeys, SOURCE_MAX } from './remix-store.js?v=82';
+import { cardThumb, padFrameAt, grabFrame, canvasToDataUrl, ensureFonts, makeCanvas, composeFrame } from './remix-draw.js?v=82';
+import { frameAt as graphFrameAt } from './remix-graph.js?v=82';
+import { videoParts, planFor, noteFor, fmtDur } from './video.js?v=82';
 
 export const PLACEHOLDER = 'How should we remix it?'; // one line on a 360 px phone (the composer note and chips carry the rest)
 export const COPY = Object.freeze({
@@ -156,7 +156,7 @@ export function createRemix(deps) {
   const toast = deps.toast || (() => {});
   const ApiError = deps.ApiError || class extends Error { constructor(status, msg) { super(msg); this.status = status; } };
   let renderMod = null;
-  const loadRender = () => (renderMod ||= (deps.loadRender ? Promise.resolve(deps.loadRender()) : import('./remix-render.js?v=81')).catch((err) => { renderMod = null; throw err; }));
+  const loadRender = () => (renderMod ||= (deps.loadRender ? Promise.resolve(deps.loadRender()) : import('./remix-render.js?v=82')).catch((err) => { renderMod = null; throw err; }));
 
   const probes = new WeakMap(); // composer video → {status, info, caps, error}
   const files = new Map(); // entryId → source File (this session)

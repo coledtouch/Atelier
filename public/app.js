@@ -7,24 +7,24 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=81';
-import * as Sync from './sync.js?v=81';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwaySeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=81';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=81';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=81';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=81';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=81';
-import { initLookup } from './lookup.js?v=81';
-import { createRemix } from './remix-app.js?v=81';
-import { sendMode, looksLikeQuestion } from './remix.js?v=81';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=81';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=81';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=81';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=81';
-import * as ClaudeImport from './claude-import.js?v=81';
-import { createFeedback } from './feedback.js?v=81';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=81';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=81';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=82';
+import * as Sync from './sync.js?v=82';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, spendQuestion as runwaySpendQuestion, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=82';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=82';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=82';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=82';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=82';
+import { initLookup } from './lookup.js?v=82';
+import { createRemix } from './remix-app.js?v=82';
+import { sendMode, looksLikeQuestion } from './remix.js?v=82';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=82';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=82';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=82';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=82';
+import * as ClaudeImport from './claude-import.js?v=82';
+import { createFeedback } from './feedback.js?v=82';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=82';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=82';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -2347,6 +2347,9 @@ async function runRunway(e, cfg, still, signal) {
   const req = runwayRequest({ model: cfg.runway, prompt, still: img, stillSize: size, ratio, aspect: e.params.aspect, secs: e.params.secs });
   e.ratio = req.ratio; // the 'developing' placeholder takes the clip's shape
   e.meta.note = `${req.note} · ${req.seconds} s · ${runwayQuote(cfg.runway, req.seconds, { resolution: req.resolution, still: req.kind === 'image_to_video' })}`;
+  // Over $5 the owner confirms the price right before a new paid task (not a resumed one): one Seedance send can reach
+  // $20.40, and an Ask-mode message can start several videos on the saved Video options. No → Stopped, nothing sent.
+  const ask = runwaySpendQuestion(cfg.runway, req.seconds, { resolution: req.resolution, still: req.kind === 'image_to_video' });
   const prev = e.runway, resume = prev?.task && prev.model === cfg.runway && Date.now() - prev.at < 864e5 ? prev.task : null;
   // The thread this entry lives in. The owner may have opened another thread since sending, and persist() saves S.thread.
   const home = () => [...liveThreads.values()].find((t) => t.entries.includes(e)) || (S.thread?.entries.includes(e) ? S.thread : null);
@@ -2354,7 +2357,7 @@ async function runRunway(e, cfg, still, signal) {
   let out;
   try {
     out = await runwayVideo(req, {
-      apiHeaders, signal, resume,
+      apiHeaders, signal, resume, approve: ask ? () => confirm(ask) : null,
       onTask: (id) => {
         e.runway = { task: id, model: cfg.runway, at: Date.now() };
         // Save the task id now: if the app is closed or killed before the video lands, Try again resumes it (no second charge).
@@ -2880,7 +2883,7 @@ function renderOptions() {
       // 4–10 s; Cosmos and the motion still 4/6/8.
       const rw = vm.runway || null, rwHd = Boolean(rw && RUNWAY_SPECS[rw]?.hd), xm = vm.xai || null;
       if (xm) { if (!XAI_SECONDS.includes(+o.secs)) o.secs = xaiSeconds(o.secs); }
-      else if (rw) { if (o.aspect === '16:9hd' && !rwHd) o.aspect = '16:9'; if (!runwaySecondsFor(rw).includes(+o.secs)) o.secs = runwaySeconds(o.secs, rw); }
+      else if (rw) { if (o.aspect === '16:9hd' && !rwHd) o.aspect = '16:9'; if (!runwaySecondsFor(rw).includes(+o.secs)) o.secs = runwayMenuSeconds(o.secs, rw); }
       else if (!fit && vm.omni) { if (!OMNI_SECONDS.includes(+o.secs)) o.secs = +o.secs > 10 ? 10 : 4; }
       else if (!fit) o.secs = veoSeconds(o.secs);
       const secs = fit ? fitSecs : xm ? XAI_SECONDS : rw ? runwaySecondsFor(rw) : vm.omni ? OMNI_SECONDS : [4, 6, 8];
@@ -5765,7 +5768,7 @@ $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
 
 // The build feedback reports when app.js was loaded without its ?v= (scripts/bump-version.mjs moves it with sw.js VERSION).
-const APP_BUILD = '81';
+const APP_BUILD = '82';
 const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || APP_BUILD}`, online: navigator.onLine !== false }), toast });
 $('#feedbackBtn').onclick = () => feedback.open();
 $('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };
