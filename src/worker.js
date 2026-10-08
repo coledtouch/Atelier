@@ -17,6 +17,7 @@ import { handleOmni, OMNI_MODEL } from './omni.js';
 import { handleXai, xaiDiag, XAI_PROVIDER } from './xai.js';
 import { handleLookup } from './lookup.js';
 import { handleTranscribe } from './transcribe.js';
+import { ownerSpend, handleOwnerApi, imageQuote, imageSettle, SpendError, spendResponse, IMAGE_BODY_MAX, isGatewayStatus } from './spend.js';
 export { Relay } from './relay.js';
 export { Ledger } from './tester/ledger.js';
 
@@ -118,7 +119,8 @@ function missingKey(req, env, provider) {
   return json({ error: `No ${PROVIDERS[provider].name} key on the server (set ${PROVIDERS[provider].secret}).` }, 401);
 }
 
-async function forward(target, { method, headers, body }) {
+// onUnreachable(): called when no answer came back at all (the request may still have reached the provider).
+async function forward(target, { method, headers, body }, onUnreachable) {
   let upstream;
   try {
     upstream = await fetch(target, { method, headers, body, redirect: 'manual' });
@@ -127,6 +129,7 @@ async function forward(target, { method, headers, body }) {
     if (upstream.status >= 300 && upstream.status < 400 && loc) upstream = await fetch(loc);
   } catch (err) {
     console.error('upstream unreachable', new URL(target).host, err.message);
+    onUnreachable?.();
     return json({ error: `Upstream unreachable: ${err.message}` }, 502);
   }
   const out = new Headers({ 'cache-control': 'no-store' });
@@ -232,6 +235,9 @@ async function handleChat(req, env) {
   });
 }
 
+// Every allow-listed passthrough route makes images (OpenAI / Meta images, Gemini image generateContent), so each POST
+// is priced (src/spend.js imageQuote) and held to the owner's monthly limit before it is forwarded, then settled from
+// the answer's reported usage. A request Atelier can't price is never sent (400 owner_cap_unpriced).
 async function handlePassthrough(req, env, provider, sub, search) {
   const cfg = PASSTHRU[provider];
   if (!cfg || !cfg.allow.some(([m, re]) => m === req.method && re.test(sub))) return json({ error: 'Route not allowed' }, 404);
@@ -239,13 +245,33 @@ async function handlePassthrough(req, env, provider, sub, search) {
   if (!key) return missingKey(req, env, provider);
   const headers = { ...cfg.auth(key), accept: req.headers.get('accept') || '*/*' };
   const init = { method: req.method, headers };
-  if (req.method === 'POST') {
-    headers['content-type'] = req.headers.get('content-type') || 'application/json';
-    init.body = req.body;
-  }
   // Only the download flag is forwarded as a query parameter.
   const qs = new URLSearchParams(search).get('alt') === 'media' ? '?alt=media' : '';
-  return forward(`${cfg.base}/${sub}${qs}`, init);
+  if (req.method !== 'POST') return forward(`${cfg.base}/${sub}${qs}`, init);
+  headers['content-type'] = req.headers.get('content-type') || 'application/json';
+  const text = await readCapped(req, IMAGE_BODY_MAX);
+  if (text == null) return json({ error: 'This image request is too large.' }, 413);
+  let body = null;
+  try { body = JSON.parse(text); } catch {}
+  let quote, hold;
+  try {
+    quote = imageQuote(provider, sub, body);
+    hold = await ownerSpend(env).start({ provider, kind: 'image', model: quote.model, amount: quote.amount });
+  } catch (err) {
+    if (err instanceof SpendError) return spendResponse(err);
+    throw err;
+  }
+  let unreachable = false;
+  const res = await forward(`${cfg.base}/${sub}${qs}`, { ...init, body: text }, () => { unreachable = true; });
+  // refused: nothing billed; no answer, or a gateway's 502/504/52x (the provider may have made it): the quote
+  if (!res.ok) { await hold.settle(unreachable || isGatewayStatus(res.status) ? null : 0); return res; }
+  const out = await res.text().catch(() => null);
+  let j = null;
+  try { j = JSON.parse(out); } catch {}
+  await hold.settle(j ? imageSettle(provider, j, quote) : null);
+  const h = new Headers(res.headers);
+  h.delete('content-length');
+  return new Response(out ?? '', { status: res.status, headers: h });
 }
 
 // What the tester router borrows from the owner's proxy (passed in, so tester code never imports worker.js).
@@ -397,6 +423,12 @@ async function handleApi(req, env, url) {
   if (path === 'testers' || path.startsWith('testers/')) {
     if (!passOk(req, env)) return json({ error: 'Enter your passcode.' }, 401);
     return testerAdmin(req, env, path);
+  }
+  // GET/PUT /api/owner/limits, GET /api/owner/spend → Settings → Spending (src/spend.js). Passcode only: testers were
+  // already answered 403 owner_only by the deny-by-default router above. Never add an owner/ route to TESTER_ROUTES.
+  if (path.startsWith('owner/')) {
+    if (!passOk(req, env)) return json({ error: 'Enter your passcode.' }, 401);
+    return handleOwnerApi(req, env, url, path);
   }
 
   // GET /api/lookup?q=|title=&lang=&v= → a short Wikipedia summary for words selected in an answer; GET /api/lookup/img?k=
@@ -715,11 +747,11 @@ async function handleApi(req, env, url) {
   }
 
   // /api/omni/* → Gemini Omni video (src/omni.js), owner behind the passcode. Testers reach their own metered copies of
-  // these routes in the tester router above.
+  // these routes in the tester router above. spend: the owner's spending limits (src/spend.js), on every paid start.
   if (path.startsWith('omni/')) {
     const key = resolveKey(req, env, 'gemini');
     if (!key) return missingKey(req, env, 'gemini');
-    return handleOmni(req, env, path, { key });
+    return handleOmni(req, env, path, { key, spend: ownerSpend(env) });
   }
 
   // /api/runway/* → Runway video, owner only (src/runway.js). Testers never get here: the tester router above answers
@@ -727,7 +759,7 @@ async function handleApi(req, env, url) {
   if (path.startsWith('runway/')) {
     const key = resolveKey(req, env, 'runway');
     if (!key) return missingKey(req, env, 'runway');
-    return handleRunway(req, env, url, path, { key });
+    return handleRunway(req, env, url, path, { key, spend: ownerSpend(env) });
   }
 
   // /api/xai/* → Grok Imagine images and video, owner only (src/xai.js). Testers never get here: the tester router above
@@ -735,7 +767,7 @@ async function handleApi(req, env, url) {
   if (path.startsWith('xai/')) {
     const key = resolveKey(req, env, 'xai');
     if (!key) return missingKey(req, env, 'xai');
-    return handleXai(req, env, path, { key });
+    return handleXai(req, env, path, { key, spend: ownerSpend(env) });
   }
 
   // POST /api/chat → routed by model prefix (anthropic: / openai: / gemini: / NVIDIA default)

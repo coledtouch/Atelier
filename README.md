@@ -117,9 +117,59 @@ replacement token immediately, and parallel refreshes are shared, so the old tok
 ## Develop / deploy
 ```bash
 npm install
-npx wrangler dev          # http://localhost:8787
-npx wrangler deploy      # → https://atelier.ciprari.ai
+npx wrangler dev                      # http://localhost:8787
+node scripts/bump-version.mjs 83      # live VERSION + 1: sw.js, index.html ?v=, module imports, APP_BUILD
+git commit -am "v83: …"
+npm run ship                          # → https://atelier.ciprari.ai (npm run deploy is the same command); asks you to type 83
+npm run ship -- --dry-run             # steps 1–3 only: never deploys or pushes
 ```
+
+`npm run ship` (`scripts/ship.mjs`) is the only checked way to deploy, and `npm run deploy` runs it too. It deploys
+only when it is safe, in this order:
+1. The working tree is clean (only `public/atelier-browser.zip` and untracked `promo/` folders may differ), and HEAD is
+   not behind or diverged from `origin/master` after a `git fetch`. Ahead is fine: it is pushed at the end.
+2. `public/sw.js` VERSION at HEAD is newer than the live one (fetched from `https://atelier.ciprari.ai/sw.js`), and the
+   bump is complete: index.html `?v=`, every module import `?v=` and `APP_BUILD` agree. The service worker serves the
+   app cache-first, so without a bump installed phones keep running their old cached modules.
+   Every module import, sw.js SHELL/LAZY path and index.html `src`/`href` names a file git has in exactly that case: the
+   live site is case-sensitive (it answers a miscased module with index.html), while Windows and the :8791 fixture are not.
+   The live deploy's record (`https://atelier.ciprari.ai/ship.json`, written by every ship) names a commit that is in
+   HEAD's history, so a ship never rolls back someone else's deploy; when it isn't, ship lists the commits that would go.
+   A live site without a record (deployed before this check, from an older branch, or by a rollback) needs
+   `--allow-unrecorded-live` once you have checked it.
+3. A clean, detached worktree of HEAD in the OS temp folder runs `npm ci`, `npm run check` and every
+   `tests/*.test.mjs`, gated on the real exit codes. On Windows that checkout is forced to CRLF line endings
+   (`core.autocrlf=true`, whatever git's own config says), so tests that only pass with LF fail here. Failing test names
+   are printed. node_modules is installed there, never linked.
+4. You type the VERSION to go ahead (or pass `--yes`, which a run outside a terminal needs). Then from that worktree:
+   `node scripts/pack-extension.mjs`, `public/ship.json` (the commit), and `wrangler deploy`. Just before deploying it
+   checks `origin/master`, the live VERSION and the live record again. If wrangler fails after the new version is already
+   live (a routes or custom-domain step), ship still checks it and pushes.
+5. It polls the live `sw.js` until it reports the new VERSION (up to about 120 s), then checks that the live index.html
+   loads `/app.js?v=<N>`.
+6. `git push origin <deployed commit>:master` (skip with `--no-push`).
+7. The worktree is always removed. Windows "Permission denied" leftovers there are harmless, and nothing outside the temp
+   folder is ever deleted.
+
+Flags: `--dry-run`, `--no-push`, `--yes`, `--allow-unrecorded-live`, and `--skip-live-check` (offline, only together
+with `--dry-run`). Pass flags after `--`. ship honours `npm run deploy --dry-run` without the `--`, and refuses to run
+at all when npm took any other ship-like flag for itself (`--dryrun`, `-n`, `--skip-live`, …), since npm still runs
+the script.
+`npm run deploy:raw` is the unchecked escape hatch. It prints a loud warning and asks you to type the VERSION (off a
+terminal it needs `ATELIER_RAW_DEPLOY=I-UNDERSTAND` instead), then packs and deploys this folder as it is, with no
+tests, no VERSION check and no push. It records itself in `ship.json` as a raw deploy, so the next ship asks for
+`--allow-unrecorded-live` when it had uncommitted changes.
+
+`wrangler deploy` itself is guarded: wrangler.jsonc's `build.command` runs `scripts/deploy-guard.mjs`, which stops any
+deploy or `versions upload` that doesn't come from ship's clean worktree or a confirmed deploy:raw, before anything is
+uploaded (`wrangler dev` and `wrangler types` are never stopped).
+
+CI (`.github/workflows/ci.yml`) runs `npm ci`, `npm run check` and `node --test tests/*.test.mjs` on Ubuntu and on
+Windows with CRLF, for every push and pull request to master. A "version bumped" job (`scripts/check-bump.mjs`) fails
+when a change touches `public/` or `src/` without raising the sw.js VERSION. Docs-only and tests-only changes don't need a
+bump. A force push to master fails it too (what it replaced can't be compared), and a shallow clone is refused. Runs for
+pushes to master are never cancelled by a later push; only pull request runs are. To check before pushing, run
+`npm run check:bump -- origin/master`. CI needs no secrets and never deploys.
 
 ## Verification and UI review
 
@@ -127,7 +177,7 @@ npx wrangler deploy      # → https://atelier.ciprari.ai
 npm run check            # syntax checks
 npm test                 # backup safety, recovery and offline-cache regression tests
 npm run review:ui        # isolated fixture at http://127.0.0.1:8791
-npx wrangler deploy --dry-run --outdir .review-build
+npm run ship -- --dry-run   # clean-checkout check + tests (wrangler deploy, --dry-run included, runs only through ship)
 ```
 
 The isolated UI fixture uses the passcode `review-only`. It serves canned responses and a small interactive test app, never loads `.dev.vars`, and never calls providers or connected accounts. It is a development script, not part of the deployed app. Real development continues to use `npm run dev` on port 8787.

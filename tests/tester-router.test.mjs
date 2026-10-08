@@ -136,7 +136,9 @@ test('with a passcode and a tester cookie, every route takes the owner path exac
       L.calls.length = 0;
       const withCookie = await api(env, path, init, { pass: 'pw', cookie: token });
       assert.ok(!L.calls.includes('session'), `${method} ${path}: the owner path never looks the cookie up`);
-      if (!path.startsWith('testers')) assert.deepEqual(L.calls, [], `${method} ${path}: only the owner's Testers panel reads the Ledger`);
+      // Only the owner's Testers panel reads the tester tables; the owner's paid media routes use only the owner's own
+      // spend rows (src/spend.js: ownerReserve / ownerAttach / ownerResize / ownerSettle / ownerSpend).
+      if (!path.startsWith('testers')) assert.ok(L.calls.every((m) => /^owner[A-Z]/.test(m)), `${method} ${path}: only the owner's spend methods: ${L.calls}`);
       const plain = await api(env, path, init, { pass: 'pw' });
       assert.equal(withCookie.status, plain.status, `${method} ${path}`);
       assert.notEqual(await codeOf(withCookie), 'owner_only');
@@ -1174,7 +1176,7 @@ test('tester/profile: per tester, sanitized, 300 KB cap, never the owner’s me 
 });
 
 // ── owner regression: the owner path is unchanged and never metered ──
-test('owner calls are never metered and keep their old shapes (web search 5, fallbacks, raw image bodies, Omni up to 4K, 1 GB clips)', async () => {
+test('owner calls never touch the tester meter and keep their old shapes (web search 5, fallbacks, raw image bodies, Omni up to 4K, 1 GB clips)', async () => {
   const { env, L } = makeEnv();
   mockFetch([
     [ANTHROPIC, () => claudeStream()],
@@ -1200,9 +1202,14 @@ test('owner calls are never metered and keep their old shapes (web search 5, fal
   r = await owner('chat', post({ ...raw, model: 'openai:gpt-6-luna' }));
   await r.text();
   assert.deepEqual(upstream.calls.at(-1).json, { model: 'gpt-6-luna', messages: [{ role: 'user', content: 'hi' }], stream: true, max_completion_tokens: 50_000 }, 'no stream_options added');
-  r = await owner('x/openai/images/generations', post({ model: 'gpt-image-9', prompt: 'x', n: 9, quality: 'max' }));
+  r = await owner('x/openai/images/generations', post({ model: 'gpt-image-2.5-flare', prompt: 'x', n: 9, quality: 'max' }));
   assert.equal(r.status, 200);
   assert.equal((await new Response(upstream.calls.at(-1).body).json()).n, 9, 'the owner body passes through raw');
+  // an image Atelier has no price for is never sent: the owner's spending limits need one (src/spend.js)
+  const before = upstream.calls.length;
+  r = await owner('x/openai/images/generations', post({ model: 'gpt-image-9', prompt: 'x' }));
+  assert.deepEqual([r.status, (await r.json()).code], [400, 'owner_cap_unpriced']);
+  assert.equal(upstream.calls.length, before);
   // the owner's Omni: any length 3–10 s and up to 4K, unmetered; Veo's old proxy routes are gone
   r = await owner('omni/start', post({ prompt: 'p', seconds: 10, resolution: '4k', aspect: '16:9' }));
   assert.equal(r.status, 200);
@@ -1212,5 +1219,6 @@ test('owner calls are never metered and keep their old shapes (web search 5, fal
   assert.equal(r.status, 404);
   r = await owner('video/upload/start', post({ name: 'big.mp4', mime: 'video/mp4', size: 900 * 1024 * 1024 }));
   assert.equal(r.status, 200, 'the owner keeps 1 GB clips');
-  assert.deepEqual(L.calls, [], 'the Ledger was never called');
+  // the tester meter was never called: the owner's paid starts use only the owner's own spend rows (Settings → Spending)
+  assert.ok(L.calls.length && L.calls.every((m) => /^owner[A-Z]/.test(m)), `${L.calls}`);
 });

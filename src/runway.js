@@ -11,7 +11,11 @@
 //
 // Wiring (src/worker.js, after the tester dispatch):
 //   if (path.startsWith('runway/')) { const key = resolveKey(req, env, 'runway'); if (!key) return missingKey(req, env, 'runway');
-//     return handleRunway(req, env, url, path, { key }); }
+//     return handleRunway(req, env, url, path, { key, spend: ownerSpend(env) }); }
+// spend (src/spend.js): the owner's spending limits. A new video is held to the per-video and monthly limits before
+// Runway is called (402 owner_cap_video / owner_cap_month), tied to its task once Runway accepts it, and settled to
+// Runway's reported cost when a poll or the download sees it finish.
+import { SpendError, spendResponse, isGatewayStatus } from './spend.js';
 
 export const RUNWAY_BASE = 'https://api.dev.runwayml.com/v1'; // not api.runwayml.com
 export const RUNWAY_VERSION = '2024-11-06'; // X-Runway-Version, required on every call
@@ -409,10 +413,26 @@ async function readText(req, cap) {
 
 const maxCredits = (env) => { const v = intParam(String(env?.RUNWAY_MAX_CREDITS ?? '')); return Number.isSafeInteger(v) && v > 0 ? v : null; };
 
+// ── owner spending limits (src/spend.js) ──
+export const MICROS_PER_CREDIT = 10_000; // 1 credit = $0.01
+export const ALEPH_MAX_SECONDS = 30; // an Aleph edit of unknown length is held at its longest clip until Runway estimates it
+const jobOf = (id) => `runway:${String(id).toLowerCase()}`;
+/** What a shaped request is held at against the owner's limits → {credits, usd}: the price list, the longest Aleph clip when its length is unknown. */
+export const ownerQuote = (shaped) => quote(shaped.model, shaped.seconds ?? (shaped.kind === 'video_to_video' ? ALEPH_MAX_SECONDS : null), shaped.audio, shaped);
+/**
+ * A finished task (cleanTask's shape) → what to record in micro-dollars, or null for "its quote": SUCCEEDED at Runway's
+ * cost (else its estimate); FAILED or CANCELLED at what Runway says it still charged, else $0.
+ */
+export function taskCost(t) {
+  const paid = Number(t?.cost?.credits), est = Number(t?.estimatedCost?.credits);
+  if (t?.status === 'SUCCEEDED') return Number.isFinite(paid) && paid >= 0 ? paid * MICROS_PER_CREDIT : Number.isFinite(est) && est >= 0 ? est * MICROS_PER_CREDIT : null;
+  return Number.isFinite(paid) && paid > 0 ? paid * MICROS_PER_CREDIT : 0;
+}
+
 // ── routes ──
 
 // POST runway/generate/<kind> {model, promptText, promptImage|videoUri, ratio, duration, …} → {id, estimatedCost, quote, pollAfterMs}
-async function generate(req, env, key, kind) {
+async function generate(req, env, key, kind, spend) {
   const text = await readText(req, BODY_MAX);
   let input = null;
   try { input = JSON.parse(text); } catch {}
@@ -427,20 +447,45 @@ async function generate(req, env, key, kind) {
   if (cap != null && pre && pre.credits > cap) {
     throw new RunwayError(`This Runway video would cost about ${pre.credits} credits ($${pre.usd.toFixed(2)}) — over this server’s cap of ${cap} (RUNWAY_MAX_CREDITS). Nothing was sent to Runway.`, 402, { code: 'runway_cap', estimatedCost: pre });
   }
+  // The owner's spending limits (src/spend.js): over the per-video or the monthly limit → 402 owner_cap_*, and nothing
+  // reaches Runway. Otherwise the quote is held for this month until the task settles.
+  const held = ownerQuote(shaped);
+  const hold = spend ? await spend.start({ provider: 'runway', kind: 'video', model: shaped.model, amount: held ? held.credits * MICROS_PER_CREDIT : NaN }) : null;
   const what = 'Starting the Runway video';
-  const r = await call(key, 'POST', kind, shaped.body, what);
-  if (!r.ok) throw await upstreamError(r, what, key);
+  let r;
+  try { r = await call(key, 'POST', kind, shaped.body, what); }
+  catch (err) { await hold?.settle(null); throw err; } // no answer: Runway may have started (and will bill) it, so it counts at its quote
+  if (!r.ok) { // refused: nothing billed; a gateway's 502/504/52x: Runway may have started it, so it counts at its quote
+    const refused = await upstreamError(r, what, key);
+    await (isGatewayStatus(r.status) ? hold?.settle(null) : hold?.release());
+    throw refused;
+  }
   const j = await r.json().catch(() => null);
-  if (!isRecord(j) || typeof j.id !== 'string' || !UUID.test(j.id)) throw new RunwayError('Runway didn’t return a task id.', 502, { code: 'runway_failed' });
+  if (!isRecord(j) || typeof j.id !== 'string' || !UUID.test(j.id)) { await hold?.settle(null); throw new RunwayError('Runway didn’t return a task id.', 502, { code: 'runway_failed' }); }
+  await hold?.attach(jobOf(j.id));
   const est = costOf(Number(j.estimatedCost?.credits));
   if (cap != null && est && est.credits > cap) {
     // Backstop: Runway's own estimate is over the cap (e.g. an Aleph clip longer than the browser said). Cancel at once.
     const over = `Runway estimated ${est.credits} credits ($${est.usd.toFixed(2)}) for this — over this server’s cap of ${cap} (RUNWAY_MAX_CREDITS).`;
     const stopped = await cancel(key, j.id).then(() => true, () => false);
+    await hold?.settle(stopped ? 0 : est.credits * MICROS_PER_CREDIT);
     if (stopped) throw new RunwayError(`${over} Atelier cancelled it straight away.`, 402, { code: 'runway_cap', estimatedCost: est });
     // The cancel failed: the task may run and bill. Hand back its id so the browser can retry the cancel (and say so).
     console.warn('runway cap cancel failed');
     throw new RunwayError(`${over} Atelier couldn’t cancel it at once and is trying again — check at dev.runway.com that it stopped.`, 402, { code: 'runway_cap_running', id: j.id, estimatedCost: est });
+  }
+  if (hold && est) {
+    // The same backstop for the owner's limits: Runway's estimate replaces the quote, and one that no longer fits (an
+    // Aleph clip longer than the browser said) is cancelled at once.
+    const fit = await hold.resize(est.credits * MICROS_PER_CREDIT);
+    if (!fit.ok) {
+      const b = fit.error.body, stopped = await cancel(key, j.id).then(() => true, () => false);
+      await hold.settle(stopped ? 0 : est.credits * MICROS_PER_CREDIT);
+      const over = b.limit === 'video' ? `over your $${b.perVideoUsd.toFixed(2)} limit per video` : `past your $${b.monthlyMediaUsd.toFixed(2)} monthly limit for video and images`;
+      if (!stopped) console.warn('runway owner-limit cancel failed');
+      throw new SpendError(402, { ...b, costUsd: est.usd, ...(stopped ? {} : { id: j.id }),
+        error: `Runway estimated $${est.usd.toFixed(2)} for this, ${over}. ${stopped ? 'Atelier cancelled it straight away. Change the limit in Settings → Spending.' : 'Atelier couldn’t cancel it at once and is trying again — check at dev.runway.com that it stopped.'}` });
+    }
   }
   return json({ id: j.id, model: shaped.model, kind, estimatedCost: est, quote: quote(shaped.model, shaped.seconds, shaped.audio, shaped), pollAfterMs: POLL_MS });
 }
@@ -466,15 +511,25 @@ async function cancel(key, id) {
 // DELETE runway/task/<id> (Stop): cancels a task that is still queued or running, and leaves a finished one alone —
 // Runway's DELETE would also delete a SUCCEEDED task's paid-for output, and a Stop can race the browser's last poll.
 // If Runway's status can't be read, Stop still cancels (the browser only sends it for a task it thinks is unfinished).
-async function stop(key, id) {
+// spend (the owner's limits): Stop settles the task's hold, since nothing polls a stopped video again. A finished task
+// settles to its cost; a cancelled one to what Runway still reports charging, else $0 (also when it is gone or
+// unreadable after the cancel); one Runway no longer had before the cancel, at its quote (as a poll would).
+async function stop(key, id, spend = null) {
+  const settle = (actual) => spend?.settleJob(jobOf(id), actual);
   const r = await call(key, 'GET', `tasks/${id}`, undefined, 'Checking the Runway video');
-  if (r.status === 404) { r.body?.cancel().catch(() => {}); return { ok: true, gone: true }; }
+  if (r.status === 404) { r.body?.cancel().catch(() => {}); await settle(null); return { ok: true, gone: true }; }
   if (r.ok) {
     const t = await r.json().catch(() => null);
     const status = isRecord(t) && typeof t.status === 'string' ? t.status : '';
-    if (TERMINAL.has(status)) return { ok: true, gone: false, kept: true, status };
+    if (TERMINAL.has(status)) { await settle(taskCost(cleanTask(t, id))); return { ok: true, gone: false, kept: true, status }; }
   } else r.body?.cancel().catch(() => {});
-  return cancel(key, id);
+  const out = await cancel(key, id); // a failed cancel throws: the task may still run and bill, so its hold stays
+  if (spend) {
+    let after = null;
+    try { after = await getTask(key, id); } catch { /* gone (404) or unreadable: cancelled before it finished */ }
+    await settle(after && TERMINAL.has(after.status) ? taskCost(after) : 0);
+  }
+  return out;
 }
 
 // Runway's output links: https on its CDN (CloudFront) or its own domains only.
@@ -496,7 +551,7 @@ function capped(body, max) {
 
 // GET runway/output/<id>?i=0 → the video bytes (video/mp4), fetched fresh from the task (links expire in 24–48 h)
 // and WITHOUT any credentials. Redirects are followed only onto allowed hosts.
-async function output(key, id, params) {
+async function output(key, id, params, spend) {
   const iRaw = params.get('i') ?? '0';
   if (!/^\d{1,2}$/.test(iRaw)) throw bad('Bad output index');
   const i = Number(iRaw);
@@ -507,6 +562,7 @@ async function output(key, id, params) {
   const t = await r.json().catch(() => null);
   if (!isRecord(t)) throw new RunwayError('Runway returned an unexpected task.', 502, { code: 'runway_failed' });
   if (t.status !== 'SUCCEEDED') throw new RunwayError('The Runway video isn’t ready yet.', 409, { code: 'runway_not_ready', status: STATUSES.includes(t.status) ? t.status : 'UNKNOWN' });
+  await spend?.settleJob(jobOf(id), taskCost(cleanTask(t, id))); // a no-op once a poll has settled it
   const outs = Array.isArray(t.output) ? t.output : [];
   if (i >= outs.length) throw new RunwayError('Runway has no video at that index.', 404, { code: 'runway_no_output' });
   let link = outs[i];
@@ -642,18 +698,32 @@ async function upload(req, key) {
   return { runwayUri: j.runwayUri, expiresAt: Date.now() + UPLOAD_TTL_MS };
 }
 
+// GET runway/task/<id> for the owner: a finished task settles its spend (once; later polls change nothing), and one
+// Runway no longer has settles at its quote.
+async function taskRoute(c, id) {
+  let t;
+  try { t = await getTask(c.key, id); }
+  catch (err) {
+    if (err instanceof RunwayError && err.extra?.code === 'runway_gone') await c.spend?.settleJob(jobOf(id), null);
+    throw err;
+  }
+  if (TERMINAL.has(t.status)) await c.spend?.settleJob(jobOf(id), taskCost(t));
+  return json(t, 200, t.pollAfterMs ? { 'retry-after': String(t.pollAfterMs / 1000) } : {});
+}
+
 const ROUTES = [
-  ['POST', /^generate\/(image_to_video|text_to_video|video_to_video)$/, (c, m) => generate(c.req, c.env, c.key, m[1])],
-  ['GET', /^task\/([0-9a-f-]{36})$/i, async (c, m) => { const t = await getTask(c.key, m[1]); return json(t, 200, t.pollAfterMs ? { 'retry-after': String(t.pollAfterMs / 1000) } : {}); }],
-  ['DELETE', /^task\/([0-9a-f-]{36})$/i, async (c, m) => json(await stop(c.key, m[1]))],
-  ['GET', /^output\/([0-9a-f-]{36})$/i, (c, m) => output(c.key, m[1], c.url.searchParams)],
+  ['POST', /^generate\/(image_to_video|text_to_video|video_to_video)$/, (c, m) => generate(c.req, c.env, c.key, m[1], c.spend)],
+  ['GET', /^task\/([0-9a-f-]{36})$/i, (c, m) => taskRoute(c, m[1])],
+  ['DELETE', /^task\/([0-9a-f-]{36})$/i, async (c, m) => json(await stop(c.key, m[1], c.spend))],
+  ['GET', /^output\/([0-9a-f-]{36})$/i, (c, m) => output(c.key, m[1], c.url.searchParams, c.spend)],
   ['POST', /^upload$/, async (c) => json(await upload(c.req, c.key))],
   ['GET', /^account$/, async (c) => json(await account(c.key))],
 ];
 
 // /api/runway/* for the owner. path is relative to /api/ ('runway/task/<id>'); opts.key is the RUNWAYML_API_SECRET the
-// Worker resolved behind the passcode (resolveKey) — without it nothing here runs.
-export async function handleRunway(req, env, url, path, { key } = {}) {
+// Worker resolved behind the passcode (resolveKey) — without it nothing here runs. opts.spend: src/spend.js's
+// ownerSpend(env), the owner's spending limits (worker.js always passes it).
+export async function handleRunway(req, env, url, path, { key, spend = null } = {}) {
   const route = String(path || '').replace(/^\/?(api\/)?runway\//, '');
   if (!key) return json({ error: 'No Runway key on the server (set RUNWAYML_API_SECRET).' }, 401);
   try {
@@ -662,10 +732,11 @@ export async function handleRunway(req, env, url, path, { key } = {}) {
       if (!m) continue;
       if (req.method !== method) continue;
       if (m[1] && /^[0-9a-f-]{36}$/i.test(m[1]) && !UUID.test(m[1])) break;
-      return await fn({ req, env, url: url instanceof URL ? url : new URL(req.url), key }, m);
+      return await fn({ req, env, url: url instanceof URL ? url : new URL(req.url), key, spend }, m);
     }
     return json({ error: 'Not found' }, 404);
   } catch (err) {
+    if (err instanceof SpendError) return spendResponse(err);
     if (err instanceof RunwayError) return json({ error: err.message, ...err.extra }, err.status, err.headers);
     console.error('runway route failed', scrub(err?.message || err, key, 200));
     return json({ error: 'The Runway request failed — try again.' }, 502);

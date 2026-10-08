@@ -7,24 +7,25 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=82';
-import * as Sync from './sync.js?v=82';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, spendQuestion as runwaySpendQuestion, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=82';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=82';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=82';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=82';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=82';
-import { initLookup } from './lookup.js?v=82';
-import { createRemix } from './remix-app.js?v=82';
-import { sendMode, looksLikeQuestion } from './remix.js?v=82';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=82';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=82';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=82';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=82';
-import * as ClaudeImport from './claude-import.js?v=82';
-import { createFeedback } from './feedback.js?v=82';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=82';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=82';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=83';
+import * as Sync from './sync.js?v=83';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, spendQuestion as runwaySpendQuestion, RUNWAY_MODELS as RUNWAY_SPECS, quote as runwayQuoteUsd } from './runway.js?v=83';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=83';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=83';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=83';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=83';
+import { initLookup } from './lookup.js?v=83';
+import { createRemix } from './remix-app.js?v=83';
+import { sendMode, looksLikeQuestion } from './remix.js?v=83';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=83';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=83';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=83';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=83';
+import * as ClaudeImport from './claude-import.js?v=83';
+import { createFeedback } from './feedback.js?v=83';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=83';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=83';
+import { isCapCode, capOf, cleanCap, capTitle, capWarning, imageUsd, usd as capUsd, resetDay, limitsBody, breakdownRows, loadSpend, saveLimits, partialCapNote } from './spend.js?v=83';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -636,7 +637,8 @@ async function toApiError(r) {
   if (/^\s*<(!doctype|html|head|body)/i.test(detail)) detail = 'The provider answered with an error page instead of a response.';
   const code = typeof j?.code === 'string' && /^[a-z_]{1,40}$/.test(j.code) ? j.code : undefined;
   // Tester refusals are already worded for people (and never mention a passcode): keep them as they are.
-  if (isTesterCode(code) || code === 'model_no_images') return new ApiError(r.status, detail || `Request failed (${r.status}).`, { code, scope: typeof j.scope === 'string' ? j.scope : undefined, resetsAt: j.resetsAt });
+  // So are the owner's spending-limit refusals (owner_cap_*, src/spend.js): a limit, never a provider problem.
+  if (isTesterCode(code) || code === 'model_no_images' || isCapCode(code)) return new ApiError(r.status, detail || `Request failed (${r.status}).`, { code, scope: typeof j.scope === 'string' ? j.scope : undefined, resetsAt: j.resetsAt });
   if (r.status === 401 && /passcode|key on the server/i.test(detail)) return new ApiError(401, detail);
   if (/^error code: \d+$/i.test(detail.trim())) detail = '';
   const lead = {
@@ -656,27 +658,32 @@ async function toApiError(r) {
 // Streams a chat completion, falling back through the role's model chain when a model is retired,
 // or to another provider when one is unusable (bad key, workspace, billing, quota).
 // onModel(id) reports the model that actually answered; onSkip(provider, err) reports a provider switch.
-const accountProblem = (err) => err.status === 401 || err.status === 403 || err.status === 402
+// The owner's own spending limits (402 owner_cap_*, Settings → Spending) are never one: no fallback, no dead provider.
+const accountProblem = (err) => !/^owner_cap/.test(err.code || '') && (err.status === 401 || err.status === 403 || err.status === 402
   || ((err.status === 400 || err.status === 429) && /workspace|api key|credit|billing|quota|balance|permission|not enabled|organization|spending limit/i.test(err.message))
   // out of credit reported mid-stream or as a 5xx (DeepSeek "Insufficient Balance", OpenAI insufficient_quota…): same as a 402
-  || (err.status >= 500 && /insufficient[ _](balance|quota|credit|funds)|out of credits?|credit balance is too low|exceeded your current quota|billing|spending limit|(?:does not|doesn[’']t) have any credits/i.test(err.message));
+  || (err.status >= 500 && /insufficient[ _](balance|quota|credit|funds)|out of credits?|credit balance is too low|exceeded your current quota|billing|spending limit|(?:does not|doesn[’']t) have any credits/i.test(err.message)));
 // Friendly error kinds. New entries store e.errorKind; older/restored entries only have e.error, so text is classified too.
 function errorKind(msg = '', status, code) {
   const m = String(msg || '');
   if (code === 'tester_signin') return 'signin';
   if (isTesterCode(code)) return 'budget'; // tester limits: never a dead provider, never the passcode screen
+  if (/^owner_cap_(video|month)$/.test(code || '')) return 'cap'; // the owner's spending limits (Settings → Spending)
+  // owner_cap_unpriced / owner_cap_unavailable: the Worker couldn't check the limits (no price, no Ledger). Its words say
+  // so; worded with "spending limits", they must not read as a provider key problem.
+  if (/^owner_cap_/.test(code || '')) return 'error';
   if (m === 'Stopped.') return 'stopped';
   if (/interrupted/i.test(m)) return 'interrupted'; // renderThread + data-safety recoverThread/prepareImport messages
   if (/passcode/i.test(m)) return 'passcode';
   if (status === 0 || /couldn[’']t reach atelier|connection dropped|failed to fetch|networkerror|\bload failed/i.test(m)) return 'offline';
-  if (accountProblem({ status, message: m }) || /key on the server|api key|isn[’']t allowed|billing|quota|credit|workspace/i.test(m)) return 'key';
+  if (accountProblem({ status, message: m, code }) || /key on the server|api key|isn[’']t allowed|billing|quota|credit|workspace/i.test(m)) return 'key';
   if (status === 429 || /rate limited/i.test(m)) return 'rate';
   if (status === 404 || status === 410 || /isn[’']t available|retired/i.test(m)) return 'model';
   if ([408, 500, 502, 503, 504].includes(status) || /hiccup|warming up|overloaded|timed out|too slow|error page|reach the ai provider/i.test(m)) return 'busy';
   if (/safety|filtered|rephras/i.test(m)) return 'filtered';
   return 'error';
 }
-const ERROR_TITLE = { offline: 'Couldn’t reach the studio', passcode: 'Passcode needed', key: 'A provider key needs attention', rate: 'Too many requests', model: 'That model isn’t available', busy: 'The model is busy', filtered: 'Try rephrasing', stopped: 'Stopped', interrupted: 'Interrupted', budget: 'Over the tester allowance', signin: 'Sign in again', error: 'Couldn’t finish' };
+const ERROR_TITLE = { offline: 'Couldn’t reach the studio', passcode: 'Passcode needed', key: 'A provider key needs attention', rate: 'Too many requests', model: 'That model isn’t available', busy: 'The model is busy', filtered: 'Try rephrasing', stopped: 'Stopped', interrupted: 'Interrupted', budget: 'Over the tester allowance', signin: 'Sign in again', cap: 'Over your spending limit', error: 'Couldn’t finish' };
 // The 'budget' card's title by what stopped it (e.budget.scope, from the 402/403/413/503 code).
 const BUDGET_TITLE = { day: 'Today’s allowance is used up', month: 'This month’s allowance is used up', pool: 'The tester budget is used up this month', call: 'Too much for one request', paused: 'Tester access is paused', model: 'Not in the tester plan', owner: 'Not part of tester mode', large: 'That request is too large', origin: 'Request blocked', video: 'This clip isn’t ready yet' };
 // A day/month/pool refusal while at least a cent is still left: this request was bigger than what remains (short).
@@ -689,8 +696,9 @@ function budgetOf(err) {
   const short = RESET_SCOPES.includes(scope) && Boolean(S.tester) && (leftOf(S.tester)[scope] ?? 0) >= 10_000; // the pill already has the refusal's figures
   return { scope, ...(resetsAt ? { resetsAt } : {}), ...(short ? { short: true } : {}) };
 }
-function errorTitle(kind, msg = '', budget) {
+function errorTitle(kind, msg = '', budget, cap) {
   if (kind === 'budget') return (budget?.short && SHORT_TITLE[budget.scope]) || BUDGET_TITLE[budget?.scope] || ERROR_TITLE.budget;
+  if (kind === 'cap') return capTitle(cleanCap(cap)?.limit);
   if (kind === 'key' && S.tester) return 'That model isn’t available';
   if (kind === 'key' && /insufficient|balance|credit|quota/i.test(msg)) return 'Out of credit on every available model';
   if (/only thought and never wrote/i.test(msg)) return 'No answer came back'; // kind stays 'busy': synced/backed-up kinds are a fixed list // testers have no provider keys to check
@@ -1509,10 +1517,13 @@ function errorBox(e) {
   const kind = typeof e.errorKind === 'string' && Object.hasOwn(ERROR_TITLE, e.errorKind) ? e.errorKind : errorKind(e.error);
   const soft = kind === 'stopped' || kind === 'interrupted';
   const extra = kind === 'passcode' ? btn('settings', '', 'Enter passcode') : kind === 'key' && !S.tester ? btn('settings', '', 'Settings') : kind === 'filtered' ? btn('edit-prompt', ICON.pen, 'Edit prompt')
-    : kind === 'budget' && S.tester ? btn('allowance', '', 'See allowance') : kind === 'signin' && !S.tester ? btn('signin', '', 'Sign in') : '';
+    : kind === 'budget' && S.tester ? btn('allowance', '', 'See allowance') : kind === 'signin' && !S.tester ? btn('signin', '', 'Sign in')
+    : kind === 'cap' && !S.tester ? btn('spending', '', 'Change limits') : '';
   const detail = kind === 'stopped' ? '' : `<p class="error-detail">${esc(e.error)}</p>`;
-  const reset = kind === 'budget' && Number.isFinite(e.budget?.resetsAt) ? `<p class="error-reset">${e.budget.resetsAt > Date.now() ? `Resets ${esc(resetIn(e.budget.resetsAt))}` : 'It has reset — try again'} <span>· ${esc(new Date(e.budget.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }))}</span></p>` : '';
-  return `<div class="error-box${soft ? ' soft' : ''}" data-error="${esc(kind)}"><p class="error-title">${esc(errorTitle(kind, e.error, e.budget))}</p>${detail}${reset}<div class="error-acts">${btn('retry', ICON.retry, soft ? 'Run again' : 'Try again')}${extra}</div></div>`;
+  const capAt = kind === 'cap' ? cleanCap(e.cap)?.resetsAt : null; // the owner's monthly limit: 00:00 UTC on the 1st
+  const reset = kind === 'budget' && Number.isFinite(e.budget?.resetsAt) ? `<p class="error-reset">${e.budget.resetsAt > Date.now() ? `Resets ${esc(resetIn(e.budget.resetsAt))}` : 'It has reset — try again'} <span>· ${esc(new Date(e.budget.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }))}</span></p>`
+    : Number.isFinite(capAt) ? `<p class="error-reset">${capAt > Date.now() ? `Resets ${esc(resetDay(capAt))}` : 'A new month has started — try again'} <span>· 00:00 UTC</span></p>` : '';
+  return `<div class="error-box${soft ? ' soft' : ''}" data-error="${esc(kind)}"><p class="error-title">${esc(errorTitle(kind, e.error, e.budget, e.cap))}</p>${detail}${reset}<div class="error-acts">${btn('retry', ICON.retry, soft ? 'Run again' : 'Try again')}${extra}</div></div>`;
 }
 // The ONE 'working' line: spinner (.status::before) + sheen label + elapsed time kept current by tickAll().
 const elapsedLabel = (t0) => { const s = Math.round((Date.now() - t0) / 1000); return s < 3 ? '' : s < 60 ? `· ${s}s` : `· ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -1698,7 +1709,7 @@ async function run(e) {
   const thread = S.thread;
   if (thread) { liveThreads.set(thread.id, thread); liveRuns.set(thread.id, (liveRuns.get(thread.id) || 0) + 1); }
   const signal = ctrl.signal;
-  e.pending = true; e.error = null; e.errorKind = null; e.cut = null; delete e.budget;
+  e.pending = true; e.error = null; e.errorKind = null; e.cut = null; delete e.budget; delete e.cap;
   delete e.recovered; const releaseRun = Sync.holdRunLock(e.id); // another tab never syncs this entry mid-run
   const t0 = e.startedAt = Date.now();
   repaint(e); // a retry otherwise keeps its old error card until the first token
@@ -1718,6 +1729,7 @@ async function run(e) {
       e.error = /failed to fetch|networkerror|\bload failed/i.test(err.message || '') ? 'Couldn’t reach Atelier — the connection dropped. Tap Try again.' : err.message || String(err);
       e.errorKind = errorKind(e.error, err.status, err.code);
       if (isTesterCode(err.code)) e.budget = budgetOf(err);
+      else if (isCapCode(err.code)) { const cap = capOf(err); if (cap) e.cap = cap; } // which spending limit, and when the month resets
       if (err.status === 401) updateKeyState(false);
       if (err.code === 'tester_signin') testerSignedOut('expired');
       else if (err.status === 401 && /passcode/i.test(e.error)) { Sync.pause('passcode'); S.settings.passcode = ''; saveSettings(); syncRole(); DB.ownerPasscodeSet('').catch(() => {}); signinReason = 'rejected'; openOnboard('rejected'); }
@@ -1729,7 +1741,7 @@ async function run(e) {
       if (left > 0) liveRuns.set(thread.id, left);
       else { liveRuns.delete(thread.id); liveThreads.delete(thread.id); }
     }
-    $('#activityStatus').textContent = e.error ? `${errorTitle(e.errorKind || errorKind(e.error), e.error, e.budget)}.` : e.cut === 'stopped' ? 'Stopped early.' : 'Your response is ready.';
+    $('#activityStatus').textContent = e.error ? `${errorTitle(e.errorKind || errorKind(e.error), e.error, e.budget, e.cap)}.` : e.cut === 'stopped' ? 'Stopped early.' : 'Your response is ready.';
     delete e.stage; delete e.chars; delete e.status; delete e.startedAt;
     for (const st of e.steps || []) {
       if (st.status === 'awaiting') { st.status = 'declined'; approvals.delete(st.id); }
@@ -1748,6 +1760,7 @@ async function run(e) {
     if (thread?.entries.length === 1 && !e.error) nameThread(e, thread);
     if (!e.error && !e.group) learnFrom(e);
     if (S.tester) refreshTesterSoon(); // reservations settle after the stream: show the settled numbers
+    else if (e.kind === 'image' || e.kind === 'video') refreshSpendSoon(); // the owner's month moved: the cost notes follow
   }
 }
 
@@ -2232,7 +2245,7 @@ async function runImage(e, signal) {
         return m.run ? await m.run(prompt, { aspect: e.params.aspect, seed }, signal)
           : extractMedia(await genai(m.id, m.body(prompt, { ...e.params, seed }), { signal, onTick: (ms) => tick(e, ms) }), 'image');
       } catch (err) {
-        const skippable = !isTesterCode(err.code) && (accountProblem(err) || err.status === 429 || err.status === 503);
+        const skippable = !isTesterCode(err.code) && !isCapCode(err.code) && (accountProblem(err) || err.status === 429 || err.status === 503);
         if (err.name === 'AbortError' || !skippable || ci >= candidates.length - 1) throw err;
         if (candidates[ci] === m) { ci++; e.meta.model = candidates[ci].id; toast(`${m.label} unavailable — using ${candidates[ci].label}`); repaint(e); }
       }
@@ -2245,6 +2258,9 @@ async function runImage(e, signal) {
   const res = await Promise.allSettled(jobs);
   const fail = res.find((r) => r.status === 'rejected');
   if (!e.media.length && fail) throw fail.reason;
+  // ×N where only some fit this month's limit (each image is its own request): say why fewer came back
+  const short = res.some((r) => r.status === 'rejected' && isCapCode(r.reason?.code)) ? partialCapNote(e.media.length, e.expect) : '';
+  if (short) { e.meta.note = [e.meta.note, short].filter(Boolean).join(' · '); toast(short, { action: { label: 'Change limits', onClick: openSpending } }); }
   e.expect = e.media.length;
 }
 
@@ -2624,6 +2640,7 @@ stream.addEventListener('click', async (ev) => {
     case 'edit-prompt': setMode(e.kind); input.value = e.prompt; setMark(e.untrusted); autosize(); return input.focus(); // a link/share prompt stays marked
     case 'settings': return openSettings();
     case 'allowance': openSettings(); return selectSettings('general');
+    case 'spending': return openSpending();
     case 'signin': return openOnboard('expired');
     case 'view-media': return openViewer({ title: e.prompt, img: e.media[k].src, dl: () => dlMedia(e, k), more: { id: e.id, k } });
     case 'view-video': {
@@ -2833,6 +2850,22 @@ function omniNote(o) {
   const { seconds, resolution } = veoShape(o), usd = (VEO_PER_SECOND[OMNI_ID]?.[resolution] || 0) * seconds;
   return `Gemini Omni · ${seconds} s ${resolution} ≈ $${usd.toFixed(2)}${resolution === '720p' ? '' : ' (estimate)'}`;
 }
+// The owner's spending limits (Settings → Spending): what one send in Video / Image mode should cost, warned about in
+// the options strip when it wouldn't fit (the Worker refuses it before the provider is called anyway).
+function videoUsd(vm, o) {
+  if (vm.xai) return xaiQuote(vm.xai, xaiSeconds(o.secs));
+  if (vm.runway) {
+    const tiered = Boolean(RUNWAY_SPECS[vm.runway]?.rates);
+    return runwayQuoteUsd(vm.runway, +o.secs, { resolution: tiered ? (o.aspect === '16:9hd' ? '1080p' : '720p') : undefined, still: S.attachments.length > 0 })?.usd ?? null;
+  }
+  if (vm.omni) { const { seconds, resolution } = veoShape(o); return (VEO_PER_SECOND[OMNI_ID]?.[resolution] || 0) * (omniEdit ? 10 : seconds); } // an edit is held at the longest clip
+  return null; // Cosmos and the motion still are free
+}
+const videoCapNote = (vm, o) => capNote(videoUsd(vm, o), 'video');
+function imageCapNote(o) {
+  const cfg = imageModel(o.model), edit = S.attachments.length > 0, per = cfg && imageUsd(cfg.id, { edit });
+  return per ? capNote(per * (edit ? 1 : Math.max(1, +o.count || 1)), 'image') : '';
+}
 // Video mode, after Edit on an Omni clip: the chip that says the next prompt edits it (tap to film a new clip instead).
 function omniEditChip() {
   if (!omniEdit || !videoModel(S.opts.video.model)?.omni) return '';
@@ -2863,7 +2896,8 @@ function renderOptions() {
         + '<span class="opt-sep"></span>'
         + selectOpt('', 'count', [[1, '×1'], [2, '×2'], [4, '×4']], o.count)
         + `<button class="chip ${o.enhance ? 'on' : ''}" data-toggle="enhance" title="Let an LLM enrich your prompt"><span aria-hidden="true">✦</span> Enhance</button>`
-        + `<span class="opt-note">attach a photo to edit it</span>`;
+        + `<span class="opt-note">attach a photo to edit it</span>`
+        + imageCapNote(o);
       break;
     case 'video': {
       if (S.video) { // a clip in Video mode: Remix (Labs) or, with it off, a plain way over to Ask
@@ -2898,7 +2932,8 @@ function renderOptions() {
         // kept on phones whenever a length or HD was left out of the menus, so the tester sees why (A7b)
         + (xm ? `<span class="opt-note keep">${esc(xaiOptNote(vm, o))}</span>`
           : rw ? `<span class="opt-note keep">${esc(runwayOptNote(vm, o.secs, o.aspect))} · ${RUNWAY_POWERED}</span>`
-          : `<span class="opt-note${fit && (!fit.hd || fit.secs.length < 3) ? ' keep' : ''}">${esc(fit ? veoNote(vm, fit, o) : vm.omni ? omniNote(o) : vm.note || 'attach an image to animate it')}</span>`);
+          : `<span class="opt-note${fit && (!fit.hd || fit.secs.length < 3) ? ' keep' : ''}">${esc(fit ? veoNote(vm, fit, o) : vm.omni ? omniNote(o) : vm.note || 'attach an image to animate it')}</span>`)
+        + (fit ? '' : videoCapNote(vm, o)); // the owner's spending limits: a warning when this clip wouldn't fit
       h = rxChoice + h;
       break;
     }
@@ -2971,7 +3006,8 @@ $('#options').addEventListener('change', (ev) => {
   S.opts[S.mode][s.dataset.opt] = /^\d+$/.test(v) ? +v : v;
   saveOpts();
   // Video: the cost note follows the length and HD choice (Omni, Runway and a tester's reserve all price by them).
-  if (S.mode === 'video' && ['model', 'secs', 'aspect'].includes(s.dataset.opt)) {
+  // Image (owner): the spending-limit warning follows the model and the count.
+  if ((S.mode === 'video' && ['model', 'secs', 'aspect'].includes(s.dataset.opt)) || (S.mode === 'image' && !S.tester && ['model', 'count'].includes(s.dataset.opt))) {
     const key = s.dataset.opt; // keep focus on the select that changed
     renderOptions(); saveOpts(); // renderOptions may snap the length/aspect to what the new model takes: keep that
     $(`[data-opt="${key}"]`, $('#options'))?.focus({ preventScroll: true });
@@ -3717,12 +3753,15 @@ function renderComposerControls() {
     if (select) h += select.closest('label').outerHTML.replace(/data-opt=/g, 'data-essential-opt=');
   }
   if (S.mode === 'video') {
-    const note = $('.opt-note', advanced);
+    const note = $('.opt-note:not(.cap-warn)', advanced);
     if (note) h += `<span class="essential-note">${esc(note.textContent)}</span>`;
     for (const sel of ['[data-rx-choice]', '[data-ask-about]']) {
       const b = $(sel, advanced); if (b) h += `<button type="button" class="chip" data-show-options>${esc(b.textContent)}</button>`;
     }
   }
+  // The owner's spending limits (Settings → Spending): this send wouldn't fit, said here too when the options are folded.
+  const warn = $('.cap-warn', advanced);
+  if (warn) h += `<span class="essential-note cap-warn" role="note">${esc(warn.textContent)}</span>`;
   box.innerHTML = h;
   // outerHTML retains the original selected attribute; copy the live select value.
   $$('[data-essential-opt]', box).forEach((s) => { s.value = $(`[data-opt="${s.dataset.essentialOpt}"]`, advanced).value; });
@@ -4443,7 +4482,7 @@ function openSettings() {
       return `<span class="${on ? 'ok' : 'bad'}">${PROVIDER_NAMES[p]}${why ? `<small>${why}</small>` : ''}</span>`;
     }).join('');
   }
-  if (S.settings.passcode && !S.tester) loadTesters();
+  if (S.settings.passcode && !S.tester) { loadSpending(); loadTesters(); }
   const dl = $('#modelList');
   if (!dl.children.length) dl.innerHTML = [...new Set(Object.values(CHAT_MODELS).flat().map(([id]) => id))].map((id) => `<option value="${id}">`).join('');
   $('#passResult').textContent = ''; $('#passResult').className = 'hint';
@@ -4500,6 +4539,14 @@ $('#settingsForm').addEventListener('submit', async (ev) => {
     m.scrollIntoView({ block: 'center' });
     return;
   }
+  // ...and so do the owner's Spending limits, edited but not yet saved with their own button.
+  const caps = spEdited();
+  if (caps?.error) {
+    selectSettings('general');
+    const m = $('#spMsg'); m.hidden = false; m.textContent = caps.error;
+    m.scrollIntoView({ block: 'center' });
+    return;
+  }
   const f = ev.target;
   const s = S.settings;
   s.passcode = f.passcode.value.trim();
@@ -4520,7 +4567,8 @@ $('#settingsForm').addEventListener('submit', async (ev) => {
   syncClip(); // the Video model pin decides clip vs frames
   retitleReads(); // a passcode added or cleared changes which voice Read aloud uses
   if (lim) testersPost('config', lim.body, null).then((ok) => { if (ok) { toast('Saved · tester limits updated'); loadTesters(); } });
-  else toast('Saved');
+  else if (!caps) toast('Saved');
+  if (caps) spSave(null, caps); // toasts "Spending limits saved" (or the server's reason it couldn't)
   if (sub) tpAddPreview(sub, null);
 });
 // Verifies every stored provider key with its provider (free calls) and shows the exact error.
@@ -5396,6 +5444,136 @@ $('#testersPanel').addEventListener('keydown', (ev) => {
   else $('#testersPanel [data-tp="limits"]')?.click();
 });
 
+// ── owner: Settings → General → Spending (GET /api/owner/spend, PUT /api/owner/limits; public/spend.js, src/spend.js) ──
+// The Worker holds every paid owner video to the per-video limit and every paid video and image to the monthly one, and
+// refuses a job over either before the provider is called. This panel shows the month and edits the limits (saved on
+// the server, so they apply on every device). Testers never see it (needs-owner) and the routes answer them 403.
+const SP = { data: null, at: 0, seq: 0, pending: false, loading: null };
+function loadSpending(opts) { return (SP.loading = fetchSpending(opts)); } // SP.loading: the latest load, for openSpending
+async function fetchSpending({ paint = true } = {}) {
+  const box = $('#spendingPanel'), seq = ++SP.seq;
+  if (!S.settings.passcode || S.tester) return null;
+  SP.at = Date.now(); // a failure waits as long as a success before the cost notes ask again
+  if (paint && !SP.data) { box.setAttribute('aria-busy', 'true'); box.innerHTML = skel('58%', 14) + skel('100%', 6) + skel('44%', 12) + skel('80%', 14); }
+  try {
+    const j = await loadSpend({ apiHeaders, signal: AbortSignal.timeout(15000) });
+    if (seq !== SP.seq) return SP.data;
+    SP.data = j;
+    if (paint || $('#settings').open) paintSpending();
+    if (S.mode === 'video' || S.mode === 'image') keepOptFocus(renderOptions); // the cost note's warning follows the new numbers
+    return j;
+  } catch (err) {
+    if (seq !== SP.seq) return null;
+    if (paint) {
+      box.removeAttribute('aria-busy');
+      box.innerHTML = `<p class="hint bad" role="alert">${esc(err?.name === 'TimeoutError' ? 'Your spending is taking too long to load — try again.' : netText(err))}</p><button type="button" class="chip" data-sp="reload">Try again</button>`;
+    }
+    return null;
+  }
+}
+// A background re-render of the options strip (the spend numbers arrived) rebuilds its selects: put focus back on the
+// one the owner was using, as the options' own change handler does, instead of dropping it to <body>.
+function keepOptFocus(render) {
+  const a = document.activeElement, key = a?.dataset?.opt || a?.dataset?.essentialOpt, host = key ? a.closest('#options, #essentialOptions') : null;
+  render();
+  if (!host || document.contains(a)) return;
+  const attr = host.id === 'options' ? 'data-opt' : 'data-essential-opt';
+  $(`[${attr}="${key}"]`, host.isConnected ? host : $(`#${host.id}`))?.focus({ preventScroll: true });
+}
+// The cost notes' numbers, fetched in the background when they are over five minutes old (never for testers).
+function ensureSpend() {
+  if (S.tester || !S.settings.passcode || SP.pending || Date.now() - SP.at < 300_000) return;
+  SP.pending = true;
+  loadSpending({ paint: false }).finally(() => { SP.pending = false; });
+}
+let spendTimer = 0;
+function refreshSpendSoon() {
+  if (S.tester || !S.settings.passcode) return;
+  clearTimeout(spendTimer);
+  spendTimer = setTimeout(() => loadSpending({ paint: $('#settings').open }), 1500); // after the job's settle reached the Ledger
+}
+const spDollars = (v) => (Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '');
+function paintSpending() {
+  const box = $('#spendingPanel'), d = SP.data || {}, lim = d.limits || {};
+  // A repaint (a job just settled) keeps limits being typed, and the field being typed in.
+  const typed = spEdited() ? [$('#spVideo').value, $('#spMonth').value] : null;
+  const focused = ['spVideo', 'spMonth'].includes(document.activeElement?.id) ? document.activeElement.id : null;
+  box.removeAttribute('aria-busy');
+  const month = Math.max(0, Number(lim.monthlyMediaUsd) || 0), total = Math.max(0, Number(d.totalUsd) || 0), held = Math.max(0, Number(d.heldUsd) || 0);
+  const frac = (x) => (month ? Math.min(1, x / month) : x > 0 ? 1 : 0).toFixed(3);
+  const name = /^\d{4}-\d{2}$/.test(d.month || '') ? new Date(`${d.month}-01T12:00:00Z`).toLocaleDateString([], { month: 'long', year: 'numeric', timeZone: 'UTC' }) : 'This month';
+  const reset = Date.parse(d.resetsAt || ''), rows = breakdownRows(d);
+  const resetText = resetDay(reset); // the Worker's month is UTC
+  box.innerHTML = `<div class="tp-pool">
+      <p class="tp-row"><span class="tp-label">Video + images · ${esc(name)}</span><span class="tp-num"><b>${capUsd(total, { up: true })}</b> of ${capUsd(month)}</span></p>
+      <span class="tp-bar${total >= month ? ' full' : ''}" style="--s:${frac(total - held)};--r:${frac(total)}" aria-hidden="true"><i class="r"></i><i class="s"></i></span>
+      <p class="hint">${capUsd(Math.max(0, month - total))} left${resetText ? ` · resets ${esc(resetText)}` : ''}${held ? ` · ${capUsd(held, { up: true })} held for jobs still running` : ''}</p>
+    </div>
+    <div class="tp-block">
+      <p class="tp-label">This month by provider</p>
+      ${rows.length ? `<ul class="sp-list">${rows.map((x) => `<li><span>${esc(x.label)}</span><span>${x.jobs} ${x.jobs === 1 ? 'job' : 'jobs'} · <b>${capUsd(x.usd, { up: true })}</b></span></li>`).join('')}</ul>` : '<p class="hint">Nothing paid for yet this month.</p>'}
+    </div>
+    <div class="tp-block">
+      <p class="tp-label">Limits <small>Checked before anything paid starts, on every device. Free FLUX images and Cosmos video never count.</small></p>
+      <div class="tp-limits sp-limits">
+        <label class="field"><span>Per video <small>$</small></span><input id="spVideo" inputmode="decimal" autocomplete="off" enterkeyhint="done" value="${spDollars(lim.perVideoUsd)}" /></label>
+        <label class="field"><span>Video + images a month <small>$</small></span><input id="spMonth" inputmode="decimal" autocomplete="off" enterkeyhint="done" value="${spDollars(lim.monthlyMediaUsd)}" /></label>
+      </div>
+      <p class="hint tp-hint">Runway, Gemini Omni and Grok videos count toward both; GPT Image, Nano Banana, Muse and Grok images toward the month. 0 pauses paid video, or all paid media.</p>
+      <p class="hint bad" id="spMsg" role="alert" hidden></p>
+      <button type="button" class="chip" data-sp="save">Save limits</button>
+    </div>`;
+  if (typed) [$('#spVideo').value, $('#spMonth').value] = typed;
+  if (focused) $(`#${focused}`).focus({ preventScroll: true });
+}
+// The limit fields as PUT /api/owner/limits (limitsBody: {body} | {error}) when either differs from what was loaded, else null.
+function spEdited() {
+  if (S.tester || !SP.data || !$('#spVideo') || ['#spVideo', '#spMonth'].every((id) => $(id).value.trim() === $(id).defaultValue)) return null;
+  return limitsBody({ perVideo: $('#spVideo').value, monthly: $('#spMonth').value });
+}
+async function spSave(b, res = limitsBody({ perVideo: $('#spVideo').value, monthly: $('#spMonth').value })) {
+  const msg = $('#spMsg');
+  if (msg) { msg.hidden = !res.error; msg.textContent = res.error || ''; }
+  if (res.error) return false;
+  const done = busyBtn(b, 'Saving…');
+  try {
+    const j = await saveLimits(res.body, { apiHeaders });
+    // what the server kept (a per-video limit above the month comes back lowered): the fields show it, not what was typed
+    for (const [id, v] of [['#spVideo', j.perVideoUsd], ['#spMonth', j.monthlyMediaUsd]]) { const f = $(id); if (f) f.value = f.defaultValue = spDollars(v); }
+    toast(j.clamped ? 'Limits saved · per video lowered to the monthly limit' : 'Spending limits saved');
+    await loadSpending({ paint: $('#settings').open });
+    return true;
+  } catch (err) {
+    if (msg && $('#settings').open) { msg.hidden = false; msg.textContent = netText(err); } else toast(netText(err), { error: true });
+    return false;
+  } finally { done(); }
+}
+// The error card's "Change limits": Settings, General, scrolled to the Spending limits.
+function openSpending() {
+  openSettings(); selectSettings('general');
+  const go = () => { const f = $('#spVideo'); if (f) { f.scrollIntoView({ block: 'center' }); if (!COARSE.matches) f.focus({ preventScroll: true }); } else $('#spendingSection').scrollIntoView({ block: 'start' }); };
+  (SP.loading || loadSpending()).then(() => setTimeout(go, 30)); // after openSettings' own load repaints the panel
+}
+$('#spendingPanel').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-sp]');
+  if (!b || b.disabled) return;
+  if (b.dataset.sp === 'reload') loadSpending();
+  else if (b.dataset.sp === 'save') spSave(b);
+});
+// Enter in a limit field saves the limits — it must not submit (and close) the Settings form.
+$('#spendingPanel').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' || ev.isComposing || ev.target.tagName !== 'INPUT') return;
+  ev.preventDefault();
+  $('#spendingPanel [data-sp="save"]')?.click();
+});
+// The cost note's warning for one send of `costUsd` (owner only; '' when it fits or nothing is known yet).
+function capNote(costUsd, kind) {
+  if (S.tester || !S.settings.passcode) return '';
+  ensureSpend();
+  const w = capWarning(costUsd, { kind, data: SP.data });
+  return w ? `<span class="opt-note keep cap-warn" role="note">${esc(`${capUsd(costUsd, { up: true })} · ${w}`)}</span>` : '';
+}
+
 // ───────────────────────── You: profile, voice, memory, imports ─────────────────────────
 const ME_DEFAULT = { bio: '', learned: '', style: '', samples: '', memory: [], sources: {}, updatedAt: 0 };
 // A tester's You is cached under its own key, and only for the tester it belongs to.
@@ -5768,7 +5946,7 @@ $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
 
 // The build feedback reports when app.js was loaded without its ?v= (scripts/bump-version.mjs moves it with sw.js VERSION).
-const APP_BUILD = '82';
+const APP_BUILD = '83';
 const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || APP_BUILD}`, online: navigator.onLine !== false }), toast });
 $('#feedbackBtn').onclick = () => feedback.open();
 $('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };

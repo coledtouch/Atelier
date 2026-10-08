@@ -20,7 +20,12 @@
 //   GET  omni/video/<id>   → video/mp4 (the finished clip)
 //   POST omni/cancel/<id>  → {ok}
 // The API key never leaves the Worker and never reaches a log or an error; prompts and media are never logged.
+// The owner's starts go through src/spend.js (opts.spend): held to the per-video and monthly limits before Google is
+// called (402 owner_cap_*), tied to the interaction once Google accepts it, and settled from its reported usage when a
+// status poll sees it finish ($0 for a filtered, failed or cancelled one: Google bills only a produced video).
 import { GEMINI_BASE } from './gemini.js';
+import { veoCost, omniActual } from './tester/prices.js';
+import { SpendError, spendResponse, isGatewayStatus } from './spend.js';
 
 export const OMNI_MODEL = 'gemini-omni-1.1-flash';
 export const OMNI_PRICE_ID = `gemini:${OMNI_MODEL}`;
@@ -55,9 +60,11 @@ const isRecord = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
 export const validId = (id) => typeof id === 'string' && ID_RE.test(id);
 
 // Text that may leave this module: no key, no links, no base64, no control characters, short.
+const SCRUB_IN = 20000; // characters of upstream text looked at (the key is removed from all of it first)
 export function scrub(text, key = '', max = 240) {
   let s = String(text ?? '');
   if (key) s = s.split(key).join('…');
+  s = s.slice(0, SCRUB_IN); // a counted quantifier like {200,} overflows V8's regex stack on a multi-MB run (an error page, a clip)
   return s.replace(/\bAIza[\w-]+/g, 'AIza…').replace(/\bhttps?:\/\/\S+/gi, '[link]').replace(/[A-Za-z0-9+/=_-]{200,}/g, '…')
     .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s{2,}/g, ' ').trim().slice(0, max);
 }
@@ -142,7 +149,7 @@ export async function upstreamError(r, what, key) {
   if (s === 401 || s === 403) return new OmniError('Google refused the server’s Gemini key for Omni (GEMINI_API_KEY) — check billing and model access in AI Studio.', 403, 'omni_key');
   if (s === 404) return new OmniError('Google no longer has that video (interactions are kept 55 days).', 404, 'omni_gone');
   if (s === 429) return new OmniError('Gemini Omni is busy or this key is over its limit — try again in a moment.', 429, 'omni_busy', retryAfterOf(r));
-  if (s >= 500) return new OmniError('Gemini Omni is busy right now — try again in a moment.', 503, 'omni_busy', retryAfterOf(r));
+  if (s >= 500) return Object.assign(new OmniError('Gemini Omni is busy right now — try again in a moment.', 503, 'omni_busy', retryAfterOf(r)), { gateway: isGatewayStatus(s) });
   return new OmniError(`${what} failed (${s}).`, 502, 'omni_failed');
 }
 
@@ -173,18 +180,29 @@ async function readCappedText(body, cap) {
   for (const p of parts) { all.set(p, at); at += p.byteLength; }
   return new TextDecoder().decode(all);
 }
-const BLOB_RE = new RegExp(`"data"\\s*:\\s*"([A-Za-z0-9+/=_\\\\-]{${LIMITS.blob},})"`, 'g');
+// Only the key is found by regex; the value is walked a character at a time. A regex over the value itself
+// ("…"([A-Za-z0-9+/=_\\-]{1024,})"") overflows V8's stack once a clip passes ~3 MB of base64 (RangeError on 4 MB+).
+const DATA_KEY_RE = /"data"\s*:\s*"/g;
+const b64ish = (c) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c === 43 || c === 47 || c === 61 || c === 95 || c === 45 || c === 92; // A-Z a-z 0-9 + / = _ - \
 /**
  * An interaction's JSON text → {j, text, blobs}: j is the JSON with every long "data" string replaced by '@omni:<n>',
  * and blobs[n] = [start, end) of that string in `text` (decoded later, in slices). Exported for tests.
  */
 export function scan(text) {
   const blobs = [];
-  const stripped = text.replace(BLOB_RE, (all, b64, offset) => {
-    const start = offset + all.length - b64.length - 1;
-    blobs.push([start, start + b64.length]);
-    return `"data":"@omni:${blobs.length - 1}"`;
-  });
+  let stripped = '', last = 0;
+  DATA_KEY_RE.lastIndex = 0;
+  for (let m; (m = DATA_KEY_RE.exec(text));) {
+    const start = m.index + m[0].length;
+    let end = start;
+    while (end < text.length && b64ish(text.charCodeAt(end))) end++;
+    if (end - start < LIMITS.blob || text.charCodeAt(end) !== 34) continue; // short, or not a plain base64 string: left in
+    blobs.push([start, end]);
+    stripped += `${text.slice(last, m.index)}"data":"@omni:${blobs.length - 1}"`;
+    last = end + 1;
+    DATA_KEY_RE.lastIndex = last;
+  }
+  stripped += text.slice(last);
   let j = null;
   try { j = JSON.parse(stripped); } catch {}
   return { j: isRecord(j) ? j : null, text, blobs };
@@ -323,41 +341,92 @@ export async function readBody(req) {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+// ── the owner's spending limits (src/spend.js) ──
+const jobOf = (id) => `omni:${id}`;
+/** What an owner clip is held at (µ$, Google's per-second price, no margin): an edit keeps its clip's length, so it is held at the longest (10 s). */
+export const ownerQuote = (shaped, seconds = shaped.edit ? OMNI_SECONDS_MAX : shaped.seconds) => veoCost({ model: OMNI_PRICE_ID, seconds, resolution: shaped.resolution, margin: false });
+/** A finished interaction (summarize's shape) → µ$ to record: its usage when it made a video (else null: the quote); $0 without one. */
+export function ownerCost(summary) {
+  if (!summary?.video) return 0;
+  try { return omniActual({ model: OMNI_PRICE_ID, usage: summary.usage }); } catch { return null; }
+}
+// The statuses an owner hold settles on. Anything else (requires_action, a missing, uppercase or new status) is not known
+// to be finished, so the hold stays at its quote and a later poll can still settle it to what Google reports.
+export const OMNI_SETTLED = Object.freeze(['completed', 'failed', 'cancelled', 'incomplete']);
+// A refused create: Google answered (nothing made, nothing billed) → $0; no answer, a gateway's answer (502, 504, 52x:
+// Google may have started it) or a garbled one → the quote.
+const settleRefused = (hold, err) => hold?.settle(err instanceof OmniError && err.code !== 'omni_unreachable' && err.code !== 'omni_failed' && !err.gateway ? 0 : null);
+
 // The owner's start: when Google refuses the duration field itself, try once more without it (the clip then has
 // Omni's own length, which the browser shows), so a format change on Google's side can't stop every video.
-async function ownerStart(req, key) {
+async function ownerStart(req, key, spend) {
   const shaped = shapeOmni(await readBody(req));
+  const hold = spend ? await spend.start({ provider: 'omni', kind: 'video', model: OMNI_PRICE_ID, amount: ownerQuote(shaped) }) : null;
+  const made = async (body, extra) => {
+    const r = await omniCreate(key, body);
+    await hold?.attach(jobOf(r.id));
+    return { ...r, ...extra };
+  };
   try {
-    return { ...(await omniCreate(key, shaped.body)), seconds: shaped.seconds };
+    return await made(shaped.body, { seconds: shaped.seconds });
   } catch (err) {
-    if (!(err instanceof OmniError) || err.code !== 'omni_rejected' || !/duration/i.test(err.message) || !shaped.body.response_format.duration) throw err;
+    if (!(err instanceof OmniError) || err.code !== 'omni_rejected' || !/duration/i.test(err.message) || !shaped.body.response_format.duration) { await settleRefused(hold, err); throw err; }
     console.warn('omni: duration refused, retrying without it');
+    if (hold) { // Omni picks the length now: hold the longest clip, and only if that still fits
+      const fit = await hold.resize(ownerQuote(shaped, OMNI_SECONDS_MAX));
+      if (!fit.ok) { await hold.release(); throw fit.error; }
+    }
     const { duration, ...rf } = shaped.body.response_format;
-    return { ...(await omniCreate(key, { ...shaped.body, response_format: rf })), seconds: null, durationIgnored: true };
+    try { return await made({ ...shaped.body, response_format: rf }, { seconds: null, durationIgnored: true }); }
+    catch (again) { await settleRefused(hold, again); throw again; }
   }
+}
+// GET omni/status/<id> for the owner: a finished interaction settles its spend once (a resumed poll changes nothing);
+// one Google no longer has settles at its quote.
+async function ownerStatus(c, id) {
+  let summary;
+  try { ({ summary } = await omniGet(c.key, id)); }
+  catch (err) { if (err instanceof OmniError && err.status === 404) await c.spend?.settleJob(jobOf(id), null); throw err; }
+  if (summary.done && OMNI_SETTLED.includes(summary.status)) await c.spend?.settleJob(jobOf(id), ownerCost(summary));
+  return json(summary);
+}
+// POST omni/cancel/<id> for the owner (Stop): once Google has the cancel, the hold settles to what the interaction shows
+// (a clip it had already finished counts at its usage; a cancelled or still-unsettled one at $0). Nothing else ever polls
+// a stopped video, so without this its quote would stay in the month.
+async function ownerCancel(c, id) {
+  const out = await omniCancel(c.key, id);
+  if (!c.spend) return json(out);
+  let summary = null;
+  try { ({ summary } = await omniGet(c.key, id)); } catch { /* gone or unreadable: nothing more to bill */ }
+  await c.spend.settleJob(jobOf(id), summary?.done && summary.status === 'completed' ? ownerCost(summary) : 0);
+  return json(out);
 }
 
 const ROUTES = [
-  ['POST', /^start$/, async (c) => json({ ...(await ownerStart(c.req, c.key)), pollAfterMs: POLL_MS })],
-  ['GET', /^status\/([A-Za-z0-9_-]{1,256})$/, async (c, m) => json((await omniGet(c.key, m[1])).summary)],
+  ['POST', /^start$/, async (c) => json({ ...(await ownerStart(c.req, c.key, c.spend)), pollAfterMs: POLL_MS })],
+  ['GET', /^status\/([A-Za-z0-9_-]{1,256})$/, (c, m) => ownerStatus(c, m[1])],
   ['GET', /^video\/([A-Za-z0-9_-]{1,256})$/, (c, m) => omniVideo(c.key, m[1])],
-  ['POST', /^cancel\/([A-Za-z0-9_-]{1,256})$/, async (c, m) => json(await omniCancel(c.key, m[1]))],
+  ['POST', /^cancel\/([A-Za-z0-9_-]{1,256})$/, (c, m) => ownerCancel(c, m[1])],
 ];
 /** An OmniError (or anything else) → the JSON error response. */
 export function omniFail(err, key = '') {
+  if (err instanceof SpendError) return spendResponse(err);
   if (err instanceof OmniError) return json({ error: err.message, code: err.code }, err.status, err.headers);
   console.error('omni route failed', scrub(err?.message || err, key, 200));
   return json({ error: 'The Omni request failed — try again.', code: 'omni_failed' }, 502);
 }
 
-/** /api/omni/* for the owner. path is relative to /api/ ('omni/status/<id>'); key: GEMINI_API_KEY behind the passcode. */
-export async function handleOmni(req, env, path, { key } = {}) {
+/**
+ * /api/omni/* for the owner. path is relative to /api/ ('omni/status/<id>'); key: GEMINI_API_KEY behind the passcode;
+ * spend: src/spend.js's ownerSpend(env), the owner's spending limits (worker.js always passes it).
+ */
+export async function handleOmni(req, env, path, { key, spend = null } = {}) {
   if (!key) return json({ error: 'No Gemini key on the server (set GEMINI_API_KEY).' }, 401);
   const route = String(path || '').replace(/^\/?(api\/)?omni\//, '');
   try {
     for (const [method, re, fn] of ROUTES) {
       const m = route.match(re);
-      if (m && req.method === method) return await fn({ req, env, key }, m);
+      if (m && req.method === method) return await fn({ req, env, key, spend }, m);
     }
     return json({ error: 'Not found' }, 404);
   } catch (err) { return omniFail(err, key); }

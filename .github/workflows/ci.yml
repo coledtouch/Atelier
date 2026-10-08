@@ -1,0 +1,63 @@
+# Checks every push and pull request to master. It needs no secrets and never deploys: deploys happen only from the
+# owner's machine, through the checked ship command (README, "Develop / deploy").
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels its older run. Pushes to master never share a group (one per commit) and are
+# never cancelled: each push's "version bumped" job compares only that push's range, so a cancelled run would let an
+# unbumped push go unreported.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.ref) || format('ci-push-{0}', github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: check + tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows checks out CRLF like a local Windows clone: a test that only passes with LF line endings fails here.
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: CRLF checkout on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - name: node --test tests/*.test.mjs
+        shell: bash
+        run: node --test tests/*.test.mjs
+
+  version-bump:
+    name: version bumped
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # A change to public/ or src/ must move public/sw.js VERSION up (node scripts/bump-version.mjs <N>): the service
+      # worker serves the app cache-first, so without a bump phones keep their old cached modules.
+      # The base is the PR's base commit, or the commit before the push (a new branch falls back to the previous commit).
+      # A force push (the old tip is gone) fails: what it replaced can't be compared. The full history (fetch-depth: 0)
+      # is required: check-bump refuses a shallow clone.
+      - name: node scripts/check-bump.mjs
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/check-bump.mjs "$BASE" HEAD

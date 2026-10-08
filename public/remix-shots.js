@@ -10,10 +10,10 @@
 // itself. Only a DEFINITIVE answer (an HTTP status with a body) can be retried: 429 → 'queued' (no video was created,
 // nothing billed), tester 402 → 'budget'. A dropped connection or timeout after sending (omni_unconfirmed, status 0)
 // or a gateway answer → 'unknown', which needs the user's fresh approval ("retrying may bill twice").
-import { createTask, getTask, downloadOutput, failureOf, buildRequest, ratioFor } from './runway.js?v=82';
-import { omniStart, omniStatus, omniFetch } from './omni.js?v=82';
-import { parseResetsAt } from './tester.js?v=82';
-import { shotModel, shotPrompt, SHOT_NEGATIVE, isShotOp, isVeoOp, LIMITS, VEO_RETIRED } from './remix.js?v=82';
+import { createTask, cancelTask, getTask, downloadOutput, failureOf, buildRequest, ratioFor } from './runway.js?v=83';
+import { omniStart, omniStatus, omniFetch } from './omni.js?v=83';
+import { parseResetsAt } from './tester.js?v=83';
+import { shotModel, shotPrompt, SHOT_NEGATIVE, isShotOp, isVeoOp, LIMITS, VEO_RETIRED } from './remix.js?v=83';
 
 export const SHOT_TIMING = { start: 60_000, poll: 5_000, pollSlow: 10_000, slowAfter: 180_000, queuedRetry: 30_000, queuedMax: 600_000, expireAfter: 47 * 3_600_000, request: 30_000, download: 300_000, downloadTries: 3, notReadyTries: 6 };
 
@@ -148,6 +148,9 @@ export async function runwayStart(deps, request) {
     return { op };
   } catch (err) {
     if (err instanceof ShotError) throw err;
+    // A refusal naming a task (runway_cap_running, or owner_cap_* when the Worker's cancel of an over-limit estimate
+    // failed): the task exists and may bill, and the Worker's words promise another try at cancelling it, as Video mode does.
+    if (err?.task) cancelTask(err.task, { apiHeaders: deps.apiHeaders });
     if (err?.status === 0 || err?.code === 'runway_unconfirmed' || GATEWAY.has(err?.status)) throw new ShotError('unknown', err.message || 'Runway didn’t confirm the new shot — it may have started anyway.');
     throw new ShotError('definitive', err?.message || 'Runway refused the shot.', { status: err?.status ?? 500, code: err?.code ?? null, ...(err?.retryAfter ? { retryAfter: err.retryAfter } : {}) });
   }

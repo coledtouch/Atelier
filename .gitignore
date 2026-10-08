@@ -5,3 +5,4 @@ node_modules/
 .review-build/
 atelier-browser-dev.zip
 .claude/settings.local.json
+public/ship.json

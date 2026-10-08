@@ -12,6 +12,10 @@
 // Testers never reach any of it: the tester router answers xai/* with 403 owner_only (deny by default), and no xai:
 // model is in a tester plan. Nothing here can search the web (Grok's web/X search is a Responses-API tool Atelier
 // never sends). The key never leaves the Worker and never reaches a log or an error; prompts are never logged.
+// Every paid start goes through src/spend.js (opts.spend), the owner's spending limits: images count toward the monthly
+// limit, videos toward it and the per-video limit; over either → 402 owner_cap_*, and nothing reaches xAI. A finished
+// job settles to xAI's reported cost (usage.cost_in_usd_ticks), else its quote; a failed or filtered one to $0.
+import { SpendError, spendResponse, isGatewayStatus } from './spend.js';
 
 export const XAI_BASE = 'https://api.x.ai/v1';
 export const XAI_SECRET = 'XAI_API_KEY';
@@ -54,6 +58,7 @@ const round = (usd) => Math.round(usd * 1e4) / 1e4;
 export function scrub(text, key = '', max = 240) {
   let s = String(text ?? '');
   if (key) s = s.split(key).join('…');
+  s = s.slice(0, 20000); // a counted quantifier like {200,} overflows V8's regex stack on a multi-MB run (an error page, a clip)
   return s.replace(/\bxai-[A-Za-z0-9_-]{8,}/g, 'xai-…').replace(/\bhttps?:\/\/\S+/gi, '[link]').replace(/\bdata:[\w/+.-]*;base64,\S*/gi, 'data:…')
     .replace(/[A-Za-z0-9+/=_-]{200,}/g, '…').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s{2,}/g, ' ').trim().slice(0, max);
 }
@@ -141,10 +146,26 @@ export async function upstreamError(r, what, key) {
   if (s === 401 || s === 403) return new XaiError('xAI rejected the server’s API key (XAI_API_KEY) — run “Check provider keys” in Settings.', 403, 'xai_key');
   if (s === 404) return new XaiError('xAI no longer has that (it may have expired).', 404, 'xai_gone');
   if (s === 429) return new XaiError('xAI is rate limiting this key — try again in a moment.', 429, 'xai_limit', retryAfterOf(r));
-  if (s >= 500) return new XaiError('xAI is busy right now — try again in a moment.', 503, 'xai_busy', retryAfterOf(r));
+  if (s >= 500) return Object.assign(new XaiError('xAI is busy right now — try again in a moment.', 503, 'xai_busy', retryAfterOf(r)), { gateway: isGatewayStatus(s) });
   return new XaiError(`${what} failed (${s}).`, 502, 'xai_failed');
 }
 const usdOf = (usage) => { const t = Number(usage?.cost_in_usd_ticks); return Number.isSafeInteger(t) && t >= 0 ? round(t / USD_TICKS) : null; };
+// ── owner spending limits (src/spend.js), in micro-dollars ──
+const TICKS_PER_MICRO = USD_TICKS / 1e6;
+/** usage.cost_in_usd_ticks → µ$ (rounded up), or null when xAI reported none. */
+export const microsOf = (usage) => { const t = Number(usage?.cost_in_usd_ticks); return Number.isSafeInteger(t) && t >= 0 ? Math.ceil(t / TICKS_PER_MICRO) : null; };
+/** A video's quote in µ$ from xAI's price list (whole seconds × the model's rate). */
+export const videoQuoteMicros = (model, seconds) => (own(XAI_VIDEO_MODELS, model) && Number(seconds) > 0 ? Math.ceil(Number(seconds)) * Math.round(XAI_VIDEO_MODELS[model].usdPerSecond * 1e6) : NaN);
+const jobOf = (id) => `xai:${id}`;
+/** A finished video poll (summarize's shape plus the raw usage) → µ$ to record, or null for "its quote". */
+export function videoCost(s, usage) {
+  const paid = microsOf(usage);
+  if (s.video) return paid; // made: xAI's cost, else the quote
+  if (s.status === 'expired') return paid; // made, then expired before it was collected: billed all the same
+  return paid ?? 0; // failed or held back by moderation: $0 unless xAI says it charged
+}
+// No answer from xAI, or a gateway's 502/504/52x (it may have started and billed) → the quote; a refusal → $0.
+const settleRefused = (hold, err) => hold?.settle(err instanceof XaiError && err.code !== 'xai_unreachable' && !err.gateway ? 0 : null);
 
 async function readBody(req) {
   const len = Number(req.headers.get('content-length') || 0);
@@ -164,25 +185,45 @@ async function readBody(req) {
   try { return JSON.parse(new TextDecoder().decode(all)); } catch { return null; }
 }
 
-async function image(req, key) {
+async function image(req, key, spend) {
   const shaped = shapeImage(await readBody(req));
+  const hold = spend ? await spend.start({ provider: 'xai', kind: 'image', model: shaped.body.model, amount: Math.round(shaped.usd * 1e6) }) : null;
   const what = 'Making the Grok image';
-  const r = await call(key, 'POST', 'images/generations', shaped.body);
-  if (!r.ok) throw await upstreamError(r, what, key);
+  let r;
+  try {
+    r = await call(key, 'POST', 'images/generations', shaped.body);
+    if (!r.ok) throw await upstreamError(r, what, key);
+  } catch (err) { await settleRefused(hold, err); throw err; }
   const j = await r.json().catch(() => null);
   const data = (Array.isArray(j?.data) ? j.data : []).filter((d) => isRecord(d) && typeof d.b64_json === 'string' && d.b64_json)
     .map((d) => ({ b64_json: d.b64_json, mime_type: /^image\/(png|jpeg|webp)$/.test(d.mime_type || '') ? d.mime_type : 'image/jpeg' }));
+  // made: xAI's cost, else the quote; none (filtered): $0 unless xAI says it charged; an unreadable answer: the quote
+  await hold?.settle(j == null ? null : data.length ? microsOf(j.usage) : microsOf(j.usage) ?? 0);
   if (!data.length) throw new XaiError('Grok returned no image — it may have been filtered. Try rephrasing.', 400, 'xai_filtered');
   return json({ data, usd: usdOf(j?.usage) ?? shaped.usd });
 }
 
-async function videoStart(req, key) {
+async function videoStart(req, key, spend) {
   const shaped = shapeVideo(await readBody(req));
-  const r = await call(key, 'POST', 'videos/generations', shaped.body); // never cut short: xAI may already bill
-  if (!r.ok) throw await upstreamError(r, 'Starting the Grok video', key);
-  const j = await r.json().catch(() => null);
-  if (!validId(j?.request_id)) throw new XaiError('xAI didn’t return an id for the new video.', 502, 'xai_failed');
+  const hold = spend ? await spend.start({ provider: 'xai', kind: 'video', model: shaped.model, amount: videoQuoteMicros(shaped.model, shaped.seconds) }) : null;
+  let j;
+  try {
+    const r = await call(key, 'POST', 'videos/generations', shaped.body); // never cut short: xAI may already bill
+    if (!r.ok) throw await upstreamError(r, 'Starting the Grok video', key);
+    j = await r.json().catch(() => null);
+  } catch (err) { await settleRefused(hold, err); throw err; }
+  if (!validId(j?.request_id)) { await hold?.settle(null); throw new XaiError('xAI didn’t return an id for the new video.', 502, 'xai_failed'); }
+  await hold?.attach(jobOf(j.request_id));
   return json({ id: j.request_id, model: shaped.model, seconds: shaped.seconds, resolution: shaped.resolution, quote: shaped.quote, pollAfterMs: POLL_MS });
+}
+// GET xai/video/status/<id> (owner): a finished video settles its spend once; one xAI no longer has, at its quote.
+async function videoStatus(c, id) {
+  let j;
+  try { ({ j } = await videoGet(c.key, id)); }
+  catch (err) { if (err instanceof XaiError && err.status === 404) await c.spend?.settleJob(jobOf(id), null); throw err; }
+  const s = summarize(j, id, c.key);
+  if (s.done) await c.spend?.settleJob(jobOf(id), videoCost(s, j.usage));
+  return json(s);
 }
 
 // GET /v1/videos/{id}: 200 {status: pending | done | failed | expired, progress, video: {url, duration, respect_moderation}, usage}
@@ -229,10 +270,11 @@ function capped(body, max) {
   let n = 0;
   return body.pipeThrough(new TransformStream({ transform(chunk, c) { n += chunk.byteLength; if (n > max) c.error(new Error('xAI output over the size cap')); else c.enqueue(chunk); } }));
 }
-async function videoFile(key, id) {
+async function videoFile(key, id, spend) {
   const { j } = await videoGet(key, id);
   const s = summarize(j, id, key);
   if (!s.done) throw new XaiError('The Grok video isn’t ready yet.', 409, 'xai_not_ready');
+  await spend?.settleJob(jobOf(id), videoCost(s, j.usage)); // a no-op once a status poll has settled it
   if (!s.video) throw new XaiError(s.error || 'Grok made no video.', 404, 'xai_no_video');
   let link = j.video.url;
   if (!mediaUrlOk(link)) { console.warn('xai video host refused'); throw new XaiError('xAI returned a download link Atelier doesn’t trust.', 502, 'xai_failed'); }
@@ -261,26 +303,30 @@ async function videoFile(key, id) {
 }
 
 const ROUTES = [
-  ['POST', /^image$/, (c) => image(c.req, c.key)],
-  ['POST', /^video\/start$/, (c) => videoStart(c.req, c.key)],
-  ['GET', /^video\/status\/([A-Za-z0-9_-]{1,128})$/, async (c, m) => { const { j } = await videoGet(c.key, m[1]); return json(summarize(j, m[1], c.key)); }],
-  ['GET', /^video\/file\/([A-Za-z0-9_-]{1,128})$/, (c, m) => videoFile(c.key, m[1])],
+  ['POST', /^image$/, (c) => image(c.req, c.key, c.spend)],
+  ['POST', /^video\/start$/, (c) => videoStart(c.req, c.key, c.spend)],
+  ['GET', /^video\/status\/([A-Za-z0-9_-]{1,128})$/, (c, m) => videoStatus(c, m[1])],
+  ['GET', /^video\/file\/([A-Za-z0-9_-]{1,128})$/, (c, m) => videoFile(c.key, m[1], c.spend)],
 ];
 /** An XaiError (or anything else) → the JSON error response. */
 export function xaiFail(err, key = '') {
+  if (err instanceof SpendError) return spendResponse(err);
   if (err instanceof XaiError) return json({ error: err.message, code: err.code }, err.status, err.headers);
   console.error('xai route failed', scrub(err?.message || err, key, 200));
   return json({ error: 'The xAI request failed — try again.', code: 'xai_failed' }, 502);
 }
 
-/** /api/xai/* for the owner. path is relative to /api/ ('xai/video/status/<id>'); key: XAI_API_KEY behind the passcode. */
-export async function handleXai(req, env, path, { key } = {}) {
+/**
+ * /api/xai/* for the owner. path is relative to /api/ ('xai/video/status/<id>'); key: XAI_API_KEY behind the passcode;
+ * spend: src/spend.js's ownerSpend(env), the owner's spending limits (worker.js always passes it).
+ */
+export async function handleXai(req, env, path, { key, spend = null } = {}) {
   if (!key) return json({ error: 'No xAI key on the server (set XAI_API_KEY).' }, 401);
   const route = String(path || '').replace(/^\/?(api\/)?xai\//, '');
   try {
     for (const [method, re, fn] of ROUTES) {
       const m = route.match(re);
-      if (m && req.method === method) return await fn({ req, env, key }, m);
+      if (m && req.method === method) return await fn({ req, env, key, spend }, m);
     }
     return json({ error: 'Not found' }, 404);
   } catch (err) { return xaiFail(err, key); }

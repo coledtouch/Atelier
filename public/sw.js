@@ -6,11 +6,11 @@
 // One step does all three:  node scripts/bump-version.mjs <n>
 //   (the same by hand: sed -i -E "s/atelier-v[0-9]+'/atelier-v<n>'/" public/sw.js && sed -i -E "s/\?v=[0-9]+/?v=<n>/g" public/index.html public/*.js)
 // tests/service-worker.test.mjs fails if they disagree or a module the app loads isn't precached at its ?v= URL.
-const VERSION = 'atelier-v82';
+const VERSION = 'atelier-v83';
 const V = VERSION.slice('atelier-v'.length);
 // Modules are listed at the exact ?v=<n> URLs they are imported by (PATHS drops the query for the fetch guard below).
 const SHELL = ['/', '/index.html', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`,
-  `/data-safety.js?v=${V}`, `/sync.js?v=${V}`, `/sync-merge.js?v=${V}`, `/video.js?v=${V}`, `/runway.js?v=${V}`, `/omni.js?v=${V}`, `/xai.js?v=${V}`, `/tester.js?v=${V}`, `/context.js?v=${V}`, `/launch.js?v=${V}`, `/lookup.js?v=${V}`, `/readaloud.js?v=${V}`, `/dictate.js?v=${V}`, `/viewport.js?v=${V}`, `/builds.js?v=${V}`, `/claude-import.js?v=${V}`, `/claude-worker.js?v=${V}`,
+  `/data-safety.js?v=${V}`, `/sync.js?v=${V}`, `/sync-merge.js?v=${V}`, `/video.js?v=${V}`, `/runway.js?v=${V}`, `/omni.js?v=${V}`, `/xai.js?v=${V}`, `/spend.js?v=${V}`, `/tester.js?v=${V}`, `/context.js?v=${V}`, `/launch.js?v=${V}`, `/lookup.js?v=${V}`, `/readaloud.js?v=${V}`, `/dictate.js?v=${V}`, `/viewport.js?v=${V}`, `/builds.js?v=${V}`, `/claude-import.js?v=${V}`, `/claude-worker.js?v=${V}`,
   `/remix.js?v=${V}`, `/remix-cuts.js?v=${V}`, `/remix-shots.js?v=${V}`, `/remix-graph.js?v=${V}`, `/remix-store.js?v=${V}`, `/remix-draw.js?v=${V}`, `/remix-app.js?v=${V}`, `/remix.css?v=${V}`,
   `/feedback.js?v=${V}`, `/feedback.css?v=${V}`,
   '/manifest.webmanifest', '/vendor/marked.js', '/vendor/purify.js', '/vendor/highlight.js',

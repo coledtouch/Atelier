@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=82';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=83';
 
 export const CHAT_KINDS = ['ask', 'code'];
 export const HISTORY_TURNS = 10; // earlier turns replayed (chat answers and notes alike)

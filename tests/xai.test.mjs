@@ -15,7 +15,8 @@ const PNG = `data:image/png;base64,${'iVBORw0KGgo'.padEnd(64, 'A')}`;
 const CHAT = /^POST https:\/\/api\.x\.ai\/v1\/chat\/completions$/;
 
 afterEach(() => restoreFetch());
-const owner = (path, init = {}, env = makeEnv({ ledger: null }).env) => api(env, path, init, { pass: 'pw' });
+// A real Ledger: the owner's paid image and video routes hold their quotes there (src/spend.js, Settings → Spending).
+const owner = (path, init = {}, env = makeEnv().env) => api(env, path, init, { pass: 'pw' });
 const post = (body) => ({ method: 'POST', body, headers: { 'content-type': 'application/json' } });
 const text = async (r) => { const t = await r.text(); assert.ok(!t.includes(KEY), `the key leaked: ${t}`); return t; };
 const sent = () => upstream.calls.at(-1).json;
@@ -281,4 +282,11 @@ test('catalogue: Grok in its roles after today’s top choices; image and video 
   assert.match(APP, /xai: 'xAI \(Grok\)'/);
   // testers: no xai: model in any tester plan
   for (const list of [TESTER_MODELS, TESTER_IMAGE_MODELS, TESTER_VIDEO_MODELS]) assert.ok(list.every((id) => !id.startsWith('xai:')), list.join(' '));
+});
+
+test('scrub never throws on a huge upstream body and still redacts', () => {
+  const huge = `bad xai-abcdefghijklmnop https://x.example/a ${'A'.repeat(20 * 1024 * 1024)}`;
+  const out = X.scrub(huge);
+  assert.ok(out.length <= 240);
+  assert.ok(!/xai-abcdefgh/.test(out) && !/https:/.test(out) && !/A{200}/.test(out));
 });

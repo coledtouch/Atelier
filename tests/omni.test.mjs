@@ -216,3 +216,29 @@ test('app.js: Omni is the Auto video model, the Google Veo ids are gone, saved p
   const sw = await readFile(new URL('../public/sw.js', import.meta.url), 'utf8');
   assert.match(sw, /`\/omni\.js\?v=\$\{V\}`/);
 });
+
+test('scan cuts out clips of any size: a regex over the base64 overflowed V8 past ~3 MB (RangeError at 4 MB+)', () => {
+  for (const mb of [1, 4, 8, 20]) {
+    const b64 = 'QUJD'.repeat(Math.floor((mb * 1024 * 1024 * 4) / 3 / 4));
+    const text = JSON.stringify({ id: 'v1_big', status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'video', data: b64, mime_type: 'video/mp4' }] }], short: { data: 'QUJD' } });
+    const s = W.scan(text);
+    assert.ok(s.j, `${mb} MB: parsed`);
+    assert.equal(s.blobs.length, 1, `${mb} MB: one clip cut out, the short data string left in`);
+    assert.equal(text.slice(...s.blobs[0]), b64, `${mb} MB: the range is exactly the base64`);
+    assert.equal(s.j.steps[0].content[0].data, '@omni:0');
+    assert.equal(s.j.short.data, 'QUJD');
+  }
+  // same rules as before: escaped slashes and base64url count; a value that isn't a plain string is left alone
+  const odd = `{"a":{"data":"${'A\/'.repeat(600)}"},"b":{"data":"${'A'.repeat(2000)}x y"},"c":{"data" : "${'_-'.repeat(600)}"}}`;
+  const o = W.scan(odd);
+  assert.equal(o.blobs.length, 2);
+  assert.equal(o.j.a.data, '@omni:0'); assert.equal(o.j.c.data, '@omni:1'); assert.ok(o.j.b.data.endsWith('x y'));
+});
+
+test('scrub never throws on a huge upstream body (an error page or a clip) and still redacts', () => {
+  const huge = `error AIzaSyFAKEFAKEFAKE https://x.example/a ${'A'.repeat(20 * 1024 * 1024)}`;
+  const out = W.scrub(huge, KEY);
+  assert.ok(out.length <= 240);
+  assert.ok(!/AIzaSyFAKE/.test(out) && !/https:/.test(out));
+  assert.ok(!/A{200}/.test(out));
+});

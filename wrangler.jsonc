@@ -3,6 +3,10 @@
   "name": "atelier",
   "main": "src/worker.js",
   "compatibility_date": "2026-09-01",
+  // Deploy guard: wrangler runs this before every deploy, version upload, dev and types (WRANGLER_COMMAND names which).
+  // A deploy or upload goes ahead only from npm run deploy (scripts/ship.mjs, its clean worktree) or a confirmed
+  // npm run deploy:raw; `npx wrangler deploy` anywhere else stops before uploading. dev and types always pass.
+  "build": { "command": "node scripts/deploy-guard.mjs" },
   "routes": [{ "pattern": "atelier.ciprari.ai", "custom_domain": true }],
   // The custom domain is the only way in: no atelier.<account>.workers.dev hostname and no per-version preview URLs.
   "workers_dev": false,
@@ -17,7 +21,8 @@
   // Profile + memory sync ("You" panel), guarded by APP_PASSCODE.
   "kv_namespaces": [{ "binding": "ATELIER_KV", "id": "069567aa1d9a426588b90757d49c6c71" }],
   // Remote browser relay: one Durable Object holds the extension's WebSocket.
-  // Ledger: LinkedIn tester roster, sessions and spend meter (one "main" instance, SQLite; starts paused).
+  // Ledger: LinkedIn tester roster, sessions and spend meter (one "main" instance, SQLite; starts paused), plus the owner's
+  // monthly video and image spend (owner_spend) and spending limits (config owner_limits; src/spend.js, Settings → Spending).
   "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "Relay" }, { "name": "LEDGER", "class_name": "Ledger" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }, { "tag": "v2", "new_sqlite_classes": ["Ledger"] }],
   // Per-IP throttle on the public LinkedIn sign-in routes (/api/li/start, /api/li/callback), ahead of the Ledger.

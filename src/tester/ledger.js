@@ -1,4 +1,5 @@
-// Ledger: the LinkedIn tester roster, sessions, job ownership and the spend meter (spec §5-§7, §9; addendum A2-A4, A7b).
+// Ledger: the LinkedIn tester roster, sessions, job ownership and the spend meter (spec §5-§7, §9; addendum A2-A4, A7b),
+// plus the owner's own monthly video and image spend (owner_spend, src/spend.js: Settings → Spending).
 // One instance ("main") with SQLite storage. Money is integer micro-dollars; days and months are UTC.
 // Every RPC method runs its reads and writes synchronously inside transactionSync, so each call is atomic and
 // interleaved callers can never push a tester or the pool past a limit.
@@ -18,6 +19,11 @@ const STATE_TTL = 10 * MINUTE, STALE = 15 * MINUTE, TICK = 10 * MINUTE, SESSION_
 // for the owner's Testers panel, then dropped when read and deleted by the alarm (privacy page §6).
 export const REFUSED_TTL = 7 * DAY;
 const SESSIONS_PER_TESTER = 10;
+// Owner spending (src/spend.js): rows kept 13 months; one job's recorded cost is held to a sane ceiling ($10,000).
+export const OWNER_SPEND_MONTHS = 13;
+const OWNER_JOB_MAX = 10_000_000_000;
+const OWNER_TAG = /^[a-z0-9_-]{1,20}$/;
+const OWNER_JOB = /^[a-z]{1,12}:[A-Za-z0-9_.:-]{1,256}$/;
 const MAX_STATES = 2000; // sign-ins in flight (10 minutes each); a flood of /api/li/start can't grow the table past it
 
 export const dayKey = (t) => new Date(t).toISOString().slice(0, 10);
@@ -48,6 +54,12 @@ const SCHEMA = [
   'CREATE INDEX IF NOT EXISTS jobs_sub ON jobs (sub, kind, created_at)',
   'CREATE TABLE IF NOT EXISTS config (k TEXT PRIMARY KEY, v TEXT NOT NULL)',
   'CREATE TABLE IF NOT EXISTS profiles (sub TEXT PRIMARY KEY, doc TEXT NOT NULL, updated_at INTEGER NOT NULL)',
+  // The owner's own paid video and image jobs (src/spend.js): amount is the quote held at the start, actual what it
+  // settled at (null while the job runs), job the provider's id once it accepted ('runway:<uuid>', 'omni:<id>', …).
+  `CREATE TABLE IF NOT EXISTS owner_spend (id TEXT PRIMARY KEY, month TEXT NOT NULL, provider TEXT NOT NULL, kind TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT '', amount INTEGER NOT NULL, actual INTEGER, job TEXT, created_at INTEGER NOT NULL, settled_at INTEGER)`,
+  'CREATE INDEX IF NOT EXISTS owner_spend_month ON owner_spend (month)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS owner_spend_job ON owner_spend (job)',
 ];
 
 const str = (v, max) => (typeof v === 'string' ? v : '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
@@ -130,6 +142,8 @@ export class Ledger extends DurableObject {
   #forget(sub) {
     for (const t of ['testers', 'sessions', 'spend', 'jobs', 'profiles']) this.#run(`DELETE FROM ${t} WHERE sub = ?`, sub);
   }
+  // A month's owner spend: settled jobs at what they cost, running ones at their quote.
+  #ownerTotal(month) { return this.#row('SELECT COALESCE(SUM(COALESCE(actual, amount)), 0) AS n FROM owner_spend WHERE month = ?', month).n; }
 
   // ── sign-in (OIDC state, admission, sessions) ──
   // → false when MAX_STATES sign-ins are already in flight.
@@ -240,6 +254,8 @@ export class Ledger extends DurableObject {
       this.#run('DELETE FROM jobs WHERE created_at <= ?', now - JOB_TTL);
       // ...and a refused sign-in goes 7 days after the attempt, whether or not the owner ever looked at it.
       this.#lastRefused(now);
+      const d = new Date(now), keep = monthKey(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - OWNER_SPEND_MONTHS + 1, 1));
+      this.#run('DELETE FROM owner_spend WHERE month < ?', keep);
     });
     // Retention includes the new private R2 namespace. Keep the record until its cloud data is gone, so a failed
     // or partial R2 cleanup never becomes an orphan. Revocation alone does not delete work (the owner can restore it).
@@ -311,6 +327,84 @@ export class Ledger extends DurableObject {
     if (!t || t.revoked_at != null) return false;
     this.#run('INSERT OR REPLACE INTO profiles (sub, doc, updated_at) VALUES (?, ?, ?)', sub, String(doc), this.clock());
     return true;
+  }
+
+  // ── the owner's spending limits (src/spend.js; owner routes only, never a tester's) ──
+  // The limits themselves, {perVideoUsd, monthlyMediaUsd, updatedAt} as src/spend.js saved them (it validates and
+  // normalises them), in the config table: read on every paid start, so a change applies at once on every device
+  // (KV could serve the old limits for up to a minute elsewhere). → the saved object, or null when never set.
+  ownerLimits() {
+    const r = this.#row("SELECT v FROM config WHERE k = 'owner_limits'");
+    if (!r) return null;
+    try { const v = JSON.parse(r.v); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
+  }
+  ownerSetLimits({ perVideoUsd, monthlyMediaUsd, updatedAt } = {}) {
+    const usd = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1e6;
+    if (!usd(perVideoUsd) || !usd(monthlyMediaUsd) || !Number.isSafeInteger(updatedAt)) throw new Error('ownerSetLimits: bad limits');
+    this.#run('INSERT INTO config (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', 'owner_limits', JSON.stringify({ perVideoUsd, monthlyMediaUsd, updatedAt }));
+    return true;
+  }
+  // A paid owner job about to start: holds `amount` µ$ in this UTC month unless that would take the month's spend past
+  // `monthly` µ$ (equal is allowed). The check and the hold are one transaction, so concurrent starts can't both slip
+  // under the limit. → {ok: true, id, month, spent (with this hold)} | {ok: false, scope: 'month', month, spent (before)}
+  ownerReserve({ provider, kind, model = '', amount, monthly } = {}) {
+    if (!Number.isSafeInteger(amount) || amount < 0 || !Number.isSafeInteger(monthly) || monthly < 0) throw new Error('ownerReserve: amounts must be whole micro-dollars');
+    if (!OWNER_TAG.test(String(provider)) || !OWNER_TAG.test(String(kind))) throw new Error('ownerReserve: bad provider or kind');
+    return this.#tx(() => {
+      const now = this.clock(), month = monthKey(now), spent = this.#ownerTotal(month);
+      if (spent + amount > monthly) return { ok: false, scope: 'month', month, spent };
+      const id = crypto.randomUUID();
+      this.#run('INSERT INTO owner_spend (id, month, provider, kind, model, amount, actual, job, created_at, settled_at) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL)',
+        id, month, String(provider), String(kind), str(model, 120), amount, now);
+      return { ok: true, id, month, spent: spent + amount };
+    });
+  }
+  // A running hold's new quote. Growing it must still fit `monthly` in the hold's own month. → {ok: true} |
+  // {ok: false, scope: 'month', spent (with the old quote)} | {ok: false, gone: true} (settled or unknown)
+  ownerResize(id, amount, monthly) {
+    if (!Number.isSafeInteger(amount) || amount < 0 || !Number.isSafeInteger(monthly) || monthly < 0) throw new Error('ownerResize: amounts must be whole micro-dollars');
+    return this.#tx(() => {
+      const r = this.#row('SELECT month, amount FROM owner_spend WHERE id = ? AND actual IS NULL', String(id));
+      if (!r) return { ok: false, gone: true };
+      const spent = this.#ownerTotal(r.month);
+      if (amount > r.amount && spent - r.amount + amount > monthly) return { ok: false, scope: 'month', spent };
+      this.#run('UPDATE owner_spend SET amount = ? WHERE id = ?', amount, String(id));
+      return { ok: true };
+    });
+  }
+  // The provider accepted the job: tie the hold to its id, so a status poll (from any device) can settle it. → boolean
+  ownerAttach(id, job) {
+    if (!OWNER_JOB.test(String(job))) return false;
+    return this.#tx(() => {
+      if (this.#row('SELECT 1 AS y FROM owner_spend WHERE job = ?', String(job))) return false; // one row per provider job
+      this.#run('UPDATE owner_spend SET job = ? WHERE id = ? AND job IS NULL', String(job), String(id));
+      return Boolean(this.#row('SELECT 1 AS y FROM owner_spend WHERE id = ? AND job = ?', String(id), String(job)));
+    });
+  }
+  // Settles a running job once, by its hold id or its provider id: at `actual` µ$, or at its quote when actual is null
+  // (or unreadable). A settled or unknown row is left alone: a resumed poll never counts a job twice.
+  // → {ok: true, charged, amount, month} | {ok: false}
+  ownerSettle(key, actual = null) {
+    return this.#tx(() => {
+      const r = this.#row('SELECT id, month, amount FROM owner_spend WHERE (id = ? OR job = ?) AND actual IS NULL', String(key), String(key));
+      if (!r) return { ok: false };
+      const a = Number(actual);
+      const charged = actual === null || actual === undefined || !Number.isFinite(a) ? r.amount : Math.min(OWNER_JOB_MAX, Math.max(0, Math.ceil(a)));
+      this.#run('UPDATE owner_spend SET actual = ?, settled_at = ? WHERE id = ?', charged, this.clock(), r.id);
+      return { ok: true, charged, amount: r.amount, month: r.month };
+    });
+  }
+  // One month's owner spend → {month, total, held (still running, at their quotes), jobs, byProvider: [{provider, kind,
+  // total, held, jobs}]} in µ$, the biggest first.
+  ownerSpend(month) {
+    const m = /^\d{4}-\d{2}$/.test(String(month)) ? String(month) : monthKey(this.clock());
+    const byProvider = this.#rows(`SELECT provider, kind, COUNT(*) AS jobs, SUM(COALESCE(actual, amount)) AS total,
+        SUM(CASE WHEN actual IS NULL THEN amount ELSE 0 END) AS held FROM owner_spend WHERE month = ? GROUP BY provider, kind
+      ORDER BY total DESC, provider, kind`, m).map((x) => ({ provider: x.provider, kind: x.kind, total: x.total, held: x.held, jobs: x.jobs }));
+    return {
+      month: m, total: byProvider.reduce((n, x) => n + x.total, 0), held: byProvider.reduce((n, x) => n + x.held, 0),
+      jobs: byProvider.reduce((n, x) => n + x.jobs, 0), byProvider,
+    };
   }
 
   // ── public + owner ──
