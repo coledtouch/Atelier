@@ -7,44 +7,46 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=80';
-import * as Sync from './sync.js?v=80';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwaySeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=80';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=80';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=80';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=80';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=80';
-import { initLookup } from './lookup.js?v=80';
-import { createRemix } from './remix-app.js?v=80';
-import { sendMode, looksLikeQuestion } from './remix.js?v=80';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=80';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=80';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=80';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=80';
-import * as ClaudeImport from './claude-import.js?v=80';
-import { createFeedback } from './feedback.js?v=80';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=80';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=81';
+import * as Sync from './sync.js?v=81';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwaySeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=81';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=81';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=81';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES } from './context.js?v=81';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=81';
+import { initLookup } from './lookup.js?v=81';
+import { createRemix } from './remix-app.js?v=81';
+import { sendMode, looksLikeQuestion } from './remix.js?v=81';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=81';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=81';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=81';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=81';
+import * as ClaudeImport from './claude-import.js?v=81';
+import { createFeedback } from './feedback.js?v=81';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=81';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=81';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
   ask: [
     ['gemini:gemini-3.8-flash', 'Gemini 3.8 Flash'], ['zai:glm-5.3-flash', 'GLM 5.3 Flash (Z.ai)'], ['deepseek:deepseek-flash', 'DeepSeek Flash'], ['openai:gpt-6-luna', 'GPT-6 Luna'], ['meta:muse-spark-1.3', 'Muse Spark 1.3 (Meta)'], ['anthropic:claude-sonnet-5-5', 'Claude Sonnet 5.5'],
     ['anthropic:claude-opus-5-5', 'Claude Opus 5.5'], ['openai:gpt-6-astra', 'GPT-6 Astra'], ['gemini:gemini-3.1-pro-preview', 'Gemini 3.1 Pro'], ['zai:glm-5.3', 'GLM 5.3 (Z.ai)'], ['deepseek:deepseek-v4-pro', 'DeepSeek V4 Pro'],
+    ['xai:grok-4.7', 'Grok 4.7 (xAI)'],
   ],
   // Hard Ask prompts: fast AND accurate first; Opus stays for Deep think / Code / Build.
   smart: [
     ['anthropic:claude-sonnet-5-5', 'Claude Sonnet 5.5'], ['anthropic:claude-opus-5-5', 'Claude Opus 5.5'], ['openai:gpt-6-astra', 'GPT-6 Astra'],
-    ['gemini:gemini-3.1-pro-preview', 'Gemini 3.1 Pro'],
+    ['gemini:gemini-3.1-pro-preview', 'Gemini 3.1 Pro'], ['xai:grok-4.7', 'Grok 4.7 (xAI)'],
   ],
   // Time-sensitive questions: Claude with live web search.
   web: [['anthropic:claude-sonnet-5-5', 'Claude Sonnet 5.5 + web'], ['anthropic:claude-opus-5-5', 'Claude Opus 5.5 + web']],
   reason: [
     ['anthropic:claude-opus-5-5', 'Claude Opus 5.5'], ['openai:gpt-6-astra', 'GPT-6 Astra'], ['gemini:gemini-3.1-pro-preview', 'Gemini 3.1 Pro'],
-    ['deepseek:deepseek-v4-pro', 'DeepSeek V4 Pro'], ['anthropic:claude-fable-5-1', 'Claude Fable 5.1'],
+    ['deepseek:deepseek-v4-pro', 'DeepSeek V4 Pro'], ['anthropic:claude-fable-5-1', 'Claude Fable 5.1'], ['xai:grok-4.7', 'Grok 4.7 (xAI)'],
   ],
   code: [
     ['anthropic:claude-opus-5-5', 'Claude Opus 5.5'], ['zai:glm-5.3', 'GLM 5.3 (Z.ai)'], ['deepseek:deepseek-v4-pro', 'DeepSeek V4 Pro'], ['openai:gpt-6.1-sol', 'GPT-6.1 Sol'], ['gemini:gemini-3.1-pro-preview', 'Gemini 3.1 Pro'],
-    ['anthropic:claude-sonnet-5-5', 'Claude Sonnet 5.5'], ['openai:gpt-6-astra', 'GPT-6 Astra'],
+    ['anthropic:claude-sonnet-5-5', 'Claude Sonnet 5.5'], ['openai:gpt-6-astra', 'GPT-6 Astra'], ['xai:grok-build-0.1', 'Grok Build 0.1 (xAI)'], ['xai:grok-4.7', 'Grok 4.7 (xAI)'],
   ],
   // Ghostwriting in your voice.
   write: [
@@ -53,7 +55,7 @@ const PREMIUM_MODELS = {
   ],
   vision: [
     ['gemini:gemini-3.8-flash', 'Gemini 3.8 Flash'], ['zai:glm-5.3-flash', 'GLM 5.3 Flash (Z.ai)'], ['anthropic:claude-opus-5-5', 'Claude Opus 5.5'], ['gemini:gemini-3.1-pro-preview', 'Gemini 3.1 Pro'],
-    ['openai:gpt-6-astra', 'GPT-6 Astra'], ['meta:muse-spark-1.3', 'Muse Spark 1.3 (Meta)'],
+    ['openai:gpt-6-astra', 'GPT-6 Astra'], ['meta:muse-spark-1.3', 'Muse Spark 1.3 (Meta)'], ['xai:grok-4.7', 'Grok 4.7 (xAI)'],
   ],
   // Attached videos: Gemini watches the real clip (with sound); the rest get sampled frames.
   watch: [
@@ -63,10 +65,12 @@ const PREMIUM_MODELS = {
   agent: [
     ['anthropic:claude-sonnet-5-5', 'Claude Sonnet 5.5'], ['anthropic:claude-opus-5-5', 'Claude Opus 5.5'], ['gemini:gemini-3.8-flash', 'Gemini 3.8 Flash'],
     ['zai:glm-5.3', 'GLM 5.3 (Z.ai)'], ['deepseek:deepseek-flash', 'DeepSeek Flash'], ['meta:muse-spark-1.3', 'Muse Spark 1.3 (Meta)'], ['openai:gpt-6-luna', 'GPT-6 Luna'],
+    // Grok: function calling only (shapeChatBody never sends xAI's web or X search), so web search stays Claude's alone.
+    ['xai:grok-4.7', 'Grok 4.7 (xAI)'],
   ],
   // Helper calls (prompt polish, titles, memory): cheap and quick.
   // Claude Haiku 5.5 first whenever the Anthropic key is there (adaptive thinking at effort low, no sampling params).
-  fast: [['anthropic:claude-haiku-5-5', 'Claude Haiku 5.5'], ['gemini:gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite'], ['zai:glm-4.7-flash', 'GLM 4.7 Flash (Z.ai, free)'], ['deepseek:deepseek-flash', 'DeepSeek Flash'], ['openai:gpt-6-luna', 'GPT-6 Luna']],
+  fast: [['anthropic:claude-haiku-5-5', 'Claude Haiku 5.5'], ['gemini:gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite'], ['zai:glm-4.7-flash', 'GLM 4.7 Flash (Z.ai, free)'], ['deepseek:deepseek-flash', 'DeepSeek Flash'], ['openai:gpt-6-luna', 'GPT-6 Luna'], ['xai:grok-4.3', 'Grok 4.3 (xAI)']],
 };
 const NVIDIA_MODELS = {
   ask: [
@@ -107,8 +111,8 @@ const NVIDIA_MODELS = {
 const CHAT_MODELS = Object.fromEntries(Object.keys(PREMIUM_MODELS).map((r) => [r, [...PREMIUM_MODELS[r], ...(NVIDIA_MODELS[r] || NVIDIA_MODELS[r === 'code' ? 'code' : 'ask'])]]));
 // Roles that borrow another role's list.
 const ROLE_LIST = { agent: 'agent', web: 'web', ask: 'ask', smart: 'smart', reason: 'reason', code: 'code', write: 'write', vision: 'vision', watch: 'watch', ideas: 'ask', build: 'code', fast: 'fast' };
-const providerOf = (id = '') => (id.match(/^(anthropic|openai|gemini|zai|deepseek|meta|runway):/) || [, 'nvidia'])[1];
-const PROVIDER_NAMES = { nvidia: 'NVIDIA', anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', zai: 'Z.ai', deepseek: 'DeepSeek', meta: 'Meta', runway: 'Runway' };
+const providerOf = (id = '') => (id.match(/^(anthropic|openai|gemini|zai|deepseek|meta|runway|xai):/) || [, 'nvidia'])[1];
+const PROVIDER_NAMES = { nvidia: 'NVIDIA', anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', zai: 'Z.ai', deepseek: 'DeepSeek', meta: 'Meta', runway: 'Runway', xai: 'xAI' };
 
 // Visual generation. NVIDIA entries build a genai `body`; OpenAI/Gemini entries have `run`, and `edit`
 // marks models that accept a photo to modify. "Auto" picks the first model whose provider has a key.
@@ -119,6 +123,8 @@ const IMAGE_MODELS = [
   { id: 'gemini:gemini-3-pro-image', label: 'Nano Banana Pro', edit: true, run: (p, o, sig) => geminiImage('gemini-3-pro-image', p, o, sig) },
   { id: 'gemini:gemini-nano-banana-2.1', label: 'Nano Banana 2.1 · fast', edit: true, run: (p, o, sig) => geminiImage('gemini-nano-banana-2.1', p, o, sig) },
   { id: 'meta:muse-image-1.0', label: 'Muse Image (Meta)', run: (p, o, sig) => metaImage(p, o, sig) },
+  // xAI's Grok Imagine (owner only, public/xai.js): $0.04 an image, medium quality at 1k.
+  { id: XAI_IMAGE_MODEL.id, label: XAI_IMAGE_MODEL.label, run: (p, o, sig) => xaiImageCall(xaiImageRequest(p, o.aspect), { apiHeaders, signal: sig }) },
   {
     id: 'black-forest-labs/flux.1-dev', label: 'FLUX.1 dev · detailed',
     body: (p, o) => ({ prompt: p, mode: 'base', cfg_scale: 3.5, width: ASPECTS[o.aspect][0], height: ASPECTS[o.aspect][1], seed: o.seed, steps: 40, samples: 1 }),
@@ -143,6 +149,8 @@ const VIDEO_MODELS = [
   { id: OMNI_ID, label: 'Gemini Omni Flash', omni: true, veo: true, note: 'Omni ≈ $0.10/sec at 720p, ≈ $0.20 HD · 6 s ≈ $0.61' },
   // Runway Gen-4.5 / Gen-4 Turbo / Veo 3.1 (owner only, public/runway.js). auto:false: Auto never spends Runway credits.
   ...RUNWAY_VIDEO_MODELS,
+  // xAI's Grok Imagine 1.5 / 1.5 Lite direct with the owner's XAI_API_KEY (public/xai.js). auto:false like Runway.
+  ...XAI_VIDEO_MODELS,
   {
     id: 'nvidia/cosmos3-nano', fn: 'cosmos3-nano', label: 'Cosmos 3 Nano',
     body: (p, img, o) => ({
@@ -235,7 +243,7 @@ function migrateOpts(o) {
 }
 
 // Last known provider list (refreshed from /api/health at boot) so startup never waits on the network.
-let server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, runway: false, ...LS.get('server', {}) };
+let server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, runway: false, xai: false, ...LS.get('server', {}) };
 // A tester device starts in tester mode from its last /api/tester/me (boot checks it again). The owner passcode always wins.
 if (!S.settings.passcode) S.tester = normalizeMe(LS.get('tester', null));
 // Each page is bound to one workspace. A role change reloads before another
@@ -649,9 +657,9 @@ async function toApiError(r) {
 // or to another provider when one is unusable (bad key, workspace, billing, quota).
 // onModel(id) reports the model that actually answered; onSkip(provider, err) reports a provider switch.
 const accountProblem = (err) => err.status === 401 || err.status === 403 || err.status === 402
-  || ((err.status === 400 || err.status === 429) && /workspace|api key|credit|billing|quota|balance|permission|not enabled|organization/i.test(err.message))
+  || ((err.status === 400 || err.status === 429) && /workspace|api key|credit|billing|quota|balance|permission|not enabled|organization|spending limit/i.test(err.message))
   // out of credit reported mid-stream or as a 5xx (DeepSeek "Insufficient Balance", OpenAI insufficient_quota…): same as a 402
-  || (err.status >= 500 && /insufficient[ _](balance|quota|credit|funds)|out of credits?|credit balance is too low|exceeded your current quota|billing/i.test(err.message));
+  || (err.status >= 500 && /insufficient[ _](balance|quota|credit|funds)|out of credits?|credit balance is too low|exceeded your current quota|billing|spending limit|(?:does not|doesn[’']t) have any credits/i.test(err.message));
 // Friendly error kinds. New entries store e.errorKind; older/restored entries only have e.error, so text is classified too.
 function errorKind(msg = '', status, code) {
   const m = String(msg || '');
@@ -851,7 +859,7 @@ async function streamChatRaw({ model, messages, temperature, max_tokens = 4096, 
 }
 
 // Hybrid-reasoning templates read one of these switches; unknown template vars are ignored.
-const noThink = (model) => (/nemotron|qwen|gemma|glm|deepseek|zai:/i.test(model) ? { chat_template_kwargs: { enable_thinking: false, thinking: false } } : {});
+const noThink = (model) => (/nemotron|qwen|gemma|glm|deepseek|zai:|xai:/i.test(model) ? { chat_template_kwargs: { enable_thinking: false, thinking: false } } : {});
 
 // Pull the answer out of <tag>…</tag>; reject rambling output so it never reaches a model or the UI.
 function helperAnswer(raw, tag, maxWords) {
@@ -2282,6 +2290,7 @@ async function runVideo(e, signal) {
   if (cfg.fn && Date.now() - LS.get('cosmosDeniedAt', 0) < 864e5) cfg = VIDEO_MODELS.find((m) => m.local);
   const still = e.images?.[0] || null;
   if (cfg.runway) return runRunway(e, cfg, still, signal);
+  if (cfg.xai) return runXai(e, cfg, still, signal);
   e.meta = { model: cfg.id, note: still ? 'image → video' : 'text → video' };
   e.media = []; e.expect = 1;
   const prompt = await enhance(e, 'video', signal);
@@ -2337,7 +2346,7 @@ async function runRunway(e, cfg, still, signal) {
   }
   const req = runwayRequest({ model: cfg.runway, prompt, still: img, stillSize: size, ratio, aspect: e.params.aspect, secs: e.params.secs });
   e.ratio = req.ratio; // the 'developing' placeholder takes the clip's shape
-  e.meta.note = `${req.note} · ${req.seconds} s · ${runwayQuote(cfg.runway, req.seconds)}`;
+  e.meta.note = `${req.note} · ${req.seconds} s · ${runwayQuote(cfg.runway, req.seconds, { resolution: req.resolution, still: req.kind === 'image_to_video' })}`;
   const prev = e.runway, resume = prev?.task && prev.model === cfg.runway && Date.now() - prev.at < 864e5 ? prev.task : null;
   // The thread this entry lives in. The owner may have opened another thread since sending, and persist() saves S.thread.
   const home = () => [...liveThreads.values()].find((t) => t.entries.includes(e)) || (S.thread?.entries.includes(e) ? S.thread : null);
@@ -2363,6 +2372,40 @@ async function runRunway(e, cfg, still, signal) {
   e.media = [{ type: 'video', src: await blobToDataUrl(out.blob) }];
   const cost = runwayCredits(out.credits ?? out.estimate);
   e.meta.note = `${req.note} · ${req.seconds} s${cost ? ` · ${cost}` : ''} · Powered by Runway`;
+}
+
+// Grok Imagine direct (owner only; public/xai.js): the same pending card and result card as Runway. e.xaiJob {id, model, at}
+// lets Try again pick up the earlier request instead of paying for a new one (xAI has no cancel: Stop only stops waiting).
+async function runXai(e, cfg, still, signal) {
+  e.meta = { model: cfg.id, note: still ? 'image → video' : 'text → video' };
+  e.media = []; e.expect = 1;
+  const prompt = await enhance(e, 'video', signal);
+  const img = still ? await shrinkDataUrl(still, 1280, 1280, 3_000_000) : null;
+  const body = xaiVideoRequest({ model: cfg.xai, prompt, still: img, params: e.params });
+  const note = `${img ? 'image → video' : 'text → video'} · ${body.seconds} s · ${body.resolution}`;
+  e.meta.note = `${note} · ≈ $${xaiQuote(cfg.xai, body.seconds).toFixed(2)}`;
+  const prev = e.xaiJob, resume = prev?.id && prev.model === cfg.xai && Date.now() - prev.at < 864e5 ? prev.id : null;
+  const home = () => [...liveThreads.values()].find((t) => t.entries.includes(e)) || (S.thread?.entries.includes(e) ? S.thread : null);
+  e.stage = 'Sending to xAI'; repaint(e);
+  let out;
+  try {
+    out = await xaiVideo(body, {
+      apiHeaders, signal, resume,
+      onId: (id) => {
+        e.xaiJob = { id, model: cfg.xai, at: Date.now() };
+        const t = home(); // saved now: if the app closes before the video lands, Try again resumes it (no second charge)
+        if (t) { t.updatedAt = Date.now(); DB.put(t).catch(storageError); }
+      },
+      onStatus: (text) => { e.stage = text; repaint(e); },
+    });
+  } catch (err) {
+    if (!err.resumable) delete e.xaiJob;
+    throw err;
+  }
+  delete e.xaiJob;
+  e.stage = 'Saving'; repaint(e);
+  e.media = [{ type: 'video', src: await blobToDataUrl(out.blob) }];
+  e.meta.note = `${note}${typeof out.usd === 'number' ? ` · $${out.usd.toFixed(2)}` : ''} · Grok Imagine by xAI`;
 }
 
 // FLUX paints the frame (unless one was attached), then a slow push-in/pan is recorded in-browser.
@@ -2835,11 +2878,12 @@ function renderOptions() {
       if (fitSecs?.length && !fitSecs.includes(+o.secs)) o.secs = fitSecs.at(-1);
       // Runway: its own lengths (2–10 s; Veo 3.1 4/6/8) and HD only where it has a 1080p ratio (Veo 3.1); Omni (owner)
       // 4–10 s; Cosmos and the motion still 4/6/8.
-      const rw = vm.runway || null, rwHd = Boolean(rw && RUNWAY_SPECS[rw]?.hd);
-      if (rw) { if (o.aspect === '16:9hd' && !rwHd) o.aspect = '16:9'; if (!runwaySecondsFor(rw).includes(+o.secs)) o.secs = runwaySeconds(o.secs, rw); }
+      const rw = vm.runway || null, rwHd = Boolean(rw && RUNWAY_SPECS[rw]?.hd), xm = vm.xai || null;
+      if (xm) { if (!XAI_SECONDS.includes(+o.secs)) o.secs = xaiSeconds(o.secs); }
+      else if (rw) { if (o.aspect === '16:9hd' && !rwHd) o.aspect = '16:9'; if (!runwaySecondsFor(rw).includes(+o.secs)) o.secs = runwaySeconds(o.secs, rw); }
       else if (!fit && vm.omni) { if (!OMNI_SECONDS.includes(+o.secs)) o.secs = +o.secs > 10 ? 10 : 4; }
       else if (!fit) o.secs = veoSeconds(o.secs);
-      const secs = fit ? fitSecs : rw ? runwaySecondsFor(rw) : vm.omni ? OMNI_SECONDS : [4, 6, 8];
+      const secs = fit ? fitSecs : xm ? XAI_SECONDS : rw ? runwaySecondsFor(rw) : vm.omni ? OMNI_SECONDS : [4, 6, 8];
       h = selectOpt('', 'model', [['', `Auto · ${videoModel('').label}`], ...VIDEO_MODELS.filter((m) => modelReady(m.id)).map((m) => [m.id, m.label])], o.model)
         // "Use Runway Gen-4.5?" (syncRunwayHint) sits next to the model it would change: a phone's strip scrolls, and
         // at the end the chip would start off-screen
@@ -2849,7 +2893,8 @@ function renderOptions() {
         + omniEditChip()
         + `<button class="chip ${o.enhance ? 'on' : ''}" data-toggle="enhance"><span aria-hidden="true">✦</span> Enhance</button>`
         // kept on phones whenever a length or HD was left out of the menus, so the tester sees why (A7b)
-        + (rw ? `<span class="opt-note keep">${esc(runwayOptNote(vm, o.secs))} · ${RUNWAY_POWERED}</span>`
+        + (xm ? `<span class="opt-note keep">${esc(xaiOptNote(vm, o))}</span>`
+          : rw ? `<span class="opt-note keep">${esc(runwayOptNote(vm, o.secs, o.aspect))} · ${RUNWAY_POWERED}</span>`
           : `<span class="opt-note${fit && (!fit.hd || fit.secs.length < 3) ? ' keep' : ''}">${esc(fit ? veoNote(vm, fit, o) : vm.omni ? omniNote(o) : vm.note || 'attach an image to animate it')}</span>`);
       h = rxChoice + h;
       break;
@@ -4390,7 +4435,7 @@ function openSettings() {
   else {
     if (!$('#connList').children.length) $('#connList').innerHTML = `<li class="conn-loading">${statusLine('Checking connections', null)}</li>`;
     renderConnections();
-    $('#provStatus').innerHTML = ['nvidia', 'anthropic', 'openai', 'gemini', 'zai', 'deepseek', 'meta', 'runway'].map((p) => {
+    $('#provStatus').innerHTML = ['nvidia', 'anthropic', 'openai', 'gemini', 'zai', 'deepseek', 'meta', 'xai', 'runway'].map((p) => {
       const on = providerReady(p); const why = on ? '' : server[p] ? 'needs passcode' : 'no key on server';
       return `<span class="${on ? 'ok' : 'bad'}">${PROVIDER_NAMES[p]}${why ? `<small>${why}</small>` : ''}</span>`;
     }).join('');
@@ -4483,7 +4528,7 @@ $('#diagBtn').onclick = async () => {
     const r = await fetch('/api/diag', { headers: apiHeaders() });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `Check failed (${r.status})`);
-    const names = { anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini', veo: 'Gemini Omni (model access)', zai: 'Z.ai (GLM)', deepseek: 'DeepSeek', meta: 'Meta (Muse)', nvidia: 'NVIDIA', runway: 'Runway' };
+    const names = { anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini', veo: 'Gemini Omni (model access)', zai: 'Z.ai (GLM)', deepseek: 'DeepSeek', meta: 'Meta (Muse)', xai: 'xAI (Grok)', nvidia: 'NVIDIA', runway: 'Runway' };
     box.innerHTML = Object.entries(j).map(([k, v]) => `<span class="${v.ok ? 'ok' : 'err'}">${v.ok ? '✓' : '✗'} ${names[k] || k}${v.ok ? '' : ` — ${esc(v.status ? `(${v.status}) ` : '')}${esc(v.message || '')}`}${v.keyShape ? ` <i style="color:var(--ink-3)">[key ${esc(v.keyShape)}]</i>` : ''}</span>`).join('');
   } catch (err) { box.innerHTML = `<span class="err">${esc(netText(err))}</span>`; }
   finally { done(); box.removeAttribute('aria-busy'); }
@@ -5720,7 +5765,7 @@ $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
 
 // The build feedback reports when app.js was loaded without its ?v= (scripts/bump-version.mjs moves it with sw.js VERSION).
-const APP_BUILD = '80';
+const APP_BUILD = '81';
 const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || APP_BUILD}`, online: navigator.onLine !== false }), toast });
 $('#feedbackBtn').onclick = () => feedback.open();
 $('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };
@@ -5791,7 +5836,7 @@ async function refreshServer(tries = 4) {
       if (r.ok) {
         const h = await r.json();
         serverKey = h.serverKey;
-        server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, runway: false, ...(h.server || {}) };
+        server = { nvidia: false, anthropic: false, openai: false, gemini: false, zai: false, deepseek: false, meta: false, runway: false, xai: false, ...(h.server || {}) };
         LS.set('server', server);
         renderOptions();
         syncMic();

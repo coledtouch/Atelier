@@ -10,7 +10,7 @@ const {
   quote, quoteNote, creditsNote, ratioFor, ratioBox, t2vRatio, runwaySeconds, veoSeconds, alephProblem, ALEPH_PROBLEM_TEXT, clampPrompt, buildRequest,
   pollDelay, statusText, failureOf, mentionsRunway, runwayHint, connectionRow, isRunwayId, runwayModelOf,
   waitForTask, runwayVideo, takeSlot, slotState, uploadToRunway, runwayAccount, forgetAccount, accountLimit, cancelTask, downloadOutput, POWERED_BY,
-  stillPlan, INPUT_ASPECT, createTask, createTimeout, VEO_RATIOS, runwaySecondsFor, veoRatio, optionNote,
+  stillPlan, INPUT_ASPECT, createTask, createTimeout, VEO_RATIOS, runwaySecondsFor, veoRatio, optionNote, GROK_SECONDS, grokShape,
 } = R;
 
 // app.js's own errorKind (+ accountProblem), lifted from the source so the card a Runway error gets is the real one.
@@ -81,7 +81,44 @@ test('the client catalogue matches the Worker’s (models, prices, ratios, uploa
     assert.equal(S.RUNWAY_MODELS[id].creditsNoAudio * 2, S.RUNWAY_MODELS[id] === S.RUNWAY_MODELS['veo3.1'] ? 40 : 20, id);
   }
   // only current ids (gen3a_turbo and gen4_aleph were retired by Runway on 2026-07-30)
-  assert.deepEqual(Object.keys(RUNWAY_MODELS).sort(), ['aleph2', 'gen4.5', 'gen4_turbo', 'veo3.1', 'veo3.1_fast']);
+  assert.deepEqual(Object.keys(RUNWAY_MODELS).sort(), ['aleph2', 'gen4.5', 'gen4_turbo', 'grok_imagine_1_5', 'grok_imagine_1_5_lite', 'veo3.1', 'veo3.1_fast']);
+  // Grok Imagine on Runway: the same per-resolution rates and start-frame credit on both sides
+  for (const id of ['grok_imagine_1_5', 'grok_imagine_1_5_lite']) {
+    assert.deepEqual({ ...RUNWAY_MODELS[id].rates }, { ...S.RUNWAY_MODELS[id].rates }, id);
+    assert.equal(RUNWAY_MODELS[id].still, S.RUNWAY_MODELS[id].stillCredits, id);
+    for (const resolution of ['480p', '720p', '1080p']) for (const still of [false, true]) {
+      assert.deepEqual(quote(id, 7, { resolution, still }), S.quote(id, 7, true, { resolution, still }), `${id} ${resolution} ${still}`);
+    }
+    assert.ok(GROK_SECONDS.every((s) => s >= S.RUNWAY_MODELS[id].durationRange[0] && s <= S.RUNWAY_MODELS[id].durationRange[1]), id);
+  }
+});
+
+test('Grok Imagine on Runway: requests the Worker accepts, the still as is, and quotes by resolution', () => {
+  // every request the client builds passes the Worker's own shaping unchanged
+  const cases = [
+    [{ model: 'grok_imagine_1_5_lite', prompt: 'a lighthouse', aspect: '16:9', secs: 6 }, { kind: 'text_to_video', body: { model: 'grok_imagine_1_5_lite', promptText: 'a lighthouse', ratio: '1280:720', duration: 6 } }],
+    [{ model: 'grok_imagine_1_5_lite', prompt: 'x', aspect: '9:16', secs: 10 }, { kind: 'text_to_video', body: { model: 'grok_imagine_1_5_lite', promptText: 'x', ratio: '720:1280', duration: 10 } }],
+    [{ model: 'grok_imagine_1_5_lite', prompt: 'x', aspect: '16:9hd', secs: 15 }, { kind: 'text_to_video', body: { model: 'grok_imagine_1_5_lite', promptText: 'x', ratio: '1904:1072', duration: 15 } }],
+    [{ model: 'grok_imagine_1_5_lite', prompt: '', still: PNG, aspect: '16:9hd', secs: 4 }, { kind: 'image_to_video', body: { model: 'grok_imagine_1_5_lite', promptImage: PNG, ratio: 'auto_1080p', duration: 4 } }],
+    [{ model: 'grok_imagine_1_5', prompt: 'x', aspect: '9:16', secs: 8 }, { kind: 'text_to_video', body: { model: 'grok_imagine_1_5', promptText: 'x', ratio: '9:16', resolution: '720p', duration: 8 } }],
+    [{ model: 'grok_imagine_1_5', prompt: 'push in', still: JPEG, aspect: '16:9hd', secs: 6 }, { kind: 'image_to_video', body: { model: 'grok_imagine_1_5', promptText: 'push in', promptImage: JPEG, resolution: '1080p', duration: 6 } }],
+  ];
+  for (const [input, want] of cases) {
+    const r = buildRequest(input);
+    assert.deepEqual({ kind: r.kind, body: r.body }, want, JSON.stringify(input).slice(0, 80));
+    assert.deepEqual(S.shapeRequest(r.kind, r.body).body, r.body, 'the Worker sends it as built');
+  }
+  assert.equal(buildRequest({ model: 'grok_imagine_1_5_lite', prompt: 'x'.repeat(3000), secs: 6 }).body.promptText.length, 2500, 'Grok takes 2,500 characters');
+  assert.throws(() => buildRequest({ model: 'grok_imagine_1_5', prompt: '' }), (e) => e.status === 400 && /Describe the video/.test(e.message));
+  assert.deepEqual([...runwaySecondsFor('grok_imagine_1_5_lite')], [4, 6, 8, 10, 15]);
+  assert.deepEqual([runwaySeconds(5, 'grok_imagine_1_5'), runwaySeconds(15, 'grok_imagine_1_5'), runwaySeconds(30, 'grok_imagine_1_5')], [4, 15, 15]);
+  assert.equal(quoteNote('grok_imagine_1_5_lite', 6), '≈ 18 credits ($0.18)');
+  assert.equal(quoteNote('grok_imagine_1_5', 6, { resolution: '1080p', still: true }), '≈ 175 credits ($1.75)');
+  const lite = RUNWAY_VIDEO_MODELS.find((m) => m.id === 'runway:grok_imagine_1_5_lite');
+  assert.equal(optionNote(lite, 10, '16:9'), 'Grok Imagine 1.5 Lite (Runway) · 10 s ≈ 30 credits ($0.30) · 720p');
+  assert.equal(optionNote(lite, 10, '16:9hd'), 'Grok Imagine 1.5 Lite (Runway) · 10 s ≈ 140 credits ($1.40) · 1080p');
+  assert.deepEqual(grokShape('grok_imagine_1_5', { aspect: '16:9', still: true }), { ratio: null, resolution: '720p' });
+  assert.equal(RUNWAY_MODELS.grok_imagine_1_5.hd, true);
 });
 
 test('Veo 3.1 on Runway: requests in its own ratios and lengths, the still as is, and a quote per second with sound', () => {
@@ -104,7 +141,7 @@ test('Veo 3.1 on Runway: requests in its own ratios and lengths, the still as is
 });
 
 test('menu entries: runway:<model> ids, never Auto, and the meta line reads runway:gen4.5', () => {
-  assert.deepEqual(RUNWAY_VIDEO_MODELS.map((m) => m.id), ['runway:gen4.5', 'runway:gen4_turbo', 'runway:veo3.1', 'runway:veo3.1_fast']);
+  assert.deepEqual(RUNWAY_VIDEO_MODELS.map((m) => m.id), ['runway:gen4.5', 'runway:gen4_turbo', 'runway:veo3.1', 'runway:veo3.1_fast', 'runway:grok_imagine_1_5_lite', 'runway:grok_imagine_1_5']);
   for (const m of [...RUNWAY_VIDEO_MODELS, RUNWAY_EDIT_MODEL]) {
     assert.equal(m.auto, false, m.id);
     assert.equal(runwayModelOf(m.id), m.runway);

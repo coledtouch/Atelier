@@ -14,6 +14,7 @@ import { handleSync } from './sync.js';
 import { handleFeedback } from './feedback.js';
 import { handleRunway, runwayDiag, RUNWAY_PROVIDER } from './runway.js';
 import { handleOmni, OMNI_MODEL } from './omni.js';
+import { handleXai, xaiDiag, XAI_PROVIDER } from './xai.js';
 import { handleLookup } from './lookup.js';
 import { handleTranscribe } from './transcribe.js';
 export { Relay } from './relay.js';
@@ -39,6 +40,8 @@ const PROVIDERS = {
   zai: { secret: 'ZAI_API_KEY', name: 'Z.ai' },
   deepseek: { secret: 'DEEPSEEK_API_KEY', name: 'DeepSeek' },
   meta: { secret: 'META_API_KEY', name: 'Meta' },
+  // xAI (Grok), owner only: chat through CHAT_UPSTREAM.xai, images and video through /api/xai/* (src/xai.js).
+  xai: XAI_PROVIDER,
   // Video only (src/runway.js): never in providerOf, CHAT_UPSTREAM, PASSTHRU or the /api/x/ regex, so /api/chat can't reach it.
   runway: RUNWAY_PROVIDER,
 };
@@ -72,6 +75,8 @@ const CHAT_UPSTREAM = {
   zai: { url: 'https://api.z.ai/api/paas/v4/chat/completions', auth: (k) => ({ authorization: `Bearer ${k}` }) },
   deepseek: { url: 'https://api.deepseek.com/chat/completions', auth: (k) => ({ authorization: `Bearer ${k}` }) },
   meta: { url: 'https://api.meta.ai/v1/chat/completions', auth: (k) => ({ authorization: `Bearer ${k}` }) },
+  // OpenAI-compatible Chat Completions (https://docs.x.ai/developers/rest-api-reference/inference/chat-completions).
+  xai: { url: 'https://api.x.ai/v1/chat/completions', auth: (k) => ({ authorization: `Bearer ${k}` }) },
 };
 
 const PASS_HEADERS = ['content-type', 'content-length', 'nvcf-reqid', 'nvcf-status', 'nvcf-percent-complete', 'retry-after'];
@@ -141,13 +146,13 @@ async function forward(target, { method, headers, body }) {
 }
 
 function providerOf(model = '') {
-  const m = model.match(/^(anthropic|openai|gemini|zai|deepseek|meta):/);
+  const m = model.match(/^(anthropic|openai|gemini|zai|deepseek|meta|xai):/);
   return m ? m[1] : 'nvidia';
 }
 
 // Adjust the shared OpenAI-style body for each upstream's quirks.
 function shapeChatBody(provider, body) {
-  const b = { ...body, model: body.model.replace(/^(openai|gemini|zai|deepseek|meta):/, '') };
+  const b = { ...body, model: body.model.replace(/^(openai|gemini|zai|deepseek|meta|xai):/, '') };
   if (provider === 'deepseek') {
     // Thinking is on by default; helper calls turn it off. In thinking mode temperature isn't accepted.
     const off = body.chat_template_kwargs?.enable_thinking === false;
@@ -184,6 +189,21 @@ function shapeChatBody(provider, body) {
     delete b.temperature;
   }
   if (provider === 'nvidia' || provider === 'meta') delete b.reasoning_effort;
+  if (provider === 'xai') {
+    // Grok (docs.x.ai, read 2026-10-08). Grok 4.7 / 4.6 / 4.5 always reason (effort low | medium | high | xhigh; 4.5 has
+    // no xhigh), Grok 4.3 also takes none, and Grok Build's page lists no effort levels, so it gets none. Reasoning
+    // models refuse presence_penalty, frequency_penalty and stop. max_tokens is deprecated for max_completion_tokens.
+    // Nothing that searches: Live Search (search_parameters, web_search_options) is never sent — without it "no data
+    // will be acquired by the model" — and only function tools go (web_search / x_search are Responses-API tools).
+    const off = body.chat_template_kwargs?.enable_thinking === false;
+    if (/^grok-build/.test(b.model)) delete b.reasoning_effort;
+    else if (/^grok-4\.3\b/.test(b.model)) b.reasoning_effort = off ? 'none' : { max: 'xhigh' }[body.reasoning_effort] || (['low', 'medium', 'high', 'xhigh'].includes(body.reasoning_effort) ? body.reasoning_effort : 'low');
+    else b.reasoning_effort = off ? 'low' : { max: 'xhigh', none: 'low', minimal: 'low' }[body.reasoning_effort] || (['low', 'medium', 'high', 'xhigh'].includes(body.reasoning_effort) ? body.reasoning_effort : 'high');
+    if (b.max_tokens) b.max_completion_tokens = b.max_tokens;
+    delete b.max_tokens;
+    for (const k of ['presence_penalty', 'frequency_penalty', 'stop', 'logprobs', 'top_logprobs', 'search_parameters', 'web_search_options', 'deferred', 'n']) delete b[k];
+    if (Array.isArray(b.tools)) { b.tools = b.tools.filter((t) => t?.type === 'function' && t.function?.name); if (!b.tools.length) { delete b.tools; delete b.tool_choice; } }
+  }
   return b;
 }
 
@@ -524,6 +544,7 @@ async function handleApi(req, env, url) {
       }
     }
     if (env.META_API_KEY) out.meta = await check('https://api.meta.ai/v1/models', { authorization: `Bearer ${env.META_API_KEY}` });
+    if (env.XAI_API_KEY) out.xai = await xaiDiag(env.XAI_API_KEY);
     if (env.NVIDIA_API_KEY) out.nvidia = { ok: /^nvapi-/.test(env.NVIDIA_API_KEY), status: 0, message: 'format check only' };
     if (env.RUNWAYML_API_SECRET) out.runway = await runwayDiag(env.RUNWAYML_API_SECRET);
     return json(out);
@@ -707,6 +728,14 @@ async function handleApi(req, env, url) {
     const key = resolveKey(req, env, 'runway');
     if (!key) return missingKey(req, env, 'runway');
     return handleRunway(req, env, url, path, { key });
+  }
+
+  // /api/xai/* → Grok Imagine images and video, owner only (src/xai.js). Testers never get here: the tester router above
+  // answers xai/* with 403 owner_only (deny by default), and no xai: model is in a tester plan.
+  if (path.startsWith('xai/')) {
+    const key = resolveKey(req, env, 'xai');
+    if (!key) return missingKey(req, env, 'xai');
+    return handleXai(req, env, path, { key });
   }
 
   // POST /api/chat → routed by model prefix (anthropic: / openai: / gemini: / NVIDIA default)

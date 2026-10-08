@@ -23,6 +23,10 @@ export const UPLOAD_TYPES = Object.freeze(['video/mp4', 'video/quicktime', 'vide
 // Video-mode length menu for Runway models (Runway takes 2–10 whole seconds; Veo 3.1, on Runway too, 4/6/8).
 export const RUNWAY_SECONDS = Object.freeze([2, 4, 6, 8, 10]);
 export const VEO_SECONDS = Object.freeze([4, 6, 8]);
+// xAI's Grok Imagine Video 1.5 / 1.5 Lite through Runway: 1–15 s (this menu), prompts up to 2,500 characters, the still
+// as is (the output follows it). src/runway.js keeps the ratio lists and prices; these are the ones Video mode sends.
+export const GROK_SECONDS = Object.freeze([4, 6, 8, 10, 15]);
+export const GROK_PROMPT_MAX = 2500;
 
 // credits: per second; min: per generation. i2v / t2v / v2v: image → video, text → video, video → video.
 // seconds: the lengths the model takes (else RUNWAY_SECONDS); ratios: its own ratio list; hd: has a 1080p ratio.
@@ -33,6 +37,9 @@ export const RUNWAY_MODELS = Object.freeze({
   aleph2: Object.freeze({ label: 'Runway Aleph', credits: 28, min: 56, i2v: false, t2v: false, v2v: true }),
   'veo3.1': Object.freeze({ label: 'Veo 3.1 (Runway)', credits: 40, min: 0, i2v: true, t2v: true, v2v: false, seconds: VEO_SECONDS, ratios: VEO_RATIOS, hd: true }),
   'veo3.1_fast': Object.freeze({ label: 'Veo 3.1 Fast (Runway)', credits: 15, min: 0, i2v: true, t2v: true, v2v: false, seconds: VEO_SECONDS, ratios: VEO_RATIOS, hd: true }),
+  // Grok Imagine: credits per second by resolution (credits: 720p's), +1 credit for an image → video start frame.
+  grok_imagine_1_5: Object.freeze({ label: 'Grok Imagine 1.5 (Runway)', credits: 16, rates: Object.freeze({ '480p': 10, '720p': 16, '1080p': 29 }), still: 1, min: 0, i2v: true, t2v: true, v2v: false, seconds: GROK_SECONDS, grok: true, hd: true }),
+  grok_imagine_1_5_lite: Object.freeze({ label: 'Grok Imagine 1.5 Lite (Runway)', credits: 3, rates: Object.freeze({ '480p': 2, '720p': 3, '1080p': 14 }), still: 1, min: 0, i2v: true, t2v: true, v2v: false, seconds: GROK_SECONDS, grok: true, hd: true }),
 });
 
 // Entries for app.js VIDEO_MODELS (appended after the Veo entries). auto:false — Auto never spends Runway credits;
@@ -43,6 +50,9 @@ export const RUNWAY_VIDEO_MODELS = Object.freeze([
   // Google's Veo 3.1 through Runway (owner only; it shuts down on the Gemini API on 2026-10-22).
   Object.freeze({ id: 'runway:veo3.1', label: 'Veo 3.1 · Runway', runway: 'veo3.1', auto: false, note: 'Veo 3.1 on Runway ≈ $0.40/sec with sound · text or image → video' }),
   Object.freeze({ id: 'runway:veo3.1_fast', label: 'Veo 3.1 Fast · Runway', runway: 'veo3.1_fast', auto: false, note: 'Veo 3.1 Fast on Runway ≈ $0.15/sec with sound · text or image → video' }),
+  // xAI's Grok Imagine through Runway (owner only). Lite: Runway's 2026-10-01 addition.
+  Object.freeze({ id: 'runway:grok_imagine_1_5_lite', label: 'Grok Imagine 1.5 Lite · Runway', runway: 'grok_imagine_1_5_lite', auto: false, note: 'Grok Imagine 1.5 Lite on Runway ≈ $0.03/sec at 720p · text or image → video' }),
+  Object.freeze({ id: 'runway:grok_imagine_1_5', label: 'Grok Imagine 1.5 · Runway', runway: 'grok_imagine_1_5', auto: false, note: 'Grok Imagine 1.5 on Runway ≈ $0.16/sec at 720p with sound · text or image → video' }),
 ]);
 // Video → video edits (a clip attached in Video mode). Not in the menu until app.js routes clips there (phase 1b).
 export const RUNWAY_EDIT_MODEL = Object.freeze({ id: 'runway:aleph2', label: 'Runway Aleph · edit a video', runway: 'aleph2', v2v: true, auto: false, note: 'Runway Aleph ≈ $0.28/sec · at least $0.56' });
@@ -71,23 +81,26 @@ const credits$ = (c) => `$${(c * USD_PER_CREDIT).toFixed(2)}`;
 const n$ = (n) => Number(n).toLocaleString('en-US');
 
 // Credits and dollars for `seconds` of `model` → {credits, usd}, or null (unknown model / no length).
-export function quote(model, seconds) {
+// opts (Grok Imagine): {resolution} its per-resolution rate (else 720p's), {still: true} the start frame's credit.
+export function quote(model, seconds, { resolution, still = false } = {}) {
   const m = RUNWAY_MODELS[model];
   if (!Object.hasOwn(RUNWAY_MODELS, model) || !(Number(seconds) > 0)) return null;
-  const credits = Math.max(m.min, Math.ceil(Number(seconds)) * m.credits);
+  const rate = m.rates && Object.hasOwn(m.rates, resolution ?? '') ? m.rates[resolution] : m.credits;
+  const credits = Math.max(m.min, Math.ceil(Number(seconds)) * rate + (still && m.still ? m.still : 0));
   return { credits, usd: Math.round(credits) / 100 };
 }
 // '≈ 48 credits ($0.48)'
-export function quoteNote(model, seconds) {
-  const q = quote(model, seconds);
+export function quoteNote(model, seconds, opts) {
+  const q = quote(model, seconds, opts);
   return q ? `≈ ${n$(q.credits)} credits (${credits$(q.credits)})` : '';
 }
-// The Video-mode options strip note for a Runway menu entry: 'Runway Gen-4.5 · 4 s ≈ 48 credits ($0.48)'.
-export function optionNote(entry, secs) {
+// The Video-mode options strip note for a Runway menu entry: 'Runway Gen-4.5 · 4 s ≈ 48 credits ($0.48)'. aspect: the
+// Video-mode aspect ('16:9hd' prices Grok Imagine at 1080p).
+export function optionNote(entry, secs, aspect) {
   const model = entry?.runway;
   if (!Object.hasOwn(RUNWAY_MODELS, model ?? '')) return '';
-  const s = runwaySeconds(secs, model);
-  return `${RUNWAY_MODELS[model].label} · ${s} s ${quoteNote(model, s)}${entry.needsImage ? ' · attach a still' : ''}`;
+  const s = runwaySeconds(secs, model), grok = RUNWAY_MODELS[model].grok, resolution = grok ? (aspect === '16:9hd' ? '1080p' : '720p') : undefined;
+  return `${RUNWAY_MODELS[model].label} · ${s} s ${quoteNote(model, s, { resolution })}${grok ? ` · ${resolution}` : ''}${entry.needsImage ? ' · attach a still' : ''}`;
 }
 // '48 credits ($0.48)' for a finished task's real cost; '' when unknown.
 export const creditsNote = (c) => (Number.isFinite(c) && c >= 0 ? `${n$(c)} credit${c === 1 ? '' : 's'} (${credits$(c)})` : '');
@@ -137,6 +150,7 @@ export async function cropStill(src, model = 'gen4.5') {
   });
   const w = img.naturalWidth, h = img.naturalHeight;
   if (RUNWAY_MODELS[model]?.ratios) return { src, ratio: veoRatio({ w, h }), w, h };
+  if (RUNWAY_MODELS[model]?.grok) return { src, ratio: null, w, h }; // Grok Imagine: the output follows the still
   const plan = stillPlan(w, h, model);
   if (!plan.crop) return { src, ratio: plan.ratio, w, h };
   const { x, y, w: cw, h: ch } = plan.crop, k = Math.min(1, 2048 / Math.max(cw, ch));
@@ -157,6 +171,7 @@ export const t2vRatio = (aspect) => (aspect === '9:16' ? '720:1280' : '1280:720'
 export function runwaySeconds(secs, model) {
   const s = Math.round(Number(secs)), list = RUNWAY_MODELS[model]?.seconds;
   if (list) return list.includes(s) ? s : [...list].reverse().find((x) => x <= s) ?? (Number.isFinite(s) && s > 0 ? list[0] : 6);
+  // (Grok Imagine's list is GROK_SECONDS: Runway takes any whole 1–15 s, the menu offers those)
   return Number.isFinite(s) && s >= 2 && s <= 10 ? s : 5;
 }
 /** The Video-mode length menu for a Runway model. */
@@ -165,6 +180,15 @@ export const runwaySecondsFor = (model) => RUNWAY_MODELS[model]?.seconds || RUNW
 export function veoRatio({ w, h, aspect } = {}) {
   if (w > 0 && h > 0) return h > w ? (aspect === '16:9hd' ? '1080:1920' : '720:1280') : aspect === '16:9hd' ? '1920:1080' : '1280:720';
   return aspect === '9:16' ? '720:1280' : aspect === '16:9hd' ? '1920:1080' : '1280:720';
+}
+// Grok Imagine on Runway → {ratio, resolution} for the Video-mode aspect. 1.5: 16:9 / 9:16 plus a resolution field (no
+// ratio from a still); Lite: the size ratio (text) or auto_<res> (still). '16:9hd' is 1080p (Lite: 720p upscaled).
+export function grokShape(model, { aspect, still = false, wantRatio } = {}) {
+  const hd = aspect === '16:9hd', portrait = aspect === '9:16', resolution = hd ? '1080p' : '720p';
+  if (model === 'grok_imagine_1_5') return { ratio: still ? null : portrait ? '9:16' : '16:9', resolution };
+  if (still) return { ratio: hd ? 'auto_1080p' : 'auto_720p', resolution };
+  if (/^(720:1280|1280:720|1904:1072|1072:1904)$/.test(wantRatio || '')) return { ratio: wantRatio, resolution: /1904|1072/.test(wantRatio) ? '1080p' : '720p' };
+  return { ratio: hd ? '1904:1072' : portrait ? '720:1280' : '1280:720', resolution };
 }
 // After switching from Runway back to Omni / Cosmos: a length of 4/6/8 s.
 export const veoSeconds = (secs) => (VEO_SECONDS.includes(+secs) ? +secs : +secs > 8 ? 8 : 4);
@@ -213,6 +237,19 @@ export function buildRequest({ model, prompt, still, stillSize, ratio: wantRatio
     return { kind: 'video_to_video', body, ratio: null, seconds: Number(seconds) > 0 ? Number(seconds) : null, note: 'video edit' };
   }
   const duration = runwaySeconds(secs, model);
+  if (spec.grok) { // Grok Imagine: the still as is; a prompt is optional with a still, needed without one
+    const text = String(prompt ?? '').trim().slice(0, GROK_PROMPT_MAX).trim();
+    const { ratio, resolution } = grokShape(model, { aspect, still: Boolean(still), wantRatio });
+    const res = model === 'grok_imagine_1_5' ? { resolution } : {};
+    const r = ratio ? { ratio } : {};
+    if (still) {
+      if (typeof still !== 'string' || !/^data:image\/(jpeg|jpg|png|webp);base64,/.test(still)) throw fail(400, 'Runway takes JPEG, PNG or WebP images.');
+      if (still.length > DATA_URI_MAX) throw fail(413, 'That image is too large for Runway (5 MB) — try a smaller one.');
+      return { kind: 'image_to_video', body: { model, ...(text ? { promptText: text } : {}), promptImage: still, ...r, ...res, duration }, ratio, resolution, seconds: duration, note: 'image → video' };
+    }
+    if (!text) throw fail(400, 'Describe the video you want Grok Imagine to make.');
+    return { kind: 'text_to_video', body: { model, promptText: text, ...r, ...res, duration }, ratio, resolution, seconds: duration, note: 'text → video' };
+  }
   if (spec.ratios) { // Veo 3.1: its own ratios, 4/6/8 s; the still goes as is
     if (!promptText) throw fail(400, 'Describe the video you want Veo to make.');
     const ratio = spec.ratios.includes(wantRatio) ? wantRatio : veoRatio({ w: stillSize?.w, h: stillSize?.h, aspect });
@@ -324,12 +361,12 @@ export function connectionRow({ configured = false, passcode = false, account = 
     if (account.code === 'runway_key') return { on: false, state: 'Key rejected', detail: 'check RUNWAYML_API_SECRET at dev.runway.com' };
     return { on: true, state: 'Connected', detail: 'couldn’t read the credit balance just now' };
   }
-  if (!account?.ok) return { on: true, state: 'Connected', detail: 'Gen-4.5 · Gen-4 Turbo · Veo 3.1 video' };
+  if (!account?.ok) return { on: true, state: 'Connected', detail: 'Gen-4.5 · Gen-4 Turbo · Veo 3.1 · Grok Imagine video' };
   const parts = [];
   if (Number.isFinite(account.creditBalance)) parts.push(`${n$(account.creditBalance)} credits (${credits$(account.creditBalance)})`);
   const lim = account.models?.['gen4.5']?.maxConcurrentGenerations;
   if (Number.isInteger(lim) && lim > 0) parts.push(`${lim} video${lim === 1 ? '' : 's'} at a time`);
-  return { on: true, state: 'Connected', detail: parts.join(' · ') || 'Gen-4.5 · Gen-4 Turbo · Veo 3.1 video' };
+  return { on: true, state: 'Connected', detail: parts.join(' · ') || 'Gen-4.5 · Gen-4 Turbo · Veo 3.1 · Grok Imagine video' };
 }
 
 // ── browser: talking to /api/runway/* ──

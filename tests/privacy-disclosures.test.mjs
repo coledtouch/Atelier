@@ -61,8 +61,8 @@ test('Cloudflare Web Analytics is disclosed whenever the CSP lets its beacon run
   assert.match(PRIVACY, /<b>In short:<\/b>[^<]*cookieless page-view counts/);
 });
 
-test('the legal pages keep the October 7, 2026 effective date for optional tester sync and feedback', () => {
-  for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective October 7, 2026<\/p>/);
+test('the legal pages carry the October 8, 2026 effective date (xAI added as a provider)', () => {
+  for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective October 8, 2026<\/p>/);
 });
 
 test('Google Fonts is disclosed while any page loads it: in Technical data, as a processor and in the short summary', async () => {
@@ -217,4 +217,21 @@ test('Read aloud names the provider the voices really use (src/tts.js): Google o
   assert.doesNotMatch(PRIVACY, /OpenAI and Google \(Read aloud\)/);
   assert.match(AI_CAPTION, /sent to Google\./);
   assert.doesNotMatch(AI_CAPTION, /OpenAI/);
+});
+
+test('every AI provider the Worker can send prompts to is named as a processor, and xAI (Grok) says owner only and no search', async () => {
+  const WORKER = await read('src/worker.js');
+  const block = /const PROVIDERS = \{([\s\S]*?)\n\};/.exec(WORKER)?.[1] || '';
+  const keys = [...block.matchAll(/^ {2}(\w+):/gm)].map((m) => m[1]);
+  assert.deepEqual(keys, ['nvidia', 'anthropic', 'openai', 'gemini', 'zai', 'deepseek', 'meta', 'xai', 'runway'], 'a new provider needs a row in the privacy table (and a name below)');
+  const NAME = { nvidia: 'NVIDIA', anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Google (Gemini', zai: 'Z.ai', deepseek: 'DeepSeek', meta: 'Meta', xai: 'xAI (Grok)', runway: 'Runway' };
+  const table = /<h2 id="sharing">([\s\S]*?)<\/table>/.exec(PRIVACY)?.[1] || '';
+  const firsts = [...table.matchAll(/<tr><td>([^<]+)<\/td>/g)].map((m) => m[1]).join(' | ');
+  for (const k of keys) assert.ok(firsts.includes(NAME[k]), `${k}: named in the processor column (${firsts})`);
+  const xai = /<tr><td>xAI \(Grok\)<\/td><td>([\s\S]*?)<\/td><\/tr>/.exec(table)?.[1] || '';
+  for (const words of ['owner only', 'testers can’t', 'Auto never starts on one', 'busy or unavailable', 'xAI’s API', 'never turns on Grok’s web or X search', 'Grok Imagine'])
+    assert.ok(text(xai).includes(words), `xAI row: ${words}`);
+  assert.match(PRIVACY, /<li><b>xAI \(owner only\):<\/b>/);
+  assert.match(PRIVACY, /xAI’s Grok Imagine through Runway/);
+  assert.match(TOS, /Meta, xAI and Runway\)/);
 });

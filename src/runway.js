@@ -33,6 +33,30 @@ const T2V_RATIOS = Object.freeze(['1280:720', '720:1280']);
 // video, these four ratios, 4/6/8 s, an `audio` flag (default true; audio doubles the price), no outputFormat field.
 const VEO_RATIOS = Object.freeze(['1280:720', '720:1280', '1080:1920', '1920:1080']);
 const VEO_DURATIONS = Object.freeze([4, 6, 8]);
+// xAI's Grok Imagine Video 1.5 and 1.5 Lite through Runway (OpenAPI schema, docs.dev.runwayml.com/openapi.json, read
+// 2026-10-08; changelog 2026-08-07 and 2026-10-01). Both: text and image → video, 1–15 whole seconds, prompts up to 2,500
+// characters, no outputFormat, no audio flag (1.5 makes native audio). Text → video needs a prompt; image → video takes
+// one first frame and the output follows its shape.
+//   grok_imagine_1_5:      text → video takes `ratio` (GROK_T2V_RATIOS) and `resolution`; image → video `resolution` only.
+//   grok_imagine_1_5_lite: no `resolution` field — the ratio carries it: width:height sizes for text → video, auto_<res>
+//                          for image → video (1080p is made at 720p and upscaled).
+// Price by resolution (https://docs.dev.runwayml.com/guides/pricing/): 1.5 10 / 16 / 29 credits a second at 480p / 720p
+// / 1080p, Lite 2 / 3 / 14, plus 1 credit for an image → video start frame (Atelier sends no other references).
+const GROK_RESOLUTIONS = Object.freeze(['480p', '720p', '1080p']);
+const GROK_T2V_RATIOS = Object.freeze(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3']);
+const GROK_LITE_T2V_RATIOS = Object.freeze(['848:480', '480:848', '480:480', '640:480', '480:640', '720:480', '480:720', '1280:720', '720:1280', '720:720', '960:720',
+  '720:960', '1088:720', '720:1088', '1904:1072', '1072:1904', '1424:1424', '1648:1232', '1232:1648', '1744:1152', '1152:1744']);
+const GROK_LITE_I2V_RATIOS = Object.freeze(['auto_480p', 'auto_720p', 'auto_1080p']);
+const GROK_PROMPT_MAX = 2500;
+/** A Grok Imagine Lite ratio → the resolution it is billed at ('auto_720p' → '720p'; '1280:720' → '720p'; 1072+ → '1080p'). */
+export function grokLiteResolution(ratio) {
+  const a = /^auto_(480p|720p|1080p)$/.exec(String(ratio));
+  if (a) return a[1];
+  const m = /^(\d+):(\d+)$/.exec(String(ratio));
+  if (!m) return null;
+  const short = Math.min(+m[1], +m[2]);
+  return short <= 480 ? '480p' : short <= 720 ? '720p' : '1080p';
+}
 // The only Runway models Atelier sends. kinds: endpoint → allowed ratios (null: the model has no ratio).
 // mp4: the model takes outputFormat, which is always forced to 'mp4' (no ProRes/HDR surcharges). durations: the lengths
 // the model takes (else DURATION_MIN–DURATION_MAX). creditsNoAudio: the rate when audio: false is sent (Veo 3.1).
@@ -43,6 +67,11 @@ export const RUNWAY_MODELS = Object.freeze({
   aleph2: Object.freeze({ creditsPerSecond: 28, minCredits: 56, promptRequired: true, mp4: true, kinds: Object.freeze({ video_to_video: null }) }),
   'veo3.1': Object.freeze({ creditsPerSecond: 40, creditsNoAudio: 20, minCredits: 0, promptRequired: true, mp4: false, audio: true, durations: VEO_DURATIONS, kinds: Object.freeze({ text_to_video: VEO_RATIOS, image_to_video: VEO_RATIOS }) }),
   'veo3.1_fast': Object.freeze({ creditsPerSecond: 15, creditsNoAudio: 10, minCredits: 0, promptRequired: true, mp4: false, audio: true, durations: VEO_DURATIONS, kinds: Object.freeze({ text_to_video: VEO_RATIOS, image_to_video: VEO_RATIOS }) }),
+  // grok: per-resolution rates (creditsPerSecond is the 720p default), 1–15 s, its own prompt limit and ratio rules.
+  grok_imagine_1_5: Object.freeze({ creditsPerSecond: 16, rates: Object.freeze({ '480p': 10, '720p': 16, '1080p': 29 }), stillCredits: 1, minCredits: 0, promptRequired: false, promptMax: GROK_PROMPT_MAX, mp4: false,
+    grok: true, resolution: true, durationRange: Object.freeze([1, 15]), kinds: Object.freeze({ text_to_video: GROK_T2V_RATIOS, image_to_video: null }) }),
+  grok_imagine_1_5_lite: Object.freeze({ creditsPerSecond: 3, rates: Object.freeze({ '480p': 2, '720p': 3, '1080p': 14 }), stillCredits: 1, minCredits: 0, promptRequired: false, promptMax: GROK_PROMPT_MAX, mp4: false,
+    grok: true, resolution: false, durationRange: Object.freeze([1, 15]), kinds: Object.freeze({ text_to_video: GROK_LITE_T2V_RATIOS, image_to_video: GROK_LITE_I2V_RATIOS }) }),
 });
 export const KINDS = Object.freeze(['image_to_video', 'text_to_video', 'video_to_video']);
 export const TARGET_ASPECTS = Object.freeze(['16:9', '4:3', '3:2', '1:1', '2:3', '3:4', '9:16', '21:9']);
@@ -75,11 +104,12 @@ export const costOf = (credits) => (Number.isFinite(credits) && credits >= 0 ? {
 
 // What a generation should cost by Runway's price list → {credits, usd}, or null when the length is unknown.
 // audio: false only for a model that takes the flag (Veo 3.1's silent rate); anything else quotes with audio.
-export function quote(model, seconds, audio = true) {
+// opts (Grok Imagine): {resolution} picks the per-resolution rate (else 720p's), {still: true} adds the start frame.
+export function quote(model, seconds, audio = true, { resolution, still = false } = {}) {
   const m = RUNWAY_MODELS[model];
   if (!own(RUNWAY_MODELS, model) || !(Number(seconds) > 0)) return null;
-  const rate = audio === false && m.creditsNoAudio ? m.creditsNoAudio : m.creditsPerSecond;
-  return costOf(Math.max(m.minCredits, Math.ceil(Number(seconds)) * rate));
+  const rate = m.rates && own(m.rates, resolution) ? m.rates[resolution] : audio === false && m.creditsNoAudio ? m.creditsNoAudio : m.creditsPerSecond;
+  return costOf(Math.max(m.minCredits, Math.ceil(Number(seconds)) * rate + (still && m.stillCredits ? m.stillCredits : 0)));
 }
 
 // Text that may leave this module (responses and logs): no key, no links (signed CloudFront URLs carry a `_jwt`
@@ -186,9 +216,11 @@ export function shapeRequest(kind, input) {
 
   if (input.promptText != null && typeof input.promptText !== 'string') throw bad('promptText must be text.');
   const prompt = typeof input.promptText === 'string' ? input.promptText.trim() : '';
-  if (prompt.length > PROMPT_MAX) throw bad(`Runway prompts are limited to ${PROMPT_MAX} characters.`);
+  const promptMax = spec.promptMax || PROMPT_MAX;
+  if (prompt.length > promptMax) throw bad(`Runway prompts are limited to ${promptMax} characters.`);
   if (prompt) body.promptText = prompt;
-  else if (spec.promptRequired) throw bad(kind === 'video_to_video' ? 'Describe the edit you want Runway to make.' : 'Describe the video you want Runway to make.');
+  else if (spec.promptRequired || (spec.grok && kind === 'text_to_video')) throw bad(kind === 'video_to_video' ? 'Describe the edit you want Runway to make.' : 'Describe the video you want Runway to make.');
+  if (spec.grok) return shapeGrok(kind, input, spec, body);
 
   let seconds = null;
   if (kind === 'video_to_video') {
@@ -251,6 +283,36 @@ export function shapeRequest(kind, input) {
   return { model, kind, body, seconds, audio: body.audio !== false };
 }
 
+// Grok Imagine (spec.grok): ratio and resolution by its own rules, 1–15 whole seconds, nothing else (no seed, no
+// moderation settings, no references). → the same {model, kind, body, seconds, audio} plus {resolution, still}.
+function shapeGrok(kind, input, spec, body) {
+  const { model } = body;
+  if (kind === 'image_to_video') body.promptImage = dataOrRunwayUri(input.promptImage, 'The image');
+  const ratios = spec.kinds[kind];
+  let resolution;
+  if (spec.resolution) { // grok_imagine_1_5: resolution field (default 720p); text → video also a ratio (default 16:9)
+    resolution = input.resolution == null ? '720p' : input.resolution;
+    if (!GROK_RESOLUTIONS.includes(resolution)) throw bad(`Runway ${model} takes the resolutions ${GROK_RESOLUTIONS.join(', ')}.`);
+    if (ratios) {
+      const ratio = input.ratio == null ? '16:9' : input.ratio;
+      if (!ratios.includes(ratio)) throw bad(`Runway ${model} (${kind.replace(/_/g, ' ')}) takes the ratios ${ratios.join(', ')}.`);
+      body.ratio = ratio;
+    } else if (input.ratio != null) throw bad(`Runway ${model} takes no ratio for image to video (the output follows the image).`);
+    body.resolution = resolution;
+  } else { // grok_imagine_1_5_lite: the ratio carries the resolution (default 720p)
+    if (input.resolution != null) throw bad(`Runway ${model} takes no resolution field — pick a ratio of that size.`);
+    const ratio = input.ratio == null ? (kind === 'image_to_video' ? 'auto_720p' : '1280:720') : input.ratio;
+    if (!ratios.includes(ratio)) throw bad(`Runway ${model} (${kind.replace(/_/g, ' ')}) takes the ratios ${ratios.join(', ')}.`);
+    body.ratio = ratio;
+    resolution = grokLiteResolution(ratio);
+  }
+  const [lo, hi] = spec.durationRange;
+  const d = input.duration == null ? 6 : input.duration;
+  if (!intIn(d, lo, hi)) throw bad(`Runway ${model} clips are ${lo}–${hi} whole seconds.`);
+  body.duration = d;
+  return { model, kind, body, seconds: d, audio: true, resolution, still: kind === 'image_to_video' };
+}
+
 // A task as the browser may see it: status, progress, costs and Runway's failure code — never the output links.
 export function cleanTask(t, id) {
   if (!isRecord(t)) throw new RunwayError('Runway returned an unexpected task.', 502, { code: 'runway_failed' });
@@ -309,7 +371,7 @@ async function generate(req, env, key, kind) {
   // Optional spending cap (Worker var RUNWAY_MAX_CREDITS). Checked BEFORE the paid call from Runway's price list: exact
   // for gen4.5 / gen4_turbo (whole seconds), and at least Aleph's minimum when the clip length is unknown.
   const cap = maxCredits(env);
-  const pre = quote(shaped.model, shaped.seconds, shaped.audio) || (RUNWAY_MODELS[shaped.model].minCredits > 0 ? costOf(RUNWAY_MODELS[shaped.model].minCredits) : null);
+  const pre = quote(shaped.model, shaped.seconds, shaped.audio, shaped) || (RUNWAY_MODELS[shaped.model].minCredits > 0 ? costOf(RUNWAY_MODELS[shaped.model].minCredits) : null);
   if (cap != null && pre && pre.credits > cap) {
     throw new RunwayError(`This Runway video would cost about ${pre.credits} credits ($${pre.usd.toFixed(2)}) — over this server’s cap of ${cap} (RUNWAY_MAX_CREDITS). Nothing was sent to Runway.`, 402, { code: 'runway_cap', estimatedCost: pre });
   }
@@ -328,7 +390,7 @@ async function generate(req, env, key, kind) {
     console.warn('runway cap cancel failed');
     throw new RunwayError(`${over} Atelier couldn’t cancel it at once and is trying again — check at dev.runway.com that it stopped.`, 402, { code: 'runway_cap_running', id: j.id, estimatedCost: est });
   }
-  return json({ id: j.id, model: shaped.model, kind, estimatedCost: est, quote: quote(shaped.model, shaped.seconds, shaped.audio), pollAfterMs: POLL_MS });
+  return json({ id: j.id, model: shaped.model, kind, estimatedCost: est, quote: quote(shaped.model, shaped.seconds, shaped.audio, shaped), pollAfterMs: POLL_MS });
 }
 
 // GET runway/task/<id> → the cleaned task (see cleanTask); 404 {code:'runway_gone'} once Runway no longer has it.

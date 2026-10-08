@@ -10,10 +10,10 @@
 // itself. Only a DEFINITIVE answer (an HTTP status with a body) can be retried: 429 → 'queued' (no video was created,
 // nothing billed), tester 402 → 'budget'. A dropped connection or timeout after sending (omni_unconfirmed, status 0)
 // or a gateway answer → 'unknown', which needs the user's fresh approval ("retrying may bill twice").
-import { createTask, getTask, downloadOutput, failureOf, buildRequest, ratioFor } from './runway.js?v=80';
-import { omniStart, omniStatus, omniFetch } from './omni.js?v=80';
-import { parseResetsAt } from './tester.js?v=80';
-import { shotModel, shotPrompt, SHOT_NEGATIVE, isShotOp, isVeoOp, LIMITS, VEO_RETIRED } from './remix.js?v=80';
+import { createTask, getTask, downloadOutput, failureOf, buildRequest, ratioFor } from './runway.js?v=81';
+import { omniStart, omniStatus, omniFetch } from './omni.js?v=81';
+import { parseResetsAt } from './tester.js?v=81';
+import { shotModel, shotPrompt, SHOT_NEGATIVE, isShotOp, isVeoOp, LIMITS, VEO_RETIRED } from './remix.js?v=81';
 
 export const SHOT_TIMING = { start: 60_000, poll: 5_000, pollSlow: 10_000, slowAfter: 180_000, queuedRetry: 30_000, queuedMax: 600_000, expireAfter: 47 * 3_600_000, request: 30_000, download: 300_000, downloadTries: 3, notReadyTries: 6 };
 
@@ -28,8 +28,8 @@ const isAbort = (e) => e?.name === 'AbortError';
 export const providerOf = (model) => shotModel(model)?.provider ?? null;
 // Gemini Omni ('omni'; 'veo' is the pre-Omni name of the same Gemini path) vs Runway.
 const isOmni = (m) => m?.provider === 'omni' || m?.provider === 'veo';
-// Runway's Veo 3.1 takes Veo's own 16:9 / 9:16 frames (1280:720, 720:1280), not Gen-4's ratios.
-const runwayVeo = (m) => m?.provider === 'runway' && /^veo/.test(m.runway || '');
+// Runway's Veo 3.1 and Grok Imagine take a 16:9 / 9:16 frame (1280:720, 720:1280) as is, not Gen-4's ratios.
+const runwayVeo = (m) => m?.provider === 'runway' && /^(veo|grok)/.test(m.runway || '');
 
 // ── request bodies ──
 /**

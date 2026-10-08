@@ -67,7 +67,7 @@ export function fakeKV(init = {}) {
 
 export const KEYS = {
   APP_PASSCODE: 'pw', ANTHROPIC_API_KEY: 'sk-ant-test', OPENAI_API_KEY: 'sk-openai-test', GEMINI_API_KEY: 'AQ.test-gemini-key-0123456789abcdef',
-  ZAI_API_KEY: 'zai-test', DEEPSEEK_API_KEY: 'ds-test', META_API_KEY: 'meta-test', NVIDIA_API_KEY: 'nvapi-test',
+  ZAI_API_KEY: 'zai-test', DEEPSEEK_API_KEY: 'ds-test', META_API_KEY: 'meta-test', NVIDIA_API_KEY: 'nvapi-test', XAI_API_KEY: 'xai-test-key-0123456789',
   LINKEDIN_CLIENT_ID: 'li-client', LINKEDIN_CLIENT_SECRET: 'li-secret-xyz',
 };
 // env with every provider key, a fake KV and a real Ledger (pass ledger: null for none).

@@ -389,7 +389,7 @@ test('OWNER_VIDEO_USD and the shot prices match src/tester/prices.js; tester res
 
 test('shot models: Omni is the default and the only tester model; Runway (Gen-4.5, Gen-4 Turbo, Veo 3.1, Veo 3.1 Fast) is the owner’s', () => {
   assert.equal(R.DEFAULT_SHOT_MODEL, OMNI);
-  assert.deepEqual(R.SHOT_MODELS.map((m) => m.id), [OMNI, 'runway:gen4.5', 'runway:gen4_turbo', 'runway:veo3.1', 'runway:veo3.1_fast']);
+  assert.deepEqual(R.SHOT_MODELS.map((m) => m.id), [OMNI, 'runway:gen4.5', 'runway:gen4_turbo', 'runway:veo3.1', 'runway:veo3.1_fast', 'runway:grok_imagine_1_5_lite', 'runway:grok_imagine_1_5']);
   assert.deepEqual(R.SHOT_MODELS.filter((m) => m.tester).map((m) => m.id), [OMNI]);
   const o = R.shotModel(OMNI);
   assert.deepEqual([o.provider, o.label, [...o.seconds], [...o.res], o.image], ['omni', 'Gemini Omni Flash', [4, 6, 8, 10], ['720p', '1080p'], 'optional']);
@@ -397,6 +397,12 @@ test('shot models: Omni is the default and the only tester model; Runway (Gen-4.
     const m = R.shotModel(id);
     assert.deepEqual([m.provider, m.runway, m.tester, [...m.seconds], m.image], ['runway', id.slice(7), false, [4, 6, 8], 'optional'], id);
   }
+  for (const id of ['runway:grok_imagine_1_5_lite', 'runway:grok_imagine_1_5']) {
+    const m = R.shotModel(id);
+    assert.deepEqual([m.provider, m.runway, m.tester, [...m.seconds], m.image], ['runway', id.slice(7), false, [4, 6, 8, 10, 15], 'optional'], id);
+    assert.equal(R.shotReserve(id, 4), null, `${id} is owner-only`);
+  }
+  assert.equal(R.shotUsd('runway:grok_imagine_1_5_lite', 6), 0.18, 'Grok Imagine Lite on Runway: 3 credits a second at 720p');
   for (const id of [VEO_LITE, VEO_FAST, VEO_STD]) assert.equal(R.shotModel(id)?.id, OMNI, `${id} reads as Omni`);
   assert.equal(R.shotModelId('openai:sora'), null);
 });

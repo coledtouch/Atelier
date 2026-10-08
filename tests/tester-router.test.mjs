@@ -63,13 +63,15 @@ const SAMPLES = [...new Set([
   // Runway is owner only (src/runway.js): every route shape must answer a tester 403 owner_only
   'runway/generate/image_to_video', 'runway/generate/text_to_video', 'runway/generate/video_to_video', 'runway/task/00000000-0000-4000-8000-000000000000',
   'runway/output/00000000-0000-4000-8000-000000000000', 'runway/upload', 'runway/account',
+  // xAI (Grok) is owner only (src/xai.js): every route shape must answer a tester 403 owner_only
+  'xai/image', 'xai/video/start', 'xai/video/status/d97415a1-5796-b7ec-379f-4e6819e08fdf', 'xai/video/file/d97415a1-5796-b7ec-379f-4e6819e08fdf', 'x/xai/images/generations', 'x/xai/videos/generations',
 ])];
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 const isPublic = (path) => PUBLIC_PATHS.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p));
 
 test('the sweep really enumerates the owner router (sanity check on the scan)', () => {
   for (const p of ['me', 'diag', 'models', 'relay/ws', 'relay/pair', 'tools', 'tools/run', 'oauth/google/start', 'oauth/canva/callback', 'canva/send-image', 'canva/file', 'testers', 'chat', 'health', 'sync']) assert.ok(exact.includes(p), p);
-  for (const p of ['relay/', 'tools', 'oauth/', 'accounts/', 'photos/', 'canva/', 'video/', 'genai/', 'fn/', 'status/', 'li/', 'tester/', 'testers/', 'runway/', 'sync/']) assert.ok(prefixes.includes(p), p);
+  for (const p of ['relay/', 'tools', 'oauth/', 'accounts/', 'photos/', 'canva/', 'video/', 'genai/', 'fn/', 'status/', 'li/', 'tester/', 'testers/', 'runway/', 'xai/', 'sync/']) assert.ok(prefixes.includes(p), p);
   for (const p of ['x/', 'accounts/', 'photos/', 'canva/designs/']) assert.ok(regexLeads.includes(p), p);
   assert.deepEqual(videoRoutes.sort(), ['video/file', 'video/upload/cancel', 'video/upload/chunk', 'video/upload/query', 'video/upload/start']);
   assert.ok(SAMPLES.length > 50);
@@ -272,7 +274,8 @@ test('the addendum records the live tester image routes: Meta Muse Image as an o
 test('chat: unknown, NVIDIA and free models are refused with tester_model; oversized requests with tester_too_large', async () => {
   const { L, sub, call } = await tester();
   mockFetch([]);
-  for (const model of ['openai:gpt-9', 'moonshotai/kimi-k3', 'z-ai/glm-5.3', 'zai:glm-4.7-flash', 'anthropic:claude-opus-4-8', 'gemini:gemini-3-pro-image', '', undefined]) {
+  // xai: models are owner only (no tester plan has one), even with XAI_API_KEY set (tester-env sets it)
+  for (const model of ['openai:gpt-9', 'moonshotai/kimi-k3', 'z-ai/glm-5.3', 'zai:glm-4.7-flash', 'anthropic:claude-opus-4-8', 'gemini:gemini-3-pro-image', 'xai:grok-4.7', 'xai:grok-4.3', 'xai:grok-build-0.1', 'xai:grok-imagine-image-2.0', '', undefined]) {
     const r = await call('chat', post({ model, messages: [{ role: 'user', content: 'hi' }] }));
     assert.equal(r.status, 403, String(model));
     assert.equal(await codeOf(r), 'tester_model');

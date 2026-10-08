@@ -14,7 +14,7 @@ registerHooks({
 // src/runway.js — the owner's /api/runway/* routes. Runway is never called for real: every upstream request goes to a
 // fetch mock, and an unmatched one fails the test.
 const {
-  handleRunway, runwayDiag, shapeRequest, cleanTask, quote, scrub, outputUrlOk, RunwayError,
+  handleRunway, runwayDiag, shapeRequest, cleanTask, quote, scrub, outputUrlOk, RunwayError, grokLiteResolution,
   RUNWAY_BASE, RUNWAY_VERSION, RUNWAY_MODELS, BODY_MAX, DATA_URI_MAX, UPLOAD_MAX, OUTPUT_MAX, PROMPT_MAX,
 } = await import('../src/runway.js');
 
@@ -133,6 +133,45 @@ test('generate: Veo 3.1 and Veo 3.1 Fast (text and image → video): their four 
   assert.deepEqual([...RUNWAY_MODELS['veo3.1'].kinds.text_to_video], ['1280:720', '720:1280', '1080:1920', '1920:1080']);
 });
 
+test('generate: Grok Imagine 1.5 Lite (Runway 2026-10-01) — size ratios for text, auto_<res> for a still, 1–15 s, nothing else', async () => {
+  mockFetch([created(18)]);
+  // text → video: the OpenAPI schema's fields only (model, promptText, ratio, duration); no outputFormat, seed or audio
+  const res = await rw('runway/generate/text_to_video', { method: 'POST', body: { model: 'grok_imagine_1_5_lite', promptText: 'A paper boat', ratio: '1280:720', duration: 6, outputFormat: 'mp4', seed: 7, audio: false, references: [{ uri: PNG }], junk: 1 } });
+  const j = await read(res);
+  assert.equal(res.status, 200);
+  assert.equal(calls[0].url, `${RUNWAY_BASE}/text_to_video`);
+  assert.deepEqual(calls[0].json, { model: 'grok_imagine_1_5_lite', promptText: 'A paper boat', ratio: '1280:720', duration: 6 });
+  assert.deepEqual(j.quote, { credits: 18, usd: 0.18 }, '3 credits a second at 720p');
+  // image → video: the still, auto_<res>, the prompt optional; +1 credit for the start frame
+  await rw('runway/generate/image_to_video', { method: 'POST', body: { model: 'grok_imagine_1_5_lite', promptImage: PNG, ratio: 'auto_1080p', duration: 4 } });
+  assert.equal(calls[1].url, `${RUNWAY_BASE}/image_to_video`);
+  assert.deepEqual(calls[1].json, { model: 'grok_imagine_1_5_lite', promptImage: PNG, ratio: 'auto_1080p', duration: 4 });
+  // defaults: 720p (1280:720 / auto_720p), 6 s
+  await rw('runway/generate/text_to_video', { method: 'POST', body: { model: 'grok_imagine_1_5_lite', promptText: 'x' } });
+  assert.deepEqual(calls[2].json, { model: 'grok_imagine_1_5_lite', promptText: 'x', ratio: '1280:720', duration: 6 });
+  await rw('runway/generate/image_to_video', { method: 'POST', body: { model: 'grok_imagine_1_5_lite', promptImage: PNG } });
+  assert.deepEqual(calls[3].json, { model: 'grok_imagine_1_5_lite', promptImage: PNG, ratio: 'auto_720p', duration: 6 });
+  // price by resolution (Runway's pricing guide): 2 / 3 / 14 credits a second, +1 for a start frame
+  assert.deepEqual(quote('grok_imagine_1_5_lite', 10, true, { resolution: '480p' }), { credits: 20, usd: 0.2 });
+  assert.deepEqual(quote('grok_imagine_1_5_lite', 10, true, { resolution: '1080p', still: true }), { credits: 141, usd: 1.41 });
+  assert.deepEqual(quote('grok_imagine_1_5_lite', 10), { credits: 30, usd: 0.3 }, 'no resolution: 720p');
+  assert.deepEqual([grokLiteResolution('848:480'), grokLiteResolution('1088:720'), grokLiteResolution('1424:1424'), grokLiteResolution('auto_480p')], ['480p', '720p', '1080p', '480p']);
+  assert.equal(RUNWAY_MODELS.grok_imagine_1_5_lite.kinds.text_to_video.length, 21);
+});
+
+test('generate: Grok Imagine 1.5 — aspect ratio and resolution for text, resolution only for a still, priced per resolution', async () => {
+  mockFetch([created(160)]);
+  await rw('runway/generate/text_to_video', { method: 'POST', body: { model: 'grok_imagine_1_5', promptText: 'A lighthouse', ratio: '9:16', resolution: '1080p', duration: 15, referenceAudio: [{ type: 'audio', uri: 'https://x.example/a.mp3' }] } });
+  assert.deepEqual(calls[0].json, { model: 'grok_imagine_1_5', promptText: 'A lighthouse', ratio: '9:16', resolution: '1080p', duration: 15 });
+  const r = await rw('runway/generate/image_to_video', { method: 'POST', body: { model: 'grok_imagine_1_5', promptImage: PNG, resolution: '720p', duration: 6 } });
+  assert.deepEqual(calls[1].json, { model: 'grok_imagine_1_5', promptImage: PNG, resolution: '720p', duration: 6 });
+  assert.deepEqual((await read(r)).quote, { credits: 97, usd: 0.97 }, '16 credits a second at 720p + 1 for the start frame');
+  await rw('runway/generate/text_to_video', { method: 'POST', body: { model: 'grok_imagine_1_5', promptText: 'x' } });
+  assert.deepEqual(calls[2].json, { model: 'grok_imagine_1_5', promptText: 'x', ratio: '16:9', resolution: '720p', duration: 6 }, 'defaults: 16:9, 720p, 6 s');
+  assert.deepEqual(quote('grok_imagine_1_5', 4, true, { resolution: '480p' }), { credits: 40, usd: 0.4 });
+  assert.deepEqual(quote('grok_imagine_1_5', 4, true, { resolution: '1080p' }), { credits: 116, usd: 1.16 });
+});
+
 test('generate: aleph2 edits only runway:// clips, drops the deprecated ratio and shapes keyframes', async () => {
   mockFetch([created(56)]);
   const res = await rw('runway/generate/video_to_video', { method: 'POST', body: {
@@ -158,6 +197,17 @@ test('generate refuses bad input with 400 and never calls Runway', async () => {
     ['text_to_video', { model: 'veo3.1', promptText: 'x', audio: 'yes' }, /audio must be true or false/],
     ['text_to_video', { model: 'veo3.1' }, /Describe the video/],
     ['video_to_video', { model: 'veo3.1', promptText: 'x', videoUri: RUNWAY_URI }, /can’t do video to video/],
+    ['text_to_video', { model: 'grok_imagine_1_5_lite', promptText: 'x', duration: 16 }, /grok_imagine_1_5_lite clips are 1–15 whole seconds/],
+    ['text_to_video', { model: 'grok_imagine_1_5_lite', promptText: 'x', duration: 0 }, /1–15 whole seconds/],
+    ['text_to_video', { model: 'grok_imagine_1_5_lite', promptText: 'x', ratio: '16:9' }, /takes the ratios 848:480/],
+    ['text_to_video', { model: 'grok_imagine_1_5_lite', promptText: 'x', resolution: '720p' }, /takes no resolution field/],
+    ['image_to_video', { model: 'grok_imagine_1_5_lite', promptImage: PNG, ratio: '1280:720' }, /takes the ratios auto_480p, auto_720p, auto_1080p/],
+    ['text_to_video', { model: 'grok_imagine_1_5_lite' }, /Describe the video/],
+    ['text_to_video', { model: 'grok_imagine_1_5', promptText: 'x', resolution: '4k' }, /takes the resolutions 480p, 720p, 1080p/],
+    ['text_to_video', { model: 'grok_imagine_1_5', promptText: 'x', ratio: '1280:720' }, /takes the ratios 1:1, 16:9/],
+    ['image_to_video', { model: 'grok_imagine_1_5', promptImage: PNG, ratio: '16:9' }, /takes no ratio for image to video/],
+    ['text_to_video', { model: 'grok_imagine_1_5', promptText: 'x'.repeat(2501) }, /limited to 2500 characters/],
+    ['video_to_video', { model: 'grok_imagine_1_5', promptText: 'x', videoUri: RUNWAY_URI }, /can’t do video to video/],
     ['text_to_video', { ...t2v(), model: '__proto__' }, /doesn’t offer/],
     ['text_to_video', { ...t2v(), model: 'gen4_turbo' }, /only animates a still image/],
     ['image_to_video', { model: 'aleph2', promptText: 'x', promptImage: PNG }, /only edits a video/],
@@ -202,7 +252,7 @@ test('generate refuses bad input with 400 and never calls Runway', async () => {
 });
 
 test('the Runway catalogue: only current ids (Runway retired gen3a_turbo and gen4_aleph on 2026-07-30)', () => {
-  assert.deepEqual(Object.keys(RUNWAY_MODELS).sort(), ['aleph2', 'gen4.5', 'gen4_turbo', 'veo3.1', 'veo3.1_fast']);
+  assert.deepEqual(Object.keys(RUNWAY_MODELS).sort(), ['aleph2', 'gen4.5', 'gen4_turbo', 'grok_imagine_1_5', 'grok_imagine_1_5_lite', 'veo3.1', 'veo3.1_fast']);
   for (const old of ['gen3a_turbo', 'gen4_aleph']) {
     assert.throws(() => shapeRequest('text_to_video', { model: old, promptText: 'x' }), (e) => e instanceof RunwayError && e.status === 400 && /doesn’t offer/.test(e.message), old);
   }

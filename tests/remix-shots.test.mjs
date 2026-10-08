@@ -238,6 +238,20 @@ test('Veo 3.1 on Runway: the request goes to Runway with model veo3.1 (once runw
   assert.deepEqual([r.provider, r.runway.body.model, r.runway.body.ratio], ['runway', 'veo3.1', '720:1280']);
 });
 
+test('Grok Imagine on Runway: a 16:9 / 9:16 frame as is; a still → auto_720p (Lite) or a resolution (1.5), text → its own ratio', async () => {
+  const W = await import('../src/runway.js');
+  for (const id of ['runway:grok_imagine_1_5_lite', 'runway:grok_imagine_1_5']) {
+    assert.deepEqual(S.firstFrameShape(id, { w: 1080, h: 1350 }), { w: 720, h: 1280 }, id);
+    const still = S.shotRequest({ prompt: 'p', camera: 'static', seconds: 6 }, { model: id, seconds: 6, image: JPEG, out: { w: 1080, h: 1350 } });
+    const text = S.shotRequest({ prompt: 'p', camera: 'static', seconds: 4 }, { model: id, seconds: 4, out: { w: 1080, h: 1350 } });
+    assert.equal(still.runway.kind, 'image_to_video');
+    assert.equal(text.runway.kind, 'text_to_video');
+    if (id.endsWith('lite')) assert.deepEqual([still.runway.body.ratio, text.runway.body.ratio], ['auto_720p', '720:1280']);
+    else assert.deepEqual([still.runway.body.ratio, still.runway.body.resolution, text.runway.body.ratio], [undefined, '720p', '9:16']);
+    for (const r of [still, text]) assert.deepEqual(W.shapeRequest(r.runway.kind, r.runway.body).body, r.runway.body, 'the Worker sends it as built');
+  }
+});
+
 // ── Runway (owner only) through public/runway.js, so the mock stands in for the global fetch ──
 test('runway: create → op "runway:<id>"; a dropped create is unknown; FAILED by safety is filtered; SUCCEEDED downloads', async () => {
   const req = S.shotRequest({ prompt: 'p', camera: 'static', seconds: 5 }, { model: 'runway:gen4.5', seconds: 5, image: JPEG, out: { w: 1080, h: 1350 } });

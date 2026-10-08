@@ -8,12 +8,12 @@ import { cleanProfile, EMPTY_PROFILE } from '../src/tester/profile.js';
 const root = resolve('public');
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 // REVIEW_SYNC=1 enables owner sync; REVIEW_TESTER=<subject> enables simulated tester sign-in and private sync.
-// REVIEW_PROVIDERS=1 (or --providers) reports Anthropic, OpenAI, Gemini and Runway as configured for the owner too (Video mode's Omni and
-// Runway menus, Settings → models and voices); their /api/omni, /api/runway and /api/tts calls get local stubs below.
+// REVIEW_PROVIDERS=1 (or --providers) reports Anthropic, OpenAI, Gemini, Runway and xAI as configured for the owner too (Video mode's
+// Omni, Runway and Grok menus, Settings → models and voices); their /api/omni, /api/runway, /api/xai and /api/tts calls get local stubs below.
 // Both run the real src/sync.js over separate account buckets in memory (tests/fake-r2.mjs), shared by every browser
 // profile on this port; restarting empties them. workerRequest gives a body with a Content-Length the known length the
 // Workers runtime would (the strict fake, like R2, refuses a stream without one).
-const syncEnvs = new Map(), profiles = new Map(), feedback = new Map(), omniJobs = new Map();
+const syncEnvs = new Map(), profiles = new Map(), feedback = new Map(), omniJobs = new Map(), xaiJobs = new Map();
 const fixtureTester = process.env.REVIEW_TESTER || '';
 let testerActive = Boolean(fixtureTester);
 const feedbackEnv = { ATELIER_KV: {
@@ -58,7 +58,7 @@ createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     const allProviders = Boolean(process.env.REVIEW_PROVIDERS) || process.argv.includes('--providers');
-    if (url.pathname === '/api/health') return res.end(JSON.stringify({ server: { nvidia: true, ...(process.env.REVIEW_STT || fixtureTester || allProviders ? { openai: true } : {}), ...(fixtureTester || allProviders ? { anthropic: true, gemini: true } : {}), ...(allProviders ? { runway: true } : {}) } }));
+    if (url.pathname === '/api/health') return res.end(JSON.stringify({ server: { nvidia: true, ...(process.env.REVIEW_STT || fixtureTester || allProviders ? { openai: true } : {}), ...(fixtureTester || allProviders ? { anthropic: true, gemini: true } : {}), ...(allProviders ? { runway: true, xai: true } : {}) } }));
     if (url.pathname === '/api/li/spots') return res.end('{"spotsLeft":24,"cap":25,"paused":false}');
     // REVIEW_TESTER=<subject> is a local, simulated session. No LinkedIn call or production cookie is used.
     if (url.pathname === '/api/li/start' && fixtureTester) { testerActive = true; res.statusCode = 303; res.setHeader('Location', '/?tester=welcome'); return res.end(); }
@@ -127,6 +127,21 @@ createServer(async (req, res) => {
       if (what === 'status') { const n = omniJobs.get(id) + 1; omniJobs.set(id, n); const done = n > 2; return res.end(JSON.stringify({ id, status: done ? 'completed' : 'in_progress', done, video: done, ...(done ? {} : { pollAfterMs: 10000 }) })); }
       res.setHeader('Content-Type', 'video/mp4'); return res.end(await readFile(resolve(root, 'icons/atelier-v2-512.png')));
     }
+    // xAI stubs (src/xai.js routes): a Grok Imagine video is "pending" for two polls, then done; the file is a placeholder.
+    if (url.pathname === '/api/xai/video/start' && req.method === 'POST') {
+      const parts = []; for await (const p of req) parts.push(p);
+      let b = {}; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
+      const id = `review-${Date.now().toString(36)}`; xaiJobs.set(id, 0);
+      return res.end(JSON.stringify({ id, model: b.model, seconds: b.seconds ?? 6, resolution: b.resolution ?? '720p', quote: 0.12, pollAfterMs: 5000 }));
+    }
+    const xaiM = url.pathname.match(/^\/api\/xai\/video\/(status|file)\/([A-Za-z0-9_-]+)$/);
+    if (xaiM) {
+      const [, what, id] = xaiM;
+      if (!xaiJobs.has(id)) { res.statusCode = 404; return res.end('{"error":"xAI no longer has that.","code":"xai_gone"}'); }
+      if (what === 'status') { const n = xaiJobs.get(id) + 1; xaiJobs.set(id, n); const done = n > 2; return res.end(JSON.stringify({ id, status: done ? 'done' : 'pending', done, video: done, ...(done ? { usd: 0.12 } : { progress: n * 40, pollAfterMs: 5000 }) })); }
+      res.setHeader('Content-Type', 'video/mp4'); return res.end(await readFile(resolve(root, 'icons/atelier-v2-512.png')));
+    }
+    if (url.pathname === '/api/xai/image' && req.method === 'POST') return res.end(JSON.stringify({ data: [{ b64_json: (await readFile(resolve(root, 'icons/atelier-v2-512.png'))).toString('base64'), mime_type: 'image/png' }], usd: 0.04 }));
     if (url.pathname === '/api/runway/account') return res.end('{"creditBalance":1200,"usd":12,"maxMonthlyCreditSpend":null,"models":{}}');
     // Read aloud stub: half a second of silence as WAV (the Gemini voices' format), any voice.
     if (url.pathname === '/api/tts' && req.method === 'POST') {

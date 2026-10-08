@@ -9,10 +9,10 @@
 //     that names a retired Veo id is read as Omni (omni.js migrateVideoId; migrateRemix rewrites it).
 //   - Plan strings are untrusted (on-screen text in the footage can steer Gemini): they are cleaned and capped here and
 //     must still be escaped wherever they are shown. No plan field ever reaches a URL, a tool or a model id.
-import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=80';
-import { quote as runwayQuote, RUNWAY_MODELS } from './runway.js?v=80';
-import { stripThink } from './context.js?v=80';
-import { OMNI_ID, migrateVideoId } from './omni.js?v=80';
+import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=81';
+import { quote as runwayQuote, RUNWAY_MODELS, GROK_SECONDS } from './runway.js?v=81';
+import { stripThink } from './context.js?v=81';
+import { OMNI_ID, migrateVideoId } from './omni.js?v=81';
 
 export const REMIX_V = 1;
 export const LIMITS = Object.freeze({
@@ -55,6 +55,9 @@ export const SHOT_MODELS = Object.freeze([
   Object.freeze({ id: 'runway:gen4_turbo', provider: 'runway', runway: 'gen4_turbo', label: 'Runway Gen-4 Turbo', seconds: RUNWAY_LENGTHS, res: Object.freeze(['720p']), image: 'required', tester: false }),
   Object.freeze({ id: 'runway:veo3.1', provider: 'runway', runway: 'veo3.1', label: 'Veo 3.1 · Runway', seconds: VEO_SECONDS, res: Object.freeze(['720p']), image: 'optional', tester: false }),
   Object.freeze({ id: 'runway:veo3.1_fast', provider: 'runway', runway: 'veo3.1_fast', label: 'Veo 3.1 Fast · Runway', seconds: VEO_SECONDS, res: Object.freeze(['720p']), image: 'optional', tester: false }),
+  // xAI's Grok Imagine through Runway (owner only): priced per second by resolution (runway.js quote).
+  Object.freeze({ id: 'runway:grok_imagine_1_5_lite', provider: 'runway', runway: 'grok_imagine_1_5_lite', label: 'Grok Imagine 1.5 Lite · Runway', seconds: GROK_SECONDS, res: Object.freeze(['720p']), image: 'optional', tester: false }),
+  Object.freeze({ id: 'runway:grok_imagine_1_5', provider: 'runway', runway: 'grok_imagine_1_5', label: 'Grok Imagine 1.5 · Runway', seconds: GROK_SECONDS, res: Object.freeze(['720p']), image: 'optional', tester: false }),
 ]);
 export const DEFAULT_SHOT_MODEL = OMNI_ID;
 /** A shot model by id; a retired Veo id (a saved shot or setting) resolves to the model that films it now (Omni). */
@@ -428,7 +431,7 @@ export function maxShotSeconds(model, res = '720p', opts = {}) {
 export function shotUsd(model, seconds, res = '720p') {
   const m = shotModel(model);
   if (!m || !(seconds > 0)) return null;
-  if (m.provider === 'runway') return runwayQuote(m.runway, seconds)?.usd ?? null;
+  if (m.provider === 'runway') return runwayQuote(m.runway, seconds, { resolution: res })?.usd ?? null;
   const rate = OWNER_VIDEO_USD[m.id]?.[res];
   return rate == null ? null : Math.round(rate * seconds * 1e6) / 1e6;
 }
