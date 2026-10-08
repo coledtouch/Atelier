@@ -19,8 +19,80 @@ const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript
 // Both run the real src/sync.js over separate account buckets in memory (tests/fake-r2.mjs), shared by every browser
 // profile on this port; restarting empties them. workerRequest gives a body with a Content-Length the known length the
 // Workers runtime would (the strict fake, like R2, refuses a stream without one).
+// --providers also checks Claude's stop reasons through the real Worker adapter (src/anthropic.js claudeChat) and a local
+// stand-in for the Anthropic Messages API (claudeStandIn below): fetches to api.anthropic.com are answered in-process and
+// never leave this machine; nothing else is rerouted. A Claude request (Code mode → Claude Opus 5.5; Ask with "news" or
+// "today" → Claude Sonnet 5.5 + web; an inbox question → the accounts agent on Sonnet) whose prompt holds a trigger gets:
+//   "claude think only"     thinking only, cut at max_tokens, until the app's nudge: then the answer (agent: gmail_search)
+//   "claude think forever"  thinking only every time (the app nudges, moves to the next model, then says no answer came)
+//   "claude cut off"        an answer cut at max_tokens (the "hit the length limit" note)
+//   "claude refuse"         declined before any text (the "Try rephrasing" card); "claude refuse late": after some text
+//   "claude pause"          a web search that pauses the turn (pause_turn); the Worker continues it and the answer completes
+//   "claude long thread"    model_context_window_exceeded before any text
+const CLAUDE_TRIGGER = /\bclaude (think only|think forever|cut off|refuse late|refuse|pause|long thread)\b/i;
+const textOf = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.filter((b) => b?.type === 'text').map((b) => b.text).join(' ') : '');
+// The person's own prompt: the last user text that isn't the app's empty-answer nudge (tool results have no text).
+const promptOf = (messages = []) => [...messages].reverse().map((m) => (m?.role === 'user' ? textOf(m.content) : '')).find((t) => t && !/wrote no answer/.test(t)) || '';
+const sseEvent = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+function claudeStream(blocks, stop) {
+  const out = [sseEvent('message_start', { message: { id: 'msg_fixture', type: 'message', role: 'assistant', model: 'claude-fixture', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 900, output_tokens: 1 } } })];
+  blocks.forEach((b, index) => {
+    if (b.type === 'thinking') {
+      out.push(sseEvent('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } }));
+      for (const part of b.thinking.match(/.{1,40}/gs)) out.push(sseEvent('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: part } }));
+      out.push(sseEvent('content_block_delta', { index, delta: { type: 'signature_delta', signature: 'fixture-signature' } }));
+    } else if (b.type === 'text') {
+      out.push(sseEvent('content_block_start', { index, content_block: { type: 'text', text: '' } }));
+      for (const part of b.text.match(/.{1,24}/gs)) out.push(sseEvent('content_block_delta', { index, delta: { type: 'text_delta', text: part } }));
+    } else if (b.type === 'tool_use' || b.type === 'server_tool_use') {
+      out.push(sseEvent('content_block_start', { index, content_block: { type: b.type, id: b.id, name: b.name, input: {} } }));
+      out.push(sseEvent('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(b.input) } }));
+    } else out.push(sseEvent('content_block_start', { index, content_block: b }));
+    out.push(sseEvent('content_block_stop', { index }));
+  });
+  const details = stop === 'refusal' ? { stop_details: { type: 'refusal', category: null, explanation: 'Local fixture refusal.' } } : {};
+  out.push(sseEvent('message_delta', { delta: { stop_reason: stop, stop_sequence: null, ...details }, usage: { output_tokens: 400 } }), sseEvent('message_stop', {}));
+  const enc = new TextEncoder();
+  return new Response(new ReadableStream({ async pull(c) { if (!out.length) return c.close(); await new Promise((r) => setTimeout(r, 30)); c.enqueue(enc.encode(out.shift())); } }), { headers: { 'content-type': 'text/event-stream' } });
+}
+const PLAN = 'Planning the answer: the files it needs, the edge cases, the tests, what to leave out… (local fixture thinking) ';
+async function claudeStandIn(request) {
+  const b = await request.json();
+  const which = (promptOf(b.messages).match(CLAUDE_TRIGGER)?.[1] || '').toLowerCase();
+  const last = b.messages?.at(-1) || {};
+  const nudged = /wrote no answer/.test(textOf(last.content));
+  const afterTool = last.role === 'user' && Array.isArray(last.content) && last.content.some((x) => x?.type === 'tool_result');
+  const agent = Array.isArray(b.tools) && b.tools.some((t) => t.name === 'gmail_search');
+  const think = (t = PLAN) => ({ type: 'thinking', thinking: t });
+  const answer = { type: 'text', text: 'Local fixture answer from Claude, after the nudge. No provider was called.\n\n```js\nconst ok = true;\n```' };
+  if (afterTool) return claudeStream([think('Reading the result. '), { type: 'text', text: 'You have 2 unread messages (local fixture — no Gmail was read).' }], 'end_turn');
+  if (which === 'think only') {
+    if (!nudged) return claudeStream([think(PLAN.repeat(3))], 'max_tokens');
+    return agent ? claudeStream([think('Short pass. '), { type: 'tool_use', id: 'toolu_fixture_1', name: 'gmail_search', input: { q: 'is:unread newer_than:2d' } }], 'tool_use')
+      : claudeStream([think('Short pass. '), answer], 'end_turn');
+  }
+  if (which === 'think forever') return claudeStream([think(PLAN.repeat(3))], 'max_tokens');
+  if (which === 'cut off') return claudeStream([think(), { type: 'text', text: 'Here is the first part of a long answer: step one, step two, and then step thr' }], 'max_tokens');
+  if (which === 'refuse') return claudeStream([], 'refusal');
+  if (which === 'refuse late') return claudeStream([think(), { type: 'text', text: 'Here is how it starts' }], 'refusal');
+  if (which === 'long thread') return claudeStream([think()], 'model_context_window_exceeded');
+  if (which === 'pause') {
+    if (last.role === 'assistant') return claudeStream([{ type: 'text', text: 'and here is the rest, after the paused search resumed. Completed answer (local fixture).' }], 'end_turn');
+    return claudeStream([think('Searching first. '), { type: 'server_tool_use', id: 'srvtoolu_fixture', name: 'web_search', input: { query: 'local fixture news' } },
+      { type: 'web_search_tool_result', tool_use_id: 'srvtoolu_fixture', content: [{ type: 'web_search_result', url: 'https://example.com/fixture', title: 'Fixture', encrypted_content: 'x', page_age: null }] },
+      { type: 'text', text: 'Found a source (paused here), ' }], 'pause_turn');
+  }
+  return claudeStream([{ type: 'text', text: 'Local fixture answer from Claude.' }], 'end_turn');
+}
+if (Boolean(process.env.REVIEW_PROVIDERS) || process.argv.includes('--providers')) {
+  const passFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const href = input instanceof Request ? input.url : String(input);
+    return new URL(href).hostname === 'api.anthropic.com' ? claudeStandIn(input instanceof Request ? input : new Request(href, init)) : passFetch(input, init);
+  };
+}
 // The stub Gmail tool --providers connects (the Worker's real tool list is far longer; this one is read-only).
-const FIXTURE_GMAIL = { type: 'function', function: { name: 'gmail_search', description: 'Search the user’s Gmail (local fixture).', parameters: { type: 'object', properties: { q: { type: 'string', description: 'Gmail search query' } }, required: ['q'], additionalProperties: false } }, 'x-write': false, 'x-label': 'Search Gmail', 'x-service': 'gmail' };
+const FIXTURE_GMAIL ={ type: 'function', function: { name: 'gmail_search', description: 'Search the user’s Gmail (local fixture).', parameters: { type: 'object', properties: { q: { type: 'string', description: 'Gmail search query' } }, required: ['q'], additionalProperties: false } }, 'x-write': false, 'x-label': 'Search Gmail', 'x-service': 'gmail' };
 const syncEnvs = new Map(), profiles = new Map(), feedback = new Map(), omniJobs = new Map(), xaiJobs = new Map(), runwayJobs = new Map(), omniRows = new Map();
 // Owner spending limits (src/spend.js; Settings → Spending): the Worker's own rules and words (decide, capRefusal,
 // cleanLimits, the price quotes) over an in-memory month. REVIEW_SPENT=<usd> starts this month with that much spent, so
@@ -277,6 +349,11 @@ createServer(async (req, res) => {
     if (url.pathname === '/api/chat') {
       const parts = []; for await (const p of req) parts.push(p);
       const body = JSON.parse(Buffer.concat(parts).toString());
+      // --providers: a Claude request with a stop-reason trigger goes through the real Worker adapter (claudeStandIn above).
+      if (allProviders && String(body.model || '').startsWith('anthropic:') && CLAUDE_TRIGGER.test(promptOf(body.messages))) {
+        const { claudeChat } = await import('../src/anthropic.js');
+        return writeResponse(res, await claudeChat(body, 'review-fixture-key'));
+      }
       // --providers: the accounts agent (a request offering gmail_search) calls it once for an inbox question, then answers
       // from the fixture result (or says it was declined).
       if (allProviders && Array.isArray(body.tools) && body.tools.some((t) => t?.function?.name === 'gmail_search')) {

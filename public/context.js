@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=84';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=85';
 
 export const CHAT_KINDS = ['ask', 'code'];
 export const HISTORY_TURNS = 10; // earlier turns replayed (chat answers and notes alike)
@@ -68,11 +68,13 @@ export function outputNote(x, label = (id) => id) {
 // The chat history before a turn: kinds (Ask/Code) replay as real turns — their prompt plus an attachment note, or the
 // content parts media(x) returns for x (a replayed video) — and every other mode's output as a note pair, so a model
 // switched in mid-thread still knows what happened. The last `max` turns of either sort; no binary data except what
-// media(x) adds. Kimi gets its own reasoning back (reasoning_content).
+// media(x) adds. Kimi gets its own reasoning back (reasoning_content). A turn whose answer was declined partway
+// (x.refused, app.js: finish 'content_filter') is left out like a failed one: the docs say to discard a partial answer
+// a refusal cut off, not treat it as complete, and a refusal before any text is already an error.
 export function buildHistory(prior, { kinds = CHAT_KINDS, media, label, max = HISTORY_TURNS } = {}) {
   const notes = new Map(), turns = [];
   for (const x of prior || []) {
-    if (!x || x.error) continue;
+    if (!x || x.error || x.refused) continue;
     if (kinds.includes(x.kind)) { if (x.text) turns.push(x); continue; }
     const n = outputNote(x, label);
     if (n) { notes.set(x, n); turns.push(x); }

@@ -271,7 +271,8 @@ test('catalogue: Grok in its roles after today’s top choices; image and video 
     assert.ok(ids.slice(first).every((id) => id.startsWith('xai:')), `${r}: Grok comes after the existing models`);
   }
   // the agent never gets Grok's search: web_search is offered to Anthropic models only, and shapeChatBody drops the rest
-  assert.match(APP, /web && !accountRead && providerOf\(m\) === 'anthropic' \? \{ web_search: true \}/);
+  assert.match(APP, /const offerWeb = web && !accountRead;/);
+  assert.match(APP, /const w = offerWeb && providerOf\(m\) === 'anthropic';[^\n]*\.\.\.\(w \? \{ web_search: true \} : \{\}\)/);
   // Image: after GPT Image, Nano Banana and Muse; Video: after the Runway entries, auto:false
   const images = [...APP.match(/const IMAGE_MODELS = \[([\s\S]*?)\n\];/)[1].matchAll(/id: ([\w.']+|'[^']+')/g)].map((m) => m[1]);
   assert.equal(images.indexOf('XAI_IMAGE_MODEL.id'), 4, images.join(' '));

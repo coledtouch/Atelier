@@ -7,25 +7,25 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=84';
-import * as Sync from './sync.js?v=84';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, spendQuestion as runwaySpendQuestion, RUNWAY_MODELS as RUNWAY_SPECS, quote as runwayQuoteUsd } from './runway.js?v=84';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=84';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=84';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint } from './context.js?v=84';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=84';
-import { initLookup } from './lookup.js?v=84';
-import { createRemix } from './remix-app.js?v=84';
-import { sendMode, looksLikeQuestion } from './remix.js?v=84';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=84';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=84';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=84';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=84';
-import * as ClaudeImport from './claude-import.js?v=84';
-import { createFeedback } from './feedback.js?v=84';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=84';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=84';
-import { isCapCode, capOf, cleanCap, capTitle, capWarning, imageUsd, usd as capUsd, resetDay, limitsBody, breakdownRows, loadSpend, saveLimits, partialCapNote } from './spend.js?v=84';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=85';
+import * as Sync from './sync.js?v=85';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, spendQuestion as runwaySpendQuestion, RUNWAY_MODELS as RUNWAY_SPECS, quote as runwayQuoteUsd } from './runway.js?v=85';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=85';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=85';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint } from './context.js?v=85';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=85';
+import { initLookup } from './lookup.js?v=85';
+import { createRemix } from './remix-app.js?v=85';
+import { sendMode, looksLikeQuestion } from './remix.js?v=85';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=85';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=85';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=85';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=85';
+import * as ClaudeImport from './claude-import.js?v=85';
+import { createFeedback } from './feedback.js?v=85';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=85';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=85';
+import { isCapCode, capOf, cleanCap, capTitle, capWarning, imageUsd, usd as capUsd, resetDay, limitsBody, breakdownRows, loadSpend, saveLimits, partialCapNote } from './spend.js?v=85';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -708,6 +708,19 @@ function errorTitle(kind, msg = '', budget, cap) {
 }
 // Sent when a thinking model ended its turn with reasoning only (streamChat).
 const EMPTY_NUDGE = 'Your previous attempt used up its room thinking and wrote no answer. Write the final answer now, directly, in the format asked for; skip re-planning. If it is long (several files), give the most important parts complete and say what to ask for next.';
+// What counts as an answer (streamChat's `shown`): text that isn't only whitespace, or a tool call. Reasoning never does,
+// and neither does Claude's anthropic_content on its own: it comes with every Claude turn and may hold only thinking.
+const shows = (d) => /\S/.test(d.content || '') || d.tool_calls?.length > 0;
+// Claude's replay blocks (src/anthropic.js): one round's blocks, or a list of rounds when the Worker continued a paused
+// turn. A turn that only thought has nothing to replay; withoutThinking keeps a turn's text and tool blocks (stripping
+// every thinking block is a valid history, per the history-editing check; editing one in place is not).
+const THINKING_BLOCKS = new Set(['thinking', 'redacted_thinking']);
+const replayRounds = (ac) => (Array.isArray(ac) && ac.length ? (Array.isArray(ac[0]) ? ac : [ac]) : []);
+const replayable = (ac) => replayRounds(ac).some((r) => Array.isArray(r) && r.some((b) => b && !THINKING_BLOCKS.has(b.type)));
+function withoutThinking(ac) {
+  const rounds = replayRounds(ac).map((r) => (Array.isArray(r) ? r.filter((b) => !THINKING_BLOCKS.has(b?.type)) : [])).filter((r) => r.length);
+  return rounds.length > 1 ? rounds : rounds[0] || null;
+}
 const deadProviders = new Map(); // provider → reason, for this session
 // Gemini can take a video as the clip: it has a key and hasn't failed on an account problem this session.
 const geminiUsable = () => providerReady('gemini') && !deadProviders.has('gemini') && feat('video');
@@ -727,20 +740,28 @@ async function streamChat(opts) {
     if (!messages) continue;
     // A dropped connection (deploy, network switch) gets one retry on the same model before moving on.
     for (let attempt = 0; attempt < 2; attempt++) {
-      let got = false, shown = false;
+      let got = false, shown = false, nudged = false;
       if (stale) { stale = false; opts.onRestart?.(); }
       try {
         const extra = typeof opts.extra === 'function' ? opts.extra(model) : opts.extra;
         let cut = false;
-        const onDelta = (d) => { got = true; if (d.content || d.tool_calls || d.anthropic_content) shown = true; if (d.finish === 'length') cut = true; opts.onDelta(d); };
+        // Claude's replay blocks reach the caller only with an answer (they come last, after its text or tool calls): a
+        // thinking-only turn's never do, and a nudged answer's thinking was written after EMPTY_NUDGE, which the caller's
+        // history never holds, so it goes back without it (replayed after a different prefix, Claude's history-editing
+        // check would reject it).
+        const onDelta = (d) => {
+          got = true; if (shows(d)) shown = true; if (d.finish === 'length') cut = true;
+          if (d.anthropic_content) d = { ...d, anthropic_content: !shown || !replayable(d.anthropic_content) ? undefined : nudged ? withoutThinking(d.anthropic_content) : d.anthropic_content };
+          opts.onDelta(d);
+        };
         await streamChatOnce({ ...opts, model, messages, extra, onDelta, onServed: (m) => { served = m; } });
-        // Any thinking model (DeepSeek, GLM, Gemini, Kimi, o-series…) can spend all of max_tokens reasoning and end with no
-        // answer. Ask the same model once more for the answer itself with light thinking; if that is empty too, try the
-        // next model in the chain (or say so) instead of leaving a blank reply.
+        // Any thinking model (Claude, DeepSeek, GLM, Gemini, Kimi, o-series…) can spend all of max_tokens reasoning and end
+        // with no answer. Ask the same model once more for the answer itself with light thinking (Claude: effort low); if
+        // that is empty too, try the next model in the chain (or say so) instead of leaving a blank reply.
         if (!shown) {
           opts.signal?.throwIfAborted();
           if (!nudgeNoted) { nudgeNoted = true; opts.onNote?.('reasoning ran long — asking for the answer'); }
-          cut = false;
+          cut = false; nudged = true;
           await streamChatOnce({ ...opts, model, extra: { ...(extra || {}), reasoning_effort: 'low' }, onDelta, onServed: (m) => { served = m; },
             messages: [...messages, { role: 'user', content: EMPTY_NUDGE }] });
         }
@@ -816,12 +837,31 @@ async function streamChatOnce(opts) {
   }
 }
 
+// The owner's room for Claude by the role's effort. Claude 5.x counts adaptive thinking toward max_tokens (thinking plus
+// answer), and at effort high it can think through most of a small budget before writing a word; the docs ask for a large
+// max_tokens at high and above (64K is their starting point; 128K is the 5.x output limit, src/anthropic.js caps at 64K).
+// Billing is for the tokens used: this is only the ceiling. Low-effort roles and helpers keep the caller's figure.
+// Testers keep it too: the tester router prices each call's reservation from max_tokens (≤ 8,192, src/tester/router.js).
+// The ceiling of one owner call counts the server-side fallback (src/anthropic.js sends fallbacks 'default' on Opus 5.5,
+// Fable 5.1 and Sonnet 5.5): the fallback attempt gets the same max_tokens and bills at its own model's rate, as
+// chatWorstCase (src/tester/prices.js) prices it. Output only: at 64K, Opus 5.5 $2.88 (→ Opus 5), Fable 5.1 $4.80,
+// Sonnet 5.5 $1.28; at 16K, Opus 5.5 $0.72, Sonnet 5.5 $0.32. One prompt can make two such calls per model (the
+// empty-answer nudge goes out with the same room) on at most two models (streamChat). With the default lists: Code and
+// Build up to $8.32 (Opus 5.5 + Sonnet 5.5), Deep think up to $15.36 (Opus 5.5 + Fable 5.1, also the most any 64K mode
+// can reach with Fable 5.1 picked in Settings), Ideas and "As me" up to $2.08. A paused web search (web and agent roles
+// only, at 6K and 16K) adds up to 3 continuation requests at the same room. tests/claude-stops.test.mjs checks these.
+const CLAUDE_ROOM = { medium: 16000, high: 64000, xhigh: 64000, max: 64000 };
+const roomFor = (model, role, max_tokens) => (!S.tester && providerOf(model) === 'anthropic' ? Math.max(max_tokens, CLAUDE_ROOM[EFFORT[role]] || 0) : max_tokens);
+// Errors the Worker sends inside a Claude stream when a turn ended with nothing to show (src/anthropic.js STOPS) → status.
+// A refusal (400, "Try rephrasing") isn't retried on another provider; an overflowing thread (413) wouldn't fit there either.
+const SSE_ERRORS = { refusal: 400, context_window: 413 };
+
 async function streamChatRaw({ model, messages, temperature, max_tokens = 4096, signal, onDelta, extra = {}, role, onServed, onNote }) {
   const effort = providerOf(model) === 'nvidia' ? null : EFFORT[role];
   const r = await fetch('/api/chat', {
     method: 'POST', signal,
     headers: apiHeaders({ accept: 'text/event-stream' }),
-    body: JSON.stringify({ model, messages, temperature: temperature ?? S.settings.temperature, top_p: 0.95, max_tokens, stream: true, ...(effort ? { reasoning_effort: effort } : {}), ...extra }),
+    body: JSON.stringify({ model, messages, temperature: temperature ?? S.settings.temperature, top_p: 0.95, max_tokens: roomFor(model, role, max_tokens), stream: true, ...(effort ? { reasoning_effort: effort } : {}), ...extra }),
   });
   if (!r.ok) throw await toApiError(r);
   noteAllowance(r);
@@ -853,7 +893,7 @@ async function streamChatRaw({ model, messages, temperature, max_tokens = 4096, 
       if (data === '[DONE]') return;
       try {
         const j = JSON.parse(data);
-        if (j.error) throw new ApiError(500, j.error.message || String(j.error));
+        if (j.error) { const known = Object.hasOwn(SSE_ERRORS, j.error.code); throw new ApiError(known ? SSE_ERRORS[j.error.code] : 500, j.error.message || String(j.error), known ? { code: j.error.code } : undefined); }
         const d = j.choices?.[0]?.delta || {};
         const finish = j.choices?.[0]?.finish_reason || null;
         const content = d.content || '';
@@ -1715,6 +1755,7 @@ async function run(e) {
   if (thread) { liveThreads.set(thread.id, thread); liveRuns.set(thread.id, (liveRuns.get(thread.id) || 0) + 1); }
   const signal = ctrl.signal;
   e.pending = true; e.error = null; e.errorKind = null; e.cut = null; delete e.budget; delete e.cap; delete e.web; // e.web: this run's own searches (runChat, runAgent)
+  delete e.refused; // set when this run's answer is declined partway (finish 'content_filter'): buildHistory leaves it out
   delete e.recovered; const releaseRun = Sync.holdRunLock(e.id); // another tab never syncs this entry mid-run
   const t0 = e.startedAt = Date.now();
   repaint(e); // a retry otherwise keeps its old error card until the first token
@@ -1847,7 +1888,10 @@ async function runChat(e, signal, thread = S.thread) {
     temperature: e.kind === 'code' ? Math.min(S.settings.temperature, 0.3) : undefined,
     // e.web: how many searches this answer ran (synced and backed up with it): later agent turns in the thread treat it
     // as untrusted text (threadTaint in context.js), like the "live web" note older entries carry.
-    onDelta: ({ content, reasoning, status, searches }) => { e.text += content; e.think += reasoning; if (status) e.status = status; if (searches) { searched += searches; e.web = searched; setNote(); } repaint(e); },
+    // e.refused: the answer was declined partway (finish 'content_filter'). The partial stays on screen with its note, but
+    // it isn't a complete answer, so later turns don't get it back (buildHistory in context.js), like a refusal before any
+    // text (an error).
+    onDelta: ({ content, reasoning, status, searches, finish }) => { e.text += content; e.think += reasoning; if (status) e.status = status; if (searches) { searched += searches; e.web = searched; setNote(); } if (finish === 'content_filter') e.refused = true; repaint(e); },
   });
 }
 
@@ -1894,7 +1938,7 @@ async function runWatch(e, src, signal, thread = S.thread) {
         onModel: label,
         onRestart: () => { e.text = ''; e.think = ''; repaint(e); }, // a model that only thought before failing: drop it
         temperature: e.kind === 'code' ? Math.min(S.settings.temperature, 0.3) : undefined,
-        onDelta: ({ content, reasoning, status }) => { e.text += content; e.think += reasoning; if (status) e.status = status; repaint(e); },
+        onDelta: ({ content, reasoning, status, finish }) => { e.text += content; e.think += reasoning; if (status) e.status = status; if (finish === 'content_filter') e.refused = true; repaint(e); },
       });
       return;
     } catch (err) {
@@ -2153,6 +2197,10 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
   const allTools = agentTools();
   const tools = allTools.map(({ type, function: fn }) => ({ type, function: fn }));
 
+  // Claude binds each thinking block to the request it came from, the tools array included. Once web search is withdrawn
+  // (accountRead) the tools change, so the thinking replayed from earlier turns goes back stripped, once (a history with
+  // every thinking block removed is valid; one replayed after a changed prefix is rejected for accounts the check covers).
+  let webOffered = false;
   for (let turn = 0; turn < 14; turn++) {
     let text = '';
     let reasoningTurn = '';
@@ -2160,12 +2208,18 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
     let finish = null;
     const calls = [];
     const prefix = e.text ? e.text + '\n\n' : '';
+    const offerWeb = web && !accountRead;
+    if (webOffered && !offerWeb) {
+      webOffered = false;
+      for (const m of messages) if (m.anthropic_content) { const kept = withoutThinking(m.anthropic_content); if (kept) m.anthropic_content = kept; else delete m.anthropic_content; }
+    }
     await streamChat({
       model, role: 'agent', messages: forModel || messages, signal, max_tokens: 16000,
-      extra: (m) => ({ tools, ...(web && !accountRead && providerOf(m) === 'anthropic' ? { web_search: true } : {}) }),
+      extra: (m) => { const w = offerWeb && providerOf(m) === 'anthropic'; if (w) webOffered = true; return { tools, ...(w ? { web_search: true } : {}) }; },
       onModel: (m) => { e.meta.model = m; },
       onDelta: ({ content, reasoning, tool_calls, anthropic_content, searches, finish: f }) => {
         if (f) finish = f;
+        if (f === 'content_filter') e.refused = true; // declined partway: kept on screen, left out of later history (runChat)
         if (searches) { searched += searches; setNote(); }
         if (content) { text += content; e.text = prefix + text; }
         if (reasoning) { e.think += reasoning; reasoningTurn += reasoning; }
@@ -2182,7 +2236,9 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
     });
     const toolCalls = calls.filter((c) => c && c.function.name).map((c) => ({ ...c, id: c.id || 'call_' + uid() }));
     messages.push({ role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}), ...(reasoningTurn ? { reasoning_content: reasoningTurn } : {}), ...(anthropic ? { anthropic_content: anthropic } : {}) });
-    if (!toolCalls.length) {
+    // A turn cut at the length limit (Claude: max_tokens) or declined (content_filter) ends the run: a tool call from it
+    // may be half-written, so it never runs.
+    if (!toolCalls.length || finish === 'length' || finish === 'content_filter') {
       if (finish === 'length') { e.text += '\n\n_The answer hit the length limit and stopped here — ask “continue” for the rest._'; repaint(e); }
       return;
     }
@@ -6035,7 +6091,7 @@ $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
 
 // The build feedback reports when app.js was loaded without its ?v= (scripts/bump-version.mjs moves it with sw.js VERSION).
-const APP_BUILD = '84';
+const APP_BUILD = '85';
 const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || APP_BUILD}`, online: navigator.onLine !== false }), toast });
 $('#feedbackBtn').onclick = () => feedback.open();
 $('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };

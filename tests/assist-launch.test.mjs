@@ -300,7 +300,8 @@ test('a spoken Assist request gets the composer to itself; a leftover draft come
 test('an Atelier Assist question to the accounts agent may also search the web (Claude only), and says so once it has', () => {
   const src = fnSource('runAgent');
   assert.match(src, /const web = e\.via === 'assist' && providerReady\('anthropic'\) && feat\('web'\) && !readBefore && !taint;/, 'never after an account read, nor with untrusted text in the thread');
-  assert.match(src, /extra: \(m\) => \(\{ tools, \.\.\.\(web && !accountRead && providerOf\(m\) === 'anthropic' \? \{ web_search: true \} : \{\}\) \}\)/);
+  assert.match(src, /const offerWeb = web && !accountRead;/);
+  assert.match(src, /extra: \(m\) => \{ const w = offerWeb && providerOf\(m\) === 'anthropic'; if \(w\) webOffered = true; return \{ tools, \.\.\.\(w \? \{ web_search: true \} : \{\}\) \}; \}/);
   assert.match(src, /if \(searches\) \{ searched \+= searches; setNote\(\); \}/);
   assert.match(src, /searched \? 'live web' : ''/);
   // What it reads in the accounts never goes into a search (a page or an email could ask for that).
