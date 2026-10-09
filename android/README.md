@@ -330,7 +330,7 @@ app's links when it is installed, and Chrome checks the file before it hides the
 1. Temporarily turn off Auto Blocker (Settings › Security and privacy › Auto Blocker). While it is on, it blocks
    sideloads and USB commands.
 2. Install, either:
-   - with USB debugging on: `adb install -r Atelier-2.1.0.apk`; or
+   - with USB debugging on: `adb install -r Atelier-2.2.0.apk`; or
    - by opening the APK in My Files.
 
    2.0.0 installs over Atelier Assist 1.x (same package, same key). The pairing key, "setup seen" and the
