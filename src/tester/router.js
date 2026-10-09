@@ -358,6 +358,8 @@ async function chat(c) {
   if (Object.hasOwn(EFFORTS, b.reasoning_effort)) body.reasoning_effort = EFFORTS[b.reasoning_effort];
   if (b.chat_template_kwargs?.enable_thinking === false) body.chat_template_kwargs = { enable_thinking: false };
   if (p.webUses) body.web_search = true;
+  // A helper call writes no Claude cache (src/anthropic.js): it only ever lowers the bill the reservation already covers.
+  if (b.cache === false) body.cache = false;
 
   let res;
   try {

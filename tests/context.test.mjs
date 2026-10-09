@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
-  CHAT_KINDS, HISTORY_TURNS, VIDEO_CHAIN_TURNS, IMAGE_FOLLOW_TURNS, CTX_IMAGES, ABOUT_MEDIA, ASKS_WEB,
+  CHAT_KINDS, HISTORY_TURNS, HISTORY_BLOCK, VIDEO_CHAIN_TURNS, IMAGE_FOLLOW_TURNS, CTX_IMAGES, ABOUT_MEDIA, ASKS_WEB,
   stripThink, attachNote, outputNote, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn,
 } from '../public/context.js';
 import { MAX_IMAGES } from '../public/tester.js';
@@ -75,12 +75,13 @@ test('buildHistory keeps the existing chat replay and adds notes in the same 10-
   const replay = buildHistory([vid, photo], { media: (x) => (x === vid ? parts : null) });
   assert.equal(replay[0].content, parts);
   assert.equal(replay[2].content, 'whats this\n\n[attached 1 image]');
-  // window: the last HISTORY_TURNS turns, notes included
-  const many = [...Array.from({ length: 12 }, () => ask()), img];
+  // window: at least the last HISTORY_TURNS turns, notes included; the oldest leave HISTORY_BLOCK at a time
+  const many = [...Array.from({ length: HISTORY_TURNS + HISTORY_BLOCK }, () => ask()), img];
   const last = buildHistory(many);
-  assert.equal(last.length, HISTORY_TURNS * 2);
+  assert.equal(last.length, (HISTORY_TURNS + 1) * 2);
   assert.equal(last.at(-2).content, '[Image mode] a red car');
-  assert.equal(last[0].content, many[3].prompt);
+  assert.equal(last[0].content, many[HISTORY_BLOCK].prompt);
+  assert.equal(buildHistory(many.slice(0, HISTORY_TURNS + HISTORY_BLOCK - 1)).length, (HISTORY_TURNS + HISTORY_BLOCK - 1) * 2, 'below a full block: every turn');
   // assistant text is stripped of <think> and capped; Kimi gets its reasoning back
   const kimi = ask({ text: '<think>x</think>' + 'y'.repeat(20000), think: 'z'.repeat(9000), meta: { model: 'moonshotai/kimi-k3' } });
   const [, a] = buildHistory([kimi]);

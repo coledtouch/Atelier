@@ -411,9 +411,12 @@ const OK_FINISH = new Set(['STOP', 'MAX_TOKENS', 'FINISH_REASON_UNSPECIFIED']);
 const reasonOf = (r) => (typeof r === 'string' && /^[A-Z_]{1,40}$/.test(r) ? r : 'OTHER');
 
 // Incremental converter: Google SSE bytes in → OpenAI-style SSE text out (never buffers more than one partial line).
+// Gemini's usageMetadata (a running total on every chunk) goes on once, as the last event before [DONE]: the app's cache
+// readout reads cachedContentTokenCount there (public/usage.js). Only these counts, numbers only.
+const USAGE_KEYS = ['promptTokenCount', 'cachedContentTokenCount', 'candidatesTokenCount', 'thoughtsTokenCount', 'toolUsePromptTokenCount', 'totalTokenCount'];
 function sseConverter() {
   const dec = new TextDecoder();
-  let buf = '', sentContent = false, finished = false;
+  let buf = '', sentContent = false, finished = false, usage = null;
   const frame = (o) => `data: ${JSON.stringify(o)}\n\n`;
   const delta = (d, finish = null) => frame({ choices: [{ index: 0, delta: d, finish_reason: finish }] });
   const fail = (message) => frame({ error: { message } });
@@ -426,6 +429,10 @@ function sseConverter() {
     if (!j || typeof j !== 'object') return '';
     if (j.error) return fail(String(j.error.message || j.error.status || 'Gemini stream failed').slice(0, 400));
     if (j.promptFeedback?.blockReason) return fail(`Gemini blocked this request (${reasonOf(j.promptFeedback.blockReason)}) — try rephrasing.`);
+    if (j.usageMetadata && typeof j.usageMetadata === 'object') {
+      const u = Object.fromEntries(USAGE_KEYS.filter((k) => Number.isFinite(j.usageMetadata[k])).map((k) => [k, j.usageMetadata[k]]));
+      if (Object.keys(u).length) usage = u;
+    }
     const cand = j.candidates?.[0];
     let out = '';
     for (const p of Array.isArray(cand?.content?.parts) ? cand.content.parts : []) {
@@ -456,7 +463,7 @@ function sseConverter() {
       buf += dec.decode();
       const out = buf ? line(buf) : '';
       buf = '';
-      return out;
+      return out + (usage ? frame({ usageMetadata: usage }) : '');
     },
   };
 }

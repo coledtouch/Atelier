@@ -1,5 +1,5 @@
-import { validVideo } from './video.js?v=86';
-import { validRemix, recoverRemix } from './remix.js?v=86';
+import { validVideo } from './video.js?v=87';
+import { validRemix, recoverRemix } from './remix.js?v=87';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -63,6 +63,9 @@ export function validateBackup(data) {
       if (e.web != null) assert(Number.isSafeInteger(e.web) && e.web >= 0);
       if (e.imported != null) assert(e.imported === true);
       if (e.untrustedFiles != null) assert(e.untrustedFiles === true); // only the shared photos / video marked it (submit)
+      // A chat turn's send time (app.js run(), a short locale date): it goes in front of the turn's message (context.js
+      // withSent, which also flattens and caps it), so nothing longer than a date is taken.
+      if (e.sent != null) assert(text(e.sent) && e.sent.length <= 80);
     }
   }
   return data.threads;

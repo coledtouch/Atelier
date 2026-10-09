@@ -1,5 +1,6 @@
 // Isolated UI fixture: no credentials, external API calls, or production data.
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { Readable } from 'node:stream';
@@ -26,8 +27,11 @@ const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript
 // Workers runtime would (the strict fake, like R2, refuses a stream without one).
 // --providers also checks Claude's stop reasons through the real Worker adapter (src/anthropic.js claudeChat) and a local
 // stand-in for the Anthropic Messages API (claudeStandIn below): fetches to api.anthropic.com are answered in-process and
-// never leave this machine; nothing else is rerouted. A Claude request (Code mode → Claude Opus 5.5; Ask with "news" or
-// "today" → Claude Sonnet 5.5 + web; an inbox question → the accounts agent on Sonnet) whose prompt holds a trigger gets:
+// never leave this machine; nothing else is rerouted. Every Claude request without tools takes that route (it answers
+// with the generic fixture's reply), and every answer reports usage from a simulated prompt cache (openaiUsage /
+// claudeUsage below), so the owner's "cached N%" readout shows on follow-ups; the console line for each Claude request
+// names its cache breakpoints. A Claude request (Code mode → Claude Opus 5.5; Ask with "news" or "today" → Claude Sonnet
+// 5.5 + web; an inbox question → the accounts agent on Sonnet) whose prompt holds a trigger gets:
 //   "claude think only"     thinking only, cut at max_tokens, until the app's nudge: then the answer (agent: gmail_search)
 //   "claude think forever"  thinking only every time (the app nudges, moves to the next model, then says no answer came)
 //   "claude cut off"        an answer cut at max_tokens (the "hit the length limit" note)
@@ -35,12 +39,61 @@ const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript
 //   "claude pause"          a web search that pauses the turn (pause_turn); the Worker continues it and the answer completes
 //   "claude long thread"    model_context_window_exceeded before any text
 const CLAUDE_TRIGGER = /\bclaude (think only|think forever|cut off|refuse late|refuse|pause|long thread)\b/i;
+// The generic fixture's own triggers (any model): these stay on the OpenAI-style path below.
+const GENERIC_TRIGGER = /\b(think only|think forever|no credit|slow stream)\b/i;
 const textOf = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.filter((b) => b?.type === 'text').map((b) => b.text).join(' ') : '');
 // The person's own prompt: the last user text that isn't the app's empty-answer nudge (tool results have no text).
 const promptOf = (messages = []) => [...messages].reverse().map((m) => (m?.role === 'user' ? textOf(m.content) : '')).find((t) => t && !/wrote no answer/.test(t)) || '';
 const sseEvent = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
-function claudeStream(blocks, stop) {
-  const out = [sseEvent('message_start', { message: { id: 'msg_fixture', type: 'message', role: 'assistant', model: 'claude-fixture', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 900, output_tokens: 1 } } })];
+// ── prompt caches, simulated (--providers): each answer reports usage with cached tokens, so the app's cache readout
+// ("cached 92%" on the meta line) shows on follow-ups exactly when the app sent the same prefix again. Tokens are
+// characters / 4; entries live an hour; nothing here is a provider's real accounting.
+const hashOf = (s) => createHash('sha256').update(s).digest('hex');
+// OpenAI-style providers cache every prefix on their own: each message boundary of a request (from 1,024 tokens) is
+// readable by the next request to the same model that starts with the same messages.
+const prefixSeen = new Map();
+function openaiUsage(model, messages, answer) {
+  const seen = prefixSeen.get(model) || new Map(), now = Date.now();
+  prefixSeen.set(model, seen);
+  let acc = '', cached = 0;
+  const marks = (messages || []).map((m) => { acc += JSON.stringify(m); return [hashOf(acc), Math.ceil(acc.length / 4)]; });
+  for (const [h, t] of marks) if ((seen.get(h) || 0) > now) cached = Math.max(cached, t);
+  for (const [h, t] of marks) if (t >= 1024) seen.set(h, now + 3_600_000);
+  const prompt = marks.at(-1)?.[1] || 0, out = Math.ceil(answer.length / 4);
+  return { prompt_tokens: prompt, completion_tokens: out, total_tokens: prompt + out, prompt_tokens_details: { cached_tokens: cached >= 1024 ? cached : 0 } };
+}
+// Claude caches only at its cache_control breakpoints (explicit ones and the top-level automatic one, on the last block):
+// a breakpoint reads the newest entry within 20 blocks back and writes one where it sits (from 512 tokens), so this shows
+// whether src/anthropic.js put them where the next request reads them.
+const claudeCache = new Map();
+function claudeUsage(b) {
+  const blocks = [...(b.tools || [])];
+  for (const s of typeof b.system === 'string' ? [{ type: 'text', text: b.system }] : b.system || []) blocks.push(s);
+  for (const m of b.messages || []) for (const c of typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content || []) blocks.push({ ...c, role: m.role });
+  const now = Date.now();
+  let acc = String(b.model);
+  const at = blocks.map(({ cache_control: cc, ...x }) => { acc += JSON.stringify(x); return { h: hashOf(acc), t: Math.ceil((acc.length - String(b.model).length) / 4), cc }; });
+  const marks = at.map((x, i) => (x.cc ? i : -1)).filter((i) => i >= 0);
+  if (b.cache_control && at.length) marks.push(at.length - 1);
+  let read = 0;
+  for (const i of marks) {
+    for (let j = i; j >= Math.max(0, i - 19); j--) {
+      const exp = claudeCache.get(at[j].h);
+      if (exp && exp.until > now) { read = Math.max(read, at[j].t); claudeCache.set(at[j].h, { ...exp, until: now + exp.ttl }); break; }
+    }
+  }
+  let written = 0;
+  for (const i of marks) {
+    if (at[i].t < 512) continue;
+    const ttl = (at[i].cc || b.cache_control)?.ttl === '1h' ? 3_600_000 : 300_000;
+    if (!claudeCache.has(at[i].h) || claudeCache.get(at[i].h).until <= now) claudeCache.set(at[i].h, { until: now + ttl, ttl });
+    written = Math.max(written, at[i].t - read);
+  }
+  const total = at.at(-1)?.t || 0;
+  return { input_tokens: Math.max(0, total - read - written), cache_read_input_tokens: read, cache_creation_input_tokens: written };
+}
+function claudeStream(blocks, stop, usage = { input_tokens: 900 }) {
+  const out = [sseEvent('message_start', { message: { id: 'msg_fixture', type: 'message', role: 'assistant', model: 'claude-fixture', content: [], stop_reason: null, stop_sequence: null, usage: { ...usage, output_tokens: 1 } } })];
   blocks.forEach((b, index) => {
     if (b.type === 'thinking') {
       out.push(sseEvent('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } }));
@@ -60,10 +113,20 @@ function claudeStream(blocks, stop) {
   const enc = new TextEncoder();
   return new Response(new ReadableStream({ async pull(c) { if (!out.length) return c.close(); await new Promise((r) => setTimeout(r, 30)); c.enqueue(enc.encode(out.shift())); } }), { headers: { 'content-type': 'text/event-stream' } });
 }
+// The generic fixture's answer for a request with this system prompt (Build: an HTML app; Ideas: JSON cards; a thread
+// title; memory learning: no facts; anything else: the sample reply with Look up words).
+const fixtureAnswer = (system) => (/single-file web apps/.test(system) ? '```html\n<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Review counter</title></head><body style="font:18px system-ui;padding:32px;background:#f3eee3;color:#1b1a16"><h1>Review counter</h1><p>Local fixture. No provider was called.</p><button onclick="this.textContent=Number(this.textContent)+1" style="font:inherit;padding:12px 24px">0</button></body></html>\n```'
+    : /Return ONLY JSON/.test(system) ? JSON.stringify({ideas:Array.from({length:6},(_,i)=>({title:`Studio idea ${i+1}`,pitch:'A local fixture card for checking the layout and actions.',first_step:'Try expanding this idea.',tags:['Review','Fixture']}))})
+    : /<title>|thread title/i.test(system) ? '<title>Design review</title>' : /<facts>/.test(system) ? '<facts></facts>' : 'This is a **local test response**. No AI provider was called.\n\nNero\'s Golden House (Domus Aurea) sat on the Oppian Hill. Mercury is both a planet and a metal.\n\nLook-up test words: slow river, fail state, busy signal, zzz nothing, plain text.\n\n## A little room to create\n\n- Clear navigation across your studio\n- A comfortable reading width\n- Work saved on this device\n\n```javascript\nconst studio = "Atelier";\n```');
 const PLAN = 'Planning the answer: the files it needs, the edge cases, the tests, what to leave out… (local fixture thinking) ';
 async function claudeStandIn(request) {
   const b = await request.json();
-  console.log('anthropic messages', JSON.stringify({ model: b.model, max_tokens: b.max_tokens, effort: b.output_config?.effort ?? null, stream: b.stream ?? null }));
+  const usage = claudeUsage(b), stream = (blocks, stop) => claudeStream(blocks, stop, usage);
+  // where the breakpoints sit (s: the system prompt, m<i>: message i, auto: top-level) and what the simulated cache did
+  const marks = [...(Array.isArray(b.system) && b.system.some((x) => x.cache_control) ? [`s${b.system.at(-1).cache_control.ttl || '5m'}`] : []),
+    ...(b.messages || []).flatMap((m, i) => (Array.isArray(m.content) && m.content.some((x) => x?.cache_control) ? [`m${i}${m.content.find((x) => x?.cache_control).cache_control.ttl || '5m'}`] : [])),
+    ...(b.cache_control ? [`auto${b.cache_control.ttl || '5m'}`] : [])];
+  console.log('anthropic messages', JSON.stringify({ model: b.model, max_tokens: b.max_tokens, effort: b.output_config?.effort ?? null, stream: b.stream ?? null, cache: marks.join(' ') || 'none', read: usage.cache_read_input_tokens, written: usage.cache_creation_input_tokens, input: usage.input_tokens }));
   const which = (promptOf(b.messages).match(CLAUDE_TRIGGER)?.[1] || '').toLowerCase();
   const last = b.messages?.at(-1) || {};
   const nudged = /wrote no answer/.test(textOf(last.content));
@@ -71,24 +134,25 @@ async function claudeStandIn(request) {
   const agent = Array.isArray(b.tools) && b.tools.some((t) => t.name === 'gmail_search');
   const think = (t = PLAN) => ({ type: 'thinking', thinking: t });
   const answer = { type: 'text', text: 'Local fixture answer from Claude, after the nudge. No provider was called.\n\n```js\nconst ok = true;\n```' };
-  if (afterTool) return claudeStream([think('Reading the result. '), { type: 'text', text: 'You have 2 unread messages (local fixture — no Gmail was read).' }], 'end_turn');
+  if (afterTool) return stream([think('Reading the result. '), { type: 'text', text: 'You have 2 unread messages (local fixture — no Gmail was read).' }], 'end_turn');
   if (which === 'think only') {
-    if (!nudged) return claudeStream([think(PLAN.repeat(3))], 'max_tokens');
-    return agent ? claudeStream([think('Short pass. '), { type: 'tool_use', id: 'toolu_fixture_1', name: 'gmail_search', input: { q: 'is:unread newer_than:2d' } }], 'tool_use')
-      : claudeStream([think('Short pass. '), answer], 'end_turn');
+    if (!nudged) return stream([think(PLAN.repeat(3))], 'max_tokens');
+    return agent ? stream([think('Short pass. '), { type: 'tool_use', id: 'toolu_fixture_1', name: 'gmail_search', input: { q: 'is:unread newer_than:2d' } }], 'tool_use')
+      : stream([think('Short pass. '), answer], 'end_turn');
   }
-  if (which === 'think forever') return claudeStream([think(PLAN.repeat(3))], 'max_tokens');
-  if (which === 'cut off') return claudeStream([think(), { type: 'text', text: 'Here is the first part of a long answer: step one, step two, and then step thr' }], 'max_tokens');
-  if (which === 'refuse') return claudeStream([], 'refusal');
-  if (which === 'refuse late') return claudeStream([think(), { type: 'text', text: 'Here is how it starts' }], 'refusal');
-  if (which === 'long thread') return claudeStream([think()], 'model_context_window_exceeded');
+  if (which === 'think forever') return stream([think(PLAN.repeat(3))], 'max_tokens');
+  if (which === 'cut off') return stream([think(), { type: 'text', text: 'Here is the first part of a long answer: step one, step two, and then step thr' }], 'max_tokens');
+  if (which === 'refuse') return stream([], 'refusal');
+  if (which === 'refuse late') return stream([think(), { type: 'text', text: 'Here is how it starts' }], 'refusal');
+  if (which === 'long thread') return stream([think()], 'model_context_window_exceeded');
   if (which === 'pause') {
-    if (last.role === 'assistant') return claudeStream([{ type: 'text', text: 'and here is the rest, after the paused search resumed. Completed answer (local fixture).' }], 'end_turn');
-    return claudeStream([think('Searching first. '), { type: 'server_tool_use', id: 'srvtoolu_fixture', name: 'web_search', input: { query: 'local fixture news' } },
+    if (last.role === 'assistant') return stream([{ type: 'text', text: 'and here is the rest, after the paused search resumed. Completed answer (local fixture).' }], 'end_turn');
+    return stream([think('Searching first. '), { type: 'server_tool_use', id: 'srvtoolu_fixture', name: 'web_search', input: { query: 'local fixture news' } },
       { type: 'web_search_tool_result', tool_use_id: 'srvtoolu_fixture', content: [{ type: 'web_search_result', url: 'https://example.com/fixture', title: 'Fixture', encrypted_content: 'x', page_age: null }] },
       { type: 'text', text: 'Found a source (paused here), ' }], 'pause_turn');
   }
-  return claudeStream([{ type: 'text', text: 'Local fixture answer from Claude.' }], 'end_turn');
+  if (!which && !agent) return stream([{ type: 'text', text: fixtureAnswer(textOf(b.system)) }], 'end_turn'); // the generic fixture's answer, through Claude
+  return stream([{ type: 'text', text: 'Local fixture answer from Claude.' }], 'end_turn');
 }
 if (Boolean(process.env.REVIEW_PROVIDERS) || process.argv.includes('--providers')) {
   const passFetch = globalThis.fetch;
@@ -405,8 +469,11 @@ createServer(async (req, res) => {
       const parts = []; for await (const p of req) parts.push(p);
       const body = JSON.parse(Buffer.concat(parts).toString());
       console.log('chat', JSON.stringify({ model: body.model, max_tokens: body.max_tokens, reasoning_effort: body.reasoning_effort ?? null, tools: Array.isArray(body.tools) ? body.tools.length : 0 }));
-      // --providers: a Claude request with a stop-reason trigger goes through the real Worker adapter (claudeStandIn above).
-      if (allProviders && String(body.model || '').startsWith('anthropic:') && CLAUDE_TRIGGER.test(promptOf(body.messages))) {
+      // --providers: a Claude request goes through the real Worker adapter (claudeStandIn above, which also simulates
+      // Claude's prompt cache from the breakpoints the adapter places): one with a stop-reason trigger, and one with no
+      // tools and none of the generic triggers below (those keep the OpenAI-style path, as does the accounts agent).
+      const noTools = !(Array.isArray(body.tools) && body.tools.length);
+      if (allProviders && String(body.model || '').startsWith('anthropic:') && (CLAUDE_TRIGGER.test(promptOf(body.messages)) || (noTools && !GENERIC_TRIGGER.test(JSON.stringify(body.messages ?? ''))))) {
         const { claudeChat } = await import('../src/anthropic.js');
         return writeResponse(res, await claudeChat(body, 'review-fixture-key'));
       }
@@ -427,9 +494,7 @@ createServer(async (req, res) => {
       }
       const system = body.messages?.find(m => m.role === 'system')?.content || '';
       const slow = /slow stream/i.test(JSON.stringify(body.messages?.at(-1) ?? ''));
-      const answer = /single-file web apps/.test(system) ? '```html\n<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Review counter</title></head><body style="font:18px system-ui;padding:32px;background:#f3eee3;color:#1b1a16"><h1>Review counter</h1><p>Local fixture. No provider was called.</p><button onclick="this.textContent=Number(this.textContent)+1" style="font:inherit;padding:12px 24px">0</button></body></html>\n```'
-        : /Return ONLY JSON/.test(system) ? JSON.stringify({ideas:Array.from({length:6},(_,i)=>({title:`Studio idea ${i+1}`,pitch:'A local fixture card for checking the layout and actions.',first_step:'Try expanding this idea.',tags:['Review','Fixture']}))})
-        : /<title>|thread title/i.test(system) ? '<title>Design review</title>' : /<facts>/.test(system) ? '<facts></facts>' : 'This is a **local test response**. No AI provider was called.\n\nNero\'s Golden House (Domus Aurea) sat on the Oppian Hill. Mercury is both a planet and a metal.\n\nLook-up test words: slow river, fail state, busy signal, zzz nothing, plain text.\n\n## A little room to create\n\n- Clear navigation across your studio\n- A comfortable reading width\n- Work saved on this device\n\n```javascript\nconst studio = "Atelier";\n```';
+      const answer = fixtureAnswer(system);
       res.setHeader('Content-Type', 'text/event-stream');
       // Thinking-model failures: "think only" reasons with no answer until the app asks again (its nudge is the last turn);
       // "think forever" never answers; "no credit" fails like DeepSeek's mid-stream Insufficient Balance.
@@ -446,6 +511,8 @@ createServer(async (req, res) => {
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: word } }] })}\n\n`);
         await new Promise(r => setTimeout(r, slow ? 250 : 40));
       }
+      // --providers: the usage an OpenAI-style provider reports last (stream_options.include_usage), cached tokens included
+      if (allProviders) res.write(`data: ${JSON.stringify({ choices: [], usage: openaiUsage(body.model, body.messages, answer) })}\n\n`);
       return res.end('data: [DONE]\n\n');
     }
     res.statusCode = 503; return res.end('{"error":"This integration is not available in the local review fixture."}');

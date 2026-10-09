@@ -44,11 +44,14 @@ test('chat: the shared body is shaped for Grok — effort per model, max_complet
     chat_template_kwargs: { enable_thinking: true }, tools, tool_choice: 'auto',
     messages: [{ role: 'system', content: 's' }, { role: 'assistant', content: 'a', reasoning_content: 'r', anthropic_content: [{ type: 'text', text: 'x' }] }, { role: 'user', content: 'q' }],
   };
-  await owner('chat', post(body));
+  await owner('chat', post({ ...body, cache: false, cache_key: 'at-0123456789abcdef' }));
+  // stream_options: the usage (cached prompt tokens included) for the owner's cache readout; prompt_cache_key: the app's
+  // per-thread key, which xAI sends on as x-grok-conv-id (sticky routing to the server holding the cached prefix)
   assert.deepEqual(sent(), {
     model: 'grok-4.7', stream: true, temperature: 0.6, max_completion_tokens: 4096, reasoning_effort: 'medium',
     tools: [tools[0]], tool_choice: 'auto',
     messages: [{ role: 'system', content: 's' }, { role: 'assistant', content: 'a' }, { role: 'user', content: 'q' }],
+    stream_options: { include_usage: true }, prompt_cache_key: 'at-0123456789abcdef',
   });
   // reasoning effort per model: Grok 4.7 low…xhigh (max → xhigh), a helper call (thinking off) → low; Grok 4.3 takes
   // none for a helper call and defaults to low; Grok Build gets no effort field (its page lists no levels)

@@ -189,7 +189,7 @@ test('owner config: dollars in, micro-dollars out, validated before it is sent',
 test('tester mode never reaches owner surfaces from the client: app.js gates them and index.html marks them', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
-  assert.match(app, /const agentTools = \(\) => \(S\.tester \? \[\]/);
+  assert.match(app, /const agentTools = \(browser = liveBrowser\(\)\) => \(S\.tester \? \[\]/);
   assert.match(app, /const browserAvailable = \(\) => !S\.tester &&/);
   assert.match(app, /function canvaOn\(\) \{ return !S\.tester &&/);
   assert.match(app, /if \(!S\.settings\.passcode \|\| S\.tester \|\| !server\.nvidia\) return;/, 'loadTools is owner-only');

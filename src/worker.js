@@ -188,6 +188,10 @@ function shapeChatBody(provider, body) {
     }
   }
   delete b.web_search; // Claude-only (server-side web search tool)
+  // The app's cache hints (public/app.js streamChatRaw, runAgent): cache false and cache_tail only steer Claude's
+  // breakpoints (src/anthropic.js); cache_key becomes prompt_cache_key where a provider takes one (handleChat), never a
+  // field of its own.
+  delete b.cache; delete b.cache_key; delete b.cache_tail;
   // Claude-only replay data never goes to other providers.
   b.messages = b.messages.map(({ anthropic_content, ...m }) => m);
   if (provider !== 'nvidia') {
@@ -240,10 +244,18 @@ async function handleChat(req, env) {
   if (provider === 'anthropic') return claudeChat(body, key, env.ANTHROPIC_WORKSPACE_ID);
 
   const up = CHAT_UPSTREAM[provider];
+  const shaped = shapeChatBody(provider, body);
+  // Every one of these caches a repeated prompt prefix on its own (OpenAI, Gemini's implicit caching, DeepSeek's context
+  // cache, Z.ai, xAI, Meta). A stream reports usage — cached prompt tokens included — only when asked: the app's cache
+  // readout (public/usage.js). NVIDIA's free NIM models are left as they were.
+  if (shaped.stream === true && provider !== 'nvidia') shaped.stream_options = { include_usage: true };
+  // OpenAI and xAI route requests that share a prompt_cache_key to the server holding their cached prefix (xAI sends it
+  // on as x-grok-conv-id): the app's opaque per-thread key.
+  if ((provider === 'openai' || provider === 'xai') && typeof body.cache_key === 'string' && /^[\w-]{1,64}$/.test(body.cache_key)) shaped.prompt_cache_key = body.cache_key;
   return forward(up.url, {
     method: 'POST',
     headers: { ...up.auth(key), 'content-type': 'application/json', accept: req.headers.get('accept') || 'application/json' },
-    body: JSON.stringify(shapeChatBody(provider, body)),
+    body: JSON.stringify(shaped),
   });
 }
 

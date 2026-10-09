@@ -16,10 +16,11 @@
 //     chatActual uses the tier the reported prompt actually fell in (`base` holds the lower tier and its threshold).
 //     Claude Haiku 5.5 is the one Anthropic model with a tier: $0.10/$0.50 up to 100K prompt tokens (input + cache
 //     reads + cache writes), $0.50/$2.50 above.
-//   - Fresh input is reserved at max(input, cacheWrite). src/anthropic.js sends top-level cache_control (a 5-minute
-//     write, 1.25x input), and OpenAI GPT-6 Chat Completions write the cache by default (1.25x input).
-//     cacheWrite here is Anthropic's 5-MINUTE rate, the only TTL the code uses. If 1-hour caching is ever enabled,
-//     the worst case must switch to cacheWrite1h.
+//   - Fresh input is reserved at max(input, cacheWrite). src/anthropic.js marks a tester's request with 5-minute
+//     breakpoints only (system, last history message, the turn, and automatic caching on tool rounds: 1.25x input), and
+//     OpenAI GPT-6 Chat Completions write the cache by default (1.25x input). cacheWrite here is Anthropic's 5-MINUTE
+//     rate: the owner's requests use the 1-hour cache, a tester's never do. If a tester's ever did, the worst case must
+//     switch to cacheWrite1h. Settling reads the 5-minute / 1-hour split from usage.cache_creation either way.
 //   - Gemini 3.8 Flash: the published 2027-01-01 price (2x the current promo) is the standing price.
 //     chatActual uses the promo price for requests dated through 2026-12-31 (UTC).
 //   - DeepSeek: peak-hour prices always (off-peak is half).
@@ -169,9 +170,10 @@ const TABLE = {
     fallbacks: ['anthropic:claude-opus-5', 'anthropic:claude-opus-4-8'],
     note: 'Cache reads 0.05x. Thinking is always on and bills as output inside max_tokens.',
   }),
-  'anthropic:claude-sonnet-5-5': anthropic(2, 10, 2.5, 4, 0.2, {
+  // Cache hits $0.10 (0.05x input, pricing page footnote 2, read 2026-10-08; was $0.20 here, which over-settled reads).
+  'anthropic:claude-sonnet-5-5': anthropic(2, 10, 2.5, 4, 0.1, {
     fallbacks: ['anthropic:claude-sonnet-5'],
-    note: 'Default fallback retries cyber and frontier_llm declines on Claude Sonnet 5.',
+    note: 'Cache reads 0.05x. Default fallback retries cyber and frontier_llm declines on Claude Sonnet 5.',
   }),
   // Haiku 5.5: two rate cards by prompt length (claude-api skill, models.md / model-migration.md cached 2026-10-06):
   // $0.10 / $0.50 up to 100K prompt tokens, $0.50 / $2.50 above; cache reads 0.1x input, 5-minute writes 1.25x, 1-hour

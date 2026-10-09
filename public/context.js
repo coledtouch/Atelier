@@ -1,10 +1,20 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=86';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=87';
 
 export const CHAT_KINDS = ['ask', 'code'];
-export const HISTORY_TURNS = 10; // earlier turns replayed (chat answers and notes alike)
+// Earlier turns replayed (chat answers and notes alike): every one while a thread has fewer than HISTORY_TURNS +
+// HISTORY_BLOCK of them, then always at least the last HISTORY_TURNS (as before) and at most HISTORY_TURNS +
+// HISTORY_BLOCK - 1. The oldest leave HISTORY_BLOCK at a time (historyDrop), so the replay starts at the same turn for
+// HISTORY_BLOCK requests in a row and every provider's prompt cache (an exact-prefix match) keeps hitting; dropping one
+// turn a request changed the front of the history every time.
+export const HISTORY_TURNS = 10;
+export const HISTORY_BLOCK = 5;
+// A tester's window: the same blocks, never more than v86's 10 turns (6 to 10). The tester router reserves every replayed
+// token at the cache-write rate with no credit for cache reads (a 5-minute entry may be gone by the next turn), so 11-14
+// turns would trip the per-call cap on the bigger models (src/tester/prices.js maxTokensWithin) and switch model.
+export const TESTER_HISTORY = Object.freeze({ min: 6, block: HISTORY_BLOCK });
 export const VIDEO_CHAIN_TURNS = 10; // a video stays in view for this many chat turns after it was attached
 export const IMAGE_FOLLOW_TURNS = 3; // photos attached to one of the last 3 chat turns are shown again to a follow-up
 export const CTX_IMAGES = 6; // frames / photos a follow-up carries to the agent, web or vision path (testers: ≤ MAX_IMAGES)
@@ -65,13 +75,111 @@ export function outputNote(x, label = (id) => id) {
   return null;
 }
 
+// How many of n earlier turns the replay leaves out: none up to HISTORY_TURNS + HISTORY_BLOCK - 1, then whole blocks of
+// HISTORY_BLOCK (n = 15…19 drop 5, 20…24 drop 10, …), so between min and min + block - 1 turns stay.
+export function historyDrop(n, { min = HISTORY_TURNS, block = HISTORY_BLOCK } = {}) {
+  const most = min + Math.max(1, block) - 1;
+  return n > most ? Math.ceil((n - most) / Math.max(1, block)) * Math.max(1, block) : 0;
+}
+
+// ── a chat turn's send time ──
+// The system prompt holds only today's date (app.js dateLine): a clock to the minute at the front of every request
+// changed the whole cached prefix each minute. Each Ask / Code turn keeps the time it was sent (e.sent, set by app.js
+// run() as text, in the sender's locale), and its user message starts with it — when it is sent and every time it is
+// replayed, the same bytes — so the model knows "now" from the latest turn. Entries without one (older ones, notes,
+// imported Claude turns) replay as they always did.
+const SENT_MAX = 64;
+export const sentText = (d = new Date()) => d.toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+// '[Sent Thu, Oct 8, 2026, 2:32 PM]' for an entry with a send time, else ''. Synced and restored entries are only
+// shape-checked, so the text is flattened (no brackets or line breaks) and capped before it goes into a prompt.
+export function sentTag(x) {
+  const s = typeof x?.sent === 'string' ? x.sent.replace(/[[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, SENT_MAX).trim() : '';
+  return s ? `[Sent ${s}]` : '';
+}
+// A user turn's content with x's send time in front: a first line for text, a first text part for content parts.
+export function withSent(content, x) {
+  const tag = sentTag(x);
+  if (!tag) return content;
+  if (typeof content === 'string') return `${tag}\n${content}`;
+  return Array.isArray(content) ? [{ type: 'text', text: tag }, ...content] : content;
+}
+
+// ── which remembered facts a system prompt carries ──
+// persona() (app.js) lists the user's memory in the system prompt, the front of every request. A fact memory learning
+// picked up after a turn (src 'chat': it runs once each answer is in) would change that front on the very next request
+// and miss every provider's cache, so a request leaves out the learned facts newer than its memoryAnchor:
+//   - the start of its run of the thread (runStart): back from this turn while the turns before it each started less
+//     than SESSION_GAP after the one before (by then every cache this thread wrote has expired anyway, the 1-hour Claude
+//     cache included). A fact learned mid-run from this thread is in the replayed history;
+//   - and, once the replay has dropped turns (buildHistory trims whole blocks), the send time of the second turn it still
+//     replays: a fact learned from a turn that left the window is then back in the system prompt (it would otherwise be in
+//     neither). The anchor only moves at a block step, where the history's front changes anyway. (Not the first replayed
+//     turn: learning from the last dropped one may finish just after it was sent. A fact from the first replayed turn may
+//     then be in both, which costs nothing.)
+// Facts the user added or imported themselves (any other src) are never held back: an explicit edit applies at once.
+export const SESSION_GAP = 60 * 60_000;
+// prior: the entries before e in its thread, oldest first. → when e's run of the thread began (ms).
+export function runStart(prior, e, now = Date.now()) {
+  let at = Number.isFinite(e?.createdAt) && e.createdAt <= now && now - e.createdAt < SESSION_GAP ? e.createdAt : now; // a retried old turn: now
+  for (let i = (prior || []).length - 1; i >= 0; i--) {
+    const t = prior[i]?.createdAt;
+    if (!Number.isFinite(t) || at - t >= SESSION_GAP) break;
+    at = Math.min(at, t);
+  }
+  return at;
+}
+// → the time (ms) a learned fact must not be newer than. win: the history window the request replays (buildHistory's
+// kinds / min / block; app.js historyWindow).
+export function memoryAnchor(prior, e, now = Date.now(), { kinds = CHAT_KINDS, min = HISTORY_TURNS, block = HISTORY_BLOCK } = {}) {
+  const at = runStart(prior, e, now);
+  const { turns } = historyTurns(prior, kinds);
+  const drop = historyDrop(turns.length, { min, block });
+  const second = drop ? turns[drop + 1]?.createdAt : undefined;
+  return Number.isFinite(second) && second > at ? second : at;
+}
+// The facts a system prompt with this anchor lists: every one the user gave (src 'you', an import), the learned ones
+// up to the anchor (an older fact without a time counts as old). No anchor: all of them.
+export const factsFor = (memory, anchor) => (Number.isFinite(anchor) ? (memory || []).filter((m) => !(m?.src === 'chat' && m?.at > anchor)) : memory || []);
+
+// ── a fact the system prompt states that can flip between requests, held for a run ──
+// Whether the user's computer's browser is reachable right now (app.js: the relay status, polled before each turn, drops
+// on a relay error, a sleeping computer, a network blip) would change the front of the next request each time it
+// flipped — and the accounts agent's tool list, which goes first. Held per run of a thread (runStart), it moves only
+// off → on (the browser came up: worth one miss for the tools it brings); once on in a run it stays stated and its tools
+// stay offered until the run ends, and a call that then finds the computer offline gets the relay's own error back.
+// memo: thread id → { run, v } (this tab's memory, the last RUN_MEMO threads; a reload starts again).
+const RUN_MEMO = 50;
+export function heldForRun(memo, id, run, live) {
+  const was = memo.get(id);
+  const v = was && was.run === run && was.v ? was.v : live;
+  memo.delete(id); memo.set(id, { run, v });
+  while (memo.size > RUN_MEMO) memo.delete(memo.keys().next().value);
+  return v;
+}
+
 // The chat history before a turn: kinds (Ask/Code) replay as real turns — their prompt plus an attachment note, or the
-// content parts media(x) returns for x (a replayed video) — and every other mode's output as a note pair, so a model
-// switched in mid-thread still knows what happened. The last `max` turns of either sort; no binary data except what
-// media(x) adds. Kimi gets its own reasoning back (reasoning_content). A turn whose answer was declined partway
-// (x.refused, app.js: finish 'content_filter') is left out like a failed one: the docs say to discard a partial answer
-// a refusal cut off, not treat it as complete, and a refusal before any text is already an error.
-export function buildHistory(prior, { kinds = CHAT_KINDS, media, label, max = HISTORY_TURNS } = {}) {
+// content parts media(x) returns for x (a replayed video), behind the turn's send time (withSent) — and every other
+// mode's output as a note pair, so a model switched in mid-thread still knows what happened. Turns of either sort in
+// blocks (historyDrop); no binary data except what media(x) adds. Kimi gets its own reasoning back (reasoning_content).
+// A turn whose answer was declined partway (x.refused, app.js: finish 'content_filter') is left out like a failed one:
+// the docs say to discard a partial answer a refusal cut off, not treat it as complete, and a refusal before any text is
+// already an error.
+export function buildHistory(prior, { kinds = CHAT_KINDS, media, label, min = HISTORY_TURNS, block = HISTORY_BLOCK } = {}) {
+  const { notes, turns } = historyTurns(prior, kinds, label);
+  const msgs = [];
+  for (const x of turns.slice(historyDrop(turns.length, { min, block }))) {
+    const n = notes.get(x);
+    if (n) { msgs.push({ role: 'user', content: n.user }, { role: 'assistant', content: n.assistant }); continue; }
+    const att = attachNote(x);
+    msgs.push({ role: 'user', content: withSent(media?.(x) || (att ? `${x.prompt}\n\n${att}` : x.prompt), x) });
+    const m = { role: 'assistant', content: stripThink(x.text).slice(0, ANSWER_MAX) };
+    if (x.think && /kimi/i.test(x.meta?.model || '')) m.reasoning_content = x.think.slice(0, THINK_MAX);
+    msgs.push(m);
+  }
+  return msgs;
+}
+// The turns buildHistory can replay, oldest first, before the window: answered chat turns, and other modes' work as notes.
+function historyTurns(prior, kinds = CHAT_KINDS, label) {
   const notes = new Map(), turns = [];
   for (const x of prior || []) {
     if (!x || x.error || x.refused) continue;
@@ -79,17 +187,7 @@ export function buildHistory(prior, { kinds = CHAT_KINDS, media, label, max = HI
     const n = outputNote(x, label);
     if (n) { notes.set(x, n); turns.push(x); }
   }
-  const msgs = [];
-  for (const x of turns.slice(-max)) {
-    const n = notes.get(x);
-    if (n) { msgs.push({ role: 'user', content: n.user }, { role: 'assistant', content: n.assistant }); continue; }
-    const att = attachNote(x);
-    msgs.push({ role: 'user', content: media?.(x) || (att ? `${x.prompt}\n\n${att}` : x.prompt) });
-    const m = { role: 'assistant', content: stripThink(x.text).slice(0, ANSWER_MAX) };
-    if (x.think && /kimi/i.test(x.meta?.model || '')) m.reasoning_content = x.think.slice(0, THINK_MAX);
-    msgs.push(m);
-  }
-  return msgs;
+  return { notes, turns };
 }
 
 // Which video a typed follow-up keeps in view: the last chat turn's own video, or the one it was itself following up on,

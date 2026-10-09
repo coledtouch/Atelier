@@ -287,9 +287,10 @@ test('every Gemini chat without a video_file part stays on the OpenAI-compatible
     assert.equal(c.headers.get('authorization'), `Bearer ${KEY}`);
     assert.equal(c.headers.get('x-goog-api-key'), null);
     assert.equal(c.headers.get('accept'), 'text/event-stream');
-    // shapeChatBody for gemini: prefix stripped; web_search, chat_template_kwargs, top_p and replay fields removed
+    // shapeChatBody for gemini: prefix stripped; web_search, chat_template_kwargs, top_p and replay fields removed; the
+    // stream asks for its usage (the owner's cache readout reads Gemini's cached tokens there)
     const { web_search, chat_template_kwargs, top_p, ...rest } = body;
-    const expected = { ...rest, model: 'gemini-3.8-flash', messages: body.messages.map(({ reasoning_content, anthropic_content, ...m }) => m) };
+    const expected = { ...rest, model: 'gemini-3.8-flash', messages: body.messages.map(({ reasoning_content, anthropic_content, ...m }) => m), stream_options: { include_usage: true } };
     assert.deepEqual(JSON.parse(c.body), expected);
   }
 });

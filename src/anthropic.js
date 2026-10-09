@@ -96,6 +96,94 @@ export const CLAUDE_MAX_OUTPUT = Object.freeze({ 'claude-opus-5-5': 128_000, 'cl
 export const CLAUDE_UNLISTED_MAX = 64_000;
 export const claudeMaxOutput = (model) => (Object.hasOwn(CLAUDE_MAX_OUTPUT, model) ? CLAUDE_MAX_OUTPUT[model] : CLAUDE_UNLISTED_MAX);
 
+// ── prompt caching (claude-api skill, shared/prompt-caching.md; platform.claude.com prompt-caching and pricing, read
+// 2026-10-08) ──
+// A request renders tools → system → messages, and a cache read needs that exact prefix up to a breakpoint (at most 4
+// per request; each looks back at most 20 blocks for an entry an earlier request wrote). public/app.js keeps the prefix
+// still from turn to turn: the date (not the time) in the system prompt, each turn's send time in its own message, the
+// memory fixed for the run, the history trimmed in blocks. Here the breakpoints go on:
+//   1. the system prompt — caches tools + system, shared by every thread with the same tools, settings and date
+//   2. the last message before the turn — the history a request shares with the one before even when the turn itself
+//      goes back differently: a retry (a new send time), a follow-up whose earlier photos went to a text-only model as a
+//      note (its replay is the plain prompt). (Photos or frames in a request — added or removed anywhere — invalidate
+//      the messages cache by the docs' table, so that turn and the next read the tools + system entry only.)
+//   3. the turn's own user message — what the next turn reads when it replays as sent, and what every later round of
+//      the same answer (the agent's tool rounds, a paused turn's continuation) builds on
+//   4. top-level automatic caching, only when messages go on past the turn (tool rounds, a continuation): it lands on
+//      the last cacheable block, so the next round reads this one. Never with 3 on the last block (a second marker there
+//      with another TTL is a 400).
+// TTL. The owner's 1-3 use the 1-hour cache: a follow-up often starts 5-60 minutes after the request before it started
+// (reading time, a long Code answer generating for minutes), when a 5-minute entry is gone and the whole thread is
+// written again at 1.25x; a 1-hour write costs 2x on the new tokens only, and reads cost 0.05x input on Opus 5.5 and
+// Sonnet 5.5 (0.025x Fable 5.1, 0.1x Haiku 5.5). 4 is 5-minute by default: a paused turn's continuation follows at once,
+// and an agent round follows the one before as soon as its tools have run — unless a step waits for the user's OK. An
+// approval longer than 5 minutes (counted from the start of the round before) loses that round's tail, and the next round
+// writes every round since the turn again (it still reads the turn's 1-hour entry). So the app sends cache_tail '1h' on a
+// run whose reads all wait for the OK (public/app.js runAgent: outside text in the thread or the turn, a web search or an
+// outside page / chat read earlier in the run), and 4 is then 1-hour too (after 1-hour markers, so a longer TTL still
+// never follows a shorter one). A clean run's writes wait as well, but most of its rounds don't: those keep the cheaper
+// 5 minutes and accept that miss. Testers: every marker 5-minute, the write rate src/tester/prices.js reserves at.
+// No marker where it can't pay: on a prefix shorter than the model's minimum (the API caches nothing there) or on a call
+// whose prompt is never sent again (body.cache === false, public/app.js streamChatRaw: titles, memory, prompt polish,
+// routing, Build, Ideas, Remix plans, a nudge at a changed effort — a write there would never be read).
+// Minimum cacheable prompt per model (prompt-caching docs, read 2026-10-08); an id not listed: 1,024.
+const CACHE_MIN = Object.freeze({
+  'claude-fable-5-1': 512, 'claude-mythos-5-1': 512, 'claude-opus-5-5': 512, 'claude-sonnet-5-5': 512, 'claude-haiku-5-5': 512,
+  'claude-opus-5': 512, 'claude-fable-5': 512, 'claude-mythos-5': 512,
+  'claude-opus-4-8': 1024, 'claude-sonnet-5': 1024, 'claude-sonnet-4-6': 1024, 'claude-sonnet-4-5': 1024,
+  'claude-opus-4-7': 2048, 'claude-opus-4-6': 4096, 'claude-opus-4-5': 4096, 'claude-haiku-4-5': 4096,
+});
+export const cacheMin = (model) => (Object.hasOwn(CACHE_MIN, model) ? CACHE_MIN[model] : 1024);
+// A generous token estimate (3 characters a token, an image 1,600): guessing high only ever marks a prefix the API then
+// leaves uncached (no write is billed); guessing low would skip one it would have cached.
+const IMAGE_TOKENS = 1600;
+function tokensOf(v) {
+  if (typeof v === 'string') return Math.ceil(v.length / 3);
+  if (Array.isArray(v)) return v.reduce((n, x) => n + tokensOf(x), 0);
+  if (!v || typeof v !== 'object') return 0;
+  if (v.type === 'image' || v.type === 'document') return IMAGE_TOKENS;
+  return Math.ceil(JSON.stringify(v).length / 3);
+}
+const CACHEABLE = new Set(['text', 'image', 'document', 'tool_use', 'tool_result']);
+const isToolResults = (m) => Array.isArray(m.content) && m.content.length > 0 && m.content.every((b) => b?.type === 'tool_result');
+// m with cache_control on its last block that can carry one, as a new message (the body's own objects stay as they were);
+// null when it has none. A replayed Claude turn that holds thinking (signed blocks) is left alone: the marker is never
+// needed there (the history replays answers as text), and that turn goes back exactly as Claude wrote it.
+const SIGNED = new Set(['thinking', 'redacted_thinking']);
+function marked(m, cc) {
+  if (typeof m.content === 'string') return /\S/.test(m.content) ? { ...m, content: [{ type: 'text', text: m.content, cache_control: cc }] } : null;
+  if (!Array.isArray(m.content) || (m.role === 'assistant' && m.content.some((b) => SIGNED.has(b?.type)))) return null;
+  for (let i = m.content.length - 1; i >= 0; i--) {
+    const b = m.content[i];
+    if (CACHEABLE.has(b?.type) && !(b.type === 'text' && !/\S/.test(b.text || ''))) return { ...m, content: m.content.map((x, k) => (k === i ? { ...x, cache_control: cc } : x)) };
+  }
+  return null;
+}
+// Places breakpoints 1-3 on params (system becomes a block list when it is marked). → whether caching is on for it.
+function placeCache(params, { tester, off }) {
+  if (off) return false;
+  const min = cacheMin(params.model), cc = tester ? { type: 'ephemeral' } : { type: 'ephemeral', ttl: '1h' };
+  let size = tokensOf(params.tools || []) + tokensOf(params.system || '');
+  if (params.system && size >= min) params.system = [{ type: 'text', text: params.system, cache_control: cc }];
+  const msgs = params.messages, turn = msgs.findLastIndex((m) => m.role === 'user' && !isToolResults(m));
+  const upTo = msgs.map((m) => (size += tokensOf(m.content)));
+  for (const i of [turn - 1, turn]) {
+    if (i < 0 || upTo[i] < min) continue;
+    const m = marked(msgs[i], cc);
+    if (m) msgs[i] = m;
+  }
+  return true;
+}
+// Breakpoint 4 for params as they are now: automatic caching with cc (null: caching is off) when messages go on past the
+// turn and the whole prompt can be cached; otherwise none.
+function withTail(params, cc) {
+  const { cache_control, ...rest } = params;
+  if (!cc) return rest;
+  const msgs = rest.messages, turn = msgs.findLastIndex((m) => m.role === 'user' && !isToolResults(m));
+  const size = tokensOf(rest.tools || []) + tokensOf(rest.system || '') + tokensOf(msgs.map((m) => m.content));
+  return turn < msgs.length - 1 && size >= cacheMin(rest.model) ? { ...rest, cache_control: cc } : rest;
+}
+
 // tester (LinkedIn testers only): {maxTokens, webUses, fallbacks} as the tester router priced them.
 function buildParams(body, tester = null) {
   const model = body.model.replace(/^anthropic:/, '');
@@ -122,13 +210,17 @@ function buildParams(body, tester = null) {
   // Live web search for time-sensitive questions (Anthropic-hosted server tool). Testers: the max_uses that was priced.
   const uses = tester ? tester.webUses || 0 : 5;
   if (body.web_search && uses > 0) params.tools = [...(params.tools || []), { type: 'web_search_20260209', name: 'web_search', max_uses: uses }];
-  // Cache the stable prefix (system prompt + earlier turns) so follow-ups start faster and cost less.
-  params.cache_control = { type: 'ephemeral' };
+  // Cache the stable prefix (tools + system, the history, the turn) so follow-ups start faster and cost less (placeCache).
+  // A refusal fallback (fallbacks 'default') re-runs this same body on the fallback model, markers included, and caches
+  // in that model's own cache.
+  // cached: breakpoint 4's cache_control for this body and its continuations; null with caching off.
+  const cached = !placeCache(params, { tester, off: body.cache === false }) ? null
+    : body.cache_tail === '1h' && !tester ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
   if (FALLBACK_MODELS.has(model) && (!tester || tester.fallbacks !== false)) {
     params.betas = ['server-side-fallback-2026-07-01'];
     params.fallbacks = 'default';
   }
-  return params;
+  return { params: withTail(params, cached), cached };
 }
 
 const isWebTool = (t) => typeof t.type === 'string' && t.type.startsWith('web_search');
@@ -181,8 +273,14 @@ export async function claudeChat(body, apiKey, workspaceId, tester = null) {
     maxRetries: 1,
     ...(workspaceId ? { defaultHeaders: { 'anthropic-workspace-id': workspaceId } } : {}),
   });
-  let params = buildParams(body, tester);
+  let { params, cached } = buildParams(body, tester);
   const rounds = tester ? 1 : 1 + PAUSE_CONTINUATIONS, usage = [];
+  // What the app's cache readout gets (public/usage.js readUsage): every round's tokens, added up.
+  const usageOut = () => {
+    const sum = { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 };
+    for (const u of usage) for (const k of Object.keys(sum)) { const n = Number(u?.[k]); if (Number.isFinite(n) && n > 0) sum[k] += n; }
+    return sum;
+  };
   let reported = false, partial = null; // partial: this round's usage so far, until its finalMessage
   const report = (list, complete = true) => { if (reported || !tester?.onUsage) return undefined; reported = true; return Promise.resolve().then(() => tester.onUsage(list, complete)).catch(() => {}); };
   const soFar = () => (partial ? [...usage, partial] : usage.length ? [...usage] : null);
@@ -229,6 +327,7 @@ export async function claudeChat(body, apiKey, workspaceId, tester = null) {
       // The turn's end, by stop_reason (STOPS). turn: each round's content as it goes back (more than one when a pause
       // was continued).
       const end = (stop, turn) => {
+        send({ usage: usageOut() }); // no choices: the app reads it beside the deltas (streamChatRaw)
         const how = Object.hasOwn(STOPS, stop ?? '') ? STOPS[stop] : STOPS.end_turn;
         if (how.error && !visible) return send({ error: { message: how.error, code: how.code } });
         if (how.note) delta({ content: `\n\n_${how.note}_` });
@@ -253,7 +352,9 @@ export async function claudeChat(body, apiKey, workspaceId, tester = null) {
           turn.push(final.content);
           const back = turnAfterFallback(turn);
           if (final.stop_reason === 'pause_turn' && round < rounds - 1) {
-            params = { ...params, messages: [...base, ...back.map((content) => ({ role: 'assistant', content }))] };
+            // The continuation keeps breakpoints 1-3 (they are in base) and gets the automatic one on the paused content,
+            // so it reads the turn's cached prefix and the search results the server cached after them.
+            params = withTail({ ...params, messages: [...base, ...back.map((content) => ({ role: 'assistant', content }))] }, cached);
             continue;
           }
           end(final.stop_reason, back);

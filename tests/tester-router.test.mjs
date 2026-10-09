@@ -377,6 +377,25 @@ test('chat (Claude web search): a context too big for Opus runs on Sonnet 5.5 an
   assert.equal(upstream.calls.length, 1);
 });
 
+test('chat (Claude caching): a tester’s request gets 5-minute breakpoints only (the rate its reservation is priced at); a helper call none', async () => {
+  const { call } = await tester();
+  mockFetch([[ANTHROPIC, () => claudeStream()]]);
+  const system = 'You are Atelier, the user’s personal AI. '.repeat(100);
+  const messages = [{ role: 'system', content: system }, { role: 'user', content: 'q' }, { role: 'assistant', content: 'a' }, { role: 'user', content: 'next' }];
+  let r = await call('chat', post({ model: 'anthropic:claude-sonnet-5-5', messages }));
+  assert.equal(r.status, 200);
+  await r.text();
+  let sent = upstream.calls.at(-1).json;
+  assert.deepEqual(sent.system, [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]);
+  assert.deepEqual(sent.messages.slice(1).map((m) => m.content.at(-1).cache_control), [{ type: 'ephemeral' }, { type: 'ephemeral' }]);
+  assert.ok(!JSON.stringify(sent).includes('"ttl"'), 'never the 1-hour cache (src/tester/prices.js reserves at the 5-minute write rate)');
+  r = await call('chat', post({ model: 'anthropic:claude-sonnet-5-5', messages, cache: false }));
+  await r.text();
+  sent = upstream.calls.at(-1).json;
+  assert.equal(sent.system, system);
+  assert.ok(!JSON.stringify(sent).includes('cache_control'), 'a helper call writes no cache');
+});
+
 test('budget refusals: 402 tester_budget with scope, resetsAt and the allowance header; paused → 503 tester_paused', async () => {
   const { L, call } = await tester({ config: { day_limit: 1_000 } });
   mockFetch([]);
@@ -1201,7 +1220,8 @@ test('owner calls never touch the tester meter and keep their old shapes (web se
   const raw = { model: 'gpt-6-luna', messages: [{ role: 'user', content: 'hi' }], stream: true, max_tokens: 50_000 };
   r = await owner('chat', post({ ...raw, model: 'openai:gpt-6-luna' }));
   await r.text();
-  assert.deepEqual(upstream.calls.at(-1).json, { model: 'gpt-6-luna', messages: [{ role: 'user', content: 'hi' }], stream: true, max_completion_tokens: 50_000 }, 'no stream_options added');
+  // the owner's stream asks for its usage (the cache readout), and nothing meters it
+  assert.deepEqual(upstream.calls.at(-1).json, { model: 'gpt-6-luna', messages: [{ role: 'user', content: 'hi' }], stream: true, max_completion_tokens: 50_000, stream_options: { include_usage: true } }, 'usage asked for, no tester fields');
   r = await owner('x/openai/images/generations', post({ model: 'gpt-image-2.5-flare', prompt: 'x', n: 9, quality: 'max' }));
   assert.equal(r.status, 200);
   assert.equal((await new Response(upstream.calls.at(-1).body).json()).n, 9, 'the owner body passes through raw');

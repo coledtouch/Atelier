@@ -245,7 +245,7 @@ test('the tools are read-only, run in the browser, and the agent only gets them 
     assert.equal(t.function.parameters.additionalProperties, false);
   }
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(app, /const agentTools = \(\) => \(S\.tester \? \[\] : \[[^\n]*\.\.\.\(claudeChats \? ClaudeImport\.CLAUDE_TOOLS : \[\]\)\]\);/, 'testers never get the agent');
+  assert.match(app, /const agentTools = \(browser = liveBrowser\(\)\) => \(S\.tester \? \[\] : \[[^\n]*\.\.\.\(claudeChats \? ClaudeImport\.CLAUDE_TOOLS : \[\]\)\]\);/, 'testers never get the agent');
   assert.match(app, /step\.service === 'claude' && ClaudeImport\.TOOL_NAMES\.has\(step\.name\) \? await runClaudeTool/, 'run here, never sent to /api/tools/run');
   assert.match(app, /async function runClaudeTool\(name, args\) \{\r?\n  if \(S\.tester\) return/);
   assert.match(app, /\$\{claudeChats \? `\r?\nTheir Claude history:/, 'the system prompt mentions them only when there are some');

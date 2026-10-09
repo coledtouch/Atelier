@@ -301,7 +301,7 @@ test('an Atelier Assist question to the accounts agent may also search the web (
   const src = fnSource('runAgent');
   assert.match(src, /const web = e\.via === 'assist' && providerReady\('anthropic'\) && feat\('web'\) && !readBefore && !taint;/, 'never after an account read, nor with untrusted text in the thread');
   assert.match(src, /const offerWeb = web && !accountRead;/);
-  assert.match(src, /extra: \(m\) => \{ const w = offerWeb && providerOf\(m\) === 'anthropic'; if \(w\) webOffered = true; return \{ tools, \.\.\.\(w \? \{ web_search: true \} : \{\}\) \}; \}/);
+  assert.match(src, /extra: \(m\) => \{ const w = offerWeb && providerOf\(m\) === 'anthropic'; if \(w\) webOffered = true; return \{ tools, \.\.\.\(w \? \{ web_search: true \} : \{\}\),/); // then the cache hint (tests/prompt-cache.test.mjs)
   assert.match(src, /if \(searches\) \{ searched \+= searches; setNote\(\); \}/);
   assert.match(src, /searched \? 'live web' : ''/);
   // What it reads in the accounts never goes into a search (a page or an email could ask for that).
