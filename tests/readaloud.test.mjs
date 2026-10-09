@@ -40,9 +40,9 @@ test('the client voice list and brief version match src/tts.js', () => {
 
 test('normalizeReadAloud keeps a known voice and one of the speed steps', () => {
   assert.deepEqual(normalizeReadAloud(undefined), { ...DEFAULT_READ_ALOUD });
-  assert.deepEqual(normalizeReadAloud({ voice: 'sulafat', speed: 1.25 }), { voice: 'sulafat', speed: 1.25 });
-  assert.deepEqual(normalizeReadAloud({ voice: 'marin', speed: 3 }), { voice: 'atelier', speed: 1 }, 'provider voice names are not ids');
-  assert.deepEqual(normalizeReadAloud({ voice: 'device', speed: '0.9' }), { voice: 'device', speed: 0.9 });
+  assert.deepEqual(normalizeReadAloud({ voice: 'sulafat', speed: 1.25 }), { voice: 'sulafat', speed: 1.25, auto: true });
+  assert.deepEqual(normalizeReadAloud({ voice: 'marin', speed: 3 }), { voice: 'atelier', speed: 1, auto: true }, 'provider voice names are not ids');
+  assert.deepEqual(normalizeReadAloud({ voice: 'device', speed: '0.9' }), { voice: 'device', speed: 0.9, auto: true });
   assert.deepEqual(SPEEDS, [0.9, 1, 1.1, 1.25]);
   assert.deepEqual(voiceChoices(null).map((v) => v.id), VOICES.map((v) => v.id));
   assert.deepEqual(voiceChoices(['sulafat']).map((v) => v.id), ['sulafat', 'device']);
@@ -56,7 +56,7 @@ test('saved OpenAI voices (cedar, sage, retired in v80) migrate to the Atelier v
   for (const [old, now] of Object.entries(RETIRED_VOICES)) {
     assert.ok(VOICES.some((v) => v.id === now), `${old} → ${now}, a voice that exists`);
     assert.ok(!VOICES.some((v) => v.id === old), `${old} is no longer offered`);
-    assert.deepEqual(normalizeReadAloud({ voice: old, speed: 1.1 }), { voice: 'atelier', speed: 1.1 }, old);
+    assert.deepEqual(normalizeReadAloud({ voice: old, speed: 1.1 }), { voice: 'atelier', speed: 1.1, auto: true }, old);
     assert.equal(validateTts({ voice: old, text: 'Hi.' }).voiceId, now, 'the server reads an old client id the same way');
   }
   // anything else unknown still falls back to the default

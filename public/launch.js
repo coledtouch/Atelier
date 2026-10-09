@@ -181,6 +181,9 @@ export function readLaunch(search = '', hash = '') {
     share: shareOf(q.get('share')),
     source: q.get('source') ?? '',
     via: q.get('via') ?? '', // 'assist' from Atelier Assist (android/): only a label, and only with this browser's own key (planLaunch)
+    // How the words were put in, from the fragment only: 'voice' (said) or 'typed'; '' when the link doesn't say. Like
+    // via, it counts only with this browser's own key (planLaunch prefill.spoken).
+    input: ['voice', 'typed'].includes(h.get('in')) ? h.get('in') : '',
     review: false,
     replay: false,
     any: s.length > 1 || hs.length > 1,
@@ -298,7 +301,7 @@ export function peekPendingLaunch(store, now) {
   const text = cap(cleanText(str(p.text)));
   return {
     voice: p.voice === true, mode: LAUNCH_MODES.includes(p.mode) ? p.mode : null, text, from: text ? (p.from === 'share' ? 'share' : 'link') : null,
-    send: false, key: '', share: shareOf(p.share), source: '', via: '', review: p.review === true && Boolean(text), replay: true, any: false,
+    send: false, key: '', share: shareOf(p.share), source: '', via: '', input: '', review: p.review === true && Boolean(text), replay: true, any: false,
   };
 }
 export function takePendingLaunch(store, now) {
@@ -364,12 +367,16 @@ export function planLaunch(intent, ctx = {}) {
   const key = { present: Boolean(intent.key), valid, confirmed: valid && keys.confirmed === keys.mine, limited: rateLimited(keys.lastAutoAt, c.now) };
   // via=assist is a label anyone can write: it counts (the note, the entry's label) only with this browser's own key.
   const assisted = valid && intent.via === 'assist';
+  // Words said out loud (the turn is marked spoken and its answer is read aloud, readaloud.js spokenFrom): a keyed Atelier
+  // Assist launch unless it says it was typed (#in=typed; Assist 2.0.0 doesn't say, and it listens first), or another
+  // keyed link that says it was said (#in=voice: an iPhone Shortcut that dictates). Never a share or an unkeyed link.
+  const spoken = !valid || intent.from === 'share' ? '' : assisted ? (intent.input === 'typed' ? '' : 'assist') : intent.input === 'voice' ? 'shortcut' : '';
   const share = intent.share ? (SHARE_STATUS.includes(intent.share) ? { status: intent.share } : SHARE_ID.test(intent.share) ? { id: intent.share } : null) : null;
   const plan = {
     mode: intent.mode || null,
     // own: the text came with this browser's own key (the owner's paired Atelier Assist or keyed Shortcut), so it counts as
     // the owner's own words (owner decision 2026-10-02): it may use the accounts agent. A share or an unkeyed link never does.
-    prefill: text ? { text, from: intent.from === 'share' ? 'share' : 'link', label: intent.from === 'share' ? NOTES.shared : assisted ? NOTES.assist : NOTES.link, own: valid && intent.from !== 'share' } : null,
+    prefill: text ? { text, from: intent.from === 'share' ? 'share' : 'link', label: intent.from === 'share' ? NOTES.shared : assisted ? NOTES.assist : NOTES.link, own: valid && intent.from !== 'share', ...(spoken && { spoken }) } : null,
     share, send: 'none', sendWhy: '', voice: null, voiceWhy: null, autoSend: false, stash: false, replay, clean: Boolean(intent.any), key,
     via: assisted ? 'assist' : '',
     // Key-free copy for stashLaunch: a requested send survives only as "review" (pulse Send), never as a send.
@@ -523,6 +530,8 @@ const KEYED_HOLD = ['mode', 'share', 'draft', 'offline', 'busy', 'dialog', 'hidd
 //   armSend() / armMic({ why, autoSend: false })  the pulsing ring (dictate.js: a one-shot "Tap to talk")
 //   micHint(kind)    'blocked' → the platform's mic settings path (dictate.js has its own MIC_HELP copy)
 //   holdThenSend({ ms, mode, via })  visible, cancellable hold, then submit() in that mode (via 'assist': labelled)
+//   markSpoken(text, from)  a keyed prefill whose words were said (plan.prefill.spoken: 'assist' | 'shortcut'): sending
+//                      them marks the turn spoken, and its answer is read aloud (readaloud.js spokenFrom)
 //   confirmLinkSend({ via, mode })  → Promise<boolean>  the first-use dialog (Allow → true; Atelier Assist's own wording;
 //     it names the mode this send goes to, and Video's length and price)
 //   startVoice({ autoSend, auto: true }) → boolean | Promise<boolean>  the dictation starter (public/dictate.js via app.js);
@@ -544,6 +553,7 @@ export async function applyLaunch(plan, deps = {}) {
     // share, a restored link draft) keeps its mark, and the keyed words then share it.
     const alone = !cur.trim() || cur.trim() === String(p.text).trim();
     call('showSource', p.label, { own: Boolean(p.own) && alone });
+    if (p.spoken) call('markSpoken', p.text, p.spoken); // these words were said: a send of them is a spoken turn
     did.push(`prefill:${p.from}`);
   };
 

@@ -468,6 +468,21 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 .allowance.out { color: var(--ink-2); }
 .al-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c-ideas); }
 .al-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Read aloud: a pill above the composer while an answer is read (app.js paintReadChip): Stop reading; paused, Tap to
+   listen (the browser wanted a tap first) or Resume in the accent, with × beside it. 44 px tall for a thumb. */
+.read-chip { display: flex; align-items: center; justify-content: center; gap: 6px; width: fit-content; max-width: 100%; margin: 0 auto 8px; }
+.read-chip[hidden], .read-chip [hidden] { display: none; }
+.read-chip button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border: 1px solid var(--line-2); border-radius: 99px;
+  background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(10px); color: var(--ink); font: 500 13.5px/1 var(--sans); cursor: pointer; transition: background 0.2s, color 0.2s; }
+.read-chip-main { padding: 0 18px 0 14px; }
+.read-chip-main svg { width: 14px; height: 14px; }
+.read-chip-main:not(.listen) svg { fill: currentColor; stroke: none; }
+.read-chip-main.listen { background: var(--accent); border-color: transparent; color: var(--on-accent); font-weight: 600; }
+.read-chip-main.listen svg { fill: currentColor; }
+.read-chip-x { width: 44px; padding: 0; color: var(--ink-2); }
+.read-chip-x svg { width: 16px; height: 16px; }
+.read-chip button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (hover: hover) { .read-chip-main:not(.listen):hover, .read-chip-x:hover { background: var(--surface-2); color: var(--ink); } }
 
 .composer {
   position: relative; border-radius: 26px; overflow: hidden;
@@ -1088,6 +1103,11 @@ a.chip { text-decoration: none; display: inline-flex; align-items: center; }
 .ra-speed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
 .ra-sub { font: 500 10px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
 .ra-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ra-auto { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 4px 0 10px; cursor: pointer; }
+.ra-auto input { flex: none; width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); }
+.ra-auto > span { display: grid; gap: 2px; }
+.ra-auto-title { font-size: 13.5px; color: var(--ink); }
+.ra-auto .hint { margin: 0; font-size: 11.5px; }
 @media (pointer: coarse), (max-width: 640px) {
   .read-aloud .chip { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; padding-inline: 14px; }
   .actions .mini[data-act='speak-stop'] { min-width: 44px; min-height: 44px; }

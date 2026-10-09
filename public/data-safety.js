@@ -1,5 +1,6 @@
-import { validVideo } from './video.js?v=87';
-import { validRemix, recoverRemix } from './remix.js?v=87';
+import { validVideo } from './video.js?v=88';
+import { validRemix, recoverRemix } from './remix.js?v=88';
+import { SPOKEN_FROM } from './readaloud.js?v=88';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -66,6 +67,9 @@ export function validateBackup(data) {
       // A chat turn's send time (app.js run(), a short locale date): it goes in front of the turn's message (context.js
       // withSent, which also flattens and caps it), so nothing longer than a date is taken.
       if (e.sent != null) assert(text(e.sent) && e.sent.length <= 80);
+      // A spoken turn (readaloud.js spokenFrom): where its words came from. Only a label: what reads an answer aloud by
+      // itself is this device's own send (app.js autoArmed), never a mark that came in with a backup or another device.
+      if (e.spoken != null) assert(SPOKEN_FROM.includes(e.spoken));
     }
   }
   return data.threads;

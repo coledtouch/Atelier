@@ -389,10 +389,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=87" />
-  <link rel="stylesheet" href="/studio.css?v=87" />
-  <link rel="stylesheet" href="/feedback.css?v=87" />
-  <link rel="stylesheet" href="/remix.css?v=87" />
+  <link rel="stylesheet" href="/app.css?v=88" />
+  <link rel="stylesheet" href="/studio.css?v=88" />
+  <link rel="stylesheet" href="/feedback.css?v=88" />
+  <link rel="stylesheet" href="/remix.css?v=88" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -470,6 +470,11 @@
   <footer class="dock" id="dock">
     <div class="dock-inner">
       <p class="allowance tester-ui" id="allowance" hidden></p>
+      <!-- While an answer is read aloud: Stop reading; paused, Tap to listen (the browser wanted a tap first) or Resume, and × -->
+      <div class="read-chip" id="readChip" role="group" aria-label="Read aloud" hidden>
+        <button type="button" class="read-chip-main" id="readChipMain" data-act="stop"></button>
+        <button type="button" class="read-chip-x" id="readChipStop" aria-label="Stop reading" title="Stop reading" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
       <div class="composer" id="composer">
         <nav class="modes" id="modes" role="tablist" aria-label="Mode">
           <span class="mode-ink" id="modeInk" aria-hidden="true"></span>
@@ -795,6 +800,7 @@
               <button type="button" class="chip" data-speed="1.25" aria-pressed="false">1.25×</button>
             </div>
           </div>
+          <label class="ra-auto"><input type="checkbox" id="readAuto" checked /><span><span class="ra-auto-title">Read answers to spoken requests</span><span class="hint">Ask out loud (Atelier Assist, Talk or the mic) and the answer is read aloud when it’s ready. Stop reading, typing, the mic or a new prompt stops it.</span></span></label>
           <p class="hint" id="readCaption">AI-generated voice. To make the audio, answer text is sent to OpenAI (Google for Sulafat). Clips stay on this device until you clear it.</p>
         </section>
         <section class="field-group">
@@ -906,6 +912,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=87" type="module"></script>
+  <script src="/app.js?v=88" type="module"></script>
 </body>
 </html>

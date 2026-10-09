@@ -37,6 +37,8 @@ for (const v of vectors) {
   assert.equal(got.send, Boolean(text && v.key), `send ${label}`);
   assert.equal(got.via, 'assist', `via ${label}`);
   assert.equal(got.voice, false, `voice ${label}`);
+  // in=voice|typed: only on a keyed link with words (launch.js input; '' when the link doesn't say)
+  assert.equal(got.input, text && v.key && typeof v.spoken === 'boolean' ? (v.spoken ? 'voice' : 'typed') : '', `input ${label}`);
   n++;
 }
 console.log(`launch.js readLaunch agrees with LaunchLink.build on ${n} vectors (${file})`);

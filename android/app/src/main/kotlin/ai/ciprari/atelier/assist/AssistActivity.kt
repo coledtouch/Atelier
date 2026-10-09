@@ -108,6 +108,9 @@ class AssistActivity : ComponentActivity(), Listener.Events {
 
     private var phase = Phase.IDLE
     private var heard = ""
+    /** The last utterance's final words, and whether the card's text field was opened since: see [go] (`in=voice|typed`). */
+    private var said = ""
+    private var typedSince = false
     private var guess = ModeClassifier.classify("")
     private var chosen: Mode? = null
     private var failure: Listener.Failure? = null
@@ -329,6 +332,8 @@ class AssistActivity : ComponentActivity(), Listener.Events {
         hideKeyboard()
         showChooser(false)
         heard = ""
+        said = ""
+        typedSince = false
         guess = ModeClassifier.classify("")
         if (!listener.available()) return fail(Listener.Failure.UNAVAILABLE)
         if (!micGranted()) {
@@ -372,6 +377,7 @@ class AssistActivity : ComponentActivity(), Listener.Events {
     override fun onFinal(text: String) {
         if (phase != Phase.LISTENING && phase != Phase.THINKING) return
         heard = text
+        said = text
         guess = ModeClassifier.classify(text)
         tick()
         // Opens Atelier at once, like a phone assistant: the words were on the card while you spoke.
@@ -420,6 +426,7 @@ class AssistActivity : ComponentActivity(), Listener.Events {
         listener.cancel()
         cancelCountdown()
         showChooser(false)
+        typedSince = true
         setPhase(Phase.TYPING)
         input.setText(prefill)
         input.setSelection(input.length())
@@ -452,7 +459,10 @@ class AssistActivity : ComponentActivity(), Listener.Events {
         val prompt = if (mode == g.mode) g.prompt else ModeClassifier.spoken(text)
         val target = Atelier.target(this)
         val saved = prefs.getString(PREF_KEY, null)?.takeIf(LaunchLink::isKey)
-        val url = LaunchLink.build(mode, prompt, if (target.keyed) saved else null)
+        // in=voice: said (the card's text field never opened since), or edited there but sent exactly as heard. in=typed:
+        // typed, or changed on the card. Atelier reads the answer to a said request aloud.
+        val spoken = !typedSince || (said.isNotBlank() && text.trim() == said.trim())
+        val url = LaunchLink.build(mode, prompt, if (target.keyed) saved else null, spoken)
         guess = g
         hideKeyboard()
         setPhase(Phase.OPENING)

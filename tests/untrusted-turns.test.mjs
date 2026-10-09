@@ -168,8 +168,8 @@ test('the source note sets the mark; an edit keeps it until the box is empty; si
   assert.match(APP, /input\.addEventListener\('input', \(ev\) => \{\n  if \(ev\.isTrusted\) clearSource\(\);\n  if \(!input\.value\.trim\(\)\) \{ if \(composerFrom\) markWas = composerFrom; composerFrom = ''; \}/);
   assert.match(APP, /source: \(\) => srcKind \|\| composerFrom \}\)/, 'an edited link/share draft comes back marked');
   assert.match(fnSource('launchWiped'), /clearSource\(\); setMark\(''\);/);
-  assert.match(APP, /case 'edit-prompt': setMode\(e\.kind\); input\.value = e\.prompt; setMark\(e\.untrustedFiles \? '' : e\.untrusted\);/);
-  assert.match(APP, /input\.value = ''; setMark\(''\); autosize\(\);\n {6}return input\.focus\(\);/, 'edit-image empties the box');
+  assert.match(APP, /case 'edit-prompt': setMode\(e\.kind\); setComposer\(e\.prompt\); setMark\(e\.untrustedFiles \? '' : e\.untrusted\);/);
+  assert.match(APP, /setComposer\(''\); setMark\(''\); autosize\(\);\n {6}return input\.focus\(\);/, 'edit-image empties the box');
 });
 
 // ── runChat: a marked turn never reaches the agent; "live web" only after a real search ──
@@ -1033,8 +1033,8 @@ test('Edit prompt after a photo-only share gives back your typed words unmarked;
   await btn.vars.submit('Turn this into an interactive app:\n\nIt says…', 'build', { untrusted: 'share' });
   assert.deepEqual([btn.calls.run[0].untrusted, 'untrustedFiles' in btn.calls.run[0]], ['share', false]);
   // Edit prompt and Animate: the photos don't come back, so neither does their mark
-  assert.match(APP, /case 'edit-prompt': setMode\(e\.kind\); input\.value = e\.prompt; setMark\(e\.untrustedFiles \? '' : e\.untrusted\);/);
-  assert.match(APP, /input\.value = e\.enhanced \|\| e\.prompt; setMark\(e\.untrustedFiles \? '' : e\.untrusted\);/);
+  assert.match(APP, /case 'edit-prompt': setMode\(e\.kind\); setComposer\(e\.prompt\); setMark\(e\.untrustedFiles \? '' : e\.untrusted\);/);
+  assert.match(APP, /setComposer\(e\.enhanced \|\| e\.prompt\); setMark\(e\.untrustedFiles \? '' : e\.untrusted\);/);
   // the files-only turn itself still taints the thread like any share
   assert.equal(threadTaint([{ ...photo.calls.run[0], createdAt: CLEAN }]), 'share');
 });

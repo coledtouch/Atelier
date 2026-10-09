@@ -18,6 +18,9 @@ code is in `public/launch.js` (pure logic), `public/sw.js` (share intake), `src/
   - It sets the Worker's own security headers (HSTS, nosniff, Referrer-Policy and X-Frame-Options), because
     `public/_headers` never applies to it.
 - **iPhone Shortcut:** `/?start=ask#send=1&k=<key>&q=<dictation>`. The key and the words travel only in the fragment.
+  Adding `in=voice` before `q=` (a Shortcut that dictates) marks the request spoken, so its answer is read aloud.
+- **Atelier Assist:** `/?start=<mode>&via=assist#k=<key>&send=1&in=<voice|typed>&q=<words>`. A keyed Assist link is
+  spoken unless it says `in=typed` (Assist 2.0.0 sends no `in`, and it listens first).
 - **Legacy GET share:** `/?title=&text=&url=`.
 
 ## Trust rules
@@ -120,6 +123,12 @@ Every time limit below is checked when the data is read. None is a deletion time
 ## Talk, then send
 
 `dictatedSend` holds and then sends only while the page is visible and nothing is running. Otherwise it pulses Send.
+
+A request sent this way is spoken (`e.spoken`), and its answer is read aloud once its run ends (Settings → Read aloud →
+Read answers to spoken requests). The hold comes first: the turn only exists once the hold fires or Send is tapped, so
+nothing is read for a send that was held or cancelled. An answer that finishes while the mic is open waits for it to
+close (the mic would hear it), and is dropped if what the mic heard is sent. `in=voice|typed` and `via=assist` count
+only with this browser's own key: a stranger's link can't make Atelier talk.
 
 `armMic` never carries `autoSend`. An armed launch never sends by itself: that covers a tab, a replay, an open dialog,
 iOS, a blocked mic, and a start that failed.

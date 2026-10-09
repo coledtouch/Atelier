@@ -33,7 +33,8 @@ export const RETIRED_VOICES = Object.freeze({ cedar: 'atelier', sage: 'atelier' 
 // A saved or allowed voice id as it reads today: a retired id becomes its stand-in.
 const current = (id) => (typeof id === 'string' && Object.hasOwn(RETIRED_VOICES, id) ? RETIRED_VOICES[id] : id);
 export const SPEEDS = Object.freeze([0.9, 1, 1.1, 1.25]);
-export const DEFAULT_READ_ALOUD = Object.freeze({ voice: 'atelier', speed: 1 }); // settings.readAloud
+// settings.readAloud. auto: Settings → Read aloud → "Read answers to spoken requests" (on unless turned off).
+export const DEFAULT_READ_ALOUD = Object.freeze({ voice: 'atelier', speed: 1, auto: true });
 // first/target: segment sizes in spoken units (fast first audio, then paragraph-sized); owner/tester: the most one
 // answer reads, in characters. codespan: inline code up to this length is read; deviceLine: one utterance, in spoken
 // units (Chrome cuts long ones off near 15 s).
@@ -81,12 +82,13 @@ const MOSTLY_CODE_TINY = 80; // less prose than this (or none in whole sentences
 const SHORT_SENTENCE = 15; // "Yes." or "Dr.": not counted toward the first segment's two sentences
 
 /**
- * settings.readAloud → {voice, speed}: a known voice id (a retired one, 'cedar' or 'sage', becomes its stand-in,
- * RETIRED_VOICES; anything else unknown becomes 'atelier') and one of SPEEDS (else 1).
+ * settings.readAloud → {voice, speed, auto}: a known voice id (a retired one, 'cedar' or 'sage', becomes its stand-in,
+ * RETIRED_VOICES; anything else unknown becomes 'atelier'), one of SPEEDS (else 1), and auto (read answers to spoken
+ * requests by themselves): false only when saved as false.
  */
 export function normalizeReadAloud(v) {
   const o = v && typeof v === 'object' ? v : {}, speed = Number(o.speed), voice = current(o.voice);
-  return { voice: VOICE.has(voice) ? voice : DEFAULT_READ_ALOUD.voice, speed: SPEEDS.includes(speed) ? speed : DEFAULT_READ_ALOUD.speed };
+  return { voice: VOICE.has(voice) ? voice : DEFAULT_READ_ALOUD.voice, speed: SPEEDS.includes(speed) ? speed : DEFAULT_READ_ALOUD.speed, auto: o.auto !== false };
 }
 /** The Settings list: AI voices the account may use (allowed: ids, or null for all) plus the device voice. */
 export const voiceChoices = (allowed) => VOICES.filter((v) => v.provider === 'device' || !Array.isArray(allowed) || allowed.map(current).includes(v.id));
@@ -172,7 +174,7 @@ function inline(tokens, ctx) {
 }
 function table(t, ctx) {
   const cell = (c) => tidy(c?.tokens ? inline(c.tokens, ctx) : c?.text, ctx.lang), head = (t.header || []).map(cell), rows = t.rows || [];
-  if (head.length > 4 || rows.length > 6) { ctx.out.push(NOTES.table(rows.length)); return; }
+  if (ctx.tables === 'note' || head.length > 4 || rows.length > 6) { ctx.out.push(NOTES.table(rows.length)); return; }
   for (const r of rows) push(ctx, r.map((c, j) => { const v = cell(c); return v && head[j] ? `${head[j]}: ${v}` : v; }).filter(Boolean).join(', '), { end: true });
 }
 function walk(tokens, ctx) {
@@ -206,6 +208,9 @@ function plain(md, ctx) {
   md.split(/(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$))/).forEach((p, i) => {
     if (i % 2) return codeNote(ctx, p.length);
     for (const block of p.split(/\n\s*\n/)) {
+      // tables: 'note': a pipe table (a header, its |---| rule, rows) is said as one line, as the marked pass says it
+      const rows = block.split('\n').filter((l) => /^\s*\|/.test(l));
+      if (ctx.tables === 'note' && rows.length >= 2 && rows.some((l) => isRule(l))) { ctx.out.push(NOTES.table(rows.filter((l) => !isRule(l)).length - 1)); continue; }
       const lines = block.split('\n').filter((l) => !isRule(l)).map((l) => {
         const raw = l.replace(MARKER, '').replace(/^\s*\||\|\s*$/g, '').replace(/\s*\|\s*/g, ', ');
         ctx.code += (raw.match(/`[^`\n]{25,}`/g) || []).reduce((n, c) => n + c.length - 2, 0);
@@ -234,11 +239,11 @@ function capText(s, max) {
  * <domain>", headings and list items become sentences, small tables (≤ 4 columns × 6 rows) are read row by row and
  * larger ones summarized, math is left out (a formula alone is said once), struck-out text isn't read. An answer that
  * is almost all code, with no whole sentence of prose, becomes NOTES.mostlyCode. max caps the result (owner 24,000;
- * testers 8,000).
+ * testers 8,000). tables: 'read' (the above) or 'note': every table is one line (an answer read by itself, AUTO).
  */
-export function speakable(markdown, { lang = 'en', max = READ_LIMITS.owner } = {}) {
+export function speakable(markdown, { lang = 'en', max = READ_LIMITS.owner, tables = 'read' } = {}) {
   const md = String(markdown ?? '').slice(0, Number.isFinite(max) && max > 0 ? max * 4 : undefined);
-  const ctx = { lang, out: [], prose: 0, code: 0, sentences: 0, saidCode: false, saidMath: false };
+  const ctx = { lang, out: [], prose: 0, code: 0, sentences: 0, saidCode: false, saidMath: false, tables };
   let tokens = null;
   try { if (typeof globalThis.marked?.lexer === 'function') tokens = globalThis.marked.lexer(md); } catch { tokens = null; }
   tokens ? walk(tokens, ctx) : plain(md, ctx);
@@ -432,6 +437,95 @@ export function silentWav(samples = 800) {
   return url;
 }
 
+// ── spoken requests: which turns are marked spoken, and what their answer reads by itself ──
+/**
+ * Where a spoken turn's words came from (entry.spoken; data-safety checks it is one of these). In priority order: the
+ * first that brought any of the words names the turn. 'assist': Atelier Assist (android/), a keyed launch; 'shortcut': a
+ * keyed Shortcut link that says it was dictated (#in=voice); 'talk': the mic a launch opened or armed (?start=voice,
+ * "Tap to talk", "Start listening when I open Atelier"); 'dictation': the composer's mic.
+ */
+export const SPOKEN_FROM = Object.freeze(['assist', 'shortcut', 'talk', 'dictation']);
+/**
+ * A send counts as spoken when at least this share of its words came from voice: small fixes by keyboard (a name, a
+ * typo, "please", punctuation) keep it spoken, while a typed message with a few dictated words, or dictation that was
+ * deleted and typed over, doesn't.
+ */
+export const SPOKEN_SHARE = 0.6;
+const DENSE_CHAR = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}';
+// Words, lower-cased and without apostrophes ("What's" = "whats"); each Chinese or Japanese character counts as one.
+const WORD = new RegExp(`[${DENSE_CHAR}]|(?:(?![${DENSE_CHAR}])[\\p{L}\\p{N}])+`, 'gu');
+export const wordsOf = (s) => String(s ?? '').normalize('NFKC').toLowerCase().replace(/['’]/g, '').match(WORD) || [];
+/**
+ * The share (0…1) of `text`'s words that voice put in the composer: pieces [{text, from}] (or strings), counted as a
+ * multiset, so a word said once covers one use of it.
+ */
+export function spokenShare(text, pieces) {
+  const sent = wordsOf(text);
+  if (!sent.length) return 0;
+  const bag = new Map();
+  for (const p of Array.isArray(pieces) ? pieces : []) for (const w of wordsOf(typeof p === 'string' ? p : p?.text)) bag.set(w, (bag.get(w) || 0) + 1);
+  let hit = 0;
+  for (const w of sent) { const n = bag.get(w); if (n) { hit++; bag.set(w, n - 1); } }
+  return hit / sent.length;
+}
+/**
+ * pieces less the words of `removed`: text your own edit replaced or deleted (select all and type over it, a paste over
+ * a selection, a cut). One use of each word goes, from the latest piece back, so dictation typed over with similar
+ * wording ("how do I make a reservation…" → "how do I make a cake") no longer counts as said. Returns a new list.
+ */
+export function dropSpoken(pieces, removed) {
+  const gone = new Map();
+  for (const w of wordsOf(removed)) gone.set(w, (gone.get(w) || 0) + 1);
+  const list = Array.isArray(pieces) ? pieces : [];
+  if (!gone.size) return [...list];
+  const out = [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const p = list[i];
+    const kept = wordsOf(p?.text).filter((w) => { const n = gone.get(w); if (!n) return true; gone.set(w, n - 1); return false; });
+    if (kept.length) out.unshift({ ...p, text: kept.join(' ') });
+  }
+  return out;
+}
+/** The entry's spoken mark for sending `text` (a SPOKEN_FROM value), or '' when it isn't mostly the words voice put there. */
+export function spokenFrom(text, pieces) {
+  const list = (Array.isArray(pieces) ? pieces : []).filter((p) => p && SPOKEN_FROM.includes(p.from) && typeof p.text === 'string' && p.text.trim());
+  if (!list.length || spokenShare(text, list) < SPOKEN_SHARE) return '';
+  return SPOKEN_FROM.find((f) => list.some((p) => p.from === f));
+}
+/** What a spoken turn reads when it isn't the answer's own words (an image, a video, an app, a failure). */
+export const AUTO_LINES = Object.freeze({
+  failed: 'Sorry, that didn’t work. The details are on screen.',
+  image: (n) => (n > 1 ? `Here are your ${n} images.` : 'Here’s your image.'),
+  video: 'Here’s your video.',
+  plan: 'Your edit plan is ready to review.',
+  build: 'Your app is ready to try.',
+  ideas: (n) => (n === 1 ? 'Here’s one idea.' : `Here are ${n} ideas.`),
+});
+const THINK = /<think>[\s\S]*?(?:<\/think>|$)/gi;
+/**
+ * What a spoken turn's finished entry reads by itself: {text (Markdown for the reader), line (true: a short fixed line)},
+ * or null for nothing. text: the answer to read for Ask / Code (app.js passes stripThink of it, and only the accounts
+ * agent's final summary); entry.text otherwise.
+ * - An error is never read: a short line says it failed and that the details are on screen. Stop (yours) reads nothing.
+ * - Image, Video and Build read one short line ("Here’s your image."): enough to know it is done without reading a
+ *   prompt or a file aloud. Ideas read how many, then their titles.
+ */
+export function autoReadText(e, { text } = {}) {
+  if (!e || typeof e !== 'object') return null;
+  if (e.error) return e.errorKind === 'stopped' ? null : { text: AUTO_LINES.failed, line: true };
+  if (e.cut === 'stopped') return null;
+  const media = (type) => (Array.isArray(e.media) ? e.media.filter((m) => m?.type === type).length : 0);
+  if (e.kind === 'image') { const n = media('image'); return n ? { text: AUTO_LINES.image(n), line: true } : null; }
+  if (e.kind === 'video') return e.remix ? { text: AUTO_LINES.plan, line: true } : media('video') ? { text: AUTO_LINES.video, line: true } : null;
+  if (e.kind === 'build') return e.app ? { text: AUTO_LINES.build, line: true } : null;
+  if (e.kind === 'ideas') {
+    const titles = (Array.isArray(e.ideas) ? e.ideas : []).map((d) => String(d?.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 80)).filter(Boolean);
+    return titles.length ? { text: `${AUTO_LINES.ideas(titles.length)}\n\n${titles.slice(0, 8).map((t) => `- ${t}`).join('\n')}`, line: false } : null;
+  }
+  const body = String(text ?? e.text ?? '').replace(THINK, '').trim();
+  return body ? { text: body, line: false } : null;
+}
+
 // ── the player ──
 const failure = (code, status, extra) => Object.assign(new Error(code), { tts: true, code, status, ...extra });
 const tagOf = (t) => { try { return typeof t === 'string' && t ? Intl.getCanonicalLocales(t)[0] : null; } catch { return null; } };
@@ -458,10 +552,15 @@ const aborted = () => new DOMException('Aborted', 'AbortError');
  *   device voice without its own toast, or for a preview just stops), onSignedOut(err) when a tester's /api/tts answers
  *   401 (the session has ended: the app may sign them out, and if that stops the read the reader says nothing more),
  *   lang() → BCP 47.
+ * onState(id, state, {auto, blocked, finished}): auto, a read that started by itself (auto()); blocked, paused because
+ *   the browser wouldn't play without a tap (resume() inside a tap plays it); finished, idle because it was read to the
+ *   end (not stopped).
  * Test seams (default to the browser's): Audio, URL, speech, Utterance, caches, storage, mediaSession,
- *   MediaMetadata, online(), stallMs.
- * → {toggle(id, markdown, button?, {title, album, lang}?), stop(), pause(), resume(), stateFor(id), preview(voiceId),
- *    setSpeed(x), clearCache()}. toggle() and preview() must be called straight from the tap (no await before them).
+ *   MediaMetadata, online(), stallMs, deviceStartMs (an auto read's device voice that hasn't started by then is blocked).
+ * → {toggle(id, markdown, button?, {title, album, lang}?), auto(id, markdown, meta?) → boolean, unlock({speech}?), stop(),
+ *    pause(), resume(), stateFor(id), current() → {id, state, mode, auto, blocked} | null, preview(voiceId), setSpeed(x),
+ *    clearCache()}. toggle(), preview(), unlock() and a blocked read's resume() must be called straight from the tap (no
+ *    await before them).
  */
 export function createReader(opts = {}) {
   const g = globalThis, has = (k) => k in opts;
@@ -471,7 +570,7 @@ export function createReader(opts = {}) {
   const AudioCtor = opts.Audio || g.Audio, URLs = opts.URL || g.URL;
   const speech = has('speech') ? opts.speech : g.speechSynthesis, Utterance = opts.Utterance || g.SpeechSynthesisUtterance;
   const store = has('caches') ? opts.caches : g.caches, session = has('mediaSession') ? opts.mediaSession : g.navigator?.mediaSession;
-  const Meta = opts.MediaMetadata || g.MediaMetadata, stallMs = opts.stallMs ?? 1500;
+  const Meta = opts.MediaMetadata || g.MediaMetadata, stallMs = opts.stallMs ?? 1500, deviceStartMs = opts.deviceStartMs ?? 3000;
   const online = opts.online || (() => g.navigator?.onLine !== false);
   const langOf = opts.lang || (() => g.navigator?.language || g.document?.documentElement?.lang || 'en');
   let ls = null;
@@ -481,15 +580,18 @@ export function createReader(opts = {}) {
 
   let el = null, job = null, generation = 0, opened = null, spoke = false, toldPlan = false, toldPass = false, memoBytes = 0;
   const memo = new Map(), ctrls = new Set();
+  // The answers read by themselves (auto()), id → the Markdown read: Read aloud on the same answer afterwards says what
+  // it said (tables as one line), so it replays from the clips already fetched instead of paying for new ones.
+  const autoSaid = new Map();
   speech?.getVoices?.(); // Chrome loads its voice list on first ask
 
   // ── state ──
-  function set(j, state) {
-    if (j.state === state) return;
+  function set(j, state, again = false) {
+    if (j.state === state && !again) return;
     j.state = state;
     if (j.button?.dataset) j.button.dataset.read = state;
     if (session && !j.dead && !j.preview && j.mode !== 'device') { try { session.playbackState = state === 'playing' ? 'playing' : state === 'paused' ? 'paused' : 'none'; } catch {} }
-    try { onState?.(j.id, state); } catch (err) { console.error(err); }
+    try { onState?.(j.id, state, { auto: Boolean(j.auto), blocked: Boolean(j.blocked) && state === 'paused', finished: Boolean(j.finished) && state === 'idle' }); } catch (err) { console.error(err); }
   }
   function newJob(id, voice, segs, o = {}) {
     const ctrl = new AbortController();
@@ -497,13 +599,13 @@ export function createReader(opts = {}) {
     return job = { id, voice, segs, lang: o.lang || langOf(), speed: o.speed ?? 1, button: o.button || null, meta: o.meta || null, preview: Boolean(o.preview),
       mode: null, state: 'idle', recs: [], cur: -1, turn: 0, line: 0, lines: [], pending: 0, ctrl, gen: generation, dead: false };
   }
-  // Ends a read (stopped or finished). Clips already being fetched finish into the cache: a tester is then settled at
-  // the real cost rather than the full reservation, and a replay is instant. Nothing new is requested.
-  function end(j) {
+  // Ends a read (stopped, or finished: read to the end). Clips already being fetched finish into the cache: a tester is
+  // then settled at the real cost rather than the full reservation, and a replay is instant. Nothing new is requested.
+  function end(j, finished = false) {
     if (!j || j.dead) return;
-    j.dead = true;
+    j.dead = true; j.finished = finished;
     if (job === j) job = null;
-    clearTimeout(j.guard); j.token = null;
+    clearTimeout(j.guard); clearTimeout(j.startT); j.token = null;
     if (j.mode === 'device') { try { speech?.cancel(); } catch {} }
     quiet(j);
     if (!j.preview) clearSession();
@@ -535,7 +637,7 @@ export function createReader(opts = {}) {
       const j = job;
       if (!j || j.dead || j.mode === 'device') return;
       if (j.cur < 0 || j.waiting) return;
-      return j.cur + 1 < j.segs.length ? playSeg(j, j.cur + 1) : end(j);
+      return j.cur + 1 < j.segs.length ? playSeg(j, j.cur + 1) : end(j, true);
     });
     el.addEventListener('error', () => {
       const j = job;
@@ -550,7 +652,7 @@ export function createReader(opts = {}) {
     try { p = el.play(); } catch (err) { p = Promise.reject(err); }
     p?.catch?.((err) => {
       if (silent || j !== job || j.dead || err?.name !== 'NotAllowedError') return; // AbortError: the source changed
-      j.stalled = true; set(j, 'paused'); toast(SAY.resume);
+      blocked(j);
     });
   }
   // iOS 26 home-screen apps can resolve play() and stay silent: if time hasn't moved, set the source again once, then
@@ -561,8 +663,20 @@ export function createReader(opts = {}) {
     j.guard = setTimeout(() => {
       if (j !== job || j.dead || j.state !== 'playing' || j.cur !== i || j.waiting || el.ended || el.currentTime > t0 + 0.05) return;
       if (!j.retried) { j.retried = true; el.src = j.url; rate(j); play(j); return guard(j); }
-      j.stalled = true; el.pause(); set(j, 'paused'); toast(SAY.resume);
+      blocked(j);
     }, stallMs);
+  }
+  // The browser won't play without a tap (play() refused, a resolved play() that stays silent, the device voice's
+  // 'not-allowed', or an auto read's device voice that never starts): paused until a tap resumes it. A read you started
+  // says so in a toast; one that started by itself (auto) is the app's "Tap to listen" (onState detail.blocked).
+  function blocked(j) {
+    if (j !== job || j.dead) return;
+    clearTimeout(j.guard); clearTimeout(j.startT);
+    j.stalled = true; j.blocked = true;
+    if (j.mode === 'device') { j.token = null; try { speech?.cancel(); } catch {} }
+    else if (el && !el.paused) { try { el.pause(); } catch {} }
+    set(j, 'paused', true);
+    if (!j.auto) toast(SAY.resume);
   }
 
   // ── fetching clips: memory → Cache Storage → POST /api/tts ──
@@ -697,18 +811,21 @@ export function createReader(opts = {}) {
   }
   function say(j) {
     if (j !== job || j.dead || j.mode !== 'device' || j.state === 'paused') return;
-    if (j.line >= j.lines.length) return end(j);
+    if (j.line >= j.lines.length) return end(j, true);
     const u = new Utterance(j.lines[j.line]), token = j.token = {};
     u.lang = j.lang; u.rate = DEVICE_RATE * j.speed;
     if (j.voiceObj) u.voice = j.voiceObj;
-    u.onend = () => { if (j.token === token) { j.line++; say(j); } };
+    u.onstart = () => { if (j.token === token) { j.heard = true; clearTimeout(j.startT); } };
+    u.onend = () => { if (j.token === token) { j.heard = true; j.line++; say(j); } };
     u.onerror = (ev) => { // interrupted/canceled come only from our own cancel(), which clears the token first
       if (j.token !== token) return;
-      if (ev?.error === 'not-allowed') { j.token = null; set(j, 'paused'); return toast(SAY.resume); }
+      if (ev?.error === 'not-allowed') return blocked(j);
       j.line++; say(j);
     };
     speech.speak(u);
     if (j.state === 'preparing') set(j, 'playing');
+    // Started by itself: iOS may drop an utterance spoken without a tap, with no event at all. Not started in time = blocked.
+    if (j.auto && !j.heard) { clearTimeout(j.startT); j.startT = setTimeout(() => { if (j === job && !j.dead && j.token === token && !j.heard) blocked(j); }, deviceStartMs); }
   }
 
   // ── failures: say why gently, then let the device voice read the rest ──
@@ -777,7 +894,17 @@ export function createReader(opts = {}) {
   function resume() {
     const j = job;
     if (!j || j.dead || j.state !== 'paused') return;
-    if (j.mode === 'blob' && j.cur < 0) return set(j, 'preparing'); // the first clip plays as soon as it arrives
+    const was = j.blocked;
+    j.blocked = false;
+    if (j.mode === 'blob' && j.cur < 0) {
+      // Nothing has played yet: the first clip plays as soon as it arrives. Blocked before it (an auto read the browser
+      // wouldn't start): this tap unlocks the element, as a tap's toggle() does, and starts the first clip.
+      if (!was) return set(j, 'preparing');
+      j.stalled = false;
+      if (el) { el.src = silentWav(); play(j, true); }
+      set(j, 'preparing');
+      return playSeg(j, 0);
+    }
     set(j, 'playing');
     if (j.mode === 'device') return say(j);
     if (j.mode === 'blob' && j.waiting) return; // so does the next one
@@ -815,6 +942,16 @@ export function createReader(opts = {}) {
     set(j, 'preparing');
     playSeg(j, 0);
   }
+  // Markdown → {prefs, lang, segs} for a read. tables: speakable's ('note' for a read that started by itself).
+  function prepare(markdown, meta, tables = 'read') {
+    const prefs = normalizeReadAloud(getSettings?.()), max = isTester?.() ? READ_LIMITS.tester : READ_LIMITS.owner;
+    // The answer's own language (app.js may pass the thread's as meta.lang), else what its script and words say.
+    const hint = tagOf(meta?.lang), pref = hint || langOf();
+    let text = speakable(markdown, { lang: pref, max, tables });
+    const lang = hint || textLang(text, pref);
+    if (english(lang) !== english(pref)) text = speakable(markdown, { lang, max, tables });
+    return { prefs, lang, segs: segments(text, lang) };
+  }
   function toggle(id, markdown, button, meta) {
     const cur = job;
     if (cur && cur.id === id) {
@@ -823,13 +960,7 @@ export function createReader(opts = {}) {
       return stop(); // a tap while preparing cancels
     }
     stop();
-    const prefs = normalizeReadAloud(getSettings?.()), max = isTester?.() ? READ_LIMITS.tester : READ_LIMITS.owner;
-    // The answer's own language (app.js may pass the thread's as meta.lang), else what its script and words say.
-    const hint = tagOf(meta?.lang), pref = hint || langOf();
-    let text = speakable(markdown, { lang: pref, max });
-    const lang = hint || textLang(text, pref);
-    if (english(lang) !== english(pref)) text = speakable(markdown, { lang, max });
-    const segs = segments(text, lang);
+    const { prefs, lang, segs } = prepare(markdown, meta, autoSaid.get(id) === markdown ? 'note' : 'read');
     if (!segs.length) return toast(SAY.nothing);
     const pick = choose(prefs.voice);
     const j = newJob(id, pick.voice, segs, { lang, speed: prefs.speed, button, meta });
@@ -837,6 +968,54 @@ export function createReader(opts = {}) {
     startAi(j);
     bindSession(j);
     if (lsGet(NOTED) == null) { toast(SAY.first); lsSet(NOTED, '1'); } // listeners are told once that it's an AI voice
+  }
+  // An answer to a spoken request, read without a tap: the owner's voice and speed, tables said as one line. Never over
+  // another read (→ false; so is nothing to read, which says nothing). When the browser won't play without a tap the read
+  // waits paused with detail.blocked, its first clip fetched, and resume() from a tap plays it.
+  function auto(id, markdown, meta) {
+    if (job && !job.dead) return false;
+    const { prefs, lang, segs } = prepare(markdown, meta, 'note');
+    if (!segs.length) return false;
+    autoSaid.delete(id); autoSaid.set(id, markdown);
+    while (autoSaid.size > 16) autoSaid.delete(autoSaid.keys().next().value);
+    const pick = choose(prefs.voice);
+    const j = newJob(id, pick.voice, segs, { lang, speed: prefs.speed, meta });
+    j.auto = true;
+    if (pick.voice === 'device') { if (pick.note) toast(pick.note); device(j, 0); return true; }
+    const E = element();
+    Object.assign(j, { audio: true, mode: 'blob' });
+    rate(j);
+    set(j, 'preparing');
+    bindSession(j);
+    // Can this element play without a tap now? A silent clip asks first: a read that can't play yet fetches only its first
+    // clip (so the tap plays at once), not the two after it.
+    E.src = silentWav();
+    let p;
+    try { p = E.play(); } catch (err) { p = Promise.reject(err); }
+    Promise.resolve(p).then(() => true, (err) => err?.name !== 'NotAllowedError').then((ok) => {
+      if (j !== job || j.dead) return;
+      if (ok) return playSeg(j, 0);
+      load(j, 0); // ready for the tap
+      blocked(j);
+    });
+    if (lsGet(NOTED) == null) { toast(SAY.first); lsSet(NOTED, '1'); }
+    return true;
+  }
+  /**
+   * Inside a tap that may lead to a read starting by itself later (the mic, Send of a spoken request): WebKit lets an
+   * <audio> element play later only after it played inside a gesture, so the one element plays a silent clip now.
+   * speech: also speak one silent utterance (iOS's device voice has the same rule; not needed in Chrome, where any tap
+   * counts for the page). Never while a read is on: its own tap did this.
+   */
+  function unlock({ speech: sp = false } = {}) {
+    if (job && !job.dead) return false;
+    const E = element();
+    try { E.src = silentWav(); const p = E.play(); p?.catch?.(() => {}); } catch {}
+    if (sp && !spoke && speech && typeof Utterance === 'function') {
+      spoke = true;
+      try { const u = new Utterance(' '); u.volume = 0; speech.speak(u); } catch {}
+    }
+    return true;
   }
   function stop() { end(job); }
   function preview(voiceId) {
@@ -863,9 +1042,10 @@ export function createReader(opts = {}) {
     stop();
     generation++;
     for (const c of ctrls) c.abort();
-    ctrls.clear(); memo.clear(); memoBytes = 0; opened = null;
+    ctrls.clear(); memo.clear(); autoSaid.clear(); memoBytes = 0; opened = null;
     lsSet(IDX, null);
     try { await store?.delete(TTS_CACHE); } catch {}
   }
-  return { toggle, stop, pause, resume, stateFor: (id) => (job && job.id === id ? job.state : 'idle'), preview, setSpeed, clearCache };
+  const current = () => (job && !job.dead ? { id: job.id, state: job.state, mode: job.mode, auto: Boolean(job.auto), blocked: Boolean(job.blocked) && job.state === 'paused' } : null);
+  return { toggle, auto, unlock, stop, pause, resume, stateFor: (id) => (job && job.id === id ? job.state : 'idle'), current, preview, setSpeed, clearCache };
 }

@@ -5,8 +5,8 @@ package ai.ciprari.atelier.assist
  *
  * Launch link (public/launch.js readLaunch reads it):
  *
- *     https://atelier.ciprari.ai/?start=<mode>&via=assist#k=<key>&send=1&q=<prompt>     (paired)
- *     https://atelier.ciprari.ai/?start=<mode>&via=assist#q=<prompt>                     (not paired)
+ *     https://atelier.ciprari.ai/?start=<mode>&via=assist#k=<key>&send=1&in=<voice|typed>&q=<prompt>     (paired)
+ *     https://atelier.ciprari.ai/?start=<mode>&via=assist#q=<prompt>                                    (not paired)
  *
  * - `start` is one of launch.js LAUNCH_MODES (Mode.id). `via=assist` is a label only: anyone can write it.
  * - The key and `send=1` ride in the fragment, which never reaches the server, a Referer or Worker logs. Atelier sends
@@ -34,14 +34,22 @@ object LaunchLink {
 
     fun isKey(s: String?): Boolean = s != null && KEY.matches(s)
 
-    /** The launch URL for [mode] with [prompt]; keyed (sends without a tap) only with a well-formed [key]. */
-    fun build(mode: Mode, prompt: String, key: String?): String {
+    /**
+     * The launch URL for [mode] with [prompt]; keyed (sends without a tap) only with a well-formed [key]. [spoken] says how
+     * the words were put in: `in=voice` (said, sent as heard: Atelier reads the answer aloud) or `in=typed` (typed or edited
+     * on the card); null leaves it out (Atelier then counts a keyed Assist launch as said). Only a keyed link carries it,
+     * before `q=` (launch.js readLaunch input; a label anyone can write counts only with the key).
+     */
+    fun build(mode: Mode, prompt: String, key: String?, spoken: Boolean? = null): String {
         val q = clean(prompt)
         val sb = StringBuilder(ORIGIN.length + 64 + q.length * 3)
         sb.append(ORIGIN).append("/?start=").append(mode.id).append("&via=assist")
         if (q.isEmpty()) return sb.toString() // nothing to send: Atelier just opens in that mode
         sb.append('#')
-        if (isKey(key)) sb.append("k=").append(key).append("&send=1&")
+        if (isKey(key)) {
+            sb.append("k=").append(key).append("&send=1&")
+            if (spoken != null) sb.append("in=").append(if (spoken) "voice" else "typed").append('&')
+        }
         sb.append("q=").append(encode(q))
         return sb.toString()
     }

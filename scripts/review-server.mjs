@@ -272,6 +272,52 @@ async function reviewSync(req, res, url, account = 'owner') {
   const r = await handleSync(workerRequest(url.href, { method: req.method, headers, body, ...(body ? { duplex: 'half' } : {}) }), syncEnv, suffix);
   return writeResponse(res, r);
 }
+// /__review/mic's stand-ins (see there) as one inline script for index.html, or '' when none is on for this browser.
+const cookieOf = (req, k) => { const m = new RegExp('(?:^|;\\s*)' + k + '=([^;]*)').exec(req.headers.cookie || ''); try { return m ? decodeURIComponent(m[1]) : ''; } catch { return ''; } };
+function standIns(req) {
+  const say = cookieOf(req, 'review_mic'), standalone = cookieOf(req, 'review_standalone') === '1', play = cookieOf(req, 'review_autoplay'), shown = cookieOf(req, 'review_visible') === '1';
+  const out = [];
+  if (say) out.push(`(() => {
+  const WORDS = ${JSON.stringify(say).replace(/</g, '\\u003c')}.split(/\\s+/).filter(Boolean);
+  class FakeSpeech {
+    constructor() { this.lang = 'en-US'; this.interimResults = true; this.continuous = false; this.maxAlternatives = 1; this.t = []; this.on = false; }
+    start() {
+      if (FakeSpeech.busy) throw new DOMException('already started', 'InvalidStateError');
+      FakeSpeech.busy = this.on = true;
+      const at = (ms, f) => this.t.push(setTimeout(f, ms));
+      at(60, () => { this.onstart?.({}); this.onaudiostart?.({}); });
+      WORDS.forEach((_, i) => at(250 + i * 110, () => {
+        const r = [Object.assign([{ transcript: WORDS.slice(0, i + 1).join(' '), confidence: 0.9 }], { isFinal: i === WORDS.length - 1 })];
+        this.onresult?.({ resultIndex: 0, results: r });
+      }));
+      at(400 + WORDS.length * 110, () => this.end());
+      console.info('[review] fake mic: listening');
+    }
+    end() { if (!this.on) return; this.on = FakeSpeech.busy = false; this.t.forEach(clearTimeout); this.onend?.({}); }
+    stop() { setTimeout(() => this.end(), 40); }
+    abort() { this.end(); }
+  }
+  window.SpeechRecognition = window.webkitSpeechRecognition = FakeSpeech;
+  // the stand-in is the microphone: its permission reads as granted (a launch that may open the mic does)
+  const ask = navigator.permissions?.query?.bind(navigator.permissions);
+  if (ask) navigator.permissions.query = (d) => (d?.name === 'microphone' ? Promise.resolve(Object.assign(new EventTarget(), { name: 'microphone', state: 'granted' })) : ask(d));
+})();`);
+  if (standalone) out.push("Object.defineProperty(Navigator.prototype, 'standalone', { configurable: true, get: () => true });");
+  if (shown) out.push("Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: () => 'visible' }); Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => false });");
+  if (play === 'webkit' || play === 'block') out.push(`(() => {
+  const MODE = ${JSON.stringify(play)}, real = HTMLMediaElement.prototype.play, ok = new WeakSet();
+  window.__reviewAutoplay = { refused: 0, allowed: 0 };
+  HTMLMediaElement.prototype.play = function () {
+    const tap = navigator.userActivation?.isActive, page = navigator.userActivation?.hasBeenActive;
+    const allow = MODE === 'webkit' ? ok.has(this) || tap : page;
+    if (!allow) { window.__reviewAutoplay.refused++; console.info('[review] autoplay refused'); return Promise.reject(new DOMException('play() needs a tap (review stand-in)', 'NotAllowedError')); }
+    if (tap) ok.add(this);
+    window.__reviewAutoplay.allowed++;
+    return real.call(this);
+  };
+})();`);
+  return out.join('\n');
+}
 createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   res.setHeader('Cache-Control', 'no-store');
@@ -445,11 +491,16 @@ createServer(async (req, res) => {
       const png = (await readFile(resolve(root, 'icons/atelier-v2-512.png'))).toString('base64');
       return res.end(JSON.stringify(xImg[1] === 'gemini' ? { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: png } }] } }] } : { data: Array.from({ length: q?.n ?? 1 }, () => ({ b64_json: png })) }));
     }
-    // Read aloud stub: half a second of silence as WAV (the Gemini voices' format), any voice.
+    // Read aloud stub: silence as WAV (the Gemini voices' format), any voice, about as long as reading the text would take
+    // (55 ms a character, 0.5–6 s; a preview 2 s), so a read can be watched, paused and stopped. Each request prints one
+    // line (voice and length, never the text). REVIEW_TTS_MS=<ms> delays every answer (a slow first clip).
     if (url.pathname === '/api/tts' && req.method === 'POST') {
       const parts = []; for await (const p of req) parts.push(p);
       let b = {}; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
-      const data = 24_000, wav = Buffer.alloc(44 + data);
+      const secs = b.preview ? 2 : Math.min(6, Math.max(0.5, String(b.text || '').length * 0.055));
+      console.log('tts', JSON.stringify({ voice: b.voice ?? null, chars: String(b.text || '').length, preview: Boolean(b.preview), secs: Number(secs.toFixed(2)) }));
+      if (Number(process.env.REVIEW_TTS_MS) > 0) await new Promise((r) => setTimeout(r, Number(process.env.REVIEW_TTS_MS)));
+      const data = Math.round(secs * 24_000) * 2, wav = Buffer.alloc(44 + data);
       wav.write('RIFF', 0); wav.writeUInt32LE(36 + data, 4); wav.write('WAVE', 8); wav.write('fmt ', 12); wav.writeUInt32LE(16, 16);
       wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(24_000, 24); wav.writeUInt32LE(48_000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
       wav.write('data', 36); wav.writeUInt32LE(data, 40);
@@ -517,6 +568,28 @@ createServer(async (req, res) => {
     }
     res.statusCode = 503; return res.end('{"error":"This integration is not available in the local review fixture."}');
   }
+  // Spoken requests without a microphone (Read aloud for spoken requests): /__review/mic?say=<words> sets a cookie for this
+  // browser that puts a stand-in for Web Speech in the page (index.html, before app.js), so the mic "hears" those words:
+  // live words, then the final text, then the end, through dictate.js's real 'speech' engine. Other parameters:
+  //   visible=1        the page always reports itself visible (a browser pane that isn't on screen boots hidden, and a
+  //                    hidden launch only arms the mic)
+  //   standalone=1     the page reports itself as an installed app (navigator.standalone), so ?start=voice opens the mic
+  //                    by itself and sends after the hold, as the Android app does
+  //   autoplay=webkit  play() is refused unless a tap is happening, or this element already played in one (WebKit's rule);
+  //   autoplay=block   play() is refused until the page has been tapped at all (Chrome's rule for a page another app
+  //                    opened); off (the default) leaves the browser's own policy
+  //   next=/path       where to go afterwards (default /). say= empty turns the mic stand-in off.
+  if (url.pathname === '/__review/mic') {
+    const say = (url.searchParams.get('say') || '').slice(0, 400), next = url.searchParams.get('next') || '/';
+    const play = ['webkit', 'block'].includes(url.searchParams.get('autoplay')) ? url.searchParams.get('autoplay') : 'off';
+    const standalone = url.searchParams.get('standalone') === '1', shown = url.searchParams.get('visible') === '1';
+    const cookie = (k, v) => `${k}=${encodeURIComponent(v)}; Path=/; SameSite=Lax${v ? '' : '; Max-Age=0'}`;
+    res.statusCode = 303;
+    res.setHeader('Set-Cookie', [cookie('review_mic', say), cookie('review_standalone', standalone ? '1' : ''), cookie('review_visible', shown ? '1' : ''), cookie('review_autoplay', play === 'off' ? '' : play)]);
+    res.setHeader('Location', next.startsWith('/') && !next.startsWith('//') ? next : '/');
+    console.log(`review mic: ${say ? JSON.stringify(say) : 'off'}, standalone ${standalone}, visible ${shown}, autoplay ${play}`);
+    return res.end();
+  }
   if (url.pathname === '/__review/break') {
     const mode = BREAKS.includes(url.searchParams.get('mode')) ? url.searchParams.get('mode') : 'off';
     res.statusCode = 303; res.setHeader('Set-Cookie', `review_break=${mode}; Path=/; SameSite=Lax`); res.setHeader('Location', '/');
@@ -531,6 +604,8 @@ createServer(async (req, res) => {
     const file = resolve(root, '.' + decodeURIComponent(name));
     if (!file.startsWith(root + sep)) { res.statusCode = 403; return res.end(); }
     res.setHeader('Content-Type', mime[extname(file)] || 'application/octet-stream');
+    const stand = name === '/index.html' ? standIns(req) : '';
+    if (stand) return res.end((await readFile(file, 'utf8')).replace(/<head>/i, (h) => `${h}<script>${stand}</script>`));
     res.end(await readFile(file));
   } catch { res.statusCode = 404; res.end('Not found'); }
 }).listen((Number(process.env.REVIEW_PORT) || Number(process.argv.find((a) => a.startsWith('--port='))?.slice(7)) || 8791), '127.0.0.1', () => console.log(`Isolated review: http://127.0.0.1:${(Number(process.env.REVIEW_PORT) || Number(process.argv.find((a) => a.startsWith('--port='))?.slice(7)) || 8791)} — passcode: review-only${fixtureTester ? ` — simulated tester: ${fixtureTester}` : ''}`)); // REVIEW_PORT: a second fixture beside :8791

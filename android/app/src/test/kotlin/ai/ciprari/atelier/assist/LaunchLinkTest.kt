@@ -18,6 +18,16 @@ class LaunchLinkTest {
     }
 
     @Test
+    fun a_paired_link_says_how_the_words_were_put_in() {
+        assertEquals("$base/?start=ask&via=assist#k=$key&send=1&in=voice&q=what%20do%20I%20need%20to%20do%20today", LaunchLink.build(Mode.ASK, "what do I need to do today", key, true))
+        assertEquals("$base/?start=image&via=assist#k=$key&send=1&in=typed&q=a%20red%20fox", LaunchLink.build(Mode.IMAGE, "a red fox", key, false))
+        assertEquals("$base/?start=ask&via=assist#k=$key&send=1&q=hi", LaunchLink.build(Mode.ASK, "hi", key, null))
+        // Only a paired link carries it (Atelier counts it only with the key), and only with words to send.
+        assertEquals("$base/?start=ask&via=assist#q=hi", LaunchLink.build(Mode.ASK, "hi", null, true))
+        assertEquals("$base/?start=ask&via=assist", LaunchLink.build(Mode.ASK, "  ", key, true))
+    }
+
+    @Test
     fun unpaired_link_only_prefills() {
         assertEquals("$base/?start=ask&via=assist#q=what%20is%202%2B2%20%26%20why%20%3D%20%3F", LaunchLink.build(Mode.ASK, "what is 2+2 & why = ?", null))
         // A malformed key never goes out.
@@ -134,13 +144,14 @@ class LaunchLinkTest {
         )
         val sb = StringBuilder("[\n")
         var first = true
-        for (mode in Mode.entries) for (k in listOf(key, null)) for (p in prompts) {
+        for (mode in Mode.entries) for (k in listOf(key, null)) for (s in listOf(null, true, false)) for (p in prompts) {
             if (!first) sb.append(",\n")
             first = false
             sb.append("{\"mode\":").append(json(mode.id))
                 .append(",\"prompt\":").append(json(p))
                 .append(",\"key\":").append(if (k == null) "null" else json(k))
-                .append(",\"url\":").append(json(LaunchLink.build(mode, p, k))).append('}')
+                .append(",\"spoken\":").append(s?.toString() ?: "null")
+                .append(",\"url\":").append(json(LaunchLink.build(mode, p, k, s))).append('}')
         }
         sb.append("\n]\n")
         File(out).apply { parentFile?.mkdirs() }.writeText(sb.toString(), Charsets.UTF_8)

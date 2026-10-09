@@ -114,16 +114,20 @@ The request goes to this app's own TWA (an explicit intent to `AtelierLauncherAc
 a link that `public/launch.js` reads:
 
 ```
-https://atelier.ciprari.ai/?start=<mode>&via=assist#k=<key>&send=1&q=<prompt>   (paired)
+https://atelier.ciprari.ai/?start=<mode>&via=assist#k=<key>&send=1&in=<voice|typed>&q=<prompt>   (paired)
 https://atelier.ciprari.ai/?start=<mode>&via=assist#q=<prompt>                  (not paired: prefill only)
 https://atelier.ciprari.ai/?start=<mode>&via=assist                             (no words: just that mode)
 ```
 
 - **`start`:** one of `ask code image video ideas build`, exactly as `launch.js` `LAUNCH_MODES` spells them.
   `ModeParityTest` checks the spellings against `launch.js` and the accent colours against `app.css`.
+- **`in`:** paired links only. `voice` when the words go out as they were said (the text field wasn't opened since
+  listening, or was opened and the words sent unchanged), `typed` when they were typed or edited on the card. Atelier
+  marks a said request spoken and reads its answer aloud (Settings → Read aloud). A link without `in` (Assist 2.0.0)
+  counts as said.
 - **`q`:** always last. `launch.js` takes everything after `q=` as is, so the prompt is percent-encoded byte by byte
-  (spaces as `%20`, never `+`). `tools/check-launch-vectors.mjs` feeds 180 links built by the app to the real
-  `readLaunch()`. It checks that the mode, text, key, `send` and `via` come back exactly as sent.
+  (spaces as `%20`, never `+`). `tools/check-launch-vectors.mjs` feeds 540 links built by the app to the real
+  `readLaunch()`. It checks that the mode, text, key, `send`, `via` and `in` come back exactly as sent.
 - **The key** goes only in the fragment, never to the server, and only to our own TWA when it will run in a Chrome
   the phone can vouch for: part of the system image or installed by Google Play (`Atelier.chrome()`; the TWA pins
   that same Chrome). That is the browser the key was made in. With no such Chrome the TWA opens in another browser and
@@ -215,7 +219,7 @@ node android/tools/check-launch-vectors.mjs
 
 - **Which task:** AGP 9 creates unit-test tasks for the debug build type only, so the task is `testDebugUnitTest`.
   The classes under test are the same code that ships.
-- **The suites (39 tests):**
+- **The suites (40 tests):**
   - `ModeClassifierTest` (23 tests): about 170 phrasings across the six modes, partial transcripts, and medium words
     inside other things ("video game", "image generator app", "video ideas", "photo editing app", "a website with
     photos", "movie recommendations", "a short story"). Also: "for my app" doesn't make Code or Ideas a Build, everyday

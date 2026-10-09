@@ -174,5 +174,5 @@ test('review: Clear this device stops remix before kvClear; a refused Revise kee
   const wipe = APP.slice(APP.indexOf("$('#wipeBtn').onclick"), APP.indexOf('function applyTheme'));
   assert.ok(wipe.indexOf('remix?.wipe()') > 0 && wipe.indexOf('remix?.wipe()') < wipe.indexOf('DB.kvClear()'), 'jobs and drafts stop before rx:* is cleared');
   const line = APP.split('\n').find((l) => l.includes('c?.revise'));
-  assert.match(line, /if \(remix\.revise\(c\.entry, text\)\) \{ input\.value = ''/, 'the composer is cleared only when a revision was made');
+  assert.match(line, /if \(remix\.revise\(c\.entry, text\)\) \{ setComposer\(''\)/, 'the composer is cleared only when a revision was made');
 });

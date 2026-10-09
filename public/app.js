@@ -7,27 +7,27 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=87';
-import * as Sync from './sync.js?v=87';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=87';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=87';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=87';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=87';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=87';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=87';
-import { initLookup } from './lookup.js?v=87';
-import { createRemix } from './remix-app.js?v=87';
-import { sendMode, looksLikeQuestion } from './remix.js?v=87';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=87';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=87';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=87';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=87';
-import * as ClaudeImport from './claude-import.js?v=87';
-import { createFeedback } from './feedback.js?v=87';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=87';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=87';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=87';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=87';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=88';
+import * as Sync from './sync.js?v=88';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=88';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=88';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=88';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=88';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=88';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=88';
+import { initLookup } from './lookup.js?v=88';
+import { createRemix } from './remix-app.js?v=88';
+import { sendMode, looksLikeQuestion } from './remix.js?v=88';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=88';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=88';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=88';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=88';
+import * as ClaudeImport from './claude-import.js?v=88';
+import { createFeedback } from './feedback.js?v=88';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=88';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=88';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=88';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=88';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -205,7 +205,7 @@ const DEFAULT_SETTINGS = {
   v: SETTINGS_V, passcode: '', name: '', about: '', theme: 'auto', lookup: '', temperature: 0.6,
   keys: { anthropic: '', openai: '', gemini: '' },
   models: { agent: '', ask: '', smart: '', reason: '', code: '', write: '', vision: '', watch: '', ideas: '', build: '', fast: '' },
-  readAloud: { voice: 'atelier', speed: 1 }, // Settings → Read aloud (public/readaloud.js); not opts.ask.voice, the "As me" chip
+  readAloud: { voice: 'atelier', speed: 1, auto: true }, // Settings → Read aloud (public/readaloud.js); not opts.ask.voice, the "As me" chip
   labs: { remix: true }, // Settings → Labs (owner): Video mode + an attached clip → Video Remix (public/remix-app.js)
 };
 // Settings saved by an older build may point at retired models; reset those roles.
@@ -1548,7 +1548,7 @@ const readSignedIn = () => Boolean(S.tester || S.settings.passcode);
 // The server keeps its own allow-list either way.
 const readAllowed = () => (S.tester ? (S.tester.features?.tts === false ? [] : (S.tester.models?.tts ?? null)) : (S.settings.passcode ? null : []));
 const reader = createReader({
-  apiHeaders, toast, onResponse: noteAllowance, onState: repaintReadState,
+  apiHeaders, toast, onResponse: noteAllowance, onState: readStateChanged,
   getSettings: () => S.settings.readAloud,
   isTester: () => Boolean(S.tester),
   signedIn: readSignedIn,
@@ -1593,6 +1593,148 @@ function repaintReadState(id, state) {
   old.remove();
   if (had === 'speak' || had === 'speak-stop') ($(`[data-act="${had}"]`, acts) || $('[data-act="speak"]', acts)).focus({ preventScroll: true });
 }
+
+// ── Read answers to spoken requests (Settings → Read aloud; readaloud.js spokenFrom, autoReadText, reader.auto) ──
+// A turn whose words were mostly said (Atelier Assist, Talk, the mic) is marked e.spoken in submit(). When its run on
+// this device ends, the answer is read aloud in your voice and speed, or one short line for an image, a video, an app or
+// a failure. Only this device's own sends are read (autoArmed, session only): a spoken turn that syncs in from another
+// device, comes back in a backup or is opened later stays silent.
+const autoArmed = new Set();
+// The spoken turns this device sent, this session: only these read again after Retry (a mark that synced in, came back
+// in a backup or is from an earlier session never makes this device talk).
+const spokeHere = new Set();
+function armSpoken(id) { autoArmed.add(id); spokeHere.add(id); }
+// The accounts agent's last words (its final summary, not the "let me check…" before a tool call), for the read.
+const agentFinal = new Map();
+function agentSaid(e, text) { if (String(text ?? '').trim()) agentFinal.set(e.id, text); }
+const AUTO_QUEUE_MAX = 4, AUTO_HIDDEN_MS = 120_000;
+let autoQueue = []; // answers waiting for the read that's on (a spoken request split into tasks)
+let autoWait = null; // answers that finished while the page was hidden ({reqs, cancel}): read once it shows again, each within 2 minutes
+let autoMic = []; // answers that finished while the mic was open: read once it closes, unless what it heard is being sent
+const autoOn = () => S.settings.readAloud?.auto !== false;
+let voicePieces = []; // what voice put in the composer since it was last empty or sent: [{text, from}] (spokenFrom)
+function noteVoice(text, from) {
+  const t = String(text ?? '').trim();
+  if (t && SPOKEN_FROM.includes(from)) voicePieces = [...voicePieces, { text: t.slice(0, 8000), from }].slice(-20);
+}
+// A button or an action wrote the composer (Edit prompt, Animate, Edit image, Omni edit, a remix revise, clearInput):
+// what voice put there is gone, so what is sent from it next (typed or not) never counts the old dictation as said.
+function setComposer(text) { input.value = text; voicePieces = []; }
+// Retry on a spoken turn: its new answer reads too, but only for a turn this device sent this session (spokeHere).
+function rearmRetry(e) { if (e.spoken && spokeHere.has(e.id)) { autoArmed.add(e.id); unlockReading(); } }
+// Inside the tap that sends a spoken request or opens the mic: the answer may then play without another tap (WebKit
+// unlocks one <audio> element per gesture; iOS's device voice needs its own). Chrome counts any earlier tap on the page.
+// The device voice is unlocked only when it is the voice that reads (an AI voice that fails over to it offers "Tap to
+// listen" instead): a silent utterance at the mic's tap is one more thing for iOS to switch its audio over.
+function unlockReading() { if (autoOn()) reader.unlock({ speech: PLATFORM === 'ios' && voiceFor(S.settings.readAloud.voice, readAllowed()) === 'device' }); }
+// Ends Read aloud and whatever waits to read by itself: a new prompt, the mic, another thread, Stop reading. autoOnly
+// (you started typing, or turned the setting off): only a read that started by itself (or waits on "Tap to listen").
+// disarm: answers still on their way won't read either (you typed, sent a typed prompt, changed thread or said Stop);
+// the mic and a spoken send leave them armed, so each spoken request is answered in turn (one that finishes while the
+// mic is open waits for it to close: autoRead, micClosed).
+function stopReading({ autoOnly = false, disarm = false } = {}) {
+  autoQueue = []; autoWait?.cancel(); autoMic = [];
+  if (disarm) autoArmed.clear();
+  const cur = reader.current();
+  if (cur && (!autoOnly || cur.auto)) reader.stop();
+}
+// run() ended for e: a spoken turn this device's send armed reads its answer, once, if its thread is still the open one.
+function autoReadDone(e, thread) {
+  const summary = agentFinal.get(e.id);
+  agentFinal.delete(e.id);
+  if (!autoArmed.delete(e.id) || !e.spoken || !autoOn() || !thread || thread !== S.thread) return;
+  const what = autoReadText(e, { text: e.kind === 'ask' || e.kind === 'code' ? stripThink(summary || e.text || '') : undefined });
+  if (what) autoRead({ id: e.id, text: what.text, meta: { title: e.prompt, album: thread.title } });
+}
+function autoRead(req) {
+  if (document.visibilityState === 'hidden') return holdAutoRead(req);
+  if (!S.thread?.entries.some((x) => x.id === req.id)) return; // its thread was closed meanwhile
+  // The mic is open (a follow-up while this one ran): it would hear the reader, and iOS plays it through the earpiece
+  // while it records. It waits for the mic to close (micClosed), as the reader and the mic never overlap (micYield).
+  if (micOpen()) { if (autoMic.length < AUTO_QUEUE_MAX) autoMic.push(req); return; }
+  const cur = reader.current();
+  if (cur) { if (cur.auto && autoQueue.length < AUTO_QUEUE_MAX) autoQueue.push(req); return; } // never over a read you started
+  reader.auto(req.id, req.text, req.meta);
+}
+// Finished while the page was hidden (you switched apps): nothing starts in the background; each reads, in the order
+// they finished, when you come back within AUTO_HIDDEN_MS of it, else the answer's own Read aloud button is there. The
+// window is wall-clock time (Date.now): a hidden page's timers stop while the phone sleeps or the app is suspended, so
+// the timer only takes the listener down.
+function holdAutoRead(req) {
+  const reqs = autoWait ? autoWait.reqs : [];
+  if (reqs.length < AUTO_QUEUE_MAX) reqs.push({ req, at: Date.now() });
+  autoWait?.cancel();
+  let t = 0;
+  const cancel = () => { clearTimeout(t); document.removeEventListener('visibilitychange', shown); if (autoWait?.cancel === cancel) autoWait = null; };
+  const shown = () => {
+    if (document.visibilityState !== 'visible') return;
+    cancel();
+    for (const w of reqs) if (Date.now() - w.at <= AUTO_HIDDEN_MS) autoRead(w.req); // the first reads, the rest queue behind it
+  };
+  document.addEventListener('visibilitychange', shown);
+  t = setTimeout(cancel, AUTO_HIDDEN_MS);
+  autoWait = { reqs, cancel };
+}
+// The mic closed (paintMic: idle or error): answers that finished while it was open read now, in turn, unless what it
+// heard is being sent (Send pressed while it listened, Talk's hold): then that new request's answer is the one to hear.
+function micClosed(sending) {
+  const reqs = autoMic;
+  autoMic = [];
+  if (!sending) for (const r of reqs) autoRead(r);
+}
+// reader onState: the answer's own buttons, the dock's chip, and the next answer waiting its turn once one was read to
+// the end (never started from inside the reader's own callback: a read that just ended may be making way for another).
+function readStateChanged(id, state, detail) {
+  repaintReadState(id, state);
+  paintReadChip();
+  if (state !== 'idle' || !detail?.auto) return;
+  if (!detail.finished) { autoQueue = []; return; } // stopped (the lock screen's Stop, another answer's Read aloud): the rest waits no more
+  if (autoQueue.length) setTimeout(() => { if (!reader.current() && autoQueue.length) autoRead(autoQueue.shift()); }, 0);
+}
+// The dock's chip while an answer is read: "Stop reading"; paused, "Tap to listen" when the browser wouldn't start it
+// without a tap (a launch from another app, an answer that finished by itself), else Resume; × stops it.
+// When it hides with focus in it (Stop reading, ×, or the read ended), focus goes to that answer's own Read aloud
+// button, as repaintReadState keeps it on those; with no such button, to the prompt box (not on a touch screen: that
+// would pop the keyboard). "Tap to listen" is announced (#activityStatus): a screen reader otherwise never hears that the
+// answer is waiting for a tap.
+let chipFor = '', chipAsked = false; // the answer the chip is for; whether its "Tap to listen" was announced
+function paintReadChip() {
+  const chip = $('#readChip'), main = $('#readChipMain'), cur = reader.current();
+  if (!chip || !main) return;
+  const show = Boolean(cur) && !cur.id.startsWith('preview:');
+  const had = !chip.hidden && chip.contains(document.activeElement);
+  chip.hidden = !show;
+  if (!show) {
+    chipAsked = false;
+    if (!had) return;
+    const b = chipFor && stream.querySelector(`.entry[data-id="${CSS.escape(chipFor)}"] .actions [data-act="speak"]`);
+    if (b) b.focus({ preventScroll: true });
+    else if (!COARSE.matches) input.focus({ preventScroll: true });
+    return;
+  }
+  if (cur.id !== chipFor) chipAsked = false;
+  chipFor = cur.id;
+  const listen = cur.state === 'paused';
+  main.dataset.act = listen ? 'listen' : 'stop';
+  main.classList.toggle('listen', listen);
+  main.innerHTML = listen ? `${ICON.play}<span>${cur.blocked ? 'Tap to listen' : 'Resume'}</span>` : `${ICON.stop}<span>Stop reading</span>`;
+  $('#readChipStop').hidden = !listen;
+  const asks = listen && cur.blocked;
+  if (asks && !chipAsked) $('#activityStatus').textContent = 'The answer is ready to read aloud. Tap to listen, above the prompt box.';
+  chipAsked = asks;
+}
+$('#readChipMain').addEventListener('click', (ev) => { if (ev.currentTarget.dataset.act === 'listen') { micYield(); reader.resume(); } else stopReading({ disarm: true }); }); // resume() inside the tap
+$('#readChipStop').addEventListener('click', () => stopReading({ disarm: true }));
+// The page hides on a phone: the device voice can't carry on (iOS suspends the page and Android Chrome freezes it, so
+// speechSynthesis and its sentence-by-sentence loop stop), so it pauses and the chip offers Resume. A desktop browser
+// keeps speaking in a background tab or covered window, so there it carries on, as it always has. The AI voice keeps
+// playing behind the lock screen with its lock-screen controls, as it does for a read you started.
+function pauseDeviceOnHide() {
+  if (document.visibilityState !== 'hidden' || PLATFORM === 'desktop') return;
+  const cur = reader.current();
+  if (cur?.mode === 'device' && (cur.state === 'playing' || cur.state === 'preparing')) reader.pause();
+}
+document.addEventListener('visibilitychange', pauseDeviceOnHide);
 // Build previews run in a sandboxed frame. A generated app that calls focus() on load or on blur (games do, to grab the
 // arrow keys) keeps the keyboard even while a drawer makes #stage inert, so Escape, Tab and Ctrl+. never reach this page.
 // The guard lets a preview move focus only once the user is in it (clicked or tabbed in). Copy code / Download keep the raw html.
@@ -1663,6 +1805,9 @@ stream.addEventListener('loadedmetadata', () => { if (stickToBottom) scrollDown(
 // ───────────────────────── run pipeline ─────────────────────────
 async function submit(textArg, modeArg, extra = {}) {
   if (textArg == null && micHold()) return; // dictation is still writing into the box: it sends once that's done (C2)
+  // Spoken (readaloud.js spokenFrom): the composer's words are mostly what voice put there (Atelier Assist, Talk, the mic),
+  // read before anything changes the box. A button's own text (textArg) never is.
+  const said = textArg == null ? spokenFrom(input.value, voicePieces) : '';
   let text = (textArg ?? input.value).trim();
   let mode = modeArg || S.mode;
 
@@ -1690,7 +1835,7 @@ async function submit(textArg, modeArg, extra = {}) {
   if (!video && mode === 'video' && remixOn() && !images.length && !extra.entry && textArg == null) {
     const c = remix.composer.textChoice(text, S.thread);
     if (c === 'hold') return;
-    if (c?.revise) { if (remix.revise(c.entry, text)) { input.value = ''; autosize(); } return; } // refused (still filming): the text stays
+    if (c?.revise) { if (remix.revise(c.entry, text)) { setComposer(''); autosize(); } return; } // refused (still filming): the text stays
   }
   // Text that came from a link or a share ('link' | 'share'), even after edits: the turn is marked, and never reaches the
   // accounts agent (runChat) — anyone can write a link or POST a share, and its words could steer the tools. A button
@@ -1703,6 +1848,10 @@ async function submit(textArg, modeArg, extra = {}) {
   const untrusted = textMark || (sharedFiles ? 'share' : '');
   if (textArg == null) setMark(''); // the composer's text goes out with this turn (Stop on a task split gives it back)
   launchSubmitted(textArg == null); // quick launch: the hold, the armed ring, the source note and the saved draft (H4)
+  const pieces = voicePieces;
+  if (textArg == null) voicePieces = [];
+  stopReading({ disarm: !said }); // a new prompt: Read aloud stops, and nothing waiting reads (a typed one: nothing on its way either)
+  if (said) unlockReading(); // still inside the tap that sent it (no await yet): its answer may play by itself (iOS)
   if (video && route === 'ask' && mode !== 'ask') { mode = 'ask'; setMode('ask'); toast('Sent to Ask — videos are answered there'); }
 
   // One request, several deliverables ("answer this, make an image and a video") → parallel tasks.
@@ -1710,12 +1859,12 @@ async function submit(textArg, modeArg, extra = {}) {
     if (textArg == null) { input.value = ''; autosize(); }
     const ctrl = new AbortController(); running.add(ctrl); setBusy();
     const tasks = await planTasks(text, ctrl.signal).catch(() => null).finally(() => { running.delete(ctrl); setBusy(); hideToast(); });
-    if (ctrl.signal.aborted) { if (textArg == null) { input.value = text; autosize(); setMark(untrusted); } return; } // Stop: give the prompt back
-    if (tasks && tasks.length > 1) return runTasks(text, tasks, untrusted);
+    if (ctrl.signal.aborted) { if (textArg == null) { input.value = text; autosize(); setMark(untrusted); voicePieces = pieces; } return; } // Stop: give the prompt back
+    if (tasks && tasks.length > 1) return runTasks(text, tasks, untrusted, said);
   }
 
   if (!S.thread) S.thread = newThread();
-  const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(untrusted && { untrusted }), ...(untrusted && !textMark && { untrustedFiles: true }), ...(extra.via === 'assist' && { via: 'assist' }), ...extra.entry };
+  const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(untrusted && { untrusted }), ...(untrusted && !textMark && { untrustedFiles: true }), ...(extra.via === 'assist' && { via: 'assist' }), ...(said && { spoken: said }), ...extra.entry };
   delete e.images_;
   // Video mode after Edit on an Omni clip (the chip shows it): this prompt edits that clip. Once only.
   if (mode === 'video' && omniEdit && !video && !images.length && !extra.entry && route !== 'remix' && videoModel(e.params.model)?.omni) {
@@ -1729,6 +1878,7 @@ async function submit(textArg, modeArg, extra = {}) {
     if (src) e.videoOf = src.id;
   }
   S.thread.entries.push(e);
+  if (said) armSpoken(e.id); // its answer reads aloud when this run ends (autoReadDone)
   if (!S.thread.title) S.thread.title = text.slice(0, 64);
 
   if (textArg == null) { input.value = ''; autosize(); }
@@ -1762,15 +1912,16 @@ async function planTasks(text, signal) {
   const tasks = (m ? JSON.parse(m[0]).tasks : []) || [];
   return tasks.filter((t) => TASK_KINDS.includes(t?.kind) && typeof t.prompt === 'string' && t.prompt.trim()).slice(0, 4);
 }
-async function runTasks(original, tasks, untrusted = '') {
+async function runTasks(original, tasks, untrusted = '', spoken = '') {
   if (!S.thread) S.thread = newThread();
   if (!S.thread.title) S.thread.title = original.slice(0, 64);
   const group = uid();
   const entries = tasks.map((t, i) => ({
     id: uid(), kind: t.kind, prompt: t.prompt.trim(), images: [], createdAt: Date.now() + i, pending: true,
-    params: structuredClone(S.opts[t.kind]), group, part: i + 1, parts: tasks.length, from: original, ...(untrusted && { untrusted }),
+    params: structuredClone(S.opts[t.kind]), group, part: i + 1, parts: tasks.length, from: original, ...(untrusted && { untrusted }), ...(spoken && { spoken }),
   }));
   S.thread.entries.push(...entries);
+  if (spoken) for (const e of entries) armSpoken(e.id); // each part reads in turn as it finishes (autoQueue)
   S.attachments = []; renderAttachments();
   welcome.classList.add('gone');
   entries.forEach((e) => stream.append(renderEntry(e)));
@@ -1853,6 +2004,7 @@ async function run(e) {
     if (thread) { thread.updatedAt = Date.now(); DB.put(thread).catch(storageError); }
     releaseRun(); Sync.kick('settled');
     if (thread && thread === S.thread) { persist(true); renderOptions(); }
+    autoReadDone(e, thread); // a spoken request's answer reads aloud (Settings → Read aloud)
     if (thread?.entries.length === 1 && !e.error) nameThread(e, thread);
     if (!e.error && !e.group) learnFrom(e, thread);
     if (S.tester) refreshTesterSoon(); // reservations settle after the stream: show the settled numbers
@@ -2309,6 +2461,7 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
       },
     });
     const toolCalls = calls.filter((c) => c && c.function.name).map((c) => ({ ...c, id: c.id || 'call_' + uid() }));
+    agentSaid(e, text); // its last words so far: the final summary once no tool call follows (a spoken request reads it)
     messages.push({ role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}), ...(reasoningTurn ? { reasoning_content: reasoningTurn } : {}), ...(anthropic ? { anthropic_content: anthropic } : {}) });
     // A turn cut at the length limit (Claude: max_tokens) or declined (content_filter) ends the run: a tool call from it
     // may be half-written, so it never runs.
@@ -2836,17 +2989,18 @@ stream.addEventListener('click', async (ev) => {
   switch (act) {
     case 'copy':
       return copy(e.kind === 'ideas' ? e.ideas.map((d, i) => `${i + 1}. ${d.title} — ${d.pitch}`).join('\n') : stripThink(e.text));
-    case 'speak': micYield(); return reader.toggle(e.id, stripThink(e.text), b, { title: e.prompt, album: S.thread?.title }); // inside the tap: no await before it
-    case 'speak-stop': return reader.stop();
+    case 'speak': micYield(); if (reader.current()?.id !== e.id) stopReading(); return reader.toggle(e.id, stripThink(e.text), b, { title: e.prompt, album: S.thread?.title }); // inside the tap: no await before it
+    case 'speak-stop': return stopReading({ disarm: true });
     case 'retry':
       if (e.pending || e.canva) return;
       if (!navigator.onLine) return toast('You’re offline — try again once you’re connected', { error: true });
       if (reader.stateFor(e.id) !== 'idle') reader.stop(); // the answer being read is about to be replaced
       Object.assign(e, { text: '', think: '', media: [], ideas: null, app: null, error: null, errorKind: null, cut: null, steps: null, enhanced: null, budget: null });
       if (e.params?.seed) delete e.params.seed;
+      rearmRetry(e); // a spoken request this device sent, tried again, reads its new answer too
       for (const key of libThumbs.keys()) if (key.includes(`:${e.id}:`)) libThumbs.delete(key); // new media, same entry id: drop stale Library thumbs/posters
       return run(e);
-    case 'edit-prompt': setMode(e.kind); input.value = e.prompt; setMark(e.untrustedFiles ? '' : e.untrusted); autosize(); return input.focus(); // a link/share prompt stays marked (only the shared photos marked it: they don't come back, the typed text is yours)
+    case 'edit-prompt': setMode(e.kind); setComposer(e.prompt); setMark(e.untrustedFiles ? '' : e.untrusted); autosize(); return input.focus(); // a link/share prompt stays marked (only the shared photos marked it: they don't come back, the typed text is yours)
     case 'settings': return openSettings();
     case 'allowance': openSettings(); return selectSettings('general');
     case 'signin': return openOnboard('expired');
@@ -2864,7 +3018,7 @@ stream.addEventListener('click', async (ev) => {
       setMode('video');
       S.attachments = [{ src: await shrinkDataUrl(e.media[k].src, 1024, 576, 170_000) }];
       renderAttachments();
-      input.value = e.enhanced || e.prompt; setMark(e.untrustedFiles ? '' : e.untrusted); autosize(); input.focus();
+      setComposer(e.enhanced || e.prompt); setMark(e.untrustedFiles ? '' : e.untrusted); autosize(); input.focus();
       return toast('Image attached — hit send to animate');
     case 'omni-edit': {
       if (!e.omni?.id) return;
@@ -2874,7 +3028,7 @@ stream.addEventListener('click', async (ev) => {
       const p = String(e.prompt || 'this clip');
       omniEdit = { id: e.omni.id, at: e.omni.at, label: `‘${p.length > 22 ? `${p.slice(0, 21)}…` : p}’` };
       renderOptions();
-      input.value = ''; setMark(''); autosize(); input.focus();
+      setComposer(''); setMark(''); autosize(); input.focus();
       return toast('Describe the change — Gemini Omni edits this clip');
     }
     case 'edit-image':
@@ -2882,7 +3036,7 @@ stream.addEventListener('click', async (ev) => {
       setMode('image');
       S.attachments = [{ src: await shrinkDataUrl(e.media[k].src, 1024, 1024) }];
       renderAttachments();
-      input.value = ''; setMark(''); autosize();
+      setComposer(''); setMark(''); autosize();
       return input.focus();
     case 'vary':
       setMode('image');
@@ -3345,6 +3499,22 @@ input.addEventListener('input', (ev) => {
   else if (markBack(ev)) composerFrom = markWas; // the link / share text came back (Undo, Redo, pasted back): so does its mark
   drafts.edit(); clearTimeout(draftT); draftT = setTimeout(keepDraft, 500);
 });
+// Your own typing (a trusted input: keys, paste, undo; dictation writes untrusted ones) stops a read that started by
+// itself, or waits on "Tap to listen", and an answer still on its way won't start one; a read you started keeps going.
+// An emptied box forgets what voice put in it.
+function composerTyped(ev) {
+  if (!input.value.trim()) voicePieces = [];
+  if (ev.isTrusted) stopReading({ autoOnly: true, disarm: true });
+}
+input.addEventListener('input', composerTyped);
+// Your own edit that replaces or deletes a selection (select all and type over it, paste over it, cut it): the voice
+// words it takes out no longer count as said (dropSpoken), even when what you type uses many of the same words.
+function composerReplacing(ev) {
+  if (!ev.isTrusted || !voicePieces.length || ev.inputType?.startsWith('history')) return;
+  const { selectionStart: a, selectionEnd: b, value } = input;
+  if (b > a) voicePieces = dropSpoken(voicePieces, value.slice(a, b));
+}
+input.addEventListener('beforeinput', composerReplacing);
 // Video Remix: typing a question about the attached clip offers [Ask about it instead] (re-rendered only when that flips).
 let rxAsks = false;
 input.addEventListener('input', () => { if (!S.video || S.mode !== 'video' || !remixOn()) return; const q = looksLikeQuestion(input.value); if (q !== rxAsks) { rxAsks = q; renderOptions(); } });
@@ -3632,14 +3802,14 @@ const dictation = createDictation({
   isTester: () => Boolean(S.tester) && !S.settings.passcode,
   lang: () => navigator.languages?.[0] || navigator.language || 'en-US',
   prefer: () => LS.get('dictateEngine', 'auto'), // 'record': server transcription even where Web Speech exists (review)
-  beforeStart: () => { micArm?.(); reader.stop(); }, // the mic would hear Read aloud (and iOS plays through the earpiece)
+  beforeStart: micStarting,
   onState: paintMic,
   onLevel: (level, { elapsedMs, leftMs }) => {
     micBtn.style.setProperty('--level', level.toFixed(2));
     micTime.textContent = micClock(elapsedMs);
     micBtn.toggleAttribute('data-warn', leftMs <= 10_000);
   },
-  onText: (text, { final, auto, autoSend }) => {
+  onText: (text, { final, auto, autoSend, reason }) => {
     const v = input.value;
     if (!micAt || micAt.value !== v) { // the first words, or the box was edited meanwhile: write where the starting tap
       // found the caret (micSel; the tap may have blurred the box), else at its selection now (the end if never placed)
@@ -3653,6 +3823,7 @@ const dictation = createDictation({
     else if (final && !COARSE.matches) { input.focus({ preventScroll: true }); input.setSelectionRange(out.caret, out.caret); } // phones: no keyboard pop
     input.dispatchEvent(new Event('input')); // autosize, the Send state, drafts
     if (final) micAdded = `Added: ${text.length > 80 ? `${text.slice(0, 80)}…` : text}`; // said by paintMic once the mic is closed
+    if (final) noteVoice(text, reason === 'launch' ? 'talk' : 'dictation'); // said, not typed: sending it is a spoken turn (spokenFrom)
     if (final && autoSend) dictatedSend?.();
     // A launch that listens without sending (After you speak: Review, ?start=voice&q=…, a restored draft, listen when I
     // open): Send pulses once the words are in. A tap on the mic (auto false) is plain dictation; Send pressed while it
@@ -3684,6 +3855,7 @@ function paintMic(state, { engine, reason, fallback } = {}) {
   micAt = null; micSel = null; syncMic();
   const send = micSendAfter && state === 'idle' && reason !== 'cancel';
   micSendAfter = false;
+  micClosed(send || Boolean(sendHold)); // answers that finished while it listened read now, unless this is being sent
   if (send) submit(); // Send was pressed while dictating: all it wrote is in the box now (an error or Escape sends nothing)
 }
 // Hidden only where it can never work here: no recorder and no recognizer, or a tester account without dictation and no
@@ -3711,9 +3883,14 @@ function micHold() {
 // keeping what was said (it is still transcribed into the box). Otherwise the recording hears the reader, and iOS plays
 // it through the earpiece while it records. The other way round is dictation's beforeStart: the mic stops the reader.
 function micYield() {
-  const st = dictation.state();
-  if (st === 'listening' || st === 'recording') dictation.stop('user');
+  if (micOpen()) dictation.stop('user');
 }
+// The mic is listening or recording (not transcribing: by then it has let go of the mic).
+function micOpen() { const st = dictation.state(); return st === 'listening' || st === 'recording'; }
+// dictation's beforeStart, inside the tap that opens the mic. The mic would hear Read aloud (and iOS plays through the
+// earpiece): it stops. Answers still on their way stay armed and wait for the mic to close (autoRead). The same tap lets
+// a spoken request's answer play later without another one (unlockReading).
+function micStarting() { micArm?.(); stopReading(); unlockReading(); }
 
 // keep --dock-h in sync so content never hides under the dock
 function syncDock() { document.documentElement.style.setProperty('--dock-h', $('#dock').offsetHeight + 'px'); }
@@ -3905,7 +4082,7 @@ async function openThread(id) {
   persist(true);
   const t = liveThreads.get(id) || recoverThread(await DB.get(id));
   if (!t || accountReloading) return toast('That thread is no longer on this device. Refresh the list.', { error: true });
-  if (t.id !== S.thread?.id) reader.stop();
+  if (t.id !== S.thread?.id) stopReading({ disarm: true });
   S.thread = t; renderThread(); closeDrawers(); renderOptions();
   LS.set(workspaceKey('lastThread'), t.id);
   requestAnimationFrame(() => scrollDown(true, true));
@@ -4691,6 +4868,7 @@ function renderReadAloud() {
     return `<div class="ra-voice"><label><input type="radio" name="readVoice" value="${esc(v.id)}"${v.id === chosen ? ' checked' : ''} /><span><b>${esc(v.label)}</b> <small>— ${esc(v.hint)}</small></span></label>`
       + `<button type="button" class="chip${on ? ' on' : ''}" data-preview="${esc(v.id)}" data-label="${esc(v.label)}" aria-pressed="${on}" aria-label="${on ? `Stop the ${esc(v.label)} preview` : `Preview ${esc(v.label)}`}">${on ? 'Stop' : 'Preview'}</button></div>`;
   }).join('');
+  $('#readAuto').checked = ra.auto !== false;
   $('#readSpeed').innerHTML = SPEEDS.map((x) => `<button type="button" class="chip${x === ra.speed ? ' on' : ''}" data-speed="${x}" aria-pressed="${x === ra.speed}">${x}×</button>`).join('');
   // No AI voice on offer: say why (and what reads) instead of the AI-voice caption.
   $('#readCaption').textContent = choices.some((v) => v.provider !== 'device') ? AI_CAPTION
@@ -4701,13 +4879,17 @@ $('#readVoices').addEventListener('change', (ev) => {
   if (ev.target.name !== 'readVoice') return;
   S.settings.readAloud.voice = ev.target.value; saveSettings(); retitleReads();
 });
-$('#readVoices').addEventListener('click', (ev) => { const b = ev.target.closest('[data-preview]'); if (b) { micYield(); reader.preview(b.dataset.preview); } }); // inside the tap
+$('#readVoices').addEventListener('click', (ev) => { const b = ev.target.closest('[data-preview]'); if (b) { micYield(); stopReading(); reader.preview(b.dataset.preview); } }); // inside the tap
 $('#readSpeed').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-speed]');
   if (!b) return;
   const x = Number(b.dataset.speed);
   S.settings.readAloud.speed = x; saveSettings(); reader.setSpeed(x);
   $$('[data-speed]', $('#readSpeed')).forEach((c) => { const on = c === b; c.classList.toggle('on', on); c.setAttribute('aria-pressed', String(on)); });
+});
+$('#readAuto').addEventListener('change', (ev) => {
+  S.settings.readAloud.auto = ev.target.checked; saveSettings();
+  if (!ev.target.checked) stopReading({ autoOnly: true, disarm: true }); // off: a read that started by itself stops too
 });
 $('#settings').addEventListener('close', () => { if (previewing) reader.stop(); }); // a preview ends with the sheet
 // A focused field in an open dialog stays visible as the on-screen keyboard resizes the viewport.
@@ -6046,7 +6228,7 @@ document.addEventListener('keydown', (ev) => {
 
 function startFresh() {
   persist(true);
-  reader.stop();
+  stopReading({ disarm: true });
   S.thread = null;
   $('#activityStatus').textContent = '';
   renderThread();
@@ -6061,7 +6243,7 @@ $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
 
 // The build feedback reports when app.js was loaded without its ?v= (scripts/bump-version.mjs moves it with sw.js VERSION).
-const APP_BUILD = '87';
+const APP_BUILD = '88';
 const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || APP_BUILD}`, online: navigator.onLine !== false }), toast });
 $('#feedbackBtn').onclick = () => feedback.open();
 $('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };
@@ -6198,6 +6380,7 @@ const launchDeps = {
   armMic: () => armTapToTalk(),
   micHint: () => toast(micHelp(dictation.platform), { error: true, ms: 9000 }),
   holdThenSend, confirmLinkSend,
+  markSpoken: (text, from) => noteVoice(text, from), // a keyed Atelier Assist (or dictated Shortcut) prefill: its words were said
   startVoice: ({ autoSend = false } = {}) => (dictation.needsGesture() ? false : dictation.start({ reason: 'launch', auto: true, autoSend })),
   composerEmpty: () => !hasDraft(), dialogOpen: () => Boolean($('dialog[open]')),
   whenVisible: (ms) => whenVisible(document, { ms }), caches: self.caches, File, // ms: launch.js VISIBLE_WAIT_MS
@@ -6226,7 +6409,7 @@ function resumeLaunch() {
 // Sign-out or an owner/tester switch (H11): nothing of the last role's launch state stays. Not the hold or the armed
 // rings, not the composer text (its next pagehide would save it as a draft with no role), not a pending share.
 function launchWiped() {
-  sendHold?.cancel('quiet'); clearArm(); clearTimeout(draftT); drafts.reset();
+  sendHold?.cancel('quiet'); clearArm(); clearTimeout(draftT); drafts.reset(); voicePieces = [];
   if (input.value) { input.value = ''; autosize(); }
   clearSource(); setMark(''); self.caches?.delete(SHARE_CACHE).catch(() => {});
 }
@@ -6328,7 +6511,7 @@ remix = createRemix({
   S, DB, persist, repaint, toast, esc, btn, ICON, uid, errorBox, ApiError, renderOptions, paintChip,
   streamChat, completeChat, modelFor, providerOf, ensureClip, videoFiles, clipJobs, apiHeaders, noteAllowance, openViewer, setMode, run, liveThreads,
   addEntry: (e) => { addRemixEntry(e).catch((err) => console.error(err)); },
-  inputValue: () => input.value, clearInput: () => { input.value = ''; autosize(); }, focusInput: () => input.focus(),
+  inputValue: () => input.value, clearInput: () => { setComposer(''); autosize(); }, focusInput: () => input.focus(),
   shake: () => { input.classList.remove('shake'); void input.offsetWidth; input.classList.add('shake'); },
   runwayReady: () => Boolean(server.runway && S.settings.passcode && !S.tester),
   holdSync: (id) => Sync.holdRunLock(id), // no owner-sync push of an entry while it films or cuts
