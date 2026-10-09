@@ -23,7 +23,8 @@ const defer = () => { let resolve, reject; const promise = new Promise((a, b) =>
 
 // storedValues: IndexedDB rows shared between pages (one browser profile); lsValues: its localStorage, likewise.
 // failOpen(name) → true: that database's open fails; failPut(name) → an Error: a put there aborts its transaction with it.
-function lifecycle({ passcode = '', tester = null, storedValues, lsValues, cryptoOverride, failOpen = () => false, failPut = () => null } = {}) {
+// appStore: Build app data (appdata.js) as reloadWorkspace sees it — busy() while a write hasn't reached IndexedDB.
+function lifecycle({ passcode = '', tester = null, storedValues, lsValues, cryptoOverride, failOpen = () => false, failPut = () => null, appStore = { busy: () => false, flush: () => Promise.resolve() } } = {}) {
   const events = [], opened = [], pending = [], values = storedValues || new Map(), timers = new Map(), settings = lsValues || new Map(), listeners = {};
   const S = { settings: { passcode, name: tester?.name || '', lookup: '' }, tester, thread: { id: 'current', entries: [{ id: 'entry', text: 'Saved reply' }] } };
   if (!lsValues) { settings.set('settings', structuredClone(S.settings)); settings.set('tester', structuredClone(tester)); }
@@ -58,7 +59,7 @@ function lifecycle({ passcode = '', tester = null, storedValues, lsValues, crypt
   };
   const node = { hidden: true, open: false, contains: () => false, classList: { contains: () => false } };
   const deps = {
-    S, indexedDB, IDBRequest: Request, IDBKeyRange: { bound: () => ({}) }, crypto: cryptoOverride || globalThis.crypto,
+    S, indexedDB, IDBRequest: Request, IDBKeyRange: { bound: () => ({}) }, crypto: cryptoOverride || globalThis.crypto, appStore,
     Sync: { wrapDb: (db) => db, suspend: () => events.push('suspend-sync') },
     stopAll: () => events.push('stop-runs'), toast: () => {},
     setTimeout: (fn) => { const id = timers.size + 1; timers.set(id, fn); return id; }, clearTimeout: (id) => { timers.delete(id); events.push('cancel-persist'); },
@@ -145,6 +146,24 @@ test('a save that never finishes holds the reload for at most 2 s', () => {
   assert.ok(!page.events.includes('reload'));
   page.flushTimers();
   assert.equal(page.events.filter((event) => event === 'reload').length, 1);
+});
+
+test('a Build app’s write still on its way to IndexedDB holds the reload until it lands (at most 2 s)', async () => {
+  let land; const flushing = new Promise((r) => { land = r; });
+  const calls = [];
+  const page = lifecycle({ tester: person('person-a'), appStore: { busy: () => true, flush: () => { calls.push('flush'); return flushing; } } });
+  page.S.thread = { id: 'empty', entries: [] }; // no thread save: only the app's write holds it
+  page.S.tester = person('person-b'); page.reloadWorkspace();
+  assert.deepEqual(calls, ['flush']);
+  await new Promise(setImmediate);
+  assert.ok(!page.events.includes('reload'), 'the page that would lose the write is still here');
+  land(); await page.reloaded();
+  assert.equal(page.events.filter((event) => event === 'reload').length, 1);
+  const stuck = lifecycle({ tester: person('person-a'), appStore: { busy: () => true, flush: () => new Promise(() => {}) } });
+  stuck.S.thread = { id: 'empty', entries: [] };
+  stuck.S.tester = person('person-b'); stuck.reloadWorkspace();
+  stuck.flushTimers(); // the 2 s fallback
+  assert.equal(stuck.events.filter((event) => event === 'reload').length, 1);
 });
 
 test('with nothing to save the reload is immediate', () => {

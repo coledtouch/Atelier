@@ -50,8 +50,8 @@ import {
   FORMAT, MEDIA_SYNC, MEDIA_HELD, TRANSIENT, syncId, validDate, isRev, sha256hex, utf8, utf8Length, fromBase64, base64Length, jsonClone, dehydrate,
   hydrate, mediaKinds, gateHeld, refsOf, refValue, reborn, bornOf, forkEntry, checkView, checkPulledEntry, newRecord, planPull, planPush, pushBodies,
   planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder, fullPrint, blobKind,
-} from './sync-merge.js?v=88';
-import { validateBackup } from './data-safety.js?v=88';
+} from './sync-merge.js?v=89';
+import { validateBackup } from './data-safety.js?v=89';
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 // The owner's choices and the engine's timing, kept together so they are easy to change.
@@ -117,11 +117,11 @@ export const COPY = Object.freeze({
   storage: 'Couldn’t save synced changes on this device — its storage may be full.',
   threadTrouble: 'Some threads couldn’t be downloaded — trying again shortly.',
   footnote: 'Threads sync privately to your studio account when sync is enabled. LinkedIn testers choose whether to enable private sync; otherwise their threads stay on this device. Settings, model choices and theme stay on each device.',
-  wipeSynced: 'Clears threads, media, profile and saved sign-in on this device. Your synced threads stay on your server and download again when you sign in to the same account.',
-  wipeConfirm: 'Clear Atelier threads, media, profile and saved sign-in on this device? Your synced threads stay on your Atelier server and download again when you sign in. Connected accounts stay too. This can’t be undone on this device.',
+  wipeSynced: 'Clears threads, media, app data, profile and saved sign-in on this device. Your synced threads stay on your server and download again when you sign in to the same account.',
+  wipeConfirm: 'Clear Atelier threads, media, app data, profile and saved sign-in on this device? Your synced threads stay on your Atelier server and download again when you sign in. Connected accounts stay too. This can’t be undone on this device.',
   // …while anything is only on this device (images and videos in phase 1, threads that don't sync, unsynced changes)
-  wipeSyncedLocal: 'Clears threads, media, profile and saved sign-in on this device. Export your threads first: images, videos and anything else that’s only on this device can’t be brought back. Synced threads stay on your server and download again when you sign in to the same account.',
-  wipeConfirmLocal: 'Clear Atelier threads, media, profile and saved sign-in on this device? Export your threads first: what’s only on this device can’t be brought back. Your synced threads stay on your Atelier server and download again when you sign in. Connected accounts stay too.',
+  wipeSyncedLocal: 'Clears threads, media, app data, profile and saved sign-in on this device. Export your threads first: images, videos and anything else that’s only on this device can’t be brought back. Synced threads stay on your server and download again when you sign in to the same account.',
+  wipeConfirmLocal: 'Clear Atelier threads, media, app data, profile and saved sign-in on this device? Export your threads first: what’s only on this device can’t be brought back. Your synced threads stay on your Atelier server and download again when you sign in. Connected accounts stay too.',
   navSynced: 'Threads synced across your devices', navPaused: 'Thread sync paused', navLocal: 'Threads saved on this device',
   removeSynced: 'Remove the threads that are already on your server from this browser? They stay on your server and download again when sync resumes. Threads with images, videos or changes that are only on this device stay here.',
   forkNote: 'Edited on two devices at the same time — both versions are kept.',

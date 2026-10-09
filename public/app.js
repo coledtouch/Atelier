@@ -7,27 +7,28 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=88';
-import * as Sync from './sync.js?v=88';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=88';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=88';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=88';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=88';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=88';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=88';
-import { initLookup } from './lookup.js?v=88';
-import { createRemix } from './remix-app.js?v=88';
-import { sendMode, looksLikeQuestion } from './remix.js?v=88';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=88';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=88';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=88';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=88';
-import * as ClaudeImport from './claude-import.js?v=88';
-import { createFeedback } from './feedback.js?v=88';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=88';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=88';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=88';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=88';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=89';
+import * as Sync from './sync.js?v=89';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=89';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=89';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=89';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=89';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=89';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=89';
+import { initLookup } from './lookup.js?v=89';
+import { createRemix } from './remix-app.js?v=89';
+import { sendMode, looksLikeQuestion } from './remix.js?v=89';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=89';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=89';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=89';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=89';
+import { createAppStore, createBridge, idbBackend, appKey, workspaceDb, fmtBytes } from './appdata.js?v=89';
+import * as ClaudeImport from './claude-import.js?v=89';
+import { createFeedback } from './feedback.js?v=89';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=89';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=89';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=89';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=89';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -269,16 +270,18 @@ function reloadWorkspace(external = false) {
   // Runs stop first, then the open thread is saved now: an edit or a result still inside persist's 400 ms debounce
   // would otherwise be lost (tester cookie expiry, a sign-in/out in another tab, a passcode change). The save goes to
   // THIS page's database (threadDbName is fixed when the page loads), before sync is suspended so it is still marked
-  // for upload; from here on nothing else is written. The reload waits for that save, at most 2 s.
+  // for upload; from here on nothing else is written. The reload waits for that save, at most 2 s, and so do the Build
+  // apps' writes still on their way to this page's app data database (appdata.js): a page that is unloading can't finish them.
   stopAll();
   const flushed = persist(true);
+  const apps = appStore.busy() ? appStore.flush() : null;
   accountReloading = true;
   Sync.suspend(); clearTimeout(persistTimer); S.thread = null;
   if (!external) { try { sessionStorage.setItem('atelier.accountResume', '1'); } catch {} }
-  if (!flushed) location.reload();
+  if (!flushed && !apps) location.reload();
   else {
     let gone = false; const reload = () => { if (!gone) { gone = true; location.reload(); } };
-    setTimeout(reload, 2000); flushed.then(reload, reload);
+    setTimeout(reload, 2000); Promise.allSettled([flushed, apps]).then(reload);
   }
   return true;
 }
@@ -1200,9 +1203,9 @@ Rules:
 - Everything inline (CSS in <style>, JS in <script>). No build step. Only if truly needed, load libraries from https://cdn.jsdelivr.net or https://unpkg.com.
 - Visual style: ${style}. Distinctive, polished, modern typography (Google Fonts allowed), cohesive color, thoughtful spacing, micro-interactions, empty states.
 - Fully responsive (phones first) and accessible (labels, focus states, contrast).
-- Fully functional — real logic, no fake placeholders. Persist state with localStorage but wrap every access in try/catch (the preview is sandboxed).
+- Fully functional — real logic, no fake placeholders. Persist state with localStorage (Atelier keeps it for this app, on this device; IndexedDB, cookies and sessionStorage don't last in the sandboxed preview) and wrap every access in try/catch.
 - Include a meaningful <title>.
-When asked to change an existing app, return the FULL updated file.`,
+When asked to change an existing app, return the FULL updated file, and keep its localStorage keys and data format (or migrate the old format) so what the user saved still loads.`,
   enhanceImage: () => `You rewrite short ideas into rich prompts for a text-to-image model. Describe subject, setting, composition, lighting, lens/medium and mood in one flowing paragraph under 70 words. Output only the final prompt wrapped in <prompt></prompt> tags — no drafts, notes or reasoning.`,
   enhanceVideo: () => `You rewrite a scene idea into a prompt for a text-to-video model generating a 4-second shot. Describe the subject, setting, camera movement, lighting and the motion that happens, in one flowing paragraph under 70 words. Output only the final prompt wrapped in <prompt></prompt> tags — no drafts, notes or reasoning.`,
   title: () => `Summarize the user's request as a 2-5 word title. Output only the title wrapped in <title></title> tags.`,
@@ -1490,6 +1493,7 @@ function paintEntry(li, e) {
         <div class="buildmeter">${statusLine(e.refineOf ? 'Rebuilding' : 'Building', e)}<span class="bar"><i></i></span></div>
         <pre class="appcode live">${esc(lines.slice(-18).join('\n'))}</pre></div>`;
     } else if (e.app?.html) {
+      const key = appKeyOf(e);
       const vtag = ver && ver.of > 1 ? `<span class="vtag" title="Version ${ver.n} of ${ver.of}">v${ver.n}</span>` : '';
       const baseNote = ver?.of > 1 && !ver.head && ver.newest && ver.headN ? `<div class="vnote">Next change applies to v${ver.headN}<button class="mini" data-act="ver-restore" aria-label="Apply the next change to v${ver.n} instead">Use v${ver.n}</button></div>`
         : ver && !ver.newest ? `<div class="vnote">Earlier version${ver.head ? ' · next change applies here' : ''}<button class="mini" data-act="ver-restore"${ver.head ? ' hidden' : ''}>${ICON.retry}Restore</button><button class="mini" data-act="ver-show" aria-expanded="true">Collapse</button></div>` : '';
@@ -1503,8 +1507,9 @@ function paintEntry(li, e) {
           <button class="mini" data-act="app-copy">${ICON.copy}Copy code</button>
           <span class="grow"></span>
           <button class="mini" data-act="app-refine" style="color:var(--accent)">${ICON.pen}Refine</button>
-        </div>${baseNote}</div>`;
-      $('iframe', out).srcdoc = guardFocus(e.app.html);
+        </div>${baseNote}${key ? appDataRow(key) : ''}</div>`;
+      appBridge.mount($('iframe', out), { key, html: e.app.html }); // its saved data (appdata.js): every version shares it
+      if (key) paintAppData(key, out);
       $('.appcode code', out).textContent = e.app.html;
       acts.innerHTML = btn('retry', ICON.retry, 'Rebuild');
     } else if (!e.error && e.text) {
@@ -1738,11 +1743,64 @@ document.addEventListener('visibilitychange', pauseDeviceOnHide);
 // Build previews run in a sandboxed frame. A generated app that calls focus() on load or on blur (games do, to grab the
 // arrow keys) keeps the keyboard even while a drawer makes #stage inert, so Escape, Tab and Ctrl+. never reach this page.
 // The guard lets a preview move focus only once the user is in it (clicked or tabbed in). Copy code / Download keep the raw html.
-function guardFocus(html) {
-  const guard = '<script>(()=>{const ok=()=>document.hasFocus(),h=HTMLElement.prototype.focus,s=SVGElement.prototype.focus,w=window.focus;HTMLElement.prototype.focus=function(...a){if(ok())return h.apply(this,a)};SVGElement.prototype.focus=function(...a){if(ok())return s.apply(this,a)};window.focus=function(){if(ok())return w.call(window)}})()<\/script>';
-  const m = /<head(\s[^>]*)?>/i.exec(html) || /^\s*<!doctype[^>]*>/i.exec(html);
-  const at = m ? m.index + m[0].length : 0;
-  return html.slice(0, at) + guard + html.slice(at);
+const FOCUS_GUARD = '<script>(()=>{const ok=()=>document.hasFocus(),h=HTMLElement.prototype.focus,s=SVGElement.prototype.focus,w=window.focus;HTMLElement.prototype.focus=function(...a){if(ok())return h.apply(this,a)};SVGElement.prototype.focus=function(...a){if(ok())return s.apply(this,a)};window.focus=function(){if(ok())return w.call(window)}})()<\/script>';
+
+// ── Build app data (appdata.js) ──
+// Every Build preview (its card, Full screen, the Library) is mounted through appBridge: the frame keeps its sandbox
+// (no allow-same-origin) and gets a storage shim holding its app's saved items; what the app writes comes back here, is
+// checked against the frame it came from, and lands in this workspace's own IndexedDB ("atelier-appdata…"). Device-local:
+// never synced, backed up or put in a download. A code block's HTML preview gets a shim that saves nothing.
+let appDataErrShown = false;
+const appStore = createAppStore({
+  backend: idbBackend(workspaceDb(workspace)),
+  channel: typeof BroadcastChannel === 'function' ? new BroadcastChannel(`atelier-appdata/${workspaceDb(workspace)}`) : null,
+  onChange: (key) => queueAppData(key),
+  onError: (err) => { console.error(err); if (!appDataErrShown) { appDataErrShown = true; toast('An app’s data couldn’t be saved on this device — storage may be full.', { error: true }); } },
+});
+let appRoomShown = false;
+const appBridge = createBridge({
+  store: appStore, origin: location.origin, head: FOCUS_GUARD, warn: (m) => console.warn('[atelier] app data:', m),
+  // A write the store refused (the 50 MB for all apps filled up after the app opened): the app shows it undone.
+  onRefused: () => { if (!appRoomShown) { appRoomShown = true; toast('An app’s change wasn’t saved: app data on this device is full. Clear app data on an app you no longer need.', { error: true }); } },
+  onStall: (key) => queueAppData(key), // an app reloading itself in a loop: its App data line says it isn't saving
+});
+window.addEventListener('message', (ev) => { appBridge.onMessage(ev); });
+setInterval(() => appBridge.sweep(), 10_000); // a preview gone from the page loses its port within ~15 s, even if idle
+// Writes start at once (appdata.js); a page that is hidden or closing tries whatever is still waiting.
+addEventListener('pagehide', () => { appStore.flush().catch(() => {}); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') appStore.flush().catch(() => {}); });
+// Atelier's own reloads (a new version) first let the Build apps' writes reach IndexedDB: at most `ms`.
+const appDataSaved = (ms = 2000) => (appStore.busy() ? Promise.race([appStore.flush().catch(() => {}), sleep(ms)]) : Promise.resolve());
+// The app a Build entry of the open thread belongs to ('' when it can't be named: that preview saves nothing).
+const appKeyOf = (e, thread = S.thread) => (thread ? appKey(thread.id, thread.entries, e) : '');
+const appDataRow = (key) => `<div class="appdata" data-appdata="${esc(key)}"><span class="appdata-size">App data</span><button class="mini" data-act="app-data-clear" hidden>${ICON.trash}Clear app data</button></div>`;
+// The "App data" line on every card of that app: how much it has saved here, and Clear app data when there is any.
+// root: where to look (a card being painted isn't in the stream yet).
+function paintAppData(key, root = stream) {
+  const rows = $$(`.appdata[data-appdata="${CSS.escape(key)}"]`, root);
+  if (!rows.length) return;
+  if (!appStore.peek(key)) { appStore.load(key).then(() => paintAppData(key), () => {}); return; }
+  const n = appStore.bytes(key), paused = appBridge.paused(key);
+  for (const row of rows) {
+    $('.appdata-size', row).textContent = paused ? 'App data · not saving while the app keeps reloading itself' : n ? `App data · ${fmtBytes(n)} on this device` : 'App data · nothing saved yet';
+    $('[data-act="app-data-clear"]', row).hidden = !n;
+  }
+}
+const appDataDirty = new Set();
+function queueAppData(key) {
+  if (!appDataDirty.size) requestAnimationFrame(() => { const keys = [...appDataDirty]; appDataDirty.clear(); for (const k of keys) paintAppData(k); });
+  appDataDirty.add(key);
+}
+async function clearAppData(e) {
+  const key = appKeyOf(e);
+  if (!key) return;
+  await appStore.load(key).catch(() => {});
+  const n = appStore.bytes(key);
+  if (!n) return paintAppData(key);
+  if (!confirm(`Clear what “${e.app.title}” saved on this device (${fmtBytes(n)})? Every version of this app shares it, so the app starts fresh. The thread and its versions stay.`)) return;
+  const done = appStore.clear(key);
+  appBridge.remount(key); // its open frames start over, empty
+  try { await done; toast('App data cleared'); } catch (err) { console.error(err); toast('Couldn’t clear the app’s data on this device. Try again.', { error: true }); }
 }
 // The ONE error card: serif title by kind, raw detail in mono, recovery buttons inside the card.
 function errorBox(e) {
@@ -3056,7 +3114,8 @@ stream.addEventListener('click', async (ev) => {
       if (code) highlightIn(pre);
       return;
     }
-    case 'app-full': return openViewer({ title: e.app.title, html: e.app.html, full: true, dl: () => download(e.app.html, slug(e.app.title) + '.html', 'text/html') });
+    case 'app-full': return openViewer({ title: e.app.title, html: e.app.html, app: appKeyOf(e), full: true, dl: () => download(e.app.html, slug(e.app.title) + '.html', 'text/html') });
+    case 'app-data-clear': return clearAppData(e);
     case 'app-download': return download(e.app.html, slug(e.app.title) + '.html', 'text/html');
     case 'app-copy': return copy(e.app.html);
     case 'app-refine': // refine THIS version: it becomes the head (Restore) when it isn't already
@@ -4278,10 +4337,14 @@ $('#threadMenuForm').addEventListener('submit', async (ev) => {
 async function deleteSavedThread(id) {
   if (S.busy) return toast('Wait for generation to finish before deleting a thread.');
   if (remix?.activeThreads().has(id) && !confirm(remix.deleteWarning(id))) return;
-  if (!confirm(Sync.on() ? await Sync.deleteCopy(id) : 'Delete this thread?')) return;
+  const ask = Sync.on() ? await Sync.deleteCopy(id) : 'Delete this thread?';
+  if (!confirm(ask)) return;
   const wasOpen = S.thread?.id === id;
   if (wasOpen) { clearTimeout(persistTimer); S.thread = null; }
   await Sync.deleteThread(id); remix?.forgetThread(id);
+  // Its Build apps' data (appdata.js): while Recently deleted can bring the thread back (30 days) it stays on this device
+  // for that restore, and the boot prune deletes it afterwards; a delete that can't be undone takes it now.
+  if (!ask.startsWith(Sync.COPY.deleteConfirm)) appStore.forgetThread(id).catch((err) => console.error(err));
   pinnedThreads.delete(id); LS.set(workspaceKey('pinnedThreads'), [...pinnedThreads]);
   if (wasOpen) startFresh();
   renderThreads(); renderRecentThreads(); $('#threadMenuDialog').close();
@@ -4393,7 +4456,7 @@ $('#libGrid').addEventListener('click', (ev) => {
   const el = ev.target.closest('.lib-item[data-i]'); if (!el) return;
   if (el.classList.contains('lib-wrap') && !ev.target.closest('.lib-open')) return;
   const x = libItems[+el.dataset.i]; if (!x) return;
-  if (x.type === 'app') return openViewer({ title: x.e.app.title, html: x.e.app.html, full: true, dl: () => download(x.e.app.html, slug(x.e.app.title) + '.html', 'text/html') });
+  if (x.type === 'app') return openViewer({ title: x.e.app.title, html: x.e.app.html, app: appKey(x.t.id, x.t.entries, x.e), full: true, dl: () => download(x.e.app.html, slug(x.e.app.title) + '.html', 'text/html') });
   const media = x.type === 'video' ? { video: x.src, poster: libThumbs.get(libKey(x)) || x.still } : { img: x.src };
   openViewer({ title: x.e.prompt, ...media, dl: () => dlMedia(x.e, x.k) });
 });
@@ -4779,12 +4842,16 @@ $('#canvaPick').addEventListener('click', (ev) => {
 
 // ───────────────────────── viewer ─────────────────────────
 // The ONE media/app viewer. `more` ({ id, k } of a stream image) adds Animate/Edit/Variation, proxied to that shot's own buttons.
-function openViewer({ title, img, video, poster, frames, html, full, dl, more }) {
+// `app`: a Build app's key (appdata.js): the preview gets that app's saved data, as its card does. Download is the app as
+// it was generated: none of the data goes in the file (it can be shared), and the file uses its own browser storage.
+let viewerApp = null; // { key, version } of the app in the viewer, to start its cards over if it saved something there
+function openViewer({ title, img, video, poster, frames, html, app = '', full, dl, more }) {
   viewerReturn = document.activeElement;
   const v = $('#viewer'), body = $('#viewerBody'), t = $('#viewerTitle');
   t.textContent = title || ''; t.title = title || ''; t.classList.remove('open');
   body.className = 'viewer-body' + (full ? ' full' : '');
   body.innerHTML = '';
+  appViewerDone();
   if (img) body.append(Object.assign(new Image(), { src: img, alt: title || '', decoding: 'async' }));
   if (video) {
     const el = Object.assign(document.createElement('video'), { controls: true, loop: true, playsInline: true, preload: 'auto' });
@@ -4805,7 +4872,8 @@ function openViewer({ title, img, video, poster, frames, html, full, dl, more })
     const f = document.createElement('iframe');
     f.title = title || 'App preview';
     f.sandbox = 'allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock allow-downloads';
-    f.srcdoc = guardFocus(html);
+    appBridge.mount(f, { key: app, html }); // a code block's preview (no app key) gets a shim that saves nothing
+    viewerApp = app ? { key: app, version: appStore.version(app) } : null;
     body.append(f);
   }
   const fromShot = (a) => more && stream.querySelector(`.entry[data-id="${more.id}"] [data-act="${a}"][data-k="${more.k}"]`);
@@ -4818,7 +4886,15 @@ function openViewer({ title, img, video, poster, frames, html, full, dl, more })
   v.hidden = false;
   syncOverlay(); $('#viewerClose').focus();
 }
-$('#viewerClose').onclick = () => { $('#viewer').hidden = true; $('#viewerBody').innerHTML = ''; syncOverlay(); if (viewerReturn?.isConnected) viewerReturn.focus({ preventScroll: true }); };
+$('#viewerClose').onclick = () => {
+  $('#viewer').hidden = true; $('#viewerBody').innerHTML = ''; syncOverlay(); appViewerDone();
+  if (viewerReturn?.isConnected) viewerReturn.focus({ preventScroll: true });
+};
+// The app in the viewer saved something there: its cards in the thread start over with it (they still show the old state).
+function appViewerDone() {
+  const was = viewerApp; viewerApp = null;
+  if (was && appStore.version(was.key) !== was.version) appBridge.remount(was.key);
+}
 $('#viewerTitle').addEventListener('click', (ev) => ev.currentTarget.classList.toggle('open'));
 $('#viewerBody').addEventListener('click', (ev) => { if (ev.target === ev.currentTarget && !ev.currentTarget.classList.contains('full')) $('#viewerClose').click(); });
 
@@ -5153,13 +5229,14 @@ $('#wipeBtn').onclick = async () => {
   // named first; the export advice stays whenever there is any.
   const onlyHere = await Sync.wipeWarning();
   if (onlyHere && !confirm(onlyHere)) return;
-  if (!confirm(Sync.on() ? (onlyHere ? Sync.COPY.wipeConfirmLocal : Sync.COPY.wipeConfirm) : 'Clear Atelier threads, media, profile and saved sign-in on this device? Export your threads first. This cannot be undone. Your synced profile and connected accounts on the server will remain.')) return;
+  if (!confirm(Sync.on() ? (onlyHere ? Sync.COPY.wipeConfirmLocal : Sync.COPY.wipeConfirm) : 'Clear Atelier threads, media, app data, profile and saved sign-in on this device? Export your threads first. This cannot be undone. Your synced profile and connected accounts on the server will remain.')) return;
   try {
     clearTimeout(persistTimer); clearTimeout(meTimer);
     await reader.clearCache(); // Read aloud clips (Cache Storage 'atelier-tts'); its localStorage keys go with atelier.* below
     if (S.tester) await fetch('/api/li/logout', { method: 'POST' }).catch(() => {}); // "saved sign-in" includes the tester session
     remix?.wipe(); // stop filming jobs and drop pending remix drafts: nothing writes rx:* after kvClear
     await Sync.forget(); await DB.clear(); await DB.kvClear(); // forget: the sync state goes, nothing is deleted on the server; this workspace's threads and kv keys only
+    await appStore.clearAll(); // this workspace's Build app data (appdata.js; its own database, never another account's)
     // Prevent the legacy migration from restoring erased conversations on reload. The old "atelier" database holds the
     // owner's not-yet-copied threads: only the owner's own Clear this device may delete it.
     if (workspace === 'owner') await new Promise((res, rej) => { const r = indexedDB.deleteDatabase('atelier'); r.onsuccess = res; r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('Close other Atelier tabs and try clearing this device again.')); });
@@ -6243,7 +6320,7 @@ $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
 
 // The build feedback reports when app.js was loaded without its ?v= (scripts/bump-version.mjs moves it with sw.js VERSION).
-const APP_BUILD = '88';
+const APP_BUILD = '89';
 const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || APP_BUILD}`, online: navigator.onLine !== false }), toast });
 $('#feedbackBtn').onclick = () => feedback.open();
 $('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };
@@ -6582,6 +6659,9 @@ window.atelierBoot?.started();
     if (t && Date.now() - t.updatedAt < 6 * 36e5) { S.thread = recoverThread(t); renderThread(); renderOptions(); requestAnimationFrame(() => scrollDown(true, true)); }
   }
   remix.boot().catch((err) => console.warn('[atelier] remix resume', err)); // reads rx:ops once, resumes polling, prunes rx:*
+  // Build app data of threads no longer on this device (in Recently deleted, deleted on another device): kept 30 days from
+  // when this device first finds the thread gone, so a restore brings it back, then deleted (appdata.js prune).
+  DB.keys().then((ids) => appStore.prune(ids)).catch((err) => console.warn('[atelier] app data prune', err));
   refreshClaudeCount(); // imported Claude chats: the accounts agent offers its history tools while there are any
 
   if (!S.settings.passcode) {
@@ -6647,7 +6727,7 @@ window.atelierBoot?.started();
       const reloadWhenIdle = () => {
         if (reloaded) return;
         if (S.busy || Sync.busy() || dictation.busy() || hasDraft() || sendHold || micOn() || lookup.pinned() || $('dialog[open]') || $('.drawer:not([hidden])') || !$('#viewer').hidden || learning) return setTimeout(reloadWhenIdle, 3000);
-        reloaded = true; location.reload();
+        reloaded = true; appDataSaved().then(() => location.reload()); // a Build app's last write lands first
       };
       navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) reloadWhenIdle(); });
       navigator.serviceWorker.register('/sw.js').then((r) => r.update()).catch(() => {});

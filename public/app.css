@@ -446,6 +446,10 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 .appver .mini, .vnote .mini, .appcard.queued .mini { min-height: 44px; }
 .vnote { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 2px 8px 2px 14px; border-top: 1px solid var(--line); font: 500 11.5px/1.3 var(--mono); color: var(--ink-3); }
 .vnote .mini:first-of-type { margin-left: auto; }
+/* Build app data (appdata.js): what this app saved on this device, and Clear app data */
+.appdata { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 36px; padding: 2px 8px 2px 14px; border-top: 1px solid var(--line); font: 500 11.5px/1.3 var(--mono); color: var(--ink-3); }
+.appdata .appdata-size { min-width: 0; overflow-wrap: anywhere; }
+.appdata .mini { margin-left: auto; min-height: 44px; }
 .appcard.queued .buildmeter { flex-wrap: wrap; }
 .options .chip.refine-chip { max-width: min(62vw, 320px); }
 .options .chip.refine-chip { overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: calc(var(--opt-h, 28px) - 2px); }
