@@ -7,25 +7,26 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=85';
-import * as Sync from './sync.js?v=85';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=85';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=85';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=85';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint } from './context.js?v=85';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=85';
-import { initLookup } from './lookup.js?v=85';
-import { createRemix } from './remix-app.js?v=85';
-import { sendMode, looksLikeQuestion } from './remix.js?v=85';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=85';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=85';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=85';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=85';
-import * as ClaudeImport from './claude-import.js?v=85';
-import { createFeedback } from './feedback.js?v=85';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=85';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=85';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=85';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=86';
+import * as Sync from './sync.js?v=86';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=86';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=86';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=86';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint } from './context.js?v=86';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=86';
+import { initLookup } from './lookup.js?v=86';
+import { createRemix } from './remix-app.js?v=86';
+import { sendMode, looksLikeQuestion } from './remix.js?v=86';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION } from './readaloud.js?v=86';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=86';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=86';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=86';
+import * as ClaudeImport from './claude-import.js?v=86';
+import { createFeedback } from './feedback.js?v=86';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=86';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=86';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=86';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=86';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -4705,6 +4706,14 @@ $('#diagBtn').onclick = async () => {
   } catch (err) { box.innerHTML = `<span class="err">${esc(netText(err))}</span>`; }
   finally { done(); box.removeAttribute('aria-busy'); }
 };
+// Settings → Advanced diagnostics → Recent app errors: what index.html's boot watchdog reported (public/app-errors.js).
+$('#appErrorsBtn').onclick = async () => {
+  const box = $('#appErrorsOut'); const done = busyBtn($('#appErrorsBtn'), 'Loading…');
+  box.setAttribute('aria-busy', 'true');
+  try { renderAppErrors(box, await loadAppErrors(apiHeaders())); }
+  catch (err) { box.replaceChildren(Object.assign(document.createElement('p'), { className: 'ae-empty ae-err', textContent: netText(err) })); }
+  finally { done(); box.removeAttribute('aria-busy'); }
+};
 $('#testPassBtn').onclick = async () => {
   const r = $('#passResult');
   r.className = 'hint'; r.textContent = '';
@@ -5997,7 +6006,7 @@ $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
 
 // The build feedback reports when app.js was loaded without its ?v= (scripts/bump-version.mjs moves it with sw.js VERSION).
-const APP_BUILD = '85';
+const APP_BUILD = '86';
 const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || APP_BUILD}`, online: navigator.onLine !== false }), toast });
 $('#feedbackBtn').onclick = () => feedback.open();
 $('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };
@@ -6271,6 +6280,9 @@ remix = createRemix({
   entryById: (id) => S.thread?.entries.find((x) => x.id === id) || [...liveThreads.values()].flatMap((t) => t.entries).find((x) => x.id === id) || null,
   threadIsOpen: (id) => S.thread?.id === id || liveThreads.has(id),
 });
+// The boot watchdog (index.html #bootWatch): every module ran, boot() starts now. booted() below once the first screen is
+// usable; a boot() that throws opens its recovery screen (Reload, Repair offline copy) instead of a half-drawn page.
+window.atelierBoot?.started();
 (async function boot() {
   const params = new URLSearchParams(location.search); // still read below for ?tester= and ?connected=
   // Quick launch: shortcuts (?start=), the iPhone Shortcut (#…&q=), shares (?share=), legacy ?mode= and GET shares.
@@ -6404,4 +6416,7 @@ remix = createRemix({
     }
   }
   document.fonts?.ready.then(moveInk);
-})();
+})().then(() => window.atelierBoot?.booted(), (err) => {
+  console.error('[atelier] boot failed', err);
+  window.atelierBoot?.failed(err);
+});

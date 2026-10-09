@@ -221,6 +221,9 @@ test('_headers: every external stylesheet the pages link to is allowed by the re
     assert.ok(external.length > 0, `${page} loads Google Fonts`);
     for (const tag of external) assert.ok(csp['style-src'].includes(new URL(attr(tag, 'href')).origin), `${page}: ${tag}`);
     for (const [, src] of html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)) assert.ok(src.startsWith('/'), `${page}: scripts are same-origin (${src})`);
-    assert.ok(!/<script(?![^>]*\bsrc=)[^>]*>/.test(html), `${page}: no inline <script>`);
+    // The one exception is index.html's boot watchdog: it must run when app.js can't (tests/boot-watch.test.mjs checks
+    // the policy allows it). Any other inline script fails here.
+    const inline = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>/g)].map(([tag]) => tag);
+    assert.deepEqual(inline, page === 'index.html' ? ['<script id="bootWatch">'] : [], `${page}: no inline <script> but the boot watchdog`);
   }
 });

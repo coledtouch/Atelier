@@ -166,9 +166,10 @@ export const TESTER_ROUTES = Object.freeze([
   VIDEO('POST', 'upload/start'), VIDEO('PUT', 'upload/chunk'), VIDEO('POST', 'upload/query'), VIDEO('POST', 'upload/cancel'),
   VIDEO('GET', 'file'), VIDEO('DELETE', 'file'),
 ]);
-// Reached by everyone before identity is checked (worker.js): health, CSP reports, the LinkedIn sign-in routes and the
-// extension relay socket (authenticated by its device token only, so a tester cookie in the owner's browser never breaks it).
-export const PUBLIC_PATHS = Object.freeze(['health', 'csp-report', 'li/', 'relay/ws']);
+// Reached by everyone before identity is checked (worker.js): health, CSP reports, app error reports (POST public; the
+// owner's GET checks the passcode itself, src/client-errors.js), the LinkedIn sign-in routes and the extension relay
+// socket (authenticated by its device token only, so a tester cookie in the owner's browser never breaks it).
+export const PUBLIC_PATHS = Object.freeze(['health', 'csp-report', 'client-error', 'li/', 'relay/ws']);
 
 export function matchTesterRoute(method, path) {
   for (const route of TESTER_ROUTES) {

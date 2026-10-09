@@ -19,6 +19,7 @@ import { handleLookup } from './lookup.js';
 import { handleTranscribe } from './transcribe.js';
 import { ownerSpend, handleOwnerApi, imageQuote, imageSettle, IMAGE_BODY_MAX, isGatewayStatus } from './spend.js';
 import { testersOn } from './tester/ledger.js';
+import { handleClientError } from './client-errors.js';
 export { Relay } from './relay.js';
 export { Ledger } from './tester/ledger.js';
 
@@ -400,6 +401,10 @@ async function handleApi(req, env, url) {
   }
   // POST /api/csp-report → CSP violation reports from browsers (public; see handleCspReport).
   if (path === 'csp-report') return handleCspReport(req, env);
+  // POST /api/client-error → a start-up or runtime error report from the app's boot watchdog (index.html #bootWatch).
+  // Public and answered before identity, like csp-report: a crash can come before the passcode is known (same-origin,
+  // capped, rate-limited per IP by ERR_LIMIT; src/client-errors.js). GET → the newest reports, passcode only.
+  if (path === 'client-error') return handleClientError(req, env, { owner: passOk(req, env) });
 
   // ── LinkedIn testers (docs/superpowers/specs/2026-09-30-atelier-tester-access-*.md), behind TESTERS_ENABLED ──
   // Public before identity: health, csp-report, the sign-in routes and relay/ws. Then: passcode → owner (wins over a

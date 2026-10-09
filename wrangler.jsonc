@@ -32,7 +32,11 @@
   "ratelimits": [
     { "name": "LI_LIMIT", "namespace_id": "4711", "simple": { "limit": 20, "period": 60 } },
     { "name": "LOOKUP_LIMIT", "namespace_id": "4712", "simple": { "limit": 30, "period": 60 } },
-    { "name": "WIKI_LIMIT", "namespace_id": "4713", "simple": { "limit": 120, "period": 60 } }
+    { "name": "WIKI_LIMIT", "namespace_id": "4713", "simple": { "limit": 120, "period": 60 } },
+    // App error reports (POST /api/client-error, src/client-errors.js): 10 a minute per IP (an IPv6 address by its /64).
+    // Public, since a start-up crash can come before the passcode; the Worker also caps each isolate at 30 a minute and
+    // refuses versions that aren't deployed, and the Ledger keeps only 50, taking at most 20 new ones an hour.
+    { "name": "ERR_LIMIT", "namespace_id": "4714", "simple": { "limit": 10, "period": 60 } }
   ],
   // Owner thread sync: private R2 bucket (threads as JSON docs, media and long text as SHA-256 blobs). Passcode only.
   // Create it once before deploying (owner approval): npx wrangler r2 bucket create atelier-sync. Never public.

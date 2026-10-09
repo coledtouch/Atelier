@@ -22,16 +22,377 @@
   <meta property="og:image:height" content="628" />
   <meta property="og:image:alt" content="Atelier — Come make something yours." />
   <meta name="twitter:card" content="summary_large_image" />
+  <!-- Boot watchdog: never a dead end. Inline, apart from app.js, so it runs when app.js can't load or parse, and ahead
+       of the stylesheets so a slow font can't hold it up; the style block is all it needs, so it reads fine without
+       app.css. The CSP allows both through 'unsafe-inline' (public/_headers; tests/boot-watch.test.mjs checks the policy
+       still allows this script: 'unsafe-inline' today, or its sha256 hash if that ever goes). app.js calls
+       atelierBoot.started() as boot() begins, booted() once the first screen is usable and failed(err) if boot() throws.
+       Timeline, counted only while the page is visible (a phone that slept doesn't count):
+         8 s   "Still opening…", a small card with nothing to press: a slow network is not a crash. A plain element, not a
+               <dialog>: it takes no focus, and the app's dialog[open] checks (toast placement, launch) never count it.
+         20 s  Reload and Repair offline copy are offered; boot can still finish, and the card goes away.
+       A module that fails to load or run, or a boot() that throws: the recovery screen at once, a modal <dialog> that
+       Esc or Android back can't dismiss (it comes straight back). Offline: "You're offline", Try again, and one retry by
+       itself when the connection is back. A file that didn't arrive with no server error seen (most likely the
+       connection): "Couldn't finish downloading", Try again; the same again in this tab offers Repair too. Nothing else
+       reloads or repairs by itself, so it can't loop. Repair checks the server answers first, then unregisters the service
+       worker and deletes only the atelier-v<N> caches: IndexedDB, localStorage and the atelier-share cache are never
+       opened, and a pending ?share=<id> rides along to the reload so the next start still finds it.
+       Error reports (POST /api/client-error, src/client-errors.js): version, kind, error name, the failing file's path
+       inside the app, line/column, same-origin frames, platform class and start-up phase; never the message, a URL
+       query or anything typed. Five a session at most, each failure once. -->
+  <style id="bootWatchStyle">
+    #atelierRecovery { position: fixed; inset: 0; z-index: 2147483647; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; border: 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); background: transparent; color: #ece6d9; overflow: auto; overscroll-behavior: contain; pointer-events: none; color-scheme: dark; text-align: left; font: 400 15px/1.55 'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%; }
+    dialog#atelierRecovery:not([open]) { display: none; }
+    #atelierRecovery * { box-sizing: border-box; }
+    #atelierRecovery [hidden] { display: none !important; }
+    #atelierRecovery::backdrop { background: #0e0d0b; }
+    #atelierRecovery .ar-card { pointer-events: auto; width: 100%; max-width: 420px; margin: 0; padding: 16px 18px 18px; border: 1px solid rgba(236, 230, 217, 0.14); border-radius: 18px; background: #161511; box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.8); }
+    #atelierRecovery.ar-modal { pointer-events: auto; justify-content: center; padding: calc(28px + env(safe-area-inset-top)) 20px calc(28px + env(safe-area-inset-bottom)); background: #0e0d0b radial-gradient(120% 55% at 50% 108%, rgba(200, 242, 90, 0.13), transparent 62%); }
+    #atelierRecovery.ar-modal .ar-card { max-width: 460px; margin: auto 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+    #atelierRecovery .ar-brand { display: none; align-items: center; gap: 10px; margin: 0 0 32px; font: 400 26px/1 'Instrument Serif', 'Iowan Old Style', Georgia, serif; letter-spacing: -0.01em; color: #ece6d9; }
+    #atelierRecovery.ar-modal .ar-brand { display: flex; }
+    #atelierRecovery .ar-mark { flex: none; width: 28px; height: 28px; border-radius: 8px; background: #1e1c17 url('/icons/atelier-mark-96.png') center / contain no-repeat; }
+    #atelierRecovery .ar-eyebrow { display: flex; align-items: center; gap: 9px; margin: 0 0 9px; font: 500 10.5px/1 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.18em; text-transform: uppercase; color: #9a9488; }
+    #atelierRecovery.ar-modal .ar-eyebrow { display: none; }
+    #atelierRecovery .ar-pulse { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #c8f25a; animation: arPulse 1.4s ease-in-out infinite; }
+    @keyframes arPulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { #atelierRecovery .ar-pulse { animation: none; } }
+    #atelierRecovery .ar-title { margin: 0 0 6px; font: 400 28px/1.05 'Instrument Serif', 'Iowan Old Style', Georgia, serif; letter-spacing: -0.015em; color: #ece6d9; text-transform: none; }
+    #atelierRecovery.ar-modal .ar-title { margin: 0 0 16px; font-size: clamp(42px, 12vw, 60px); line-height: 0.98; letter-spacing: -0.02em; }
+    #atelierRecovery .ar-title em { font: inherit; font-style: italic; color: #c8f25a; }
+    #atelierRecovery .ar-body { margin: 0; max-width: 36em; color: #a8a295; }
+    #atelierRecovery.ar-modal .ar-body { font-size: 16px; }
+    #atelierRecovery .ar-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
+    #atelierRecovery.ar-modal .ar-actions { margin-top: 28px; }
+    #atelierRecovery .ar-btn { appearance: none; -webkit-appearance: none; display: inline-flex; align-items: center; justify-content: center; min-height: 46px; margin: 0; padding: 0 22px; border: 1px solid rgba(236, 230, 217, 0.2); border-radius: 12px; background: rgba(255, 248, 230, 0.06); color: #ece6d9; font: 600 15px/1.2 'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, sans-serif; letter-spacing: 0; text-transform: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    #atelierRecovery .ar-primary { border-color: #c8f25a; background: #c8f25a; color: #0e0d0b; }
+    #atelierRecovery .ar-btn:disabled { opacity: 0.5; cursor: default; }
+    #atelierRecovery button:focus-visible { outline: 2px solid #c8f25a; outline-offset: 3px; }
+    #atelierRecovery .ar-note { margin: 12px 0 0; max-width: 36em; font-size: 13px; line-height: 1.5; color: #9a9488; }
+    #atelierRecovery .ar-details { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 30px 0 0; padding: 14px 0 0; border-top: 1px solid rgba(236, 230, 217, 0.1); }
+    #atelierRecovery .ar-link { appearance: none; -webkit-appearance: none; min-height: 44px; margin: 0; padding: 0; border: 0; background: none; color: #ece6d9; font: 500 12px/1.2 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.04em; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+    #atelierRecovery .ar-code { flex: 1 1 100%; font: 400 12px/1.5 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; color: #9a9488; overflow-wrap: anywhere; -webkit-user-select: all; user-select: all; }
+    #atelierRecovery .ar-status { margin: 12px 0 0; font-size: 14px; color: #ece6d9; }
+    #atelierRecovery .ar-status:empty { display: none; }
+    @media (max-width: 480px) { #atelierRecovery.ar-modal .ar-btn { flex: 1 1 100%; } }
+  </style>
+  <script id="bootWatch">
+  (function () {
+    'use strict';
+    var w = window, d = w.document, nav = w.navigator || {};
+    var SLOW_MS = 8000, STALL_MS = 20000, TICK_MS = 500, MAX_REPORTS = 5;
+    var SENT = 'atelier.errReports', REPAIRED = 'atelier.repairedAt', RETRY = 'atelier.autoRetryAt', TWA = 'atelier.twa', NETFAIL = 'atelier.netFailAt';
+    var FILE = /^\/(?:vendor\/)?[a-z0-9][a-z0-9-]{0,40}\.(?:m?js|html)$/, NAME = /^[A-Za-z_$][\w$.]{0,47}$/;
+    var TEXT = {
+      slow: ['Still ', 'opening…', 'This is taking a little longer than usual.'],
+      stalled: ['Still ', 'opening…', 'Atelier is taking longer than usual. You can keep waiting, or reload.'],
+      stalledOffline: ['Still ', 'opening…', 'You’re offline, so Atelier is opening from what’s saved on this device. You can keep waiting, or reload.'],
+      error: ['Atelier didn’t ', 'open.', 'Something in this version stopped it from starting. Your threads, settings and media are safe on this device.'],
+      download: ['Couldn’t finish ', 'downloading.', 'Part of Atelier didn’t arrive, most likely because the connection dropped. Your threads, settings and media are safe on this device.'],
+      downloadAgain: ['Atelier didn’t ', 'open.', 'Part of Atelier didn’t arrive again. If your connection is fine, Repair downloads all of its files again. Your threads, settings and media are safe on this device.'],
+      offline: ['You’re ', 'offline.', 'Atelier couldn’t finish opening without a connection. Your threads, settings and media are safe on this device, and it will try again when you’re back online.']
+    };
+    var state = 'waiting', phase = 'loading', visible = 0, last = clock(), fatal = null, netAgain = false, busy = false, stallSent = false, memo = { n: 0, keys: [] }, ui = null;
+    function noop() {}
+    function clock() { try { return w.performance.now(); } catch (e) { return Date.now(); } }
+    function online() { return nav.onLine !== false; }
+    function sget(k) { try { return w.sessionStorage.getItem(k); } catch (e) { return null; } }
+    function sset(k, v) { try { w.sessionStorage.setItem(k, v); } catch (e) {} }
+    // Resolves with p's value, or with `or` after ms.
+    function race(p, ms, or) { return new Promise(function (ok) { var t = w.setTimeout(function () { ok(or); }, ms); Promise.resolve(p).then(function (v) { w.clearTimeout(t); ok(v); }, function () { w.clearTimeout(t); ok(or); }); }); }
+
+    // ── platform class: ios-standalone, android-twa, desktop-browser… (the TWA is told by its first android-app:// referrer) ──
+    var ua = String(nav.userAgent || ''), standalone = false;
+    try { standalone = nav.standalone === true || Boolean(w.matchMedia && w.matchMedia('(display-mode: standalone), (display-mode: fullscreen), (display-mode: window-controls-overlay)').matches); } catch (e) {}
+    var ios = /iPhone|iPad|iPod/.test(ua) || (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1), android = /Android/i.test(ua);
+    if (android && standalone && String(d.referrer || '').indexOf('android-app://') === 0) sset(TWA, '1');
+    var platform = ios ? (standalone ? 'ios-standalone' : 'ios-browser')
+      : android ? (sget(TWA) === '1' ? 'android-twa' : standalone ? 'android-standalone' : 'android-browser')
+      : standalone ? 'desktop-standalone' : 'desktop-browser';
+
+    // ── what a report may say ──
+    function version() {
+      var s = d.querySelector && d.querySelector('script[type="module"]'), m = s && /[?&]v=(\d{1,6})(?:&|$)/.exec(s.getAttribute('src') || '');
+      return m ? m[1] : '0';
+    }
+    // A same-origin app file → its path ('/app.js', '/vendor/marked.js'; the page itself is '/index.html'), else ''.
+    // The query, the fragment and other sites' files never leave this function.
+    function appPath(url) {
+      if (!url) return '';
+      try {
+        var u = new URL(String(url), w.location.href), p = u.pathname === '/' ? '/index.html' : u.pathname;
+        return u.origin === w.location.origin && FILE.test(p) ? p : '';
+      } catch (e) { return ''; }
+    }
+    // A stack → up to 6 same-origin frames as path:line:col. V8 puts the message first: only its "at" lines are read.
+    function frames(stack) {
+      var lines = String(stack || '').slice(0, 8000).split('\n'), v8 = false, out = [], i, m, p;
+      for (i = 0; i < lines.length; i++) if (/^\s+at\s/.test(lines[i])) { v8 = true; break; }
+      for (i = 0; i < lines.length && out.length < 6; i++) {
+        if (v8 && !/^\s+at\s/.test(lines[i])) continue;
+        m = /(https?:\/\/[^\s()]+?):(\d{1,7}):(\d{1,7})\)?\s*$/.exec(lines[i]);
+        if (m && (p = appPath(m[1]))) out.push(p + ':' + m[2] + ':' + m[3]);
+      }
+      return out;
+    }
+    function whole(n) { return typeof n === 'number' && n >= 0 && n <= 9999999 && n % 1 === 0; }
+    function build(kind, info) {
+      info = info || {};
+      var f = frames(info.stack), file = appPath(info.file), top = !file && f.length ? /^(.+):(\d+):(\d+)$/.exec(f[0]) : null;
+      var r = { v: version(), kind: kind, name: typeof info.name === 'string' && NAME.test(info.name) ? info.name : 'Error', platform: platform, phase: phase,
+        online: online(), sw: Boolean(nav.serviceWorker && nav.serviceWorker.controller) };
+      if (file) { r.file = file; if (whole(info.line)) r.line = info.line; if (whole(info.col)) r.col = info.col; }
+      else if (top) { r.file = top[1]; r.line = Number(top[2]); r.col = Number(top[3]); }
+      if (f.length) r.stack = f;
+      if (kind === 'load') r.net = info.net === true; // no server error was seen: most likely the connection
+      return r;
+    }
+    // Each failure once, at most MAX_REPORTS a session (sessionStorage; this page's memory when that is blocked).
+    function send(r) {
+      var key = [r.kind, r.name, r.file || '', r.line || 0, r.col || 0].join('|'), log = memo;
+      try { var saved = JSON.parse(sget(SENT) || 'null'); if (saved && typeof saved.n === 'number' && Array.isArray(saved.keys)) log = saved; } catch (e) {}
+      if (log.n >= MAX_REPORTS || log.keys.indexOf(key) >= 0) return false;
+      log.n++; log.keys.push(key); memo = log; sset(SENT, JSON.stringify(log));
+      try { w.fetch('/api/client-error', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(r), keepalive: true, credentials: 'omit', cache: 'no-store' }).catch(noop); } catch (e) {}
+      return true;
+    }
+    function failure(kind, info, isFatal) {
+      var r = build(kind, info);
+      if (isFatal && state !== 'booted') {
+        if (!fatal) { // the first one is the cause
+          fatal = r;
+          // A file that didn't arrive: Try again first. The same again within 10 minutes in this tab offers Repair too.
+          if (r.net && online()) { netAgain = Date.now() - (Number(sget(NETFAIL)) || 0) < 600000; sset(NETFAIL, String(Date.now())); }
+        }
+        show(online() ? 'error' : 'offline');
+      }
+      send(r);
+      return r;
+    }
+    // Chrome names, in Resource Timing, a module that answered with an error status, or with a page instead of a script
+    // (a missing file gets index.html with 200 from the single-page-app fallback): a broken version. Nothing there (a
+    // dropped connection, or Safari, which shows neither) → '', and the report names app.js.
+    function failedModule() {
+      try {
+        var list = w.performance.getEntriesByType('resource'), i, x, p;
+        for (i = list.length - 1; i >= 0; i--) {
+          x = list[i];
+          if ((x.responseStatus >= 400 || /^text\/html\b/i.test(String(x.contentType || ''))) && (p = appPath(x.name)) && /\.m?js$/.test(p)) return p;
+        }
+      } catch (e) {}
+      return '';
+    }
+
+    // ── listeners: kept for the page's life; only failures before boot finishes can open the recovery screen ──
+    w.addEventListener('error', function (e) {
+      try {
+        var t = e && e.target, p;
+        if (t && t !== w && t.nodeType === 1) { // a file that failed to load (only a capturing listener sees it)
+          if (String(t.nodeName).toUpperCase() !== 'SCRIPT' || !(p = appPath(t.src))) return;
+          var broke = failedModule();
+          failure('load', { name: 'LoadError', file: broke || p, net: !broke }, phase === 'loading' && p.indexOf('/vendor/') !== 0);
+          return;
+        }
+        var err = e && e.error, file = appPath(e && e.filename), info = { name: err && err.name, file: e && e.filename, line: e && e.lineno, col: e && e.colno, stack: err && err.stack };
+        if (!file && !frames(info.stack).length) return; // not Atelier's code: an extension, another site's script
+        if (!err && !(info.line > 0)) return; // nothing was thrown: a browser notice such as "ResizeObserver loop completed"
+        // While the module graph runs, an error in one of its files means app.js never runs at all.
+        failure('error', info, phase === 'loading' && Boolean(file) && file.indexOf('/vendor/') !== 0 && file !== '/index.html');
+      } catch (x) {}
+    }, true);
+    w.addEventListener('unhandledrejection', function (e) {
+      try {
+        var why = e && e.reason;
+        if (!why || typeof why !== 'object') return; // a bare value: whose it is can't be told
+        if (!frames(why.stack).length && !(typeof w.DOMException === 'function' && why instanceof w.DOMException)) return;
+        failure('rejection', { name: why.name, stack: why.stack }, false);
+      } catch (x) {}
+    });
+    w.addEventListener('online', function () {
+      if (state === 'offline' && !busy && Date.now() - (Number(sget(RETRY)) || 0) > 60000) { sset(RETRY, String(Date.now())); reload(); return; }
+      if (ui) paint();
+    });
+    w.addEventListener('offline', function () { if (ui) paint(); });
+
+    // ── the clock: visible time only ──
+    var timer = w.setInterval(tick, TICK_MS);
+    function tick() {
+      var t = clock(), dt = t - last;
+      last = t;
+      if (d.visibilityState !== 'hidden') visible += Math.max(0, Math.min(dt, TICK_MS * 4));
+      if (state !== 'waiting' && state !== 'slow' && state !== 'stalled') return;
+      if (visible >= STALL_MS && state !== 'stalled') {
+        show('stalled');
+        if (!stallSent && online()) { stallSent = true; send(build('stall', { name: 'Stall' })); }
+      } else if (visible >= SLOW_MS && state === 'waiting') show('slow');
+    }
+
+    // ── the screen ──
+    function el(tag, cls, text) { var x = d.createElement(tag); if (cls) x.className = cls; if (text) x.textContent = text; return x; }
+    function button(cls, text, fn) { var b = el('button', cls, text); b.type = 'button'; b.addEventListener('click', function () { fn(); }); return b; }
+    // modal: the full screen, a <dialog> shown with showModal() (the top layer, above anything the app opened). Otherwise
+    // the "Still opening…" card, a plain element: showing it moves no focus (a keyboard already open stays open), and the
+    // app's dialog[open] checks (toast placement, launch, Look up) never count it.
+    function make(modal) {
+      var root = el(modal ? 'dialog' : 'div'), card = el('div', 'ar-card'), m = { root: root, card: card, modal: modal };
+      card.setAttribute('aria-live', 'polite');
+      root.id = 'atelierRecovery';
+      root.setAttribute('role', modal ? 'alertdialog' : 'region');
+      root.setAttribute('aria-labelledby', 'arTitle');
+      root.setAttribute('aria-describedby', 'arBody');
+      m.brand = el('p', 'ar-brand'); m.brand.appendChild(el('span', 'ar-mark')); m.brand.appendChild(d.createTextNode('Atelier'));
+      m.eyebrow = el('p', 'ar-eyebrow'); m.eyebrow.appendChild(el('span', 'ar-pulse')); m.eyebrow.appendChild(d.createTextNode('Atelier'));
+      m.title = el('h1', 'ar-title'); m.title.id = 'arTitle';
+      m.body = el('p', 'ar-body'); m.body.id = 'arBody';
+      m.actions = el('div', 'ar-actions');
+      m.reload = button('ar-btn ar-primary', 'Reload', reload);
+      m.repair = button('ar-btn', 'Repair offline copy', repair);
+      m.actions.appendChild(m.reload); m.actions.appendChild(m.repair);
+      m.note = el('p', 'ar-note', 'Repair downloads Atelier’s app files again. Your threads, settings and media stay on this device.');
+      m.details = el('div', 'ar-details');
+      m.copy = button('ar-link', 'Copy error details', copy);
+      m.code = el('code', 'ar-code');
+      m.details.appendChild(m.copy); m.details.appendChild(m.code);
+      m.status = el('p', 'ar-status'); m.status.setAttribute('role', 'status'); m.status.setAttribute('aria-live', 'polite');
+      m.parts = [m.brand, m.eyebrow, m.title, m.body, m.actions, m.note, m.details, m.status];
+      m.parts.forEach(function (x) { card.appendChild(x); });
+      m.reload.disabled = m.repair.disabled = busy;
+      root.appendChild(card);
+      if (modal) {
+        // Esc and Android back never leave the screen up with nothing behind it (a page that didn't start). The browser
+        // lets a page hold a close request only after a tap, so when the screen does close it comes straight back;
+        // hide() (the app started after all) clears ui first, so that close is left alone.
+        root.addEventListener('cancel', function (e) { e.preventDefault(); });
+        root.addEventListener('close', function () { w.setTimeout(function () { if (ui === m && !root.open) open(m); }, 0); });
+      }
+      (d.body || d.documentElement).appendChild(root);
+      return m;
+    }
+    function open(m) {
+      try { if (typeof m.root.showModal === 'function') m.root.showModal(); else m.root.setAttribute('open', ''); } catch (e) {}
+      try { m.reload.focus(); } catch (e) {}
+    }
+    function paint() {
+      if (!ui) return;
+      var live = online(), net = state === 'error' && Boolean(fatal && fatal.net), download = net && !netAgain;
+      var t = TEXT[download ? 'download' : net ? 'downloadAgain' : state === 'stalled' && !live ? 'stalledOffline' : state] || TEXT.slow;
+      var acts = state === 'stalled' || state === 'error' || state === 'offline', canRepair = live && (state === 'stalled' || (state === 'error' && !download));
+      ui.title.textContent = t[0];
+      ui.title.appendChild(el('em', '', t[1]));
+      var again = state === 'error' && !download && Date.now() - (Number(sget(REPAIRED)) || 0) < 600000;
+      ui.body.textContent = t[2] + (again ? ' Repair already ran here. If it still won’t open, this version needs a fix: try Reload again in a little while.' : '');
+      ui.actions.hidden = !acts;
+      ui.reload.textContent = state === 'offline' || download ? 'Try again' : 'Reload';
+      ui.repair.hidden = !canRepair;
+      ui.note.hidden = !canRepair;
+      ui.details.hidden = state !== 'error' || !fatal;
+      ui.code.textContent = details();
+    }
+    function show(next) {
+      state = next;
+      try {
+        var modal = next === 'error' || next === 'offline', fresh;
+        if (ui && ui.modal !== modal) hide(); // the card gives way to the full screen
+        fresh = !ui;
+        if (fresh) ui = make(modal);
+        ui.root.className = modal ? 'ar-modal' : '';
+        paint();
+        if (fresh && modal) { w.clearInterval(timer); open(ui); }
+      } catch (e) {}
+    }
+    function hide() {
+      if (!ui) return;
+      var m = ui, home = d.body || d.documentElement;
+      ui = null; // first: the close below is the screen going away, not Esc
+      // Anything the app put in the screen goes back to the page first: toast() shows #toast inside the last open dialog
+      // and takes it back on that dialog's 'close', which never reaches a dialog that is already gone.
+      rescue(m.root, [m.card], home); rescue(m.card, m.parts, home);
+      try { if (m.modal && m.root.open) m.root.close(); } catch (e) {}
+      if (m.root.parentNode) m.root.parentNode.removeChild(m.root);
+    }
+    function rescue(box, own, home) {
+      var kids = [], i;
+      for (i = 0; i < box.children.length; i++) kids.push(box.children[i]);
+      for (i = 0; i < kids.length; i++) if (own.indexOf(kids[i]) < 0) home.appendChild(kids[i]);
+    }
+    function say(text) { if (ui) ui.status.textContent = text; }
+    function hold(on) { busy = on; if (ui) ui.reload.disabled = ui.repair.disabled = on; }
+    // Version, error name and the failing file: nothing anyone wrote.
+    function details() {
+      var r = fatal;
+      return r ? 'Atelier v' + r.v + ' · ' + r.name + (r.file ? ' · ' + r.file + (r.line != null ? ':' + r.line + (r.col != null ? ':' + r.col : '') : '') : '') : '';
+    }
+
+    // ── actions (each needs a tap) ──
+    // Reload: asks the service worker to check for a new version first (index.html itself always comes from the network
+    // when online), so a fixed deploy is what loads.
+    function reload() {
+      if (busy) return Promise.resolve(false);
+      hold(true); say('Reloading…');
+      var update = null, sw = nav.serviceWorker;
+      try { if (sw && sw.getRegistration) update = sw.getRegistration().then(function (r) { return r && r.update(); }); } catch (e) {}
+      return race(update, 3000, null).then(function () { w.location.reload(); return true; });
+    }
+    // Only Atelier's app files: the atelier-v<N> caches sw.js fills, and the service worker itself.
+    function shellCache(k) { return /^atelier-v\d+$/.test(k); }
+    function clearShell() {
+      var jobs = [], sw = nav.serviceWorker, c = w.caches;
+      try { if (sw && sw.getRegistrations) jobs.push(sw.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })); } catch (e) {}
+      try { if (c && c.keys) jobs.push(c.keys().then(function (keys) { return Promise.all(keys.filter(shellCache).map(function (k) { return c.delete(k); })); })); } catch (e) {}
+      return Promise.all(jobs.map(function (j) { return j.catch(noop); }));
+    }
+    // Repair: first make sure the server answers (/sw.js is never served by the service worker, and no-store skips the
+    // HTTP cache), so the offline copy is never thrown away while offline. Then clear and load / with a fresh query.
+    function repair() {
+      if (busy) return Promise.resolve(false);
+      hold(true); say('Checking the connection…');
+      var reach = null;
+      try { reach = w.fetch('/sw.js', { cache: 'no-store', credentials: 'omit' }).then(function (r) { return Boolean(r && r.ok); }); } catch (e) {}
+      return race(reach, 8000, false).then(function (ok) {
+        if (!ok) { hold(false); say('Can’t reach Atelier right now. Nothing was removed; try again when you’re online.'); return false; }
+        say('Repairing…');
+        // A share waiting in the atelier-share cache (?share=<id>, from sw.js) rides along: without it the next start
+        // would sweep that cache as unclaimed. Only an id of the shape launch.js accepts; nothing else in the URL.
+        var share = /[?&]share=(s[a-z0-9]{10})(?:&|#|$)/.exec(String(w.location.search || ''));
+        return clearShell().then(function () {
+          sset(REPAIRED, String(Date.now()));
+          say('Repaired. Opening Atelier…');
+          w.location.replace('/?' + (share ? 'share=' + share[1] + '&' : '') + 'repair=' + Date.now().toString(36));
+          return true;
+        });
+      });
+    }
+    function copy() {
+      var text = details();
+      if (!text) return;
+      var fail = function () {
+        say('Couldn’t copy. Select the details above instead.');
+        try { var r = d.createRange(); r.selectNodeContents(ui.code); var s = w.getSelection(); s.removeAllRanges(); s.addRange(r); } catch (e) {}
+      };
+      try { nav.clipboard.writeText(text).then(function () { say('Copied.'); }, fail); } catch (e) { fail(); }
+    }
+
+    w.atelierBoot = {
+      started: function () { if (phase === 'loading') phase = 'starting'; },
+      booted: function () { phase = 'running'; if (state === 'booted') return; state = 'booted'; w.clearInterval(timer); hide(); },
+      failed: function (err) { return failure('boot', { name: err && err.name, stack: err && err.stack }, true); },
+      state: function () { return state; },
+      phase: function () { return phase; },
+      reload: reload, repair: repair, details: details, report: build, frames: frames, platform: platform
+    };
+  })();
+  </script>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icons/atelier-v2-32.png" type="image/png" sizes="32x32" />
   <link rel="apple-touch-icon" href="/icons/atelier-v2-180.png" sizes="180x180" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=85" />
-  <link rel="stylesheet" href="/studio.css?v=85" />
-  <link rel="stylesheet" href="/feedback.css?v=85" />
-  <link rel="stylesheet" href="/remix.css?v=85" />
+  <link rel="stylesheet" href="/app.css?v=86" />
+  <link rel="stylesheet" href="/studio.css?v=86" />
+  <link rel="stylesheet" href="/feedback.css?v=86" />
+  <link rel="stylesheet" href="/remix.css?v=86" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -299,6 +660,10 @@
           <h4 style="margin-top:18px">Labs</h4>
           <button type="button" class="chip" id="labsRemixBtn" aria-pressed="true" title="Attach a clip in Video mode: Gemini plans an edit, you approve any cost, Atelier cuts it on this device">Remix videos in Video mode</button>
           <div class="prov-status" id="diagOut" aria-live="polite" style="margin-top:10px"></div>
+          <h4 style="margin-top:18px">Recent app errors</h4>
+          <p class="hint">Start-up failures and uncaught errors reported by any device that opened Atelier, kept 30 days: the version, error name, file and line, never what was typed. Unverified: sending one needs no passcode, so anyone could.</p>
+          <button type="button" class="chip" id="appErrorsBtn" style="margin-top:10px">Show recent app errors</button>
+          <div class="app-errors" id="appErrorsOut" aria-live="polite"></div>
           </div>
           </details>
         </section>
@@ -541,6 +906,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=85" type="module"></script>
+  <script src="/app.js?v=86" type="module"></script>
 </body>
 </html>

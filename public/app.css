@@ -906,6 +906,19 @@ dialog[open] > .toast { position: absolute; left: 50%; bottom: 16px; max-width: 
 .prov-status .ok { color: var(--c-ask); }
 .prov-status .bad { color: var(--ink-3); }
 .prov-status .err { color: var(--c-video); }
+/* Settings → Advanced diagnostics → Recent app errors (public/app-errors.js) */
+.app-errors { margin-top: 10px; min-width: 0; }
+.app-errors:empty { display: none; }
+.ae-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ae-row { display: grid; gap: 3px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.ae-title { font: 600 13px/1.4 var(--sans); color: var(--ink); }
+.ae-where, .ae-meta, .ae-frames { font: 400 11.5px/1.5 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
+.ae-meta { color: var(--ink-3); }
+.ae-stack summary { margin-top: 2px; font: 500 11px/1.8 var(--mono); color: var(--ink-3); cursor: pointer; }
+.ae-frames { display: block; margin-top: 2px; white-space: pre-wrap; }
+.ae-empty, .ae-foot { margin: 0; font: 400 12.5px/1.5 var(--sans); color: var(--ink-3); }
+.ae-foot { margin-top: 8px; }
+.ae-err { color: var(--c-video); }
 #provStatus { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 16px; }
 #provStatus > span { display: grid; grid-template-columns: 7px minmax(0, 1fr); column-gap: 9px; align-items: center; color: var(--ink); }
 #provStatus > span::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--c-ask); }

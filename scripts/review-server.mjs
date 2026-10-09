@@ -9,6 +9,7 @@ import { shapeRequest as runwayShape, quote as runwayQuote, ownerQuote as runway
 import * as Spend from '../src/spend.js';
 import { shapeOmni, ownerQuote as omniOwnerQuote } from '../src/omni.js';
 import { videoQuoteMicros } from '../src/xai.js';
+import { handleClientError, cleanReport, reportSig, CLIENT_ERRORS } from '../src/client-errors.js';
 const root = resolve('public');
 const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 // REVIEW_SYNC=1 enables owner sync; REVIEW_TESTER=<subject> enables simulated tester sign-in and private sync. Without
@@ -98,6 +99,63 @@ if (Boolean(process.env.REVIEW_PROVIDERS) || process.argv.includes('--providers'
 }
 // The stub Gmail tool --providers connects (the Worker's real tool list is far longer; this one is read-only).
 const FIXTURE_GMAIL ={ type: 'function', function: { name: 'gmail_search', description: 'Search the user’s Gmail (local fixture).', parameters: { type: 'object', properties: { q: { type: 'string', description: 'Gmail search query' } }, required: ['q'], additionalProperties: false } }, 'x-write': false, 'x-label': 'Search Gmail', 'x-service': 'gmail' };
+// Boot watchdog checks (public/index.html #bootWatch). REVIEW_BREAK=<mode> serves a deliberately broken start; or open
+// /__review/break?mode=<mode> in a browser, which sets a cookie for that browser only and opens / (mode=off clears it,
+// and wins over REVIEW_BREAK; anything else is off too). Only this fixture can break the app: public/ and src/ have no
+// switch for it.
+//   module   app.js has a syntax error: the module never runs                  → the recovery screen
+//   missing  a module app.js imports (data-safety.js) is missing: like production (the single-page-app fallback), it
+//            answers index.html with 200                                        → the recovery screen ("Didn't load")
+//   boot     boot() throws a TypeError as it starts                              → the recovery screen ("Start failed")
+//   hang     boot() never finishes                                               → "Still opening…" at 8 s, Reload/Repair at 20 s
+//   slow     app.js arrives after REVIEW_SLOW_MS (12 s by default), then starts → "Still opening…", then the app
+// Reports reach POST /api/client-error below (the real src/client-errors.js over an in-memory Ledger stand-in) and show
+// in Settings → Advanced diagnostics → Recent app errors with the passcode review-only. Restarting empties them.
+const BREAKS = ['module', 'missing', 'boot', 'hang', 'slow'];
+const breakOf = (req) => {
+  const c = /(?:^|;\s*)review_break=([a-z]+)/.exec(req.headers.cookie || '')?.[1];
+  if (c) return BREAKS.includes(c) ? c : '';
+  return BREAKS.includes(process.env.REVIEW_BREAK) ? process.env.REVIEW_BREAK : '';
+};
+const BOOT_START = '(async function boot() {';
+async function brokenApp(mode) {
+  let src = await readFile(resolve(root, 'app.js'), 'utf8');
+  if (mode === 'module') src += '\n// review break: module\nconst = ;\n';
+  if (mode === 'boot' || mode === 'hang') {
+    if (!src.includes(BOOT_START)) console.warn(`review break ${mode}: app.js has no "${BOOT_START}" to break`);
+    src = src.replace(BOOT_START, `${BOOT_START}\n  ${mode === 'boot' ? "throw new TypeError('review break: boot (a private prompt that must never be reported)');" : 'await new Promise(() => {}); // review break: hang'}`);
+  }
+  if (mode === 'slow') await new Promise((r) => setTimeout(r, Number(process.env.REVIEW_SLOW_MS) || 12_000));
+  return src;
+}
+// The Ledger's client_errors table, in memory (src/tester/ledger.js clientErrorAdd / clientErrors: the same signature,
+// at most NEW_PER_HOUR new rows an hour, KEEP rows with the newest KEEP_NEWEST kept and a once-seen row going first,
+// DAYS-day expiry), ERR_LIMIT's 10 a minute per key, and ASSETS for the deployed version (public/sw.js).
+const clientErrorRows = new Map();
+const clientErrorEnv = {
+  ASSETS: { fetch: async () => new Response(await readFile(resolve(root, 'sw.js'), 'utf8')) }, // only /sw.js is asked for
+  ERR_LIMIT: { hits: new Map(), async limit({ key }) {
+    const now = Date.now(), h = (this.hits.get(key) || []).filter((t) => now - t < 60_000);
+    h.push(now); this.hits.set(key, h);
+    return { success: h.length <= 10 };
+  } },
+  LEDGER: { idFromName: (n) => n, get: () => ({
+    async clientErrorAdd(doc) {
+      const clean = cleanReport(doc), now = Date.now();
+      if (!clean) return { ok: false };
+      for (const [k, r] of clientErrorRows) if (r.lastAt <= now - CLIENT_ERRORS.days * 86_400_000) clientErrorRows.delete(k);
+      const sig = reportSig(clean), had = clientErrorRows.get(sig);
+      if (!had && [...clientErrorRows.values()].filter((r) => r.firstAt > now - 3_600_000).length >= CLIENT_ERRORS.newPerHour) return { ok: false, full: true };
+      clientErrorRows.delete(sig);
+      clientErrorRows.set(sig, { ...clean, count: (had?.count || 0) + 1, firstAt: had?.firstAt || now, lastAt: now });
+      const older = [...clientErrorRows.keys()].slice(0, -CLIENT_ERRORS.keepNewest); // oldest first
+      older.sort((a, b) => (clientErrorRows.get(a).count > 1) - (clientErrorRows.get(b).count > 1));
+      for (const k of older.slice(0, Math.max(0, clientErrorRows.size - CLIENT_ERRORS.keep))) clientErrorRows.delete(k);
+      return { ok: true, count: clientErrorRows.get(sig).count };
+    },
+    async clientErrors() { return [...clientErrorRows.values()].reverse(); },
+  }) },
+};
 const syncEnvs = new Map(), profiles = new Map(), feedback = new Map(), omniJobs = new Map(), xaiJobs = new Map(), runwayJobs = new Map(), omniRows = new Map();
 // The owner's spend record (src/spend.js; Settings → Spending → This month's spend) over an in-memory month: every paid
 // owner job is recorded at the Worker's own quote, and nothing is ever refused for its price (no limits since v85).
@@ -159,6 +217,12 @@ createServer(async (req, res) => {
     const allProviders = Boolean(process.env.REVIEW_PROVIDERS) || process.argv.includes('--providers');
     if (url.pathname === '/api/health') return res.end(JSON.stringify({ testers: testersOpen, server: { nvidia: true, ...(process.env.REVIEW_STT || fixtureTester || allProviders ? { openai: true } : {}), ...(fixtureTester || allProviders ? { anthropic: true, gemini: true } : {}), ...(allProviders ? { runway: true, xai: true } : {}) } }));
     if (!testersOpen && (url.pathname.startsWith('/api/li/') || url.pathname.startsWith('/api/tester/'))) return testersClosed(res);
+    // Public like the Worker's route (a start-up crash can come before the passcode); GET needs the passcode. The request
+    // keeps the browser's own origin so the same-origin check sees what production sees.
+    if (url.pathname === '/api/client-error') {
+      const here = new URL(`${url.pathname}${url.search}`, `http://${req.headers.host || '127.0.0.1'}`);
+      return writeResponse(res, await handleClientError(workerRequest(req, here), clientErrorEnv, { owner: req.headers['x-app-pass'] === 'review-only' }));
+    }
     if (url.pathname === '/api/li/spots') return res.end('{"spotsLeft":24,"cap":25,"paused":false}');
     // REVIEW_TESTER=<subject> is a local, simulated session. No LinkedIn call or production cookie is used.
     if (url.pathname === '/api/li/start' && fixtureTester) { testerActive = true; res.statusCode = 303; res.setHeader('Location', '/?tester=welcome'); return res.end(); }
@@ -386,6 +450,15 @@ createServer(async (req, res) => {
     }
     res.statusCode = 503; return res.end('{"error":"This integration is not available in the local review fixture."}');
   }
+  if (url.pathname === '/__review/break') {
+    const mode = BREAKS.includes(url.searchParams.get('mode')) ? url.searchParams.get('mode') : 'off';
+    res.statusCode = 303; res.setHeader('Set-Cookie', `review_break=${mode}; Path=/; SameSite=Lax`); res.setHeader('Location', '/');
+    console.log(`review break: ${mode}`);
+    return res.end();
+  }
+  const broken = breakOf(req);
+  if (broken && url.pathname === '/app.js' && broken !== 'missing') { res.setHeader('Content-Type', 'text/javascript'); return res.end(await brokenApp(broken)); }
+  if (broken === 'missing' && url.pathname === '/data-safety.js') { res.setHeader('Content-Type', 'text/html'); return res.end(await readFile(resolve(root, 'index.html'))); }
   try {
     const name = url.pathname === '/' ? '/index.html' : ['/privacy', '/tos'].includes(url.pathname) ? `${url.pathname}.html` : url.pathname;
     const file = resolve(root, '.' + decodeURIComponent(name));

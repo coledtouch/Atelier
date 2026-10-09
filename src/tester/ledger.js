@@ -4,6 +4,7 @@
 // Every RPC method runs its reads and writes synchronously inside transactionSync, so each call is atomic and
 // interleaved callers can never push a tester or the pool past a limit.
 import { DurableObject } from 'cloudflare:workers';
+import { CLIENT_ERRORS, cleanReport, reportSig } from '../client-errors.js';
 
 export const DEFAULTS = Object.freeze({ cap: 25, paused: 1, day_limit: 1_000_000, month_limit: 10_000_000, pool_limit: 100_000_000, preview_subs: '[]' });
 // Owner-settable bounds. The pool can't go above $1,000 without a code change (spec §9).
@@ -13,7 +14,7 @@ export const DAILY_UPLOADS = 10; // video clips a tester may start per UTC day (
 // settle records the provider-reported cost even above the reservation (an estimate gap shows up in the day, month and
 // pool totals, so the next reserve sees it), but never more than this many times the reservation.
 export const OVERRUN = 4;
-const MINUTE = 60_000, DAY = 86_400_000;
+const MINUTE = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 const STATE_TTL = 10 * MINUTE, STALE = 15 * MINUTE, TICK = 10 * MINUTE, SESSION_TTL = 30 * DAY, RETAIN = 90 * DAY, JOB_TTL = 7 * DAY;
 // The last refused sign-in (A4) names someone who is not a tester (LinkedIn ID, name, photo link): it is kept this long
 // for the owner's Testers panel, then dropped when read and deleted by the alarm (privacy page §6).
@@ -24,6 +25,7 @@ export const OWNER_SPEND_MONTHS = 13;
 const OWNER_JOB_MAX = 10_000_000_000;
 const OWNER_TAG = /^[a-z0-9_-]{1,20}$/;
 const OWNER_JOB = /^[a-z]{1,12}:[A-Za-z0-9_.:-]{1,256}$/;
+const CLIENT_ERROR_TTL = CLIENT_ERRORS.days * DAY;
 const MAX_STATES = 2000; // sign-ins in flight (10 minutes each); a flood of /api/li/start can't grow the table past it
 
 // The LinkedIn tester switch (wrangler.jsonc var TESTERS_ENABLED): on only for an exact "1", off when unset (src/worker.js
@@ -64,6 +66,11 @@ const SCHEMA = [
     model TEXT NOT NULL DEFAULT '', amount INTEGER NOT NULL, actual INTEGER, job TEXT, created_at INTEGER NOT NULL, settled_at INTEGER)`,
   'CREATE INDEX IF NOT EXISTS owner_spend_month ON owner_spend (month)',
   'CREATE UNIQUE INDEX IF NOT EXISTS owner_spend_job ON owner_spend (job)',
+  // App error reports (src/client-errors.js): one row per distinct failure, n = how often it was seen. Never more than
+  // CLIENT_ERRORS.keep rows; a row not seen for CLIENT_ERRORS.days days is deleted.
+  `CREATE TABLE IF NOT EXISTS client_errors (sig TEXT PRIMARY KEY, doc TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 1,
+    first_at INTEGER NOT NULL, last_at INTEGER NOT NULL)`,
+  'CREATE INDEX IF NOT EXISTS client_errors_last ON client_errors (last_at)',
 ];
 
 const str = (v, max) => (typeof v === 'string' ? v : '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
@@ -262,6 +269,7 @@ export class Ledger extends DurableObject {
       this.#lastRefused(now);
       const d = new Date(now), keep = monthKey(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - OWNER_SPEND_MONTHS + 1, 1));
       this.#run('DELETE FROM owner_spend WHERE month < ?', keep);
+      this.#run('DELETE FROM client_errors WHERE last_at <= ?', now - CLIENT_ERROR_TTL);
     });
     // Retention includes the new private R2 namespace. Keep the record until its cloud data is gone, so a failed
     // or partial R2 cleanup never becomes an orphan. Revocation alone does not delete work (the owner can restore it).
@@ -425,6 +433,44 @@ export class Ledger extends DurableObject {
       if (!this.#tester(sub)) return false;
       this.#run('UPDATE testers SET revoked_at = NULL, last_seen = ? WHERE sub = ?', this.clock(), sub);
       return true;
+    });
+  }
+  // ── app error reports (src/client-errors.js: POST /api/client-error; Settings → Advanced diagnostics) ──
+  // doc: a report the Worker already cleaned (cleaned again here). The same failure seen again only counts up. Anyone can
+  // POST one, so made-up reports must not sweep out real ones: a failure not seen before is stored only while fewer than
+  // CLIENT_ERRORS.newPerHour rows were added in the last hour, whoever sent them; and over CLIENT_ERRORS.keep rows, the
+  // newest keepNewest always stay, and of the rest a failure seen once goes before one seen again, the oldest first.
+  // Nothing older than CLIENT_ERRORS.days days stays.
+  clientErrorAdd(doc) {
+    const clean = cleanReport(doc);
+    if (!clean) return { ok: false };
+    const now = this.clock(), sig = reportSig(clean), text = JSON.stringify(clean);
+    return this.#tx(() => {
+      this.#run('DELETE FROM client_errors WHERE last_at <= ?', now - CLIENT_ERROR_TTL);
+      const had = this.#row('SELECT n FROM client_errors WHERE sig = ?', sig);
+      if (had) this.#run('UPDATE client_errors SET doc = ?, n = n + 1, last_at = ? WHERE sig = ?', text, now, sig);
+      else {
+        if (this.#row('SELECT COUNT(*) AS n FROM client_errors WHERE first_at > ?', now - HOUR).n >= CLIENT_ERRORS.newPerHour) return { ok: false, full: true };
+        this.#run('INSERT INTO client_errors (sig, doc, n, first_at, last_at) VALUES (?, ?, 1, ?, ?)', sig, text, now, now);
+      }
+      const over = this.#row('SELECT COUNT(*) AS n FROM client_errors').n - CLIENT_ERRORS.keep;
+      if (over > 0) {
+        this.#run(`DELETE FROM client_errors WHERE sig IN (SELECT sig FROM client_errors
+          WHERE sig NOT IN (SELECT sig FROM client_errors ORDER BY last_at DESC, rowid DESC LIMIT ?)
+          ORDER BY n > 1, last_at, rowid LIMIT ?)`, CLIENT_ERRORS.keepNewest, over);
+      }
+      return { ok: true, count: had ? had.n + 1 : 1 };
+    });
+  }
+  // → the newest reports first: [{...report, count, firstAt, lastAt}] (src/client-errors.js cleans them again on the way out).
+  clientErrors() {
+    return this.#tx(() => {
+      this.#run('DELETE FROM client_errors WHERE last_at <= ?', this.clock() - CLIENT_ERROR_TTL);
+      return this.#rows('SELECT doc, n, first_at, last_at FROM client_errors ORDER BY last_at DESC, rowid DESC LIMIT ?', CLIENT_ERRORS.keep).map((r) => {
+        let doc = null;
+        try { doc = JSON.parse(r.doc); } catch {}
+        return doc && typeof doc === 'object' && !Array.isArray(doc) ? { ...doc, count: r.n, firstAt: r.first_at, lastAt: r.last_at } : null;
+      }).filter(Boolean);
     });
   }
   // patch: {cap?, paused?, day_limit?, month_limit?, pool_limit?, preview_subs?} → {ok: true, config} | {ok: false, error}
