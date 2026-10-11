@@ -887,10 +887,12 @@ export function initLookup(deps = {}) {
     try { if (range) reg.set('atelier-lookup', new H(range)); else reg.delete('atelier-lookup'); } catch {}
   }
   function say(text) { if (status) status.textContent = text; }
+  // One of Atelier's own dialogs is open (a <dialog open> inside a rendered reply in the stream is not one of them).
+  const appDialogOpen = () => [...doc.querySelectorAll('dialog[open]')].some((d) => !stream?.contains?.(d));
 
   const fx = {
     mode: () => (sessionOff ? 'off' : LOOKUP_MODES.includes(modeOf()) ? modeOf() : 'auto'),
-    ready: () => !sessionOff && Boolean(readyOf()) && !doc.querySelector('dialog[open]') && !doc.body.classList.contains('overlay-open'),
+    ready: () => !sessionOff && Boolean(readyOf()) && !appDialogOpen() && !doc.body.classList.contains('overlay-open'),
     read,
     cached: (req) => client.peek({ ...req, lang, variant }),
     fetch(req, seq) {
@@ -975,7 +977,7 @@ export function initLookup(deps = {}) {
   for (const type of ['touchend', 'touchcancel']) on(doc, type, () => { touchActive = false; userInputAt = Date.now(); }, { capture: true, passive: true });
   on(doc, 'keydown', (ev) => {
     if (ev.key === 'Escape') {
-      if (doc.querySelector('dialog[open]')) return; // native dialogs own Escape
+      if (appDialogOpen()) return; // native dialogs own Escape
       if (away) { ctl.close('escape'); return; } // hidden while its words are scrolled away: Escape keeps its usual job
       if (ctl.escape()) { ev.stopPropagation(); ev.preventDefault(); } // the first Escape closes the card, never stopAll()
       return;

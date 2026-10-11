@@ -200,19 +200,23 @@ test('storedVideo keeps only persisted fields', () => {
 
 // ── constants shared with the Worker (src/gemini.js lands in the backend phase) ──
 const geminiPath = new URL('../src/gemini.js', import.meta.url);
-test('constants match src/gemini.js', { skip: !existsSync(geminiPath) && 'src/gemini.js not written yet' }, async () => {
+test('constants match src/gemini.js', async () => {
+  assert.ok(existsSync(geminiPath), 'src/gemini.js exists');
   registerHooks({ resolve: (s, c, next) => s === 'cloudflare:workers' ? { url: 'data:text/javascript,export class DurableObject {} export const waitUntil = () => {};', shortCircuit: true } : next(s, c) });
   const G = await import(geminiPath.href);
   assert.deepEqual([...G.GEMINI_VIDEO_MIMES].sort(), [...GEMINI_VIDEO_MIMES].sort());
   assert.equal(G.CLIP_MAX_BYTES, CLIP_MAX_BYTES);
-  if ('CHUNK_MAX' in G) assert.equal(G.CHUNK_MAX, CHUNK_MAX);
-  if ('GRANULARITY_DEFAULT' in G) assert.equal(G.GRANULARITY_DEFAULT, GRANULARITY_DEFAULT);
+  // Each export is asserted first, then compared: a rename must fail here, never switch the comparison off (v91 review).
+  for (const name of ['CHUNK_MAX', 'GRANULARITY_DEFAULT']) assert.ok(name in G, `src/gemini.js exports ${name}`);
+  for (const name of ['isFileName', 'isGeminiFileUri']) assert.equal(typeof G[name], 'function', `src/gemini.js exports ${name}`);
+  assert.equal(G.CHUNK_MAX, CHUNK_MAX);
+  assert.equal(G.GRANULARITY_DEFAULT, GRANULARITY_DEFAULT);
   for (const [t, n] of [['video/quicktime', ''], ['video/x-m4v', ''], ['VIDEO/MP4; codecs=avc1', ''], ['video/mov', ''], ['video/x-msvideo', ''], ['video/x-ms-wmv', ''],
     ['', 'clip.MOV'], ['', 'a.mp4'], ['', 'a.m4v'], ['', 'a.qt'], ['', 'a.webm'], ['', 'a.3gp'], ['', 'a.avi'], ['', 'movie.mkv'], ['', 'x.txt'], ['video/webm', 'a.mp4']]) {
     assert.equal(G.normalizeVideoMime(t, n), normalizeVideoMime(t, n), `${t} ${n}`);
   }
-  if (G.isFileName) for (const n of ['files/abc', 'files/../x', 'files/', 'x/abc']) assert.equal(G.isFileName(n), V.isFileName(n), n);
-  if (G.isGeminiFileUri) for (const u of [URI('abc'), 'https://evil.example/v1beta/files/abc', `${URI('abc')}?x=1`]) assert.equal(G.isGeminiFileUri(u), V.isGeminiFileUri(u), u);
+  for (const n of ['files/abc', 'files/../x', 'files/', 'x/abc']) assert.equal(G.isFileName(n), V.isFileName(n), n);
+  for (const u of [URI('abc'), 'https://evil.example/v1beta/files/abc', `${URI('abc')}?x=1`]) assert.equal(G.isGeminiFileUri(u), V.isGeminiFileUri(u), u);
 });
 
 // ── uploader (fetch mocked; node has no XMLHttpRequest, so chunk PUTs use fetch) ──

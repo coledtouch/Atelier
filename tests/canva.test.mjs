@@ -483,7 +483,7 @@ test('disconnecting forgets the tokens and revokes the sign-in at Canva', async 
 const call = (env, path, init = {}, origin = 'https://atelier.test') =>
   worker.fetch(new Request(`${origin}${path}`, { ...init, headers: { 'x-app-pass': 'pw', ...(init.headers || {}) } }), env);
 
-test('routes: start, callback and disconnect', { skip: !worker && 'module hooks unavailable' }, async () => {
+test('routes: start, callback and disconnect', async () => {
   let env = makeEnv({ accounts: [] });
   assert.equal((await worker.fetch(new Request('https://atelier.test/api/oauth/canva/start', { method: 'POST' }), env)).status, 401);
   assert.equal((await call(makeEnv({ secrets: false }), '/api/oauth/canva/start', { method: 'POST' })).status, 400);
@@ -526,7 +526,7 @@ test('routes: start, callback and disconnect', { skip: !worker && 'module hooks 
   assert.deepEqual(await r.json(), { ok: true, accounts: 0 });
   assert.equal(calls.filter((c) => c.url.endsWith('/oauth/revoke')).length, 1);
 });
-test('routes: send-image validates input and maps Canva errors to status codes', { skip: !worker && 'module hooks unavailable' }, async () => {
+test('routes: send-image validates input and maps Canva errors to status codes', async () => {
   const env = makeEnv({ access: 'a1' });
   const send = (body, headers = {}) => call(env, '/api/canva/send-image', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) });
   assert.equal((await worker.fetch(new Request('https://atelier.test/api/canva/send-image', { method: 'POST', body: '{}' }), env)).status, 401);

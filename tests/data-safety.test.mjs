@@ -181,6 +181,26 @@ test('validateBackup checks the files-only share flag; a restored GitHub read fr
     { id: 's1', name: 'github_read', label: 'Read a GitHub file', service: 'github', args: { repo: 'stranger/tool', path: 'README.md' }, write: false, status: 'done', outside: true },
     { id: 's2', name: 'github_read', label: 'Read a GitHub file', service: 'github', args: { repo: 'me/app', path: 'x' }, write: false, status: 'done', outside: 'yes' }] };
   const [t] = prepareImport({ app: 'atelier', v: 1, threads: [{ id: 't1', title: 'T', createdAt: at, updatedAt: at, entries: [gh] }] }, (() => { let n = 0; return () => `c${++n}`; })());
-  assert.deepEqual(t.entries[0].steps.map((s) => s.outside), [true, undefined], 'only a real true survives');
+  assert.deepEqual(t.entries[0].steps.map((s) => s.outside), [true, undefined], 'only a real boolean survives');
   assert.equal(threadTaint([{ ...t.entries[0], imported: undefined }]), 'browser');
+  // since v91 a read of your own repo says so (false), and the restore keeps that too
+  const own = { ...gh, steps: [{ ...gh.steps[1], outside: false }] };
+  const [t2] = prepareImport({ app: 'atelier', v: 1, threads: [{ id: 't2', title: 'T', createdAt: at, updatedAt: at, entries: [own] }] }, (() => { let n = 0; return () => `d${++n}`; })());
+  assert.deepEqual(t2.entries[0].steps.map((s) => s.outside), [false]);
+});
+
+// v91 review: what an earlier run read (ranTaint, kept by Retry) and the addresses its tools returned (toolUrls, the reply
+// link guard's "copied from a tool result") come with a backup only in their own shapes, and a restored thread's links
+// always ask first: toolUrls never survives an import.
+test('ranTaint is one known reason and toolUrls a short list of http(s) addresses; an import drops toolUrls and keeps ranTaint', () => {
+  const ok = fixture(); Object.assign(ok.threads[0].entries[0], { ranTaint: 'browser', toolUrls: ['https://calendar.google.com/event?eid=1', 'http://example.com/'] });
+  assert.equal(validateBackup(ok).length, 1);
+  for (const bad of [{ ranTaint: 'evil' }, { ranTaint: 1 }, { toolUrls: 'https://x.example' }, { toolUrls: ['javascript:alert(1)'] }, { toolUrls: [42] },
+    { toolUrls: Array(201).fill('https://x.example/') }, { toolUrls: [`https://x.example/${'a'.repeat(2100)}`] }]) {
+    const data = fixture(); Object.assign(data.threads[0].entries[0], bad);
+    assert.throws(() => validateBackup(data), JSON.stringify(bad).slice(0, 80));
+  }
+  const [t] = prepareImport(ok, (() => { let n = 0; return () => `r${++n}`; })());
+  assert.equal(t.entries[0].ranTaint, 'browser');
+  assert.equal('toolUrls' in t.entries[0], false);
 });

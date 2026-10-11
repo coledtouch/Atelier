@@ -18,13 +18,18 @@
 // - ERR_LIMIT (wrangler.jsonc ratelimits) per IP (an IPv6 address counts by its /64: one host usually holds the whole
 //   /64), plus PER_MINUTE accepted per isolate, so a flood can't fill the logs;
 // - storage that can't grow and that junk can't sweep out: the Ledger (src/tester/ledger.js clientErrorAdd) keeps KEEP
-//   distinct reports — an identical one only counts up — takes at most NEW_PER_HOUR new ones an hour whoever sends them,
-//   and when full lets a report seen once go before one seen again (the KEEP_NEWEST newest always stay); a report not
-//   seen for DAYS days is deleted.
-// The IP is only a rate-limit key; it is never logged or stored. Anyone can still send a plausible report, so the owner's
-// list says the reports are unverified.
+//   distinct reports — an identical one only counts up — takes at most NEW_PER_HOUR new unverified ones an hour, and at
+//   most NEW_PER_NET_HOUR of those from any one network (an IPv4 address or IPv6 /64, held only as a keyed hash for the
+//   hour), and when full lets an unverified report go before a verified one, and one seen fewer times first (the
+//   KEEP_NEWEST newest always stay); a report not seen for DAYS days is deleted.
+// - verified: a report sent with the right passcode (the owner's own device: #bootWatch adds x-app-pass when this browser
+//   saved one; passcodeGate has already guarded it) skips the hourly budgets and is evicted last, so nobody can keep the
+//   owner's own crashes off the list.
+// The answer says whether the report was kept: 204 stored, 202 {stored: false} when a budget refused it.
+// The IP is only a rate-limit key; it is never logged or stored as it is. Anyone can still send a plausible report, so
+// the owner's list says which reports are unverified.
 
-export const CLIENT_ERRORS = Object.freeze({ maxBytes: 2048, keep: 50, days: 30, frames: 6, perMinute: 30, newPerHour: 20, keepNewest: 10, versionsBack: 2 });
+export const CLIENT_ERRORS = Object.freeze({ maxBytes: 2048, keep: 50, days: 30, frames: 6, perMinute: 30, newPerHour: 20, newPerNetHour: 3, keepNewest: 10, versionsBack: 2 });
 export const KINDS = Object.freeze(['load', 'error', 'rejection', 'boot', 'stall']);
 export const PLATFORMS = Object.freeze(['ios-standalone', 'ios-browser', 'android-twa', 'android-standalone', 'android-browser', 'desktop-standalone', 'desktop-browser', 'unknown']);
 export const PHASES = Object.freeze(['loading', 'starting', 'running']);
@@ -64,7 +69,7 @@ export function cleanStored(row) {
   const doc = cleanReport(row);
   if (!doc) return null;
   const at = (n) => (Number.isSafeInteger(n) && n > 0 ? n : null);
-  return { ...doc, count: Number.isSafeInteger(row.count) && row.count > 0 ? row.count : 1, firstAt: at(row.firstAt), lastAt: at(row.lastAt) };
+  return { ...doc, count: Number.isSafeInteger(row.count) && row.count > 0 ? row.count : 1, firstAt: at(row.firstAt), lastAt: at(row.lastAt), verified: row.verified === true };
 }
 
 const json = (doc, status = 200, extra = {}) => new Response(JSON.stringify(doc), { status, headers: {
@@ -130,7 +135,8 @@ async function deployedVersion(env, url) {
 
 const storeOf = (env) => (env?.LEDGER ? env.LEDGER.get(env.LEDGER.idFromName('main')) : null);
 
-/** POST: a report from the app (public, same-origin). GET: the newest reports, for the owner only (`owner` = passcode ok). */
+/** POST: a report from the app (public, same-origin; `owner` = sent with the right passcode, stored as verified). GET: the
+ * newest reports, for the owner only. */
 export async function handleClientError(req, env, { owner = false } = {}) {
   if (req.method === 'GET') {
     if (!owner) return json({ error: 'Enter your passcode.' }, 401);
@@ -153,8 +159,11 @@ export async function handleClientError(req, env, { owner = false } = {}) {
   const current = await deployedVersion(env, req.url), v = Number(doc.v);
   if (current !== null && (v > current || v < current - CLIENT_ERRORS.versionsBack)) return json({ error: 'Not a current Atelier version.' }, 400);
   if (await throttled(req, env)) return json({ error: 'Too many reports — try again in a minute.' }, 429, { 'retry-after': '60' });
-  console.log('client-error', JSON.stringify(doc));
+  console.log('client-error', JSON.stringify({ ...doc, ...(owner ? { verified: true } : {}) }));
   const store = storeOf(env);
-  if (store) { try { await store.clientErrorAdd(doc); } catch { console.warn('client-error: not stored'); } }
-  return new Response(null, { status: 204 });
+  let stored = false;
+  if (store) {
+    try { stored = (await store.clientErrorAdd(doc, { verified: owner === true, network: ipKey(req.headers.get('cf-connecting-ip')) }))?.ok === true; } catch { console.warn('client-error: not stored'); }
+  }
+  return stored ? new Response(null, { status: 204 }) : json({ stored: false }, 202);
 }

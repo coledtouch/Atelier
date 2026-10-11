@@ -1,6 +1,7 @@
-import { validVideo } from './video.js?v=90';
-import { validRemix, recoverRemix } from './remix.js?v=90';
-import { SPOKEN_FROM } from './readaloud.js?v=90';
+import { validVideo } from './video.js?v=91';
+import { validRemix, recoverRemix } from './remix.js?v=91';
+import { SPOKEN_FROM } from './readaloud.js?v=91';
+import { TAINTS } from './context.js?v=91';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -65,6 +66,10 @@ export function validateBackup(data) {
       if (e.imported != null) assert(e.imported === true);
       if (e.untrustedFiles != null) assert(e.untrustedFiles === true); // only the shared photos / video marked it (submit)
       if (e.composed != null) assert(e.composed === true); // a prompt Atelier wrote from an answer: never memory (learnFrom)
+      // What an earlier run of the entry read, kept when Retry cleared its steps (context.js entryTaint): one known reason.
+      if (e.ranTaint != null) assert(TAINTS.includes(e.ranTaint));
+      // Addresses a tool returned in the entry's run (app.js noteToolUrls): reply links copied from them open unasked.
+      if (e.toolUrls != null) assert(Array.isArray(e.toolUrls) && e.toolUrls.length <= 200 && e.toolUrls.every((u) => text(u) && u.length <= 2048 && /^https?:\/\//.test(u)));
       // A chat turn's send time (app.js run(), a short locale date): it goes in front of the turn's message (context.js
       // withSent, which also flattens and caps it), so nothing longer than a date is taken.
       if (e.sent != null) assert(text(e.sent) && e.sent.length <= 80);
@@ -88,7 +93,9 @@ export function importedSteps(steps) {
     status: STEP_DONE.has(st.status) ? st.status : st.status === 'awaiting' ? 'declined' : 'error',
     ...(text(st.error) ? { error: short(st.error, 500) } : st.status === 'running' ? { error: 'Interrupted.' } : {}),
     ...(text(st.untrusted) && st.untrusted ? { untrusted: st.untrusted === 'link' ? 'link' : 'share' } : {}),
-    ...(st.outside === true ? { outside: true } : {}), // GitHub content from outside your accounts (context.js readsPage)
+    // GitHub content from outside your accounts (context.js readsPage); false: your own repo (a GitHub read without the
+    // key is from before v84 and counts as outside: context.js githubLegacy)
+    ...(typeof st.outside === 'boolean' ? { outside: st.outside } : {}),
   })).filter(st => st.name);
 }
 export function prepareImport(data, makeId) {
@@ -102,6 +109,7 @@ export function prepareImport(data, makeId) {
       const copy = { ...structuredClone(e), id: makeId(), pending: false, steps: importedSteps(e.steps), imported: true,
         ...(e.pending ? { error: 'This response was interrupted before the backup was made. You can try again.', errorKind: 'interrupted' } : {}) };
       delete copy.startedAt; // transient: only meaningful while a generation is live
+      delete copy.toolUrls; // a file can say anything: in a restored thread every link the assistant wrote asks first (app.js guardLinks)
       recoverRemix(copy, { imported: true }); // shots → missing/unknown/failed, approval dropped: nothing imported can spend
       if (!ids.has(e.id)) ids.set(e.id, copy.id);
       return copy;

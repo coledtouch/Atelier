@@ -109,6 +109,16 @@ export function quoteNote(model, seconds, opts) {
   const q = quote(model, seconds, opts);
   return q ? `≈ ${n$(q.credits)} credits (${credits$(q.credits)})` : '';
 }
+// What a Video-mode menu entry costs at the saved length and aspect → {seconds, resolution, credits, usd}, or null (not a
+// Runway text/image → video model). aspect: the Video-mode aspect ('16:9hd' prices Grok Imagine and Seedance at 1080p).
+// The options strip (optionNote) and the keyed-send hold (app.js holdNote) show this same figure.
+export function optionQuote(entry, secs, aspect) {
+  const model = entry?.runway;
+  if (!Object.hasOwn(RUNWAY_MODELS, model ?? '') || RUNWAY_MODELS[model].v2v) return null;
+  const s = runwaySeconds(secs, model), resolution = RUNWAY_MODELS[model].rates ? (aspect === '16:9hd' ? '1080p' : '720p') : undefined;
+  const q = quote(model, s, { resolution });
+  return q && { seconds: s, resolution, ...q };
+}
 // The Video-mode options strip note for a Runway menu entry: 'Runway Gen-4.5 · 4 s ≈ 48 credits ($0.48)'. aspect: the
 // Video-mode aspect ('16:9hd' prices Grok Imagine at 1080p).
 export function optionNote(entry, secs, aspect) {

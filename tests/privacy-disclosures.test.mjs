@@ -215,7 +215,7 @@ test('Read aloud names the provider the voices really use (src/tts.js): Google o
   const { AI_CAPTION } = await import('../public/readaloud.js');
   assert.deepEqual([...new Set(Object.values(TTS_VOICES).map((v) => v.provider))], ['gemini'], 'a new provider: update the privacy row and AI_CAPTION');
   const row = /<tr><td>Google \(Read aloud\)<\/td><td>([\s\S]*?)<\/td><\/tr>/.exec(PRIVACY)?.[1] || '';
-  assert.match(text(row), /the answer’s text is sent to Google’s Gemini API to generate the speech/);
+  assert.match(text(row), /the answer’s text, including any email, calendar or Drive details it mentions, is sent to Google’s Gemini API to generate the speech/);
   assert.doesNotMatch(row, /OpenAI/);
   assert.doesNotMatch(PRIVACY, /OpenAI and Google \(Read aloud\)/);
   assert.match(AI_CAPTION, /sent to Google\./);
@@ -235,6 +235,133 @@ test('every AI provider the Worker can send prompts to is named as a processor, 
   for (const words of ['owner only', 'testers can’t', 'Auto never starts on one', 'busy or unavailable', 'xAI’s API', 'never turns on Grok’s web or X search', 'Grok Imagine'])
     assert.ok(text(xai).includes(words), `xAI row: ${words}`);
   assert.match(PRIVACY, /<li><b>xAI \(owner only\):<\/b>/);
-  assert.match(PRIVACY, /xAI’s Grok Imagine through Runway/);
-  assert.match(TOS, /Meta, xAI and Runway\)/);
+  assert.match(PRIVACY, /xAI’s Grok Imagine and ByteDance’s Seedance 2\.5 through Runway/);
+  assert.match(TOS, /Meta, xAI and Runway, and ByteDance for Seedance through Runway\)/);
+});
+
+// ── v89 review, the privacy-copy findings: each disclosure rests on the code fact checked next to it ──
+const PRIV = text(PRIVACY);
+const section = (re) => text(re.exec(PRIVACY)?.[1] || '');
+
+test('Google Photos picks and Canva imports are disclosed as synced to the owner’s storage (privacy-google-photos-canva-synced-undisclosed)', async () => {
+  const [APP, MERGE] = await Promise.all([read('public/app.js'), read('public/sync-merge.js')]);
+  // a picked photo becomes an attachment (fetched through /api/photos/file, shrunk to 1280 px) and owner images sync
+  assert.match(APP, /fetch\(`\/api\/photos\/file\?u=/);
+  assert.match(MERGE, /export const MEDIA_SYNC = Object\.freeze\(\{ image: true, video: true \}\);/, 'image sync changed: update §3');
+  assert.match(APP, /const CANVA_THREAD = 'canva-imports';/);
+  const google = section(/<h3>How Google user data is stored<\/h3>([\s\S]*?)<\/ul>/);
+  for (const words of ['A photo you pick from Google Photos is attached to your message (resized to at most 1280 pixels)', 'owner’s private Cloudflare R2 storage',
+    'deleting the thread doesn’t remove that copy automatically', 'through the owner’s thread sync, in the owner’s private Cloudflare storage']) assert.ok(google.includes(words), words);
+  assert.doesNotMatch(google, /Email, calendar, Drive and photo content is not stored on our servers/, 'photos are stored when picked');
+  assert.doesNotMatch(google, /in your own browser, where you can delete them\./);
+  const canva = section(/<li><b>Canva<\/b>([\s\S]*?)<\/li>/);
+  assert.ok(canva.includes('A design you import goes into the “From Canva” thread') && canva.includes('synced to the owner’s private Cloudflare storage'), canva);
+  assert.doesNotMatch(canva, /a design you import is saved in your browser, like the rest of your Library/);
+});
+
+test('Gemini Omni’s 55-day storage is disclosed wherever Omni is used (privacy-omni-55-day-storage)', async () => {
+  const OMNI = await read('src/omni.js');
+  assert.match(OMNI, /store: true, \/\/ required for background runs/, 'Omni no longer stores: update §6');
+  assert.match(OMNI, /interactions are kept 55 days/);
+  assert.doesNotMatch(OMNI, /'DELETE'/, 'Atelier deletes interactions now: update "doesn’t ask Google to delete it sooner"');
+  const item = section(/<li id="omni"><b>Gemini Omni \(video\):<\/b>([\s\S]*?)<\/li>/);
+  for (const words of ['text prompt', 'starting image or still frame', 'finished clip', 'up to 55 days', 'edited or extended later', 'doesn’t ask Google to delete it sooner', 'testers’ Omni videos', 'Video Remix'])
+    assert.ok(item.includes(words), words);
+  assert.match(section(/<li id="remix">([\s\S]*?)<\/li>/), /Gemini Omni \(which keeps it for up to 55 days: see section 6 ?\)/);
+  const providers = section(/<li><b>AI providers:<\/b>([\s\S]*?)<\/li>/);
+  assert.doesNotMatch(providers, /briefly/, 'not "briefly": Omni keeps 55 days, prompt caches up to days');
+  assert.match(providers, /besides the storage listed above/);
+});
+
+test('automatic Read aloud of spoken requests is disclosed: Gemini gets the answer, account details included (privacy-auto-read-aloud-undisclosed)', async () => {
+  const { DEFAULT_READ_ALOUD, VOICES } = await import('../public/readaloud.js');
+  assert.equal(DEFAULT_READ_ALOUD.auto, true, 'auto read is off by default now: update the row');
+  assert.equal(VOICES.find((v) => v.id === DEFAULT_READ_ALOUD.voice)?.provider, 'gemini', 'the default voice is no longer Gemini: update the row');
+  const html = await read('public/index.html');
+  assert.match(html, /<input type="checkbox" id="readAuto" checked \/><span><span class="ra-auto-title">Read answers to spoken requests<\/span>/);
+  const row = section(/<tr><td>Google \(Read aloud\)<\/td><td>([\s\S]*?)<\/td><\/tr>/);
+  for (const words of ['because you tapped Read aloud, or automatically when you asked out loud', 'Atelier Assist, Talk or the mic', 'on by default', 'Settings → Read aloud → Read answers to spoken requests', 'including any email, calendar or Drive details it mentions'])
+    assert.ok(row.includes(words), words);
+  const used = section(/<h3>How Google user data is used<\/h3>([\s\S]*?)<\/ul>/);
+  assert.match(used, /also sent to Google’s Gemini speech API to make the audio/, '§3 names the second Google recipient');
+  assert.match(text(TOS), /Answers to spoken requests \(Talk or the mic\) are read aloud automatically unless you turn that off in Settings → Read aloud, and count against your allowance the same way\./);
+});
+
+test('the Runway row names Seedance and the Aleph clip upload (privacy-runway-row-seedance-aleph)', async () => {
+  const RW = await read('src/runway.js');
+  const { RUNWAY_VIDEO_MODELS, RUNWAY_EDIT_MODEL } = await import('../public/runway.js');
+  assert.ok(RUNWAY_VIDEO_MODELS.some((m) => m.runway === 'seedance2_5'), 'Seedance is offered');
+  assert.equal(RUNWAY_EDIT_MODEL.runway, 'aleph2');
+  assert.match(RW, /export const UPLOAD_TTL_MS = 23 \* 3600 \* 1000; \/\/ runway:\/\/ URIs live 24 h/);
+  const row = section(/<tr><td>Runway<\/td><td>([\s\S]*?)<\/td><\/tr>/);
+  for (const words of ['Google’s Veo 3.1, xAI’s Grok Imagine and ByteDance’s Seedance 2.5 through Runway', 'Runway Aleph edit, the video clip you attach', 'keeps the upload for about 24 hours', 'testers can’t'])
+    assert.ok(row.includes(words), words);
+  assert.match(text(TOS), /ByteDance for Seedance through Runway/);
+});
+
+test('Anthropic’s web search is disclosed with the rule that keeps it apart from account reads (privacy-web-search-undisclosed)', async () => {
+  const [ANTH, APP, ROUTER] = await Promise.all([read('src/anthropic.js'), read('public/app.js'), read('src/tester/router.js')]);
+  assert.match(ANTH, /type: 'web_search_20260209', name: 'web_search'/);
+  assert.match(APP, /const offerWeb = web && !accountRead;/, 'the agent withdraws search after the first account read');
+  assert.match(ROUTER, /if \(p\.webUses\) body\.web_search = true;/, 'testers can search too');
+  const row = section(/<tr><td>Anthropic \(Claude\), OpenAI, Google \(Gemini, Gemini Omni video\) and NVIDIA<\/td><td>([\s\S]*?)<\/td><\/tr>/);
+  for (const words of ['Anthropic’s web search tool', 'for the owner and testers alike', 'search terms Claude writes from your question and the conversation', 'its search provider', 'only before it reads anything from them', 'switched off for the rest of that answer', 'both account data and outside text'])
+    assert.ok(row.includes(words), words);
+  assert.doesNotMatch(row, /never run in the same answer/, 'they can: search first, then the accounts');
+});
+
+test('prompt caches: every provider that caches is named, DeepSeek’s days, and what the agent read (privacy-prompt-cache-copy)', async () => {
+  const WORKER = await read('src/worker.js');
+  assert.match(WORKER, /caches a repeated prompt prefix on its own \(OpenAI, Gemini's implicit caching, DeepSeek's context\r?\n\s*\/\/ cache, Z\.ai, xAI, Meta\)/, 'the list of caching providers changed: update §6');
+  const item = section(/<li><b>Prompt caches at AI providers:<\/b>([\s\S]*?)<\/li>/);
+  for (const words of ['up to 1 hour', 'OpenAI, Google, xAI, Z.ai and Meta cache repeated request starts automatically for minutes to hours', 'DeepSeek for up to a few days', 'can include what the accounts agent read for that answer'])
+    assert.ok(item.includes(words), words);
+});
+
+test('tester deletion: the owner’s Delete data and the device button are disclosed as they work (privacy-tester-deletion-no-path, -former-tester-device-data-unreachable)', async () => {
+  const [ROUTER, LEDGER, HTML, APP] = await Promise.all([read('src/tester/router.js'), read('src/tester/ledger.js'), read('public/index.html'), read('public/app.js')]);
+  assert.match(ROUTER, /\/\^testers\\\/\(revoke\|restore\|config\|forget\)\$\//, 'the owner route exists');
+  assert.match(LEDGER, /async forgetTester\(sub\) \{/);
+  assert.match(HTML, /id="testerForget" hidden>Remove my tester data from this device<\/button>/);
+  assert.match(APP, /data-tp="forget"[^>]*>Delete data<\/button>/);
+  const s8 = section(/<li><b>Testers:<\/b>([\s\S]*?)<\/li>/);
+  for (const words of ['the owner’s Delete data removes your record, sessions, usage ledger, profile, cloud-sync namespace and feedback from the server at once',
+    'Remove my tester data from this device', 'also while you can’t sign in', 'threads, Build app data, settings and Read aloud clips', 'clearing this site’s data in your browser'])
+    assert.ok(s8.includes(words), words);
+  const records = section(/<li><b>Tester records:<\/b>([\s\S]*?)<\/li>/);
+  assert.match(records, /the owner’s Delete data \(in the owner’s Testers panel\) removes a tester at once/);
+  assert.match(text(TOS), /the owner can then delete your record and cloud data at once/);
+  // and the Read aloud promise for a tester's sign-out holds (pass A cleared the clips before the reload)
+  assert.match(PRIV, /until it is cleared with Settings → Your data → Clear this device, or when a tester signs out/);
+});
+
+// v91 review (tester-privacy): Delete data runs a second pass (a still-open tab can write for up to a minute after it),
+// lifts a revocation (no record is left), and the error reports' network code lives only through its hour.
+test('tester deletion copy: the second pass and the re-sign-in are disclosed as the Ledger does them', async () => {
+  const LEDGER = await read('src/tester/ledger.js');
+  assert.match(LEDGER, /export const FORGET_SWEEP = 10 \* MINUTE;/, 'the second pass waits 10 minutes (then the 10-minute alarm)');
+  assert.match(LEDGER, /'CREATE TABLE IF NOT EXISTS forgotten \(sub TEXT PRIMARY KEY, at INTEGER NOT NULL\)'/, 'only the sub is kept for it');
+  assert.match(LEDGER, /if \(t\?\.revoked_at\) return refuse\('revoked'\);/, 'admit refuses only a revoked row: a deleted one can come back');
+  const records = section(/<li><b>Tester records:<\/b>([\s\S]*?)<\/li>/);
+  for (const words of ['the same deletion runs once more 10 to 20 minutes later', 'until then only their LinkedIn ID is kept, for that second pass',
+    'can sign in again later as a new tester while a spot is free, even if their access had been revoked'])
+    assert.ok(records.includes(words), words);
+  assert.ok(section(/<li><b>Testers:<\/b>([\s\S]*?)<\/li>/).includes('at once, and once more 10 to 20 minutes later'));
+});
+
+test('the error reports’ network code is kept only through its hour, as the Ledger prunes it', async () => {
+  const LEDGER = await read('src/tester/ledger.js');
+  assert.match(LEDGER, /DELETE FROM client_error_nets WHERE hour < \?', Math\.floor\(now \/ HOUR\)\);/, 'the alarm');
+  assert.match(LEDGER, /DELETE FROM client_error_nets WHERE hour < \?', hour\);/, 'each report');
+  assert.match(LEDGER, /TICK = 10 \* MINUTE/);
+  assert.match(section(/<li id="app-errors">([\s\S]*?)<\/li>/), /one-way keyed code of the network \(never the address itself\) kept only until that hour is over \(at most about 70 minutes\)/);
+  assert.doesNotMatch(PRIV, /kept for at most two hours/);
+});
+
+test('Google content: attached photos and long texts outlive a deleted thread in the owner’s storage, as src/sync.js keeps blobs', async () => {
+  const SYNC = await read('src/sync.js');
+  assert.match(SYNC, /content-addressed blobs \(media, long text\), written once with R2's sha256 check, never deleted/);
+  const stored = section(/<h3>How Google user data is stored<\/h3>([\s\S]*?)<\/ul>/);
+  assert.ok(stored.includes('Delete threads in the app (section 8); copies of attached photos and of long texts (over about 32 KB) stay in the owner’s private storage until the owner removes them there'), 'the copy says what deleting a thread leaves');
+  assert.doesNotMatch(stored, /Delete them in the app/);
 });

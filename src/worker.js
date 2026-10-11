@@ -127,6 +127,24 @@ const passOk = (req, env) => Boolean(env.APP_PASSCODE) && safeEqual(req.headers.
 export { testersOn };
 const testersClosed = () => fail(410, 'tester_closed', 'Tester access is closed.', {}, { 'set-cookie': clearSession() });
 
+// The client build floor. Atelier's own safety rules that run in the app (which reads wait for the owner's OK, the reply
+// link guard, the reply sanitizer…) protect a device only once that tab runs a build that has them, and a PWA window can
+// stay open for days. Every API call from the app names its build (x-atelier-build: public/app.js apiHeaders); a call
+// from a build below MIN_CLIENT_BUILD to a route that reads or changes the owner's accounts, or writes synced threads,
+// gets 426 app_outdated, and the app saves its draft and reloads into the deployed version. Raise it to the build being
+// shipped whenever such a client-side rule changes (it must never exceed the shipped build: tests/build-floor.test.mjs).
+// A call without the header (a build from before it, or not the app) isn't refused for that yet: require the header on
+// these routes once every device runs a build that sends it.
+export const MIN_CLIENT_BUILD = 84;
+const floorRoute = (method, path) => (path === 'chat' && method === 'POST') || path === 'tools' || path.startsWith('tools/') || path === 'relay/cmd'
+  || ((path.startsWith('sync/') || path.startsWith('tester/sync/')) && method !== 'GET' && method !== 'HEAD');
+export function clientOutdated(req, path) {
+  const b = req.headers.get('x-atelier-build');
+  if (b == null || !floorRoute(req.method, path)) return false;
+  return !/^\d{1,6}$/.test(b.trim()) || Number(b) < MIN_CLIENT_BUILD;
+}
+const appOutdated = () => json({ error: 'Atelier was updated — reloading this page.', code: 'app_outdated' }, 426);
+
 function resolveKey(req, env, provider) {
   const secret = env[PROVIDERS[provider].secret];
   return secret && passOk(req, env) ? secret : null;
@@ -194,10 +212,10 @@ function shapeChatBody(provider, body) {
     }
   }
   delete b.web_search; // Claude-only (server-side web search tool)
-  // The app's cache hints (public/app.js streamChatRaw, runAgent): cache false and cache_tail only steer Claude's
+  // The app's cache hints (public/app.js streamChatRaw, runChat, runAgent): cache false, cache_turn and cache_tail only steer Claude's
   // breakpoints (src/anthropic.js); cache_key becomes prompt_cache_key where a provider takes one (handleChat), never a
   // field of its own.
-  delete b.cache; delete b.cache_key; delete b.cache_tail;
+  delete b.cache; delete b.cache_key; delete b.cache_tail; delete b.cache_turn;
   // Claude-only replay data never goes to other providers.
   b.messages = b.messages.map(({ anthropic_content, ...m }) => m);
   if (provider !== 'nvidia') {
@@ -233,6 +251,9 @@ function shapeChatBody(provider, body) {
 }
 
 async function handleChat(req, env) {
+  // The passcode before the body: a caller without it never has a body read or parsed here (it could be as large as the
+  // zone's request limit). missingKey's first branch answers with the passcode wording, whatever the provider.
+  if (!passOk(req, env)) return missingKey(req, env, 'nvidia');
   let body;
   try {
     body = await req.json();
@@ -439,6 +460,8 @@ async function handleApi(req, env, url) {
   if ((path === 'sync' || path.startsWith('sync/')) && req.headers.get('x-app-pass') && !passOk(req, env)) {
     return json({ error: 'Thread sync needs the server passcode.', code: 'sync_passcode' }, 401);
   }
+  // A tab still running a build older than the floor: nothing it sends here acts on the owner's accounts or synced data.
+  if (clientOutdated(req, path)) return appOutdated();
   if (!testers) {
     // Tester access off: tester/* is closed for everyone, and so is any tester route a tester cookie comes back for
     // without a passcode (a browser that was signed in as a tester: told plainly, its cookie cleared). With a passcode,
@@ -455,7 +478,8 @@ async function handleApi(req, env, url) {
     return handleFeedback(req, env, { role: 'owner' });
   }
   if (path.startsWith('tester/')) return fail(401, 'tester_signin', 'Sign in with LinkedIn to use the tester routes.');
-  // GET /api/testers, POST /api/testers/{revoke,restore,config} → the owner's Testers panel. Passcode only.
+  // GET /api/testers, POST /api/testers/{revoke,restore,config,forget} → the owner's Testers panel. Passcode only, and
+  // reachable with tester access on or off (forget: a tester's erasure request, src/tester/router.js testerAdmin).
   if (path === 'testers' || path.startsWith('testers/')) {
     if (!passOk(req, env)) return json({ error: 'Enter your passcode.' }, 401);
     return testerAdmin(req, env, path);

@@ -382,6 +382,7 @@ class FakeDoc {
   createElementNS(ns, t) { return new FakeEl(this, t, ns); }
   getElementById(id) { return this.documentElement.querySelector(`#${id}`); }
   querySelector(s) { return this.documentElement.querySelector(s); }
+  querySelectorAll(s) { return this.documentElement.querySelectorAll(s); }
   getSelection() { return this.selection; }
   addEventListener(type, fn, opts) { (this.listeners[type] ||= []).push([fn, opts]); }
   removeEventListener(type, fn) { this.listeners[type] = (this.listeners[type] || []).filter(([f]) => f !== fn); }
@@ -1165,9 +1166,8 @@ test('initLookup: destroy removes every listener it added', async () => {
   assert.equal(p.card(), null);
 });
 
-// ── app.js wiring (skips until lookup-integration.md A1–A8 are applied) ──
+// ── app.js wiring (always runs: the ship gate and CI refuse a skipped test (v89 review, pipeline-skipped-tests-pass-gate)) ──
 const APP = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8').catch(() => '')).replace(/\r\n/g, '\n');
-const WIRED = APP.includes('const lookup = initLookup(');
 // submit() lifted out of app.js and run against stubs: names it uses that aren't stubbed resolve to no-op functions.
 function liftSubmit(stubs) {
   const at = APP.indexOf('async function submit(');
@@ -1191,7 +1191,7 @@ function appRig({ attachments = [{ src: 'data:image/png;base64,QUJD' }], draft =
   });
   return { submit, S, input, calls };
 }
-test('app.js wiring: the owner’s “Ask about this” sends no photos and leaves the composer’s mode, draft and waiting attachments alone (A3, A7, A8)', { skip: !WIRED && 'public/app.js is not wired to lookup.js yet (lookup-integration.md A1–A8)' }, async () => {
+test('app.js wiring: the owner’s “Ask about this” sends no photos and leaves the composer’s mode, draft and waiting attachments alone (A3, A7, A8)', async () => {
   const init = APP.slice(APP.indexOf('const lookup = initLookup('));
   assert.match(init.slice(0, 1000), /ask: \(prompt, from\) => submit\(prompt, 'ask', \{ images: \[\], untrusted: markOfEntry\(from\) \}\),/);
   assert.doesNotMatch(init.slice(0, 1000), /ask: \(prompt(?:, from)?\) => \{?\s*setMode/, 'the owner’s ask never switches the composer’s mode under a draft');
@@ -1206,6 +1206,19 @@ test('app.js wiring: the owner’s “Ask about this” sends no photos and leav
   const c = appRig({ draft: 'what is this?' });
   await c.submit();
   assert.deepEqual(c.calls.run[0].images, ['data:image/png;base64,QUJD']); assert.equal(c.S.attachments.length, 0); assert.equal(c.calls.renderAttachments, 1);
+});
+// v91 review (client-reply-open-dialog): a reply's own <dialog open> held Look up as if one of Atelier's dialogs were up.
+test('initLookup: a <dialog open> inside a reply doesn’t hold Look up; one of the app’s own dialogs still does', async () => {
+  const p = page();
+  const fake = p.doc.createElement('dialog'); fake.setAttribute('open', '');
+  p.prose.append(fake); // md() forbids it; this is the second layer
+  await openCard(p);
+  assert.ok(p.card() && !p.card().hidden, 'the card opens over a reply that holds a dialog');
+  const q = page();
+  const own = q.doc.createElement('dialog'); own.setAttribute('open', '');
+  q.doc.body.append(own);
+  await openCard(q);
+  assert.ok(!q.card() || q.card().hidden, 'an app dialog is up: no card');
 });
 test('constants: modes, kinds and timings the spec names', () => {
   assert.deepEqual([...LOOKUP_MODES], ['auto', 'tap', 'off']);

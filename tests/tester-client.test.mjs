@@ -203,7 +203,7 @@ test('tester mode never reaches owner surfaces from the client: app.js gates the
   assert.match(html, /<section class="field-group owner-only">\s*<h4>Connections<\/h4>/);
   assert.match(html, /class="model-grid owner-only" id="modelFields"/);
   assert.match(html, /class="chip owner-only" id="refreshModels"/);
-  assert.match(html, /class="field-group needs-owner tester-ui">\s*<h4>Testers<\/h4>/);
+  assert.match(html, /class="field-group needs-owner">\s*<h4>Testers<\/h4>/); // owner only; shown with access on or off (v91: Delete data)
   assert.match(html, /<a class="li-btn tester-ui" id="liBtn" href="\/api\/li\/start">/);
   assert.doesNotMatch(html, /w_member_social/);
 });

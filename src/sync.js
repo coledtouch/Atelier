@@ -434,11 +434,13 @@ async function postRestore(ctx) {
 }
 
 // POST blobs/missing {hashes} → {v, missing}
-async function postMissing({ req, bucket }) {
+// env.SYNC_MISSING_MAX: a smaller cap on hashes per request (a tester's: src/tester/sync.js; each hash is an R2 head).
+async function postMissing({ req, env, bucket }) {
   const { big, body } = await readJson(req, LIMITS.missingBody);
   if (big) return fail(413, 'too_large');
-  const hashes = body?.hashes;
-  if (!Array.isArray(hashes) || hashes.length > LIMITS.missingHashes || !hashes.every((h) => typeof h === 'string' && HASH_RE.test(h))) return fail(400, 'bad_shape');
+  const hashes = body?.hashes, cap = Number(env?.SYNC_MISSING_MAX);
+  const max = Number.isSafeInteger(cap) && cap > 0 ? Math.min(cap, LIMITS.missingHashes) : LIMITS.missingHashes;
+  if (!Array.isArray(hashes) || hashes.length > max || !hashes.every((h) => typeof h === 'string' && HASH_RE.test(h))) return fail(400, 'bad_shape');
   return json({ v: FORMAT, missing: await missingBlobs(bucket, [...new Set(hashes)]) });
 }
 

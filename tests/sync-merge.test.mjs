@@ -1125,10 +1125,12 @@ test('planPull (full): an entry gone from both the server and this device keeps 
 
 // ── marks that make a later accounts-agent turn ask first (e.untrusted, e.imported, e.web, steps) ──
 test('the untrusted mark, the live-web count, the imported flag and agent steps all sync; STICKY names the marks that never come off', () => {
-  const e = ask('e1', 1, 'a', { untrusted: 'share', web: 2, imported: true, steps: [{ id: 's', name: 'browser_read', service: 'browser', status: 'done' }], meta: { note: 'live web' } });
+  const e = ask('e1', 1, 'a', { untrusted: 'share', web: 2, imported: true, steps: [{ id: 's', name: 'browser_read', service: 'browser', status: 'done' }], meta: { note: 'live web' },
+    ranTaint: 'browser', toolUrls: ['https://calendar.google.com/event?eid=1'] });
   const s = strip(e);
-  for (const k of ['untrusted', 'web', 'imported', 'steps', 'meta']) assert.deepEqual(s[k], e[k], k);
-  assert.deepEqual([...STICKY], ['untrusted', 'imported']);
+  for (const k of ['untrusted', 'web', 'imported', 'steps', 'meta', 'ranTaint', 'toolUrls']) assert.deepEqual(s[k], e[k], k);
+  // ranTaint (v91): what an earlier run read, kept when Retry cleared its steps — another device can't drop it either
+  assert.deepEqual([...STICKY], ['untrusted', 'imported', 'ranTaint']);
   for (const k of STICKY) assert.equal(TRANSIENT.includes(k), false, `${k} is not transient`);
 });
 

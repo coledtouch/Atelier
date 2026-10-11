@@ -49,9 +49,9 @@
 import {
   FORMAT, MEDIA_SYNC, MEDIA_HELD, TRANSIENT, syncId, validDate, isRev, sha256hex, utf8, utf8Length, fromBase64, base64Length, jsonClone, dehydrate,
   hydrate, mediaKinds, gateHeld, refsOf, refValue, reborn, bornOf, forkEntry, checkView, checkPulledEntry, newRecord, planPull, planPush, pushBodies,
-  planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder, fullPrint, blobKind,
-} from './sync-merge.js?v=90';
-import { validateBackup } from './data-safety.js?v=90';
+  planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder, fullPrint, blobKind, LIMITS,
+} from './sync-merge.js?v=91';
+import { validateBackup } from './data-safety.js?v=91';
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 // The owner's choices and the engine's timing, kept together so they are easy to change.
@@ -1002,6 +1002,9 @@ export function createSync(deps = {}) {
       try { r = await Promise.race([fetchImpl(base + path, init), gave]); } catch (err) { throw err instanceof Retry ? err : new Retry(`network: ${err?.message || err}`, 0, true); }
       if (r.status === 401) { await pauseFor('passcode'); throw new Halt('401'); }
       if (r.status === 429) { await pauseFor('lockout', now() + SYNC_CLIENT.lockoutMs); throw new Halt('429'); }
+      // 426 app_outdated: this tab runs a build below the server's floor (src/worker.js MIN_CLIENT_BUILD). Nothing more is
+      // sent until the page reloads into the deployed version (boot lifts the pause); the app is told to do that now.
+      if (r.status === 426) { await pauseFor('upgrade'); try { deps.onOutdated?.(); } catch {} throw new Halt('426'); }
       let data = null, got = null;
       if (bytes && r.ok) {
         try { data = new Uint8Array(await Promise.race([r.arrayBuffer(), gave])); } catch (err) { throw err instanceof Retry ? err : new Retry(`download: ${err?.message || err}`, 0, true); }
@@ -1855,9 +1858,9 @@ export function createSync(deps = {}) {
       if (!(await store.get(`b:${b.hash}`).catch(() => null))) unknown.push(b);
     }
     if (unknown.length) {
-      const missing = new Set();
-      for (let i = 0; i < unknown.length; i += 1000) {
-        const r = await api('POST', 'blobs/missing', { json: { hashes: unknown.slice(i, i + 1000).map((b) => b.hash) } });
+      const missing = new Set(), chunk = accountTester ? LIMITS.testerMissingHashes : LIMITS.missingHashes; // the server's cap per check
+      for (let i = 0; i < unknown.length; i += chunk) {
+        const r = await api('POST', 'blobs/missing', { json: { hashes: unknown.slice(i, i + chunk).map((b) => b.hash) } });
         if (!r.ok) throw new Retry(`blobs/missing ${r.status}`);
         for (const h of r.json.missing || []) missing.add(h);
       }

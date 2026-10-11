@@ -702,12 +702,9 @@ test('testers: no runway: id in any tester model list, and no tester route reach
   }
 });
 
-// ── the Worker wiring (runs once src/worker.js is patched per runway-integration.md) ──
-const workerSrc = await readFile(new URL('../src/worker.js', import.meta.url), 'utf8');
-const wired = /from '\.\/runway\.js'/.test(workerSrc) && /path\.startsWith\('runway\/'\)/.test(workerSrc);
-const notWired = wired ? false : 'src/worker.js isn’t wired to src/runway.js yet (see runway-integration.md)';
+// ── the Worker wiring: through the real worker.fetch, always run (the ship gate and CI refuse a skipped test (v89 review, pipeline-skipped-tests-pass-gate)) ──
 
-test('worker: /api/health reports server.runway from RUNWAYML_API_SECRET', { skip: notWired }, async () => {
+test('worker: /api/health reports server.runway from RUNWAYML_API_SECRET', async () => {
   const { makeEnv, api } = await import('./tester-env.mjs');
   const { env } = makeEnv({ RUNWAYML_API_SECRET: KEY });
   assert.equal((await (await api(env, 'health')).json()).server.runway, true);
@@ -715,7 +712,7 @@ test('worker: /api/health reports server.runway from RUNWAYML_API_SECRET', { ski
   assert.equal((await (await api(none, 'health')).json()).server.runway, false);
 });
 
-test('worker: the passcode gate and the missing-secret message', { skip: notWired }, async () => {
+test('worker: the passcode gate and the missing-secret message', async () => {
   const { makeEnv, api, mockFetch: mf, restoreFetch, upstream } = await import('./tester-env.mjs');
   mf([[/./, () => reply(500, {})]]);
   try {
@@ -733,7 +730,7 @@ test('worker: the passcode gate and the missing-secret message', { skip: notWire
   } finally { restoreFetch(); }
 });
 
-test('worker: the owner reaches Runway through the Worker; the response is secured', { skip: notWired }, async () => {
+test('worker: the owner reaches Runway through the Worker; the response is secured', async () => {
   const { makeEnv, api, restoreFetch } = await import('./tester-env.mjs');
   mockFetch([created(48)]);
   try {
@@ -746,7 +743,7 @@ test('worker: the owner reaches Runway through the Worker; the response is secur
   } finally { restoreFetch(); }
 });
 
-test('worker: testers get 403 owner_only on every runway route, before any upstream or Ledger work', { skip: notWired }, async () => {
+test('worker: testers get 403 owner_only on every runway route, before any upstream or Ledger work', async () => {
   const { makeEnv, api, signIn, PROFILE, mockFetch: mf, restoreFetch, upstream, resetTesterCaches } = await import('./tester-env.mjs');
   resetTesterCaches();
   mf([[/./, () => reply(500, { error: 'should not be called' })]]);
@@ -765,7 +762,7 @@ test('worker: testers get 403 owner_only on every runway route, before any upstr
   } finally { restoreFetch(); }
 });
 
-test('worker: a tester’s Seedance 2.5 request is refused 403 owner_only before Runway or the Ledger', { skip: notWired }, async () => {
+test('worker: a tester’s Seedance 2.5 request is refused 403 owner_only before Runway or the Ledger', async () => {
   const { makeEnv, api, signIn, PROFILE, mockFetch: mf, restoreFetch, upstream, resetTesterCaches } = await import('./tester-env.mjs');
   resetTesterCaches();
   mf([[/./, () => reply(500, { error: 'should not be called' })]]);
@@ -784,7 +781,7 @@ test('worker: a tester’s Seedance 2.5 request is refused 403 owner_only before
   } finally { restoreFetch(); }
 });
 
-test('worker: /api/diag includes Runway when the secret is set', { skip: wired && /runwayDiag/.test(workerSrc) ? false : 'runwayDiag isn’t wired into /api/diag yet' }, async () => {
+test('worker: /api/diag includes Runway when the secret is set', async () => {
   const { makeEnv, api, restoreFetch } = await import('./tester-env.mjs');
   mockFetch([[up('organization'), () => reply(200, { creditBalance: 100, tier: { maxMonthlyCreditSpend: 10000, models: {} } })], [/./, () => reply(200, {})]]);
   try {

@@ -16,6 +16,10 @@ export const DAILY_UPLOADS = 10; // video clips a tester may start per UTC day (
 export const OVERRUN = 4;
 const MINUTE = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 const STATE_TTL = 10 * MINUTE, STALE = 15 * MINUTE, TICK = 10 * MINUTE, SESSION_TTL = 30 * DAY, RETAIN = 90 * DAY, JOB_TTL = 7 * DAY;
+// A deleted tester's second pass (forgetTester, alarm): this long after Delete data, well past every isolate's 60 s
+// identity cache (auth.js CACHE_MS) and any request of theirs let in before it. With the 10-minute alarm it runs 10-20
+// minutes after the delete.
+export const FORGET_SWEEP = 10 * MINUTE;
 // The last refused sign-in (A4) names someone who is not a tester (LinkedIn ID, name, photo link): it is kept this long
 // for the owner's Testers panel, then dropped when read and deleted by the alarm (privacy page §6).
 export const REFUSED_TTL = 7 * DAY;
@@ -67,11 +71,20 @@ const SCHEMA = [
   'CREATE INDEX IF NOT EXISTS owner_spend_month ON owner_spend (month)',
   'CREATE UNIQUE INDEX IF NOT EXISTS owner_spend_job ON owner_spend (job)',
   // App error reports (src/client-errors.js): one row per distinct failure, n = how often it was seen. Never more than
-  // CLIENT_ERRORS.keep rows; a row not seen for CLIENT_ERRORS.days days is deleted.
+  // CLIENT_ERRORS.keep rows; a row not seen for CLIENT_ERRORS.days days is deleted. verified (1: sent with the passcode)
+  // is added by CLIENT_ERROR_COLUMNS on a Ledger made before it.
   `CREATE TABLE IF NOT EXISTS client_errors (sig TEXT PRIMARY KEY, doc TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 1,
     first_at INTEGER NOT NULL, last_at INTEGER NOT NULL)`,
   'CREATE INDEX IF NOT EXISTS client_errors_last ON client_errors (last_at)',
+  // New unverified reports per network per hour (net: a keyed hash of the IPv4 address or IPv6 /64, never the address;
+  // a row goes once its hour is over, at the next report or the next alarm: at most about 1 h 10 min).
+  'CREATE TABLE IF NOT EXISTS client_error_nets (net TEXT NOT NULL, hour INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (net, hour))',
+  // Testers deleted with the owner's Delete data (forgetTester) whose second pass hasn't run yet: the LinkedIn sub, kept
+  // only until the alarm has deleted their cloud data and feedback once more (FORGET_SWEEP), then removed.
+  'CREATE TABLE IF NOT EXISTS forgotten (sub TEXT PRIMARY KEY, at INTEGER NOT NULL)',
 ];
+// Columns added after a table first shipped: ALTER TABLE ... ADD COLUMN, which fails harmlessly once the column exists.
+const CLIENT_ERROR_COLUMNS = ['ALTER TABLE client_errors ADD COLUMN verified INTEGER NOT NULL DEFAULT 0'];
 
 const str = (v, max) => (typeof v === 'string' ? v : '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
 const parseSubs = (v) => { try { const a = JSON.parse(v); return Array.isArray(a) ? a.filter((s) => SUB.test(s)) : []; } catch { return []; } };
@@ -88,8 +101,11 @@ export class Ledger extends DurableObject {
     this.clock = () => Date.now();
     ctx.blockConcurrencyWhile(async () => {
       for (const s of SCHEMA) this.storage.sql.exec(s);
+      for (const s of CLIENT_ERROR_COLUMNS) { try { this.storage.sql.exec(s); } catch { /* already there */ } }
       // A fresh Ledger starts paused (A7b): the first deploy is safe without a manual step.
       for (const [k, v] of Object.entries(DEFAULTS)) this.storage.sql.exec('INSERT OR IGNORE INTO config (k, v) VALUES (?, ?)', k, String(v));
+      // The key of the error reports' network hashes: random, made here once, never returned by any method.
+      this.storage.sql.exec("INSERT OR IGNORE INTO config (k, v) VALUES ('err_net_key', ?)", [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join(''));
       if ((await this.storage.getAlarm()) == null) await this.storage.setAlarm(Date.now() + TICK);
     });
   }
@@ -152,6 +168,17 @@ export class Ledger extends DurableObject {
   }
   #forget(sub) {
     for (const t of ['testers', 'sessions', 'spend', 'jobs', 'profiles']) this.#run(`DELETE FROM ${t} WHERE sub = ?`, sub);
+  }
+  // An error report's network (client-errors.js ipKey) → a keyed hash (32 hex), under this object's own random key.
+  #errKey = null;
+  async #netId(network) {
+    this.#errKey ||= (async () => {
+      const hex = this.#row("SELECT v FROM config WHERE k = 'err_net_key'")?.v || '';
+      const raw = /^[0-9a-f]{64}$/.test(hex) ? new Uint8Array(hex.match(/../g).map((h) => parseInt(h, 16))) : crypto.getRandomValues(new Uint8Array(32));
+      return crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    })();
+    const sig = new Uint8Array(await crypto.subtle.sign('HMAC', await this.#errKey, new TextEncoder().encode(`net|${String(network ?? '').slice(0, 64) || 'unknown'}`)));
+    return [...sig.slice(0, 16)].map((b) => b.toString(16).padStart(2, '0')).join('');
   }
   // A month's owner spend: settled jobs at what they cost, running ones at their quote.
   #ownerTotal(month) { return this.#row('SELECT COALESCE(SUM(COALESCE(actual, amount)), 0) AS n FROM owner_spend WHERE month = ?', month).n; }
@@ -270,6 +297,7 @@ export class Ledger extends DurableObject {
       const d = new Date(now), keep = monthKey(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - OWNER_SPEND_MONTHS + 1, 1));
       this.#run('DELETE FROM owner_spend WHERE month < ?', keep);
       this.#run('DELETE FROM client_errors WHERE last_at <= ?', now - CLIENT_ERROR_TTL);
+      this.#run('DELETE FROM client_error_nets WHERE hour < ?', Math.floor(now / HOUR));
     });
     // Retention includes the new private R2 namespace. Keep the record until its cloud data is gone, so a failed
     // or partial R2 cleanup never becomes an orphan. Revocation alone does not delete work (the owner can restore it).
@@ -290,6 +318,27 @@ export class Ledger extends DurableObject {
       } catch {
         // No subject, profile, path or error payload is logged. The next ten-minute alarm retries this record.
         console.warn('tester cloud retention cleanup will retry');
+      }
+    }
+    // The second pass for testers deleted with Delete data (forgetTester): what a request let in before the delete wrote
+    // afterwards (a thread, usage, media, feedback) goes too, then the sub. Someone who signed in again meanwhile (a new
+    // roster row) keeps what is there now: it is theirs, under a record the 90-day retention covers.
+    const { forgetFeedback } = await import('../feedback.js');
+    for (const { sub } of this.#rows('SELECT sub FROM forgotten WHERE at <= ?', now - FORGET_SWEEP)) {
+      try {
+        await this.#cleanupContext.blockConcurrencyWhile(async () => {
+          if (this.#tester(sub)) { this.#run('DELETE FROM forgotten WHERE sub = ?', sub); return; }
+          try {
+            const result = await purgeTesterSync(this.#syncEnv, sub);
+            if (!result.complete) return;
+            await forgetFeedback(this.#syncEnv?.ATELIER_KV, sub);
+            this.#tx(() => { this.#forget(sub); this.#run('DELETE FROM forgotten WHERE sub = ?', sub); });
+          } catch {
+            console.warn('deleted tester clean-up will retry');
+          }
+        });
+      } catch {
+        console.warn('deleted tester clean-up will retry'); // nothing identifying is logged; the next alarm retries
       }
     }
     await this.storage.setAlarm(Date.now() + TICK);
@@ -435,29 +484,79 @@ export class Ledger extends DurableObject {
       return true;
     });
   }
+  // The owner's "Delete tester and all their data" (POST /api/testers/forget; privacy §6/§8: deletion on request). In
+  // order: the tester is revoked and every session ends; the whole cloud namespace is deleted (testers/<hash>/,
+  // testers-x/<hash>/, testers-v/<hash>/ and the pre-split copies, purgeTesterSync), then their voluntary feedback (KV,
+  // forgetFeedback); only then do the roster row, sessions, spend, jobs and profile go (#forget), with any open
+  // reservation settled first so the pool stays right, the sub dropped from preview_subs and a "last refused" record
+  // naming them deleted. A purge or feedback deletion that can't finish (R2 or KV unreachable, more than maxPages pages)
+  // keeps the record, revoked, and answers retry: run it again (the row is still there to press Delete data on).
+  // Ending the sessions doesn't stop every request of theirs at once: another isolate honours a cookie it identified in
+  // the last 60 s (auth.js identify), and a request already past that check still finishes, so a still-open tab can
+  // write again (public/sync.js pushes a thread the index no longer lists). So the sub stays in `forgotten`, and the
+  // alarm deletes their cloud data and feedback once more after FORGET_SWEEP (v91 review), then drops it.
+  // Works whether or not tester access is on.
+  // → {ok: true, found (they were on the roster), removed (cloud objects), feedback (entries)} | {ok: false, retry?: true, removed?}
+  async forgetTester(sub) {
+    if (typeof sub !== 'string' || !SUB.test(sub)) return { ok: false };
+    this.#tx(() => {
+      if (this.#tester(sub)) this.#run('UPDATE testers SET revoked_at = COALESCE(revoked_at, ?) WHERE sub = ?', this.clock(), sub);
+      this.#run('DELETE FROM sessions WHERE sub = ?', sub);
+    });
+    const { purgeTesterSync } = await import('./sync.js');
+    let purge;
+    try { purge = await purgeTesterSync(this.#syncEnv, sub, { maxPages: 100 }); } catch { return { ok: false, retry: true, removed: 0 }; }
+    if (!purge.complete) return { ok: false, retry: true, removed: purge.removed };
+    const { forgetFeedback } = await import('../feedback.js');
+    let feedback;
+    try { feedback = await forgetFeedback(this.#syncEnv?.ATELIER_KV, sub); } catch { return { ok: false, retry: true, removed: purge.removed }; }
+    const found = this.#tx(() => {
+      const had = Boolean(this.#tester(sub)), now = this.clock();
+      for (const r of this.#rows('SELECT id, amount FROM reservations WHERE sub = ?', sub)) this.#settle(r.id, r.amount);
+      this.#forget(sub);
+      const c = this.#config();
+      if (c.preview_subs.includes(sub)) this.#run("UPDATE config SET v = ? WHERE k = 'preview_subs'", JSON.stringify(c.preview_subs.filter((s) => s !== sub)));
+      if (this.#lastRefused(now)?.sub === sub) this.#run("DELETE FROM config WHERE k = 'last_refused'");
+      this.#run('INSERT OR REPLACE INTO forgotten (sub, at) VALUES (?, ?)', sub, now);
+      return had;
+    });
+    return { ok: true, found, removed: purge.removed, feedback };
+  }
   // ── app error reports (src/client-errors.js: POST /api/client-error; Settings → Advanced diagnostics) ──
   // doc: a report the Worker already cleaned (cleaned again here). The same failure seen again only counts up. Anyone can
-  // POST one, so made-up reports must not sweep out real ones: a failure not seen before is stored only while fewer than
-  // CLIENT_ERRORS.newPerHour rows were added in the last hour, whoever sent them; and over CLIENT_ERRORS.keep rows, the
-  // newest keepNewest always stay, and of the rest a failure seen once goes before one seen again, the oldest first.
-  // Nothing older than CLIENT_ERRORS.days days stays.
-  clientErrorAdd(doc) {
+  // POST one, so made-up reports must not sweep out real ones:
+  //   · verified (sent with the owner's passcode): never refused for a budget, and evicted only after every unverified one;
+  //   · an unverified failure not seen before is stored only while fewer than CLIENT_ERRORS.newPerHour unverified rows
+  //     were added in the last hour, and fewer than newPerNetHour this hour from its network (opts.network, client-errors.js
+  //     ipKey, kept only as a keyed hash), so one sender can't take the whole hour's budget;
+  //   · over CLIENT_ERRORS.keep rows the newest keepNewest always stay, and of the rest an unverified report goes before a
+  //     verified one, then the one seen fewest times, the oldest first (junk posted twice no longer ties with a failure
+  //     seen a hundred times).
+  // Nothing older than CLIENT_ERRORS.days days stays. → {ok: true, count} | {ok: false, full?: true}
+  async clientErrorAdd(doc, { verified = false, network = null } = {}) {
     const clean = cleanReport(doc);
     if (!clean) return { ok: false };
-    const now = this.clock(), sig = reportSig(clean), text = JSON.stringify(clean);
+    // (The Worker always names the network; a call without one is counted only against the hour's total.)
+    const net = verified === true || network == null ? null : await this.#netId(network);
+    const now = this.clock(), sig = reportSig(clean), text = JSON.stringify(clean), hour = Math.floor(now / HOUR), v = verified === true ? 1 : 0;
     return this.#tx(() => {
       this.#run('DELETE FROM client_errors WHERE last_at <= ?', now - CLIENT_ERROR_TTL);
+      this.#run('DELETE FROM client_error_nets WHERE hour < ?', hour); // only this hour's counts are ever read
       const had = this.#row('SELECT n FROM client_errors WHERE sig = ?', sig);
-      if (had) this.#run('UPDATE client_errors SET doc = ?, n = n + 1, last_at = ? WHERE sig = ?', text, now, sig);
+      if (had) this.#run('UPDATE client_errors SET doc = ?, n = n + 1, last_at = ?, verified = MAX(verified, ?) WHERE sig = ?', text, now, v, sig);
       else {
-        if (this.#row('SELECT COUNT(*) AS n FROM client_errors WHERE first_at > ?', now - HOUR).n >= CLIENT_ERRORS.newPerHour) return { ok: false, full: true };
-        this.#run('INSERT INTO client_errors (sig, doc, n, first_at, last_at) VALUES (?, ?, 1, ?, ?)', sig, text, now, now);
+        if (!v) {
+          if (this.#row('SELECT COUNT(*) AS n FROM client_errors WHERE verified = 0 AND first_at > ?', now - HOUR).n >= CLIENT_ERRORS.newPerHour) return { ok: false, full: true };
+          if (net && (this.#row('SELECT n FROM client_error_nets WHERE net = ? AND hour = ?', net, hour)?.n || 0) >= CLIENT_ERRORS.newPerNetHour) return { ok: false, full: true };
+          if (net) this.#run('INSERT INTO client_error_nets (net, hour, n) VALUES (?, ?, 1) ON CONFLICT (net, hour) DO UPDATE SET n = n + 1', net, hour);
+        }
+        this.#run('INSERT INTO client_errors (sig, doc, n, first_at, last_at, verified) VALUES (?, ?, 1, ?, ?, ?)', sig, text, now, now, v);
       }
       const over = this.#row('SELECT COUNT(*) AS n FROM client_errors').n - CLIENT_ERRORS.keep;
       if (over > 0) {
         this.#run(`DELETE FROM client_errors WHERE sig IN (SELECT sig FROM client_errors
           WHERE sig NOT IN (SELECT sig FROM client_errors ORDER BY last_at DESC, rowid DESC LIMIT ?)
-          ORDER BY n > 1, last_at, rowid LIMIT ?)`, CLIENT_ERRORS.keepNewest, over);
+          ORDER BY verified, n, last_at, rowid LIMIT ?)`, CLIENT_ERRORS.keepNewest, over);
       }
       return { ok: true, count: had ? had.n + 1 : 1 };
     });
@@ -466,10 +565,10 @@ export class Ledger extends DurableObject {
   clientErrors() {
     return this.#tx(() => {
       this.#run('DELETE FROM client_errors WHERE last_at <= ?', this.clock() - CLIENT_ERROR_TTL);
-      return this.#rows('SELECT doc, n, first_at, last_at FROM client_errors ORDER BY last_at DESC, rowid DESC LIMIT ?', CLIENT_ERRORS.keep).map((r) => {
+      return this.#rows('SELECT doc, n, first_at, last_at, verified FROM client_errors ORDER BY last_at DESC, rowid DESC LIMIT ?', CLIENT_ERRORS.keep).map((r) => {
         let doc = null;
         try { doc = JSON.parse(r.doc); } catch {}
-        return doc && typeof doc === 'object' && !Array.isArray(doc) ? { ...doc, count: r.n, firstAt: r.first_at, lastAt: r.last_at } : null;
+        return doc && typeof doc === 'object' && !Array.isArray(doc) ? { ...doc, count: r.n, firstAt: r.first_at, lastAt: r.last_at, verified: r.verified === 1 } : null;
       }).filter(Boolean);
     });
   }

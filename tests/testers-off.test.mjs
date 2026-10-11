@@ -222,14 +222,15 @@ test('client: tester UI is hidden unless /api/health says testers: true (off unt
   // the CSS switch
   assert.match(STUDIO, /body:not\(\.testers-open\) \.tester-ui, body\.testers-open \.tester-closed \{ display: none !important; \}/);
   // every tester surface carries .tester-ui: the sign-in button and spots, the allowance pill, feedback (sidebar and the
-  // phone's studio menu), the owner's Testers panel and the feedback inbox
+  // phone's studio menu) and the feedback inbox. The owner's Testers panel doesn't since v91: with access off it is where
+  // a tester's data is deleted on request (Delete data → POST /api/testers/forget).
   for (const re of [
     /<a class="li-btn tester-ui" id="liBtn" href="\/api\/li\/start">/,
     /<p class="ob-spots tester-ui" id="spotsLine">/,
     /<p class="allowance tester-ui" id="allowance" hidden><\/p>/,
     /<button class="nav-item nav-feedback tester-ui" id="feedbackBtn"/,
     /<button type="button" class="studio-menu-item tester-ui" data-studio-target="feedback">/,
-    /<section class="field-group needs-owner tester-ui">\s*<h4>Testers<\/h4>/,
+    /<section class="field-group needs-owner">\s*<h4>Testers<\/h4>/,
   ]) assert.match(HTML, re);
   assert.match(APP, /<section class="field-group owner-only tester-ui" id="feedbackSection">/);
   assert.match(HTML, /<p class="ob-spots tester-closed" id="closedLine">Tester sign-in is closed right now\.<\/p>/);
@@ -240,7 +241,9 @@ test('client: tester UI is hidden unless /api/health says testers: true (off unt
   // closed: the passcode form opens, no spots are fetched, the Testers roster isn't loaded, LinkedIn notes read “closed”
   assert.match(APP, /if \(reason === 'rejected' \|\| LS\.get\('owner', false\) \|\| !testersOpen\) \$\('#ownerEntry'\)\.open = true;/);
   assert.match(APP, /if \(testersOpen\) loadSpots\(\);/);
-  assert.match(APP, /if \(S\.settings\.passcode && !S\.tester\) \{ loadSpending\(\); if \(testersOpen\) loadTesters\(\); \}/);
+  // ...except the owner's Testers roster, which stays (and loads) so a tester's erasure request works either way
+  assert.match(APP, /if \(S\.settings\.passcode && !S\.tester\) \{ loadSpending\(\); loadTesters\(\); \}/);
+  assert.match(APP, /\$\{testersOpen \? '' : '<p class="hint">Tester sign-in is switched off on the server \(TESTERS_ENABLED\)/, 'the panel says access is off');
   assert.match(APP, /const note = SIGNIN_NOTES\[!testersOpen && TESTER_NOTES\.has\(reason\) \? 'closed' : reason\] \|\| '';/);
   // a tester device finds out at boot (410 → signed out, “closed”) and mid-session (tester_closed on any call)
   assert.match(APP, /if \(r\.status === 410\) return 'closed';/);
@@ -278,7 +281,7 @@ test('client: the hidden surfaces really disappear — a tiny cascade check of t
   // which rule wins for an element, given the body's classes (the only two rules that mention the switch)
   const hidden = (bodyClasses, el) => (!bodyClasses.includes('testers-open') && el.includes('tester-ui')) || (bodyClasses.includes('testers-open') && el.includes('tester-closed'));
   const marked = [...HTML.matchAll(/class="([^"]*\btester-(?:ui|closed)\b[^"]*)"/g)].map((m) => m[1].split(/\s+/));
-  assert.ok(marked.length >= 7, `${marked.length} marked elements`);
+  assert.ok(marked.length >= 6, `${marked.length} marked elements`); // (the Testers panel left the list in v91)
   for (const el of marked) {
     assert.equal(hidden(['owner'], el), el.includes('tester-ui'), el.join(' '));
     assert.equal(hidden(['owner', 'testers-open'], el), el.includes('tester-closed'), el.join(' '));

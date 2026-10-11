@@ -72,7 +72,7 @@ test('an entry saved with v84’s spending-limit card still imports, renders as 
 
 test('Settings → Spending: owner only (needs-owner), a read-only readout — no limit inputs, no Save, no PUT', () => {
   assert.match(HTML, /<section class="field-group needs-owner" id="spendingSection">\s*<h4>Spending<\/h4>\s*<div class="testers spending" id="spendingPanel"><\/div>/);
-  assert.match(APP, /if \(S\.settings\.passcode && !S\.tester\) \{ loadSpending\(\); if \(testersOpen\) loadTesters\(\); \}/);
+  assert.match(APP, /if \(S\.settings\.passcode && !S\.tester\) \{ loadSpending\(\); loadTesters\(\); \}/);
   assert.match(APP, /async function loadSpending\(\) \{\n  const box = \$\('#spendingPanel'\), seq = \+\+SP\.seq;\n  if \(!S\.settings\.passcode \|\| S\.tester\) return null;/);
   const panel = APP.slice(APP.indexOf('// ── owner: Settings → General → Spending'), APP.indexOf('// ───────────────────────── You: profile'))
     .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n'); // the code, not its comments

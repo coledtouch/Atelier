@@ -8,7 +8,7 @@ const VERSION = source.match(/const VERSION = '([^']+)'/)[1]; // bumped on every
 const LAZY = JSON.parse(source.match(/const LAZY = (\[[^\]]*\]);/)[1].replace(/'/g, '"'));
 function setup({ offline = false, hit = new Response('cached'), keys = [] } = {}) {
   const handlers = {}, deleted = [], fetched = [], cached = [], waited = [];
-  const cache = { match: async () => hit, put: async (key, response) => cached.push(key), addAll: async list => cached.push(...list) };
+  const cache = { match: async () => hit, put: async (key, response) => cached.push(key), addAll: async list => cached.push(...list), keys: async () => [...new Set(cached)] };
   vm.runInNewContext(source, { URL, Response, location: { origin: 'https://atelier.test' },
     self: { addEventListener: (name, fn) => handlers[name] = fn, clients: { claim: async () => {} }, skipWaiting: async () => {} },
     caches: { open: async () => cache, keys: async () => keys, delete: async k => deleted.push(k) },
@@ -32,7 +32,7 @@ test('offline navigation uses cached legal page and uncached assets fail predict
   const empty = setup({ offline: true, hit: null }); assert.equal((await empty.dispatch('/app.js')).type, 'error');
 });
 test('online navigation prefers the current server response', async () => {
-  const s = setup(); assert.equal(await (await s.dispatch('/', {mode:'navigate'})).text(), 'network'); assert.ok(s.cached.includes('/index.html'));
+  const s = setup(); assert.equal(await (await s.dispatch('/', {mode:'navigate'})).text(), 'network'); assert.ok(s.cached.includes('/'));
 });
 test('index.html asks for exactly the versioned shell files the worker precaches', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
@@ -107,4 +107,60 @@ test('LAZY files are not in the install list, and are cached on first use', asyn
   const hit = setup();
   assert.equal(await (await hit.dispatch('/vendor/mediabunny.js')).text(), 'cached', 'then cache-first');
   assert.equal(setup().dispatch('/vendor/mediabunny.LICENSE.txt'), undefined, 'the licence text is a plain static file');
+});
+
+// v89 review (live-sw-redirected-index): the live site answers /index.html with a 307 to '/'. cache.addAll follows it and
+// stores a response marked redirected, which Chromium refuses for a navigation, so an offline launch right after an
+// install, a Repair or an update failed. '/' is precached under its own name, navigations to '/' and '/index.html' use
+// that entry, and any precached entry that still came through a redirect is stored again as a plain copy.
+// Cache Storage keeps a response's redirected flag; this stand-in does the same (a Response clone in Node drops it).
+const page = (body, redirected = false) => { const r = new Response(body, { headers: { 'content-type': 'text/html' } }); if (redirected) Object.defineProperty(r, 'redirected', { value: true }); return r; };
+function cacheRig({ upstream, offline = false }) {
+  const handlers = {}, store = new Map();
+  const keyOf = (k) => (typeof k === 'string' ? k : new URL(k.url).pathname + new URL(k.url).search);
+  const cache = {
+    match: async (k) => { const e = store.get(keyOf(k)); return e ? page(e.body, e.redirected) : undefined; },
+    put: async (k, r) => { store.set(keyOf(k), { body: await r.text(), redirected: r.redirected }); },
+    addAll: async (list) => { for (const u of list) { const r = upstream(u.split('?')[0]); store.set(u, { body: await r.text(), redirected: r.redirected }); } },
+    keys: async () => [...store.keys()],
+  };
+  vm.runInNewContext(source, { URL, Response, location: { origin: 'https://atelier.test' },
+    self: { addEventListener: (name, fn) => handlers[name] = fn, clients: { claim: async () => {} }, skipWaiting: async () => {} },
+    caches: { open: async () => cache, keys: async () => [], delete: async () => {} },
+    fetch: async (req) => { if (offline) throw new Error('offline'); return upstream(new URL(req.url).pathname); },
+  });
+  const install = async () => { let done; handlers.install({ waitUntil: (p) => { done = p; } }); await done; };
+  const nav = (path) => {
+    let response;
+    handlers.fetch({ request: { url: `https://atelier.test${path}`, method: 'GET', mode: 'navigate' }, waitUntil() {}, respondWith: (p) => { response = p; } });
+    return response;
+  };
+  return { store, install, nav, setOffline: (v) => { offline = v; } };
+}
+// what Cloudflare's html_handling does: a *.html path redirects to its pretty URL (the fetch follows, like addAll)
+const cloudflare = (path) => page(`page ${path.replace(/(index)?\.html$/, '')}`, /\.html$/.test(path));
+test('install keeps no redirected copy, and an offline launch at / or /index.html gets the clean page', async () => {
+  const shell = source.match(/const SHELL = \[[\s\S]*?\];/)[0];
+  assert.ok(!shell.includes("'/index.html'"), "SHELL names '/', never '/index.html' (the live site redirects it)");
+  const rig = cacheRig({ upstream: cloudflare });
+  await rig.install();
+  for (const [k, e] of rig.store) assert.equal(e.redirected, false, `${k} is stored without the redirected mark`);
+  rig.setOffline(true);
+  for (const path of ['/', '/?source=pwa', '/?start=voice', '/index.html']) {
+    const r = await rig.nav(path);
+    assert.equal(r.redirected, false, `${path}: a navigation never gets a redirected response`);
+    assert.equal(await r.text(), 'page /', `${path}: the app shell, from the cache`);
+  }
+  assert.equal(await (await rig.nav('/privacy')).text(), 'page /privacy');
+});
+test('install re-stores any precached entry that came through a redirect (the backstop)', async () => {
+  // the server starts redirecting a path the worker precaches by its final name (here /privacy and '/')
+  const rig = cacheRig({ upstream: (path) => page(`page ${path}`, path === '/privacy' || path === '/') });
+  await rig.install();
+  assert.equal(rig.store.get('/privacy').redirected, false, 'stored again as a plain copy');
+  assert.equal(rig.store.get('/privacy').body, 'page /privacy', 'with the same body');
+  rig.setOffline(true);
+  const r = await rig.nav('/');
+  assert.equal(r.redirected, false);
+  assert.equal(await r.text(), 'page /');
 });

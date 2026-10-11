@@ -35,11 +35,11 @@ class Node {
 }
 
 function page({ online = true, ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 like Mac OS X)', standalone = true, referrer = '', session = new Map(),
-  blockStorage = false, cacheKeys = ['atelier-v84', 'atelier-v85', 'atelier-share', 'other-app'], probe = 'ok', clipboard = true, search = '?source=pwa' } = {}) {
+  blockStorage = false, cacheKeys = ['atelier-v84', 'atelier-v85', 'atelier-share', 'other-app'], probe = 'ok', clipboard = true, search = '?source=pwa', settings = null } = {}) {
   let now = 1000;
   const timers = [];
   let nextId = 1;
-  const log = { fetches: [], deleted: [], unregistered: 0, updated: 0, reloads: 0, replaced: [], copied: [], touched: [] };
+  const log = { fetches: [], deleted: [], unregistered: 0, updated: 0, reloads: 0, replaced: [], copied: [], touched: [], lsReads: [] };
   const doc = { visibilityState: 'visible', referrer, activeElement: null };
   Object.assign(doc, {
     createElement: (t) => new Node(t, doc),
@@ -49,8 +49,13 @@ function page({ online = true, ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 lik
     createRange: () => ({ selectNodeContents() {} }),
   });
   const listeners = {};
-  // localStorage and IndexedDB must never be opened: any access is recorded.
+  // localStorage and IndexedDB must never be opened: any access is recorded. The one exception is reading the saved
+  // settings (atelier.settings) when a report goes out: the owner's passcode marks it as verified (log.lsReads).
   const forbidden = (name) => new Proxy({}, { get(_, k) { log.touched.push(`${name}.${String(k)}`); return () => {}; } });
+  const localStore = new Proxy({}, { get(_, k) {
+    if (k === 'getItem') return (key) => { log.lsReads.push(key); return key === 'atelier.settings' && settings ? JSON.stringify(settings) : null; };
+    log.touched.push(`localStorage.${String(k)}`); return () => {};
+  } });
   const storage = blockStorage ? { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } }
     : { getItem: (k) => (session.has(k) ? session.get(k) : null), setItem: (k, v) => session.set(k, String(v)) };
   const reg = { update: async () => { log.updated++; }, unregister: async () => { log.unregistered++; return true; } };
@@ -64,7 +69,7 @@ function page({ online = true, ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 lik
     },
     matchMedia: () => ({ matches: standalone }),
     performance: { now: () => now, getEntriesByType: () => [] },
-    sessionStorage: storage, localStorage: forbidden('localStorage'), indexedDB: forbidden('indexedDB'),
+    sessionStorage: storage, localStorage: localStore, indexedDB: forbidden('indexedDB'),
     caches: {
       keys: async () => [...cacheKeys],
       delete: async (k) => { log.deleted.push(k); return true; },
@@ -457,6 +462,7 @@ test('Repair: checks the server, unregisters the worker, deletes only atelier-v<
   assert.equal(p.log.unregistered, 2, 'every registration');
   assert.deepEqual(p.log.deleted, ['atelier-v84', 'atelier-v85'], 'not atelier-share (a pending share is the user’s) nor anyone else’s');
   assert.deepEqual(p.log.touched, [], 'IndexedDB, localStorage and cache contents untouched');
+  assert.ok(p.log.lsReads.every((k) => k === 'atelier.settings'), 'localStorage is only read, and only for the saved passcode (a report)');
   assert.equal(p.log.replaced.length, 1);
   assert.match(p.log.replaced[0], /^\/\?repair=[0-9a-z]+$/, 'a fresh query: nothing cached answers it');
   assert.equal(p.log.reloads, 0);
@@ -603,8 +609,28 @@ test('client cap: each failure once per session, five at most; the count survive
   assert.equal(sent.init.method, 'POST');
   assert.equal(sent.init.credentials, 'omit');
   assert.equal(sent.init.keepalive, true);
-  assert.deepEqual({ ...sent.init.headers }, { 'content-type': 'application/json' });
+  assert.deepEqual({ ...sent.init.headers }, { 'content-type': 'application/json' }, 'no passcode saved: nothing but the type');
   assert.ok(sent.init.body.length < 2048, 'under the server’s cap');
+});
+
+test('the owner’s device marks its reports as its own: the saved passcode goes with them (x-app-pass), never cookies', async () => {
+  const p = page({ settings: { passcode: 'owner-pass', theme: 'auto' } });
+  p.api.booted();
+  p.fire('error', { filename: `${ORIGIN}/app.js?v=85`, lineno: 7, colno: 1, error: v8Error('TypeError', 'x', []) });
+  await tick();
+  const sent = p.log.fetches.find((f) => f.url === '/api/client-error');
+  assert.deepEqual({ ...sent.init.headers }, { 'content-type': 'application/json', 'x-app-pass': 'owner-pass' });
+  assert.equal(sent.init.credentials, 'omit', 'still no cookies: a tester’s session never goes with a report');
+  assert.ok(!sent.init.body.includes('owner-pass'), 'the report itself never holds it');
+  assert.deepEqual(p.log.touched, []);
+  // Nothing saved, an empty one, or one that couldn't be a header value: no header.
+  for (const settings of [null, { passcode: '' }, { passcode: 'a\nb' }, { passcode: 42 }]) {
+    const q = page({ settings });
+    q.api.booted();
+    q.fire('error', { filename: `${ORIGIN}/app.js?v=85`, lineno: 8, colno: 1, error: v8Error('TypeError', 'x', []) });
+    await tick();
+    assert.deepEqual({ ...q.log.fetches.find((f) => f.url === '/api/client-error').init.headers }, { 'content-type': 'application/json' }, JSON.stringify(settings));
+  }
 });
 
 test('platform classes: iOS Home Screen, iOS Safari, the Android TWA (and after a reload), Android Chrome, desktop app and browser', () => {

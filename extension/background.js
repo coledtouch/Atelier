@@ -126,8 +126,28 @@ function pageElement(i, op, opts = {}) {
   // A field's current value is never used as its label: it could be a password.
   const label = clean(el.getAttribute('aria-label') || (field ? '' : el.innerText) || (buttonValue ? el.value : '')
     || el.getAttribute('placeholder') || el.getAttribute('name') || el.getAttribute('title'), 100);
-  const hints = [el.getAttribute('autocomplete'), el.getAttribute('name'), el.id, el.getAttribute('placeholder'), el.getAttribute('aria-label')].join(' ').toLowerCase();
-  const sensitive = type === 'password' || /cc-|card.?num|credit|cvc|cvv|security.?code|expir|iban|routing|ssn|social.?security/.test(hints);
+  // Sensitive: a password, payment, sign-in code or ID-number field (REFUSED_FIELD). Read from every name the page gives
+  // the field: its attributes, and the text of its <label>s and aria-labelledby, so a field named only by a
+  // <label for> ("Social Security Number", name=field3) counts. A password a show-password toggle turned into type=text
+  // still counts by its autocomplete (current-password / new-password) or its masking (-webkit-text-security). Short
+  // words that are common in ordinary text (pin, pwd, acct, otp, tin, ein, itin, exp_month) count only in the field's
+  // own identifiers (autocomplete, name, id), never in its label or placeholder ("Geben Sie ein Stichwort ein").
+  // A name or id is split at its case changes first (otpCode, cardPin, userPIN, SSNNumber → "otp code", "card pin",
+  // "user pin", "ssn number"), so a short word there counts as a word; "ssn" counts only as a word anywhere
+  // (businessName, className are ordinary fields). (v89 review, pipeline-ext-sensitive-field-gaps; v91 review. This runs
+  // inside the page, so it uses nothing from outside.)
+  const auto = String(el.getAttribute('autocomplete') || '').toLowerCase();
+  const words = (v) => String(v || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+  const labelText = [...(el.labels || [])].map((l) => l?.innerText || '')
+    .concat(String(el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map((id) => document.getElementById?.(id)?.innerText || ''));
+  const ids = [auto, words(el.getAttribute('name')), words(el.id)].join(' ').toLowerCase();
+  const hints = [ids, el.getAttribute('placeholder'), el.getAttribute('aria-label'), el.getAttribute('title'), ...labelText].join(' ').toLowerCase();
+  let masked = false;
+  try { masked = typeof getComputedStyle === 'function' && !/^(none|)$/.test(String(getComputedStyle(el).webkitTextSecurity || '')); } catch { /* no style */ }
+  const sensitive = type === 'password' || masked
+    || /(^|\s)(current-password|new-password|one-time-code|cc-[a-z-]+)(\s|$)/.test(auto)
+    || /pass(word|wd|code|phrase)|cc-|card.?(num|no\b)|credit|cvc|cvv|security.?code|expir|iban|routing|account.?(num|no\b|#)|(?<![a-z])ssn(?![a-z])|social.?security|tax.?(id|payer)|passport|driv.{0,6}licen[cs]e|national.?(id|insurance)|one.?time.?(code|pass)|verification.?code|sort.?code/.test(hints)
+    || /(?<![a-z])(pin|pwd|acct|otp|tin|ein|itin|cvn|exp.?(month|year|date|mm|yy))(?![a-z])/.test(ids);
   if (op === 'describe') {
     if (opts.token) {
       document.querySelectorAll('[data-atelier-c]').forEach((e) => e.removeAttribute('data-atelier-c'));

@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { VERSION_RE, HTML_RE, IMPORT_RE, BUILD_RE } from './bump-version.mjs';
 import { BUCKET as SYNC_BUCKET_NAME, checkR2Lifecycle, describe as describeLifecycle, runWrangler } from './check-r2-lifecycle.mjs';
+import { extVerdict, extVersion } from './check-bump.mjs';
 
 export const SITE = 'https://atelier.ciprari.ai';
 export const ZIP = 'public/atelier-browser.zip';
@@ -329,6 +330,23 @@ export function afterWranglerFailure({ live, local, sha, status }) {
   return { live: false, message: `wrangler deploy failed (${status}); the live sw.js reports ${live == null ? 'nothing readable' : `atelier-v${live}`}. Nothing was pushed. If ${SITE}/sw.js reports atelier-v${local} later, it went live after all: git push origin ${sha}:refs/heads/master` };
 }
 
+/**
+ * The test gate on node --test's result and its TAP report → { ok, message }. Every test must run and pass: a test that
+ * skipped itself or is marked todo didn't run. About 30 security tests used to skip themselves when a regex over the
+ * source stopped matching (the owner sync passcode test skipped once `handleSync(` was renamed), so a refactor that
+ * broke one shipped untested (v89 review, pipeline-skipped-tests-pass-gate). None skips on purpose, on any machine: a
+ * test that can't run here fails instead, naming what is missing.
+ */
+export function testGate(run, tap) {
+  const counts = `${tap.fail} failed, ${tap.cancelled} cancelled, ${tap.skipped} skipped, ${tap.todo} todo, ${tap.pass}/${tap.tests} passed`;
+  if (!run.ok || !(tap.tests > 0) || tap.fail || tap.cancelled) return { ok: false, message: `tests failed in the clean checkout (${why(run)}; ${counts})` };
+  if (tap.skipped || tap.todo) {
+    const shown = tap.skips.slice(0, 20).map((s) => `\n          ${s.kind === 'TODO' ? 'todo' : 'skipped'}: ${s.name}${s.reason ? ` (${s.reason})` : ''}`).join('');
+    return { ok: false, message: `not every test ran in the clean checkout (${counts}): a skipped or todo test checks nothing, so ship refuses it${shown}` };
+  }
+  return { ok: true, message: `${tap.pass}/${tap.tests} tests passed` };
+}
+
 /** git's arguments for the clean worktree. On Windows CRLF is forced, whatever the machine's git config says. */
 export const worktreeAddArgs = (wt, sha, platform = process.platform) => [...(platform === 'win32' ? ['-c', 'core.autocrlf=true'] : []), 'worktree', 'add', '--detach', wt, sha];
 
@@ -359,19 +377,27 @@ const unquoteYaml = (s) => {
 };
 
 /**
- * node --test's TAP output → { tests, pass, fail, cancelled, failures: [{ name, location, error }] }. A failing suite
- * whose only fault is a failing child is skipped (the child is listed); a test file that fails to load is listed by path.
+ * node --test's TAP output → { tests, pass, fail, cancelled, skipped, todo, failures: [{ name, location, error }],
+ * skips: [{ name, kind: 'SKIP' | 'TODO', reason }] }. A failing suite whose only fault is a failing child is skipped (the
+ * child is listed); a test file that fails to load is listed by path. A skipped or todo test is listed in skips, never
+ * in failures (a todo test that fails doesn't count as failed).
  */
 export function parseTap(text) {
   const lines = String(text ?? '').split(/\r?\n/);
-  const res = { tests: 0, pass: 0, fail: 0, cancelled: 0, failures: [] };
+  const res = { tests: 0, pass: 0, fail: 0, cancelled: 0, skipped: 0, todo: 0, failures: [], skips: [] };
   const stack = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const sum = /^# (tests|pass|fail|cancelled) (\d+)$/.exec(line);
+    const sum = /^# (tests|pass|fail|cancelled|skipped|todo) (\d+)$/.exec(line);
     if (sum) { res[sum[1]] = Number(sum[2]); continue; }
     const sub = /^( *)# Subtest: (.*)$/.exec(line);
     if (sub) { const d = Math.floor(sub[1].length / 4); stack.length = d; stack[d] = unescapeTap(sub[2]); continue; }
+    const sk = /^( *)(?:not )?ok \d+ - (.*?) # (SKIP|TODO)\b ?(.*)$/.exec(line);
+    if (sk) {
+      const depth = Math.floor(sk[1].length / 4);
+      res.skips.push({ name: [...stack.slice(0, depth), unescapeTap(sk[2])].filter(Boolean).join(' > '), kind: sk[3], reason: sk[4].trim() });
+      continue;
+    }
     const no = /^( *)not ok \d+ - (.*?)(?: # (?:SKIP|TODO)\b.*)?$/.exec(line);
     if (!no) continue;
     const indent = no[1].length, depth = Math.floor(indent / 4), info = {};
@@ -535,7 +561,17 @@ async function liveOrigin(sha, liveVer, allowUnrecorded) {
     if (exists) ancestor = git(['merge-base', '--is-ancestor', record.sha, sha]).ok;
     if (exists && !ancestor) lost = String(git(['log', '--format=%h %an: %s', '-n', '50', `${sha}..${record.sha}`]).stdout).trim().split(/\r?\n/).filter(Boolean);
   }
-  return liveOriginDecision({ record, liveVersion: liveVer, sha, exists, ancestor, lost, allowUnrecorded });
+  return { ...liveOriginDecision({ record, liveVersion: liveVer, sha, exists, ancestor, lost, allowUnrecorded }), liveSha: ancestor ? record.sha : null };
+}
+
+// extension/ changed since the live commit → its manifest version must be higher there (scripts/check-bump.mjs
+// extVerdict): the extension is installed unpacked from the zip this deploy serves and never updates itself.
+function extSinceLive(liveSha, sha) {
+  const d = git(['diff', '--name-only', '-z', liveSha, sha, '--', 'extension/']);
+  if (!d.ok) return { ok: false, message: `git diff ${liveSha.slice(0, 7)} ${sha.slice(0, 7)} -- extension/ failed: ${firstLine(d.stderr) || why(d)}` };
+  const at = (ref) => { const r = git(['show', `${ref}:extension/manifest.json`]); return r.ok ? extVersion(r.stdout) : null; };
+  const v = extVerdict({ paths: d.stdout.split('\0').filter(Boolean), baseVersion: at(liveSha), headVersion: at(sha) });
+  return { ok: v.ok, message: v.ok ? `extension: ${v.message} since the live commit ${liveSha.slice(0, 7)}` : v.message };
 }
 
 /** Every file git has under public/ at <sha>, in git's exact case. */
@@ -696,6 +732,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, { tt
       check(gate.ok, gate.message);
       const origin = await liveOrigin(sha, live.version, opts.allowUnrecorded);
       check(origin.ok, origin.message);
+      if (origin.liveSha) { const ext = extSinceLive(origin.liveSha, sha); check(ext.ok, ext.message); }
     }
   }
   // Non-fatal, read-only: the R2 lifecycle rules behind privacy.html's 30-day removal of trash and earlier versions.
@@ -746,21 +783,21 @@ export async function main(argv = process.argv.slice(2), env = process.env, { tt
     t0 = Date.now();
     const run = await runTests(wt, testFiles, tapPath);
     const tap = parseTap(existsSync(tapPath) ? readFileSync(tapPath, 'utf8') : '');
-    const passed = run.ok && tap.tests > 0 && tap.fail === 0 && tap.cancelled === 0;
-    if (!passed) {
+    const tested = testGate(run, tap);
+    if (!tested.ok) {
       const clip = (s, n) => (s.length > n ? `${s.slice(0, n)} …` : s);
-      if (run.details) console.log(run.details.split(/\r?\n/).slice(0, 120).map((l) => clip(l, 240)).join('\n'));
-      say.fail(`tests failed in the clean checkout (${why(run)}; ${tap.fail} failed, ${tap.cancelled} cancelled, ${tap.pass}/${tap.tests} passed)`);
+      if (run.details && !run.ok) console.log(run.details.split(/\r?\n/).slice(0, 120).map((l) => clip(l, 240)).join('\n'));
+      say.fail(tested.message);
       const wtFold = wt.toLowerCase();
       for (const f of tap.failures) {
         const loc = f.location && f.location.toLowerCase().startsWith(wtFold) ? path.relative(wt, f.location) : f.location;
         console.log(`          ✖ ${f.name}${loc ? `  (${loc})` : ''}${f.error ? `\n              ${clip(f.error, 240)}` : ''}`);
       }
-      if (!tap.failures.length) console.log(`          (no failing test names in the TAP output; node exited with ${why(run)})`);
+      if (!tap.failures.length && !run.ok) console.log(`          (no failing test names in the TAP output; node exited with ${why(run)})`);
       console.log(`\nNot shipping ${short}. A test that passes in your folder but fails here usually depends on an uncommitted file or on LF line endings.`);
       return 1;
     }
-    say.ok(`${tap.pass}/${tap.tests} tests passed in ${testFiles.length} files (${secs(Date.now() - t0)})`);
+    say.ok(`${tested.message} in ${testFiles.length} files, none skipped or todo (${secs(Date.now() - t0)})`);
     if (interrupted) return 130;
 
     if (opts.dryRun) {

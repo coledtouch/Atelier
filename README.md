@@ -11,7 +11,8 @@ public/            the installable PWA (vanilla JS, no build step)
   data-safety.js   backup validation and interrupted-response recovery
   app.js           app logic, model catalog, IndexedDB threads
   sw.js            offline shell (API traffic is never cached)
-  vendor/          marked, DOMPurify, highlight.js (vendored)
+  vendor/          marked, DOMPurify, highlight.js, fflate, Mediabunny: copies of the npm packages at the
+                   lockfile's versions (node scripts/vendor.mjs; tests/vendor.test.mjs fails on any drift)
 src/worker.js      serves /public + proxies an allow-list of NVIDIA endpoints
 wrangler.jsonc     Worker config
 ```
@@ -81,7 +82,7 @@ Runbook:
 **On** (reopened in v90; it was switched off in v85–v89). `TESTERS_ENABLED` in wrangler.jsonc `vars`: `"1"` on, `"0"` or unset off. Off, every
 `/api/li/*` route answers `410 {code:"tester_closed"}`, a tester cookie is never looked up (and is cleared), every tester
 route refuses with `410 tester_closed`, owner routes still need the passcode, and the app hides the sign-in button,
-spots, allowance pill, feedback and the Testers panel (`/api/health` → `testers: false`). The code and the Ledger stay;
+spots, allowance pill and feedback (`/api/health` → `testers: false`); the owner's Testers panel stays, for erasure requests. The code and the Ledger stay;
 `"1"` and a deploy switch it on. What follows describes it while it is on.
 
 Up to 25 people can sign in with LinkedIn and use paid models under a hard spending ceiling. The passcode path is
@@ -111,6 +112,17 @@ Design: `docs/superpowers/specs/2026-09-30-atelier-tester-access-design.md` plus
   (limits in micro-dollars; the pool can't go above $1,000). A fresh Ledger starts **paused**; while paused only subs in
   `preview_subs` can sign in and spend (still within their limits). Tester records (profile included) are deleted 90 days
   after last use.
+- **Deleting a tester's data on request (privacy §8):** Settings → Access → Testers → **Delete data** on their row, i.e.
+  `POST /api/testers/forget {sub}` (passcode; works with tester access on or off). The Ledger's `forgetTester` revokes them
+  and ends every session, deletes their whole cloud namespace (`testers/<sha256(sub)>/`, `testers-x/<hash>/`,
+  `testers-v/<hash>/`) and their feedback (`feedback:v1:…:tester-<sha256(sub)>` in KV), then their roster row, sessions,
+  spend, jobs, profile, any preview_subs entry and a "last refused" record naming them. A purge or feedback deletion that
+  can't finish answers `503 forget_retry` and leaves them on the roster, revoked: press Delete data again. Another
+  isolate can still honour their cookie for up to 60 s (and a request already let in finishes), so the sub stays in the
+  Ledger's `forgotten` table and the alarm deletes their cloud data and feedback once more after `FORGET_SWEEP` (10
+  minutes; it runs 10-20 minutes after the delete), then drops it. With no record left, nothing keeps them out: they
+  can sign in again as a new tester while a spot is free, even if they were revoked (the confirm says so). Their own
+  devices keep their copies until they remove them (the sign-in screen offers "Remove my tester data from this device").
 - **Setup:** add `https://atelier.ciprari.ai/api/li/callback` and `http://127.0.0.1:8787/api/li/callback` to the LinkedIn
   app's authorized redirect URLs, and set `npx wrangler secret put LINKEDIN_CLIENT_ID` / `LINKEDIN_CLIENT_SECRET`.
   The first deploy adds the `Ledger` class (migration `v2`).
@@ -179,12 +191,18 @@ only when it is safe, in this order:
    The live deploy's record (`https://atelier.ciprari.ai/ship.json`, written by every ship) names a commit that is in
    HEAD's history, so a ship never rolls back someone else's deploy; when it isn't, ship lists the commits that would go.
    A live site without a record (deployed before this check, from an older branch, or by a rollback) needs
-   `--allow-unrecorded-live` once you have checked it. (Since v90 a Cloudflare rollback can't go back past the deploy
+   `--allow-unrecorded-live` once you have checked it. When `extension/` changed since the live commit,
+   `extension/manifest.json`'s version must be higher there: the extension is installed unpacked from the zip and never
+   updates itself, so the version (and `MIN_EXT` in public/app.js, which must match it) is how an old copy is told apart. (Since v90 a Cloudflare rollback can't go back past the deploy
    that added the `Guard` Durable Object: see Passcode guard.)
 3. A clean, detached worktree of HEAD in the OS temp folder runs `npm ci`, `npm run check` and every
    `tests/*.test.mjs`, gated on the real exit codes. On Windows that checkout is forced to CRLF line endings
    (`core.autocrlf=true`, whatever git's own config says), so tests that only pass with LF fail here. Failing test names
-   are printed. node_modules is installed there, never linked.
+   are printed. node_modules is installed there, never linked. Every test must run: a skipped or todo test fails this
+   step and is named (no test may turn itself off; `tests/ship.test.mjs` checks the test files for skip and todo).
+   Since `npm ci` installs the lockfile, `tests/vendor.test.mjs` also fails here when a library in `public/vendor/` is not
+   the lockfile's version: after `npm i dompurify@<new>` (or marked, highlight.js, fflate, mediabunny), run
+   `node scripts/vendor.mjs` and bump the VERSION.
 4. You type the VERSION to go ahead (or pass `--yes`, which a run outside a terminal needs). Then from that worktree:
    `node scripts/pack-extension.mjs`, `public/ship.json` (the commit), and `wrangler deploy`. Just before deploying it
    checks `origin/master`, the live VERSION and the live record again. If wrangler fails after the new version is already
@@ -220,8 +238,9 @@ deploy or `versions upload` that doesn't come from ship's clean worktree or a co
 uploaded (`wrangler dev` and `wrangler types` are never stopped).
 
 CI (`.github/workflows/ci.yml`) runs `npm ci`, `npm run check` and `node --test tests/*.test.mjs` on Ubuntu and on
-Windows with CRLF, for every push and pull request to master. A "version bumped" job (`scripts/check-bump.mjs`) fails
-when a change touches `public/` or `src/` without raising the sw.js VERSION. Docs-only and tests-only changes don't need a
+Windows with CRLF, for every push and pull request to master, and fails when any test skipped itself or is todo. A
+"version bumped" job (`scripts/check-bump.mjs`) fails when a change touches `public/` or `src/` without raising the
+sw.js VERSION, or `extension/` without raising `extension/manifest.json`'s version. Docs-only and tests-only changes don't need a
 bump. A force push to master fails it too (what it replaced can't be compared), and a shallow clone is refused. Runs for
 pushes to master are never cancelled by a later push; only pull request runs are. To check before pushing, run
 `npm run check:bump -- origin/master`. CI needs no secrets and never deploys.

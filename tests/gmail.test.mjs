@@ -61,3 +61,73 @@ test('an account without a mailbox gets a plain explanation instead of "Precondi
   assert.equal(read.ok, false);
   assert.doesNotMatch(read.error, /Precondition/);
 });
+
+// v91 review (agent-gmail-draft-crlf): To, Cc and In-Reply-To went into the message as they were, and gmail_draft runs
+// without a card, so a steered agent could add a hidden Bcc or Reply-To. Line breaks are refused; In-Reply-To must be one
+// <message-id>.
+function mailSink() {
+  const sent = [];
+  globalThis.fetch = async (url, init = {}) => {
+    if (/\/(drafts|messages\/send)$/.test(url)) { sent.push({ url, raw: JSON.parse(init.body).message?.raw ?? JSON.parse(init.body).raw }); return json(200, { id: 'd1' }); }
+    throw new Error(`unmocked ${url}`);
+  };
+  return sent;
+}
+const decode = (raw) => Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+
+test('gmail_draft and gmail_send refuse a line break in To, Cc or In-Reply-To (no hidden Bcc or Reply-To), before anything is saved or sent', async () => {
+  const sent = mailSink();
+  const CR = String.fromCharCode(13), LF = String.fromCharCode(10);
+  const bad = [
+    { to: `bob@example.com${CR}${LF}Bcc: stranger@evil.example${CR}${LF}Reply-To: stranger@evil.example` },
+    { to: 'bob@example.com', cc: `x@example.com${LF}Bcc: stranger@evil.example` },
+    { to: 'bob@example.com', in_reply_to: `<a@mail>${CR}${LF}Bcc: stranger@evil.example` },
+    { to: `bob@example.com${String.fromCharCode(0)}` },
+    { to: 'bob@example.com', in_reply_to: 'not a message id' },
+    { to: 'bob@example.com', in_reply_to: '<a@mail> <b@mail>' },
+  ];
+  for (const args of bad) {
+    for (const [tool, approved] of [['gmail_draft', false], ['gmail_send', true]]) {
+      const r = await runTool(env([MAIL]), tool, { subject: 'Q3', body: 'Hi', account: MAIL, ...args }, approved);
+      assert.equal(r.ok, false, `${tool} ${JSON.stringify(args)}`);
+      assert.match(r.error, /can’t contain line breaks|must be the original message’s Message-ID/);
+    }
+  }
+  assert.deepEqual(sent, [], 'nothing reached Gmail');
+  // A normal reply still goes: one To, one Cc, In-Reply-To and References from the Message-ID.
+  const ok = await runTool(env([MAIL]), 'gmail_draft', { to: 'Bob <bob@example.com>', cc: 'amy@example.com', subject: 'Re: Q3', body: 'Thanks', in_reply_to: ' <CAx1@mail.gmail.com> ', threadId: 't1', account: MAIL }, false);
+  assert.equal(ok.ok, true);
+  const msg = decode(sent[0].raw);
+  assert.match(msg, /^To: Bob <bob@example\.com>\r\nCc: amy@example\.com\r\nSubject: =\?UTF-8\?B\?/);
+  assert.match(msg, /\r\nIn-Reply-To: <CAx1@mail\.gmail\.com>\r\nReferences: <CAx1@mail\.gmail\.com>\r\n\r\nThanks$/);
+  assert.doesNotMatch(msg, /^(Bcc|Reply-To):/m);
+});
+
+// v91 review (critic-github-outside-taint-gaps b): the repo went into the API path raw, and fetch resolves dot segments,
+// so 'me/x/../../stranger/evil' read someone else's repo while the app's outside check saw 'me'.
+test('GitHub tools take only owner/name (checked and encoded) and a path without . or .. segments', async () => {
+  const urls = [];
+  globalThis.fetch = async (url) => { urls.push(String(url)); return json(200, /\/contents\//.test(url) ? { path: 'README.md', size: 2, content: Buffer.from('hi').toString('base64'), html_url: 'https://github.com/me/app/blob/main/README.md' } : []); };
+  const store = new Map([['label:github:primary', 'me']]);
+  const genv = { GITHUB_TOKEN: 'ghp_test_0123456789abcdef', ATELIER_KV: { get: async (k, t) => (store.has(k) ? (t === 'json' ? JSON.parse(store.get(k)) : store.get(k)) : null), put: async (k, v) => { store.set(k, String(v)); }, delete: async (k) => { store.delete(k); } } };
+  for (const repo of ['me/x/../../stranger/evil', '../stranger', 'me/..', 'me/.', 'me/%2e%2e', 'me', '', 'me/x?y', 'me/x#y', 'me x/app', '-me/app']) {
+    for (const [tool, args] of [['github_issues', { repo }], ['github_read', { repo, path: 'README.md' }]]) {
+      const r = await runTool(genv, tool, args, false);
+      assert.equal(r.ok, false, `${tool} ${repo}`);
+      assert.match(r.error, /repo must be owner\/name/);
+    }
+  }
+  for (const path of ['../../stranger/evil/contents/x', 'docs/../../x', './x']) {
+    const r = await runTool(genv, 'github_read', { repo: 'me/app', path }, false);
+    assert.equal(r.ok, false, path);
+    assert.match(r.error, /path can’t contain \. or \.\. segments/);
+  }
+  const w = await runTool(genv, 'github_comment', { repo: 'me/app', number: '1/../../x', body: 'hi' }, true);
+  assert.equal(w.ok, false);
+  assert.match(w.error, /number must be the issue or PR number/);
+  assert.deepEqual(urls, [], 'nothing reached GitHub');
+  // Good ones: a dotted repo name, a nested path (each segment encoded), a state outside the list falls back to open.
+  assert.equal((await runTool(genv, 'github_read', { repo: 'me/me.github.io', path: '/docs/my file.md' }, false)).ok, true);
+  assert.equal((await runTool(genv, 'github_issues', { repo: 'Me/app', state: 'open&per_page=100' }, false)).ok, true);
+  assert.deepEqual(urls, ['https://api.github.com/repos/me/me.github.io/contents/docs/my%20file.md', 'https://api.github.com/repos/Me/app/issues?state=open&per_page=25']);
+});

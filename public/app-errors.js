@@ -24,7 +24,8 @@ export function reportRow(r, { locale, timeZone } = {}) {
   return {
     title: `${r.kind === 'load' && r.net === true ? NET_LABEL : KIND_LABELS[r.kind] || 'Error'} · ${str(r.name, 48) || 'Error'}`,
     where,
-    meta: [`v${str(r.v, 6) || '?'}`, str(r.platform, 24), PHASE_LABELS[r.phase] || '', r.online === false ? 'offline' : '', count > 1 ? `×${count}` : '', when].filter(Boolean).join(' · '),
+    // verified: sent with the passcode, so from one of your own devices (src/client-errors.js); the rest are unverified
+    meta: [`v${str(r.v, 6) || '?'}`, str(r.platform, 24), PHASE_LABELS[r.phase] || '', r.online === false ? 'offline' : '', count > 1 ? `×${count}` : '', r.verified === true ? 'your device' : '', when].filter(Boolean).join(' · '),
     stack: Array.isArray(r.stack) ? r.stack.filter((f) => typeof f === 'string').slice(0, 6).map((f) => f.slice(0, 100)) : [],
   };
 }

@@ -6,10 +6,11 @@
 // One step does all three:  node scripts/bump-version.mjs <n>
 //   (the same by hand: sed -i -E "s/atelier-v[0-9]+'/atelier-v<n>'/" public/sw.js && sed -i -E "s/\?v=[0-9]+/?v=<n>/g" public/index.html public/*.js)
 // tests/service-worker.test.mjs fails if they disagree or a module the app loads isn't precached at its ?v= URL.
-const VERSION = 'atelier-v90';
+const VERSION = 'atelier-v91';
 const V = VERSION.slice('atelier-v'.length);
 // Modules are listed at the exact ?v=<n> URLs they are imported by (PATHS drops the query for the fetch guard below).
-const SHELL = ['/', '/index.html', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`,
+// No '/index.html': the live site answers it with a redirect to '/' (see install below), and '/' is the same page.
+const SHELL = ['/', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`,
   `/data-safety.js?v=${V}`, `/sync.js?v=${V}`, `/sync-merge.js?v=${V}`, `/video.js?v=${V}`, `/runway.js?v=${V}`, `/omni.js?v=${V}`, `/xai.js?v=${V}`, `/spend.js?v=${V}`, `/tester.js?v=${V}`, `/context.js?v=${V}`, `/usage.js?v=${V}`, `/launch.js?v=${V}`, `/lookup.js?v=${V}`, `/readaloud.js?v=${V}`, `/dictate.js?v=${V}`, `/viewport.js?v=${V}`, `/builds.js?v=${V}`, `/appdata.js?v=${V}`, `/claude-import.js?v=${V}`, `/claude-worker.js?v=${V}`,
   `/remix.js?v=${V}`, `/remix-cuts.js?v=${V}`, `/remix-shots.js?v=${V}`, `/remix-graph.js?v=${V}`, `/remix-store.js?v=${V}`, `/remix-draw.js?v=${V}`, `/remix-app.js?v=${V}`, `/remix.css?v=${V}`,
   `/feedback.js?v=${V}`, `/feedback.css?v=${V}`, `/app-errors.js?v=${V}`,
@@ -19,7 +20,7 @@ const SHELL = ['/', '/index.html', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/ap
 // Cached on first use, not at install: the render engine and Mediabunny (689 KB, 177 KB gzip) only load when a clip is
 // attached in Video mode with Remix on, or a remix is cut.
 const LAZY = ['/remix-render.js', '/vendor/mediabunny.js'];
-const PATHS = [...SHELL.map(u => u.split('?')[0]), ...LAZY];
+const PATHS = [...SHELL.map(u => u.split('?')[0]), '/index.html', ...LAZY]; // '/index.html' is answered from '/'
 // Share target (manifest share_target: POST multipart to /share). The payload waits in its own Cache Storage bucket,
 // which activate() never deletes (it isn't 'atelier-v*'); the page takes it from /?share=<id> (launch.js takeShare)
 // and deletes it. Nothing lands in the URL, history or Worker logs. One pending share at a time; limits apply per File
@@ -62,8 +63,19 @@ async function takeShare(req) {
   } catch { return home('failed'); }
   return home(id);
 }
+// Cloudflare answers some paths with a redirect (/index.html → /, /privacy.html → /privacy). cache.addAll follows it and
+// stores a response marked `redirected`, and Chromium refuses a redirected response for a navigation, so an offline launch
+// right after an install, a Repair or an update showed the browser's error page (v89 review, live-sw-redirected-index).
+// SHELL names only the final URLs; as a backstop, any precached entry that still came through a redirect is stored again
+// as a plain copy.
+const unredirect = async (cache) => {
+  for (const k of await cache.keys()) {
+    const r = await cache.match(k);
+    if (r && r.redirected) await cache.put(k, new Response(await r.blob(), { status: r.status, statusText: r.statusText, headers: r.headers }));
+  }
+};
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then(async c => { await c.addAll(SHELL); await unredirect(c); }).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('atelier-v') && k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim()));
@@ -79,7 +91,7 @@ self.addEventListener('fetch', e => {
   // The manifest goes to the network first, like pages: Chrome's WebAPK update check reads it through this worker, and a
   // cached copy would tell it nothing changed (new shortcuts, share_target) until the next check a day later.
   const fresh = navigation || req.destination === 'manifest' || url.pathname === '/manifest.webmanifest';
-  const key = navigation ? (url.pathname === '/' ? '/index.html' : url.pathname) : req;
+  const key = navigation ? (url.pathname === '/index.html' ? '/' : url.pathname) : req; // '/' is precached without a redirect
   const network = fetch(req).then(async response => {
     if (response.ok || response.type === 'opaque') {
       const cache = await caches.open(VERSION);

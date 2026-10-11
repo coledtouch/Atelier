@@ -163,6 +163,10 @@ if (Boolean(process.env.REVIEW_PROVIDERS) || process.argv.includes('--providers'
   };
 }
 // The stub Gmail tool --providers connects (the Worker's real tool list is far longer; this one is read-only).
+// The stub Gmail result's link (copied into an answer it opens as before), and the made-up exfiltration link the agent's
+// "digest link" answer writes itself (it asks first: app.js guardLinks). Nothing is ever fetched from either.
+const FIXTURE_MAIL_LINK = 'https://mail.google.com/mail/u/0/#inbox/fixture1';
+const FIXTURE_EXFIL_LINK = 'https://exfil.example/d?c=482913&s=Bank';
 const FIXTURE_GMAIL ={ type: 'function', function: { name: 'gmail_search', description: 'Search the user’s Gmail (local fixture).', parameters: { type: 'object', properties: { q: { type: 'string', description: 'Gmail search query' } }, required: ['q'], additionalProperties: false } }, 'x-write': false, 'x-label': 'Search Gmail', 'x-service': 'gmail' };
 // Boot watchdog checks (public/index.html #bootWatch). REVIEW_BREAK=<mode> serves a deliberately broken start; or open
 // /__review/break?mode=<mode> in a browser, which sets a cookie for that browser only and opens / (mode=off clears it,
@@ -205,14 +209,14 @@ const clientErrorEnv = {
     return { success: h.length <= 10 };
   } },
   LEDGER: { idFromName: (n) => n, get: () => ({
-    async clientErrorAdd(doc) {
+    async clientErrorAdd(doc, { verified = false } = {}) { // verified: sent with the passcode (skips the hourly budget)
       const clean = cleanReport(doc), now = Date.now();
       if (!clean) return { ok: false };
       for (const [k, r] of clientErrorRows) if (r.lastAt <= now - CLIENT_ERRORS.days * 86_400_000) clientErrorRows.delete(k);
       const sig = reportSig(clean), had = clientErrorRows.get(sig);
-      if (!had && [...clientErrorRows.values()].filter((r) => r.firstAt > now - 3_600_000).length >= CLIENT_ERRORS.newPerHour) return { ok: false, full: true };
+      if (!had && !verified && [...clientErrorRows.values()].filter((r) => !r.verified && r.firstAt > now - 3_600_000).length >= CLIENT_ERRORS.newPerHour) return { ok: false, full: true };
       clientErrorRows.delete(sig);
-      clientErrorRows.set(sig, { ...clean, count: (had?.count || 0) + 1, firstAt: had?.firstAt || now, lastAt: now });
+      clientErrorRows.set(sig, { ...clean, count: (had?.count || 0) + 1, firstAt: had?.firstAt || now, lastAt: now, verified: Boolean(had?.verified || verified) });
       const older = [...clientErrorRows.keys()].slice(0, -CLIENT_ERRORS.keepNewest); // oldest first
       older.sort((a, b) => (clientErrorRows.get(a).count > 1) - (clientErrorRows.get(b).count > 1));
       for (const k of older.slice(0, Math.max(0, clientErrorRows.size - CLIENT_ERRORS.keep))) clientErrorRows.delete(k);
@@ -403,7 +407,7 @@ createServer(async (req, res) => {
       const parts = []; for await (const p of req) parts.push(p);
       let b = {}; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
       if (b.name !== 'gmail_search') { res.statusCode = 400; return res.end('{"error":"Unknown fixture tool."}'); }
-      return res.end(JSON.stringify({ ok: true, result: { messages: [{ from: 'Fixture Sender', subject: 'Local fixture — no Gmail was read', snippet: 'Two unread messages, both made up.' }] } }));
+      return res.end(JSON.stringify({ ok: true, result: { messages: [{ from: 'Fixture Sender', subject: 'Local fixture — no Gmail was read', snippet: 'Two unread messages, both made up.', link: FIXTURE_MAIL_LINK }] } }));
     }
     if (url.pathname === '/api/relay/status') return res.end('{"online":false}');
     // Gemini Omni stub (src/omni.js routes): start → two "in_progress" polls → completed; the video is a placeholder.
@@ -541,12 +545,19 @@ createServer(async (req, res) => {
           return res.end('data: [DONE]\n\n');
         }
         const declined = lastMsg.role === 'tool' && /declined/.test(String(lastMsg.content));
-        sse({ choices: [{ delta: { content: lastMsg.role !== 'tool' ? 'Local fixture answer from the accounts agent. No provider was called.' : declined ? 'OK — I won’t read your inbox. (Local fixture.)' : 'You have 2 unread messages (local fixture — no Gmail was read).' } }] });
+        // "digest link" in the prompt: the answer after the read ends with a link the model wrote itself (the review's
+        // exfiltration shape: what it read, in the address) and one copied from the tool result, for the reply link guard.
+        const digest = /digest link/i.test(promptOf(body.messages)) ? `\n\n[Open the full digest](${FIXTURE_EXFIL_LINK}) · [Open in Gmail](${FIXTURE_MAIL_LINK})` : '';
+        sse({ choices: [{ delta: { content: lastMsg.role !== 'tool' ? 'Local fixture answer from the accounts agent. No provider was called.' : declined ? 'OK — I won’t read your inbox. (Local fixture.)' : `You have 2 unread messages (local fixture — no Gmail was read).${digest}` } }] });
         return res.end('data: [DONE]\n\n');
       }
       const system = body.messages?.find(m => m.role === 'system')?.content || '';
       const slow = /slow stream/i.test(JSON.stringify(body.messages?.at(-1) ?? ''));
-      const answer = fixtureAnswer(system);
+      // "with a link" in the prompt: a plain answer that links to another site (the reply link guard shows its site)
+      const answer = fixtureAnswer(system) + (/with a link/i.test(promptOf(body.messages)) ? '\n\nSee [the MDN docs](https://developer.mozilla.org/en-US/docs/Web).' : '')
+        // "sanitizer probe": markup a steered answer could carry to work Atelier's own controls (md() must drop it all
+        // but the task list's checkbox): a label for a control, a command button, an open dialog, an input with a list.
+        + (/sanitizer probe/i.test(promptOf(body.messages)) ? '\n\n<label for="syncToggle">Show sources</label> <button commandfor="settings" command="show-modal">More</button> <a href="/" target="settings">Same site</a> <input list="modelList" value="x"><dialog open>Fixture dialog in a reply</dialog>\n\n- [x] a task list item' : '');
       res.setHeader('Content-Type', 'text/event-stream');
       // Thinking-model failures: "think only" reasons with no answer until the app asks again (its nudge is the last turn);
       // "think forever" never answers; "no credit" fails like DeepSeek's mid-stream Insufficient Balance.

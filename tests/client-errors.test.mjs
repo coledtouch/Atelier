@@ -42,7 +42,8 @@ test('a report is stored, logged as one clean line and listed for the owner, new
   assert.deepEqual(doc.reports.map((x) => [x.kind, x.file, x.count]), [['load', '/data-safety.js', 1], ['boot', '/app.js', 2]]);
   const boot = doc.reports[1];
   assert.ok(boot.firstAt > 0 && boot.lastAt >= boot.firstAt);
-  assert.deepEqual(Object.keys(boot).sort(), ['col', 'count', 'file', 'firstAt', 'kind', 'lastAt', 'line', 'name', 'online', 'phase', 'platform', 'stack', 'sw', 'v']);
+  assert.deepEqual(Object.keys(boot).sort(), ['col', 'count', 'file', 'firstAt', 'kind', 'lastAt', 'line', 'name', 'online', 'phase', 'platform', 'stack', 'sw', 'v', 'verified']);
+  assert.equal(boot.verified, false, 'sent without the passcode: unverified');
 });
 
 test('cleanReport keeps only listed fields, each by pattern: no message, URL, query, foreign frame or free text survives', () => {
@@ -90,7 +91,9 @@ test('rate limits: ERR_LIMIT per IP answers 429 (nothing logged or stored); each
   assert.ok(!L.calls.includes('clientErrorAdd'));
   const statuses = [];
   for (let i = 0; i < 35; i++) statuses.push((await post(env, REPORT({ line: i }))).status);
-  assert.deepEqual(statuses, [...Array(30).fill(204), ...Array(5).fill(429)]);
+  // 30 accepted (logged): the first 3 new failures from this network this hour are stored (204), the rest only logged
+  // (202 {stored: false}: CLIENT_ERRORS.newPerNetHour); then the isolate's 30 a minute is used up (429).
+  assert.deepEqual(statuses, [...Array(3).fill(204), ...Array(27).fill(202), ...Array(5).fill(429)]);
   assert.equal(lines.length, 30);
 });
 
@@ -98,9 +101,9 @@ test('storage can’t grow: one row per failure (counted), 50 at most, nothing o
   const { env, L } = makeEnv({ testers: false });
   let now = Date.UTC(2026, 9, 8);
   L.ledger.clock = () => now;
-  for (let i = 0; i < 3; i++) assert.equal(L.ledger.clientErrorAdd(REPORT()).count, i + 1);
+  for (let i = 0; i < 3; i++) assert.equal((await L.ledger.clientErrorAdd(REPORT())).count, i + 1);
   // 60 more failures over 4 hours (15 an hour, inside the 20 new ones an hour).
-  for (let i = 0; i < 60; i++) { now += 4 * 60_000; assert.equal(L.ledger.clientErrorAdd(REPORT({ line: 1000 + i })).ok, true); }
+  for (let i = 0; i < 60; i++) { now += 4 * 60_000; assert.equal((await L.ledger.clientErrorAdd(REPORT({ line: 1000 + i }))).ok, true); }
   const rows = L.ledger.clientErrors();
   assert.equal(rows.length, 50);
   assert.equal(rows[0].line, 1059, 'newest first');
@@ -109,15 +112,15 @@ test('storage can’t grow: one row per failure (counted), 50 at most, nothing o
   assert.equal(L.shim.db.prepare('SELECT COUNT(*) AS n FROM client_errors').get().n, 50);
   // Seen again: it moves to the top and counts up.
   now += 1000;
-  L.ledger.clientErrorAdd(REPORT({ line: 1030 }));
+  await L.ledger.clientErrorAdd(REPORT({ line: 1030 }));
   assert.deepEqual([L.ledger.clientErrors()[0].line, L.ledger.clientErrors()[0].count], [1030, 2]);
   // 30 days on, everything is gone: on read, on the next report and in the alarm.
   now += 30 * 86_400_000;
   assert.deepEqual(L.ledger.clientErrors(), []);
-  now -= 1; L.ledger.clientErrorAdd(REPORT({ line: 1 })); now += 30 * 86_400_000 + 1;
+  now -= 1; await L.ledger.clientErrorAdd(REPORT({ line: 1 })); now += 30 * 86_400_000 + 1;
   await L.ledger.alarm();
   assert.equal(L.shim.db.prepare('SELECT COUNT(*) AS n FROM client_errors').get().n, 0, 'the alarm deletes it too');
-  assert.deepEqual(L.ledger.clientErrorAdd({ v: 'x' }), { ok: false }, 'the Ledger cleans again');
+  assert.deepEqual(await L.ledger.clientErrorAdd({ v: 'x' }), { ok: false }, 'the Ledger cleans again');
 });
 
 test('forged reports can’t sweep out real ones: 20 new failures an hour at most, whoever sends them; one seen once goes before one seen again; the newest 10 always stay', async () => {
@@ -134,14 +137,14 @@ test('forged reports can’t sweep out real ones: 20 new failures an hour at mos
   assert.equal(rows().length, 20, 'the hour’s 20 new rows, then no more');
   assert.ok(rows().some((r) => r.line === 6290 && r.count === 2), 'the genuine report is still listed');
   // Hours of it, straight into the Ledger (past every per-minute cap): still 50 rows, and the genuine one is there.
-  for (let h = 1; h <= 8; h++) { now += 3_600_000; for (let i = 0; i < 40; i++) L.ledger.clientErrorAdd(REPORT({ line: h * 1000 + i })); }
+  for (let h = 1; h <= 8; h++) { now += 3_600_000; for (let i = 0; i < 40; i++) await L.ledger.clientErrorAdd(REPORT({ line: h * 1000 + i })); }
   const after = rows();
   assert.equal(after.length, 50);
   assert.ok(after.some((r) => r.line === 6290 && r.count === 2), 'a failure seen again outlasts any number seen once');
   assert.deepEqual(after.slice(0, 10).map((r) => r.line), Array.from({ length: 10 }, (_, i) => 8019 - i), 'the newest 10 stay, whatever they are');
   // A repeat is never refused, even with the hour’s new rows used up.
-  assert.equal(L.ledger.clientErrorAdd(REPORT()).count, 3);
-  assert.deepEqual(L.ledger.clientErrorAdd(REPORT({ line: 99999 })), { ok: false, full: true });
+  assert.equal((await L.ledger.clientErrorAdd(REPORT())).count, 3);
+  assert.deepEqual(await L.ledger.clientErrorAdd(REPORT({ line: 99999 })), { ok: false, full: true });
 });
 
 test('a report must name the deployed version or one of the two before it (read once from the deployed sw.js); refused ones use no allowance', async () => {
@@ -202,7 +205,7 @@ test('the owner’s GET: passcode only (401 without, with a wrong one, or with a
   assert.ok(!text.includes('<') && !text.includes('>') && !text.includes('secret'), text);
   const { reports } = JSON.parse(text);
   assert.equal(reports.length, 2);
-  assert.deepEqual(reports[0], { v: '85', kind: 'error', name: 'Error', stack: ['/app.js:1:1'], platform: 'unknown', count: 1, firstAt: reports[0].firstAt, lastAt: reports[0].lastAt });
+  assert.deepEqual(reports[0], { v: '85', kind: 'error', name: 'Error', stack: ['/app.js:1:1'], platform: 'unknown', count: 1, firstAt: reports[0].firstAt, lastAt: reports[0].lastAt, verified: false });
 });
 
 test('public and answered before identity: a tester cookie changes nothing; with no Ledger it still logs (GET says unavailable)', async () => {
@@ -213,9 +216,85 @@ test('public and answered before identity: a tester cookie changes nothing; with
   assert.equal(r.headers.get('set-cookie'), null);
   assert.deepEqual([...env.ATELIER_KV.m.keys()], [], 'no lockout counter or profile is touched');
   const bare = makeEnv({ testers: false, ledger: null }).env;
-  assert.equal((await post(bare, REPORT())).status, 204);
+  const logged = await post(bare, REPORT());
+  assert.equal(logged.status, 202, 'logged, but not stored: the answer says so');
+  assert.deepEqual(await logged.json(), { stored: false });
   assert.equal(lines.length, 2);
   assert.equal((await list(bare)).status, 503);
+});
+
+// v91 review (access-client-error-starvation): the budgets were global, so anyone could keep every genuine report off
+// the list. The owner's device now sends the passcode (#bootWatch): its reports are verified, skip the budgets and go last.
+test('a verified report (sent with the passcode) is stored after the hour’s unverified budget is used up, listed as verified, and evicted last', async () => {
+  const { env, L } = makeEnv({ testers: false, ERR_LIMIT: limiter() });
+  let now = Date.UTC(2026, 9, 11);
+  L.ledger.clock = () => now;
+  // 20 made-up reports from 20 networks: the hour's unverified budget is gone, and a further one isn't stored.
+  for (let i = 0; i < 20; i++) assert.equal((await post(env, REPORT({ line: 100 + i }), { 'cf-connecting-ip': `198.51.100.${i + 1}` })).status, 204);
+  assert.equal((await post(env, REPORT({ line: 999 }), { 'cf-connecting-ip': '198.51.100.99' })).status, 202);
+  // The owner's own crash, with the passcode: stored, marked, and its log line says verified (never the passcode).
+  const own = await post(env, REPORT({ line: 4242 }), { 'x-app-pass': 'pw' });
+  assert.equal(own.status, 204);
+  assert.ok(!lines.at(-1).includes('pw'));
+  assert.equal(JSON.parse(lines.at(-1)).verified, true);
+  const listed = (await (await list(env)).json()).reports;
+  assert.deepEqual(listed.filter((r) => r.verified).map((r) => r.line), [4242]);
+  // A wrong passcode is just an unverified report (and a counted wrong guess, src/guard.js).
+  assert.equal((await post(env, REPORT({ line: 4243 }), { 'x-app-pass': 'nope', 'cf-connecting-ip': '198.51.100.200' })).status, 202);
+  // Hours of junk straight into the Ledger, each seen twice: the verified row is still there.
+  for (let h = 1; h <= 6; h++) { now += 3_600_000; for (let i = 0; i < 20; i++) { const r = REPORT({ line: h * 1000 + i }); await L.ledger.clientErrorAdd(r, { network: `net-${h}-${i}` }); await L.ledger.clientErrorAdd(r, { network: `net-${h}-${i}` }); } }
+  assert.ok(L.ledger.clientErrors().some((r) => r.line === 4242 && r.verified), 'verified reports go after every unverified one');
+});
+
+test('one network gets at most 3 new unverified reports an hour (kept only as a keyed hash); junk seen twice no longer ties with a failure seen many times', async () => {
+  const { env, L } = makeEnv({ testers: false, ERR_LIMIT: limiter() });
+  let now = Date.UTC(2026, 9, 11, 10);
+  L.ledger.clock = () => now;
+  const statuses = [];
+  for (let i = 0; i < 5; i++) statuses.push((await post(env, REPORT({ line: 10 + i }))).status);
+  assert.deepEqual(statuses, [204, 204, 204, 202, 202], 'newPerNetHour');
+  assert.equal(CLIENT_ERRORS.newPerNetHour, 3);
+  assert.equal((await post(env, REPORT({ line: 99 }), { 'cf-connecting-ip': '192.0.2.50' })).status, 204, 'another network still gets in');
+  assert.equal((await post(env, REPORT({ line: 10 }))).status, 204, 'a repeat is never refused');
+  const nets = L.shim.db.prepare('SELECT net FROM client_error_nets').all().map((r) => r.net);
+  assert.ok(nets.length >= 2 && nets.every((n) => /^[0-9a-f]{32}$/.test(n)), 'a keyed hash, never the address');
+  assert.ok(!JSON.stringify(L.shim.db.prepare('SELECT * FROM client_error_nets').all()).includes('203.0.113.7'));
+  assert.ok(!L.shim.db.prepare("SELECT v FROM config WHERE k = 'err_net_key'").get().v.includes('203'), 'its key is random');
+  assert.equal((await L.ledger.roster()).config.err_net_key, undefined, 'the key never leaves the Ledger');
+  // Only the current hour's counts are kept (v91 review: the previous hour's row was never read, and with the 10-minute
+  // alarm it outlived the privacy page's "at most two hours"): they stay through their hour, and the first alarm or
+  // report after it removes them, so a keyed network code lives at most about 1 h 10 min.
+  const rows = () => L.shim.db.prepare('SELECT hour FROM client_error_nets').all().map((r) => r.hour);
+  now = Date.UTC(2026, 9, 11, 10, 59, 59, 999);
+  await L.ledger.alarm();
+  assert.ok(rows().length >= 2, 'still within their hour');
+  now = Date.UTC(2026, 9, 11, 11);
+  await L.ledger.alarm();
+  assert.deepEqual(rows(), [], 'gone at the first alarm after the hour');
+  assert.equal((await post(env, REPORT({ line: 500 }))).status, 204, 'a new hour: a fresh budget');
+  now = Date.UTC(2026, 9, 11, 12, 0, 0, 1);
+  assert.equal((await post(env, REPORT({ line: 501 }), { 'cf-connecting-ip': '192.0.2.51' })).status, 204);
+  assert.deepEqual(rows(), [Math.floor(now / 3_600_000)], 'and at the first report after it, before any alarm');
+  // Eviction: a genuine failure seen 3 times outlasts junk posted twice each (ORDER BY verified, n, last_at).
+  const fresh = makeEnv({ testers: false });
+  let t = Date.UTC(2026, 9, 12);
+  fresh.L.ledger.clock = () => t;
+  for (let i = 0; i < 3; i++) await fresh.L.ledger.clientErrorAdd(REPORT(), { network: 'genuine' });
+  for (let h = 0; h < 4; h++) { t += 3_600_000; for (let i = 0; i < 20; i++) { const r = REPORT({ line: 50_000 + h * 100 + i }); await fresh.L.ledger.clientErrorAdd(r); await fresh.L.ledger.clientErrorAdd(r); } }
+  assert.ok(fresh.L.ledger.clientErrors().some((r) => r.line === 6290 && r.count === 3), 'seen 3 times beats seen twice');
+});
+
+test('a Ledger made before v91 gains the verified column (its rows count as unverified)', async () => {
+  const { sqlCtx, Ledger } = await import('./tester-env.mjs');
+  const shim = sqlCtx();
+  shim.ctx.storage.sql.exec(`CREATE TABLE client_errors (sig TEXT PRIMARY KEY, doc TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 1,
+    first_at INTEGER NOT NULL, last_at INTEGER NOT NULL)`);
+  shim.ctx.storage.sql.exec('INSERT INTO client_errors (sig, doc, n, first_at, last_at) VALUES (?, ?, 1, ?, ?)', 'old', JSON.stringify(cleanReport(REPORT())), Date.now(), Date.now());
+  const ledger = new Ledger(shim.ctx, {});
+  assert.deepEqual(ledger.clientErrors().map((r) => [r.line, r.verified]), [[6290, false]]);
+  assert.equal((await ledger.clientErrorAdd(REPORT({ line: 1 }), { verified: true })).ok, true);
+  new Ledger(shim.ctx, {}); // a second start: the column is there already
+  assert.deepEqual(ledger.clientErrors().map((r) => [r.line, r.verified]), [[1, true], [6290, false]]);
 });
 
 test('the privacy page discloses app error reports: what they hold, what they never hold, and how long they stay', async () => {

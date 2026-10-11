@@ -105,6 +105,22 @@ function ghHeaders(token, body) {
     ...(body ? { 'content-type': 'application/json' } : {}),
   };
 }
+// owner/name as the GitHub API path: both parts checked (GitHub's own login and repo-name characters, never '.' or '..')
+// and encoded, so a model-written repo like 'me/x/../../someone/else' can't send the request to another repo than the
+// one it names (fetch resolves dot segments), and the app's outside-repo check (app.js githubOutside) reads the same owner.
+const GH_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, GH_NAME = /^[A-Za-z0-9._-]{1,100}$/;
+function repoPath(repo) {
+  const [owner, name, ...rest] = String(repo ?? '').trim().split('/');
+  if (rest.length || !GH_OWNER.test(owner || '') || !GH_NAME.test(name || '') || name === '.' || name === '..') throw new ToolError(`repo must be owner/name, like octocat/hello-world (got "${String(repo ?? '').slice(0, 80)}").`);
+  return `${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+}
+const issueNumber = (n) => { const v = Number(n); if (!Number.isSafeInteger(v) || v < 1) throw new ToolError('number must be the issue or PR number.'); return v; };
+// A path inside a repo: each segment encoded ('.' and '..' refused), the '/' between them kept.
+function repoFile(path) {
+  const parts = String(path ?? '').replace(/^\/+|\/+$/g, '').split('/').filter((p) => p !== '');
+  if (parts.some((p) => p === '.' || p === '..' || /[\0\r\n]/.test(p))) throw new ToolError('path can’t contain . or .. segments.');
+  return parts.map(encodeURIComponent).join('/');
+}
 const github = {
   ready: async (env) => (await tokenAccounts(env, 'github')).length > 0,
   api: (acct, path, init = {}) => callJson(`https://api.github.com${path}`, { ...init, headers: ghHeaders(acct.token, init.body) }, `GitHub (${acct.label})`),
@@ -136,17 +152,17 @@ const github = {
     github_issues: {
       label: 'List issues / PRs', desc: 'List issues or pull requests in a repo (uses whichever connected account can see it).',
       params: obj({ repo: S('owner/name'), kind: S('issues or pulls', { enum: ['issues', 'pulls'] }), state: S('open, closed or all', { enum: ['open', 'closed', 'all'] }), account: ACCT('GitHub') }, ['repo']),
-      run: async (env, a) => firstWorking(await chooseAccounts(env, 'github', a.account, 'GitHub'), async (acct) => {
+      run: async (env, a, repo = repoPath(a.repo)) => firstWorking(await chooseAccounts(env, 'github', a.account, 'GitHub'), async (acct) => {
         const kind = a.kind === 'pulls' ? 'pulls' : 'issues';
-        const list = await github.api(acct, `/repos/${a.repo}/${kind}?state=${a.state || 'open'}&per_page=25`);
+        const list = await github.api(acct, `/repos/${repo}/${kind}?state=${['open', 'closed', 'all'].includes(a.state) ? a.state : 'open'}&per_page=25`);
         return { items: list.filter((i) => kind === 'pulls' || !i.pull_request).map((i) => ({ number: i.number, title: i.title, state: i.state, author: i.user?.login, updated: i.updated_at, url: i.html_url })) };
       }),
     },
     github_read: {
       label: 'Read a GitHub file', desc: 'Read a file (or list a directory) in a repo (uses whichever connected account can see it).',
       params: obj({ repo: S('owner/name'), path: S('File or directory path ("" for root)'), ref: S('Branch/tag/sha (optional)'), account: ACCT('GitHub') }, ['repo', 'path']),
-      run: async (env, a) => firstWorking(await chooseAccounts(env, 'github', a.account, 'GitHub'), async (acct) => {
-        const j = await github.api(acct, `/repos/${a.repo}/contents/${a.path.replace(/^\//, '')}${a.ref ? `?ref=${encodeURIComponent(a.ref)}` : ''}`);
+      run: async (env, a, repo = repoPath(a.repo), file = repoFile(a.path)) => firstWorking(await chooseAccounts(env, 'github', a.account, 'GitHub'), async (acct) => {
+        const j = await github.api(acct, `/repos/${repo}/contents/${file}${a.ref ? `?ref=${encodeURIComponent(a.ref)}` : ''}`);
         if (Array.isArray(j)) return { entries: j.map((f) => ({ name: f.name, type: f.type, path: f.path })) };
         const bytes = Uint8Array.from(atob((j.content || '').replace(/\n/g, '')), (c) => c.charCodeAt(0));
         return { path: j.path, size: j.size, url: j.html_url, content: clip(new TextDecoder().decode(bytes), 20000) };
@@ -161,16 +177,16 @@ const github = {
     github_create_issue: {
       write: true, label: 'Create GitHub issue', desc: 'Open a new issue in a repo. `account` = which GitHub account files it (default: the first that can access the repo).',
       params: obj({ repo: S('owner/name'), title: S('Issue title'), body: S('Issue body (Markdown)'), account: ACCT('GitHub') }, ['repo', 'title']),
-      run: async (env, a) => firstWorking(await chooseAccounts(env, 'github', a.account, 'GitHub'), async (acct) => {
-        const i = await github.api(acct, `/repos/${a.repo}/issues`, { method: 'POST', body: JSON.stringify({ title: a.title, body: a.body || '' }) });
+      run: async (env, a, repo = repoPath(a.repo)) => firstWorking(await chooseAccounts(env, 'github', a.account, 'GitHub'), async (acct) => {
+        const i = await github.api(acct, `/repos/${repo}/issues`, { method: 'POST', body: JSON.stringify({ title: a.title, body: a.body || '' }) });
         return { number: i.number, url: i.html_url };
       }),
     },
     github_comment: {
       write: true, label: 'Comment on GitHub', desc: 'Comment on an issue or pull request. `account` = which GitHub account posts it.',
       params: obj({ repo: S('owner/name'), number: N('Issue or PR number'), body: S('Comment (Markdown)'), account: ACCT('GitHub') }, ['repo', 'number', 'body']),
-      run: async (env, a) => firstWorking(await chooseAccounts(env, 'github', a.account, 'GitHub'), async (acct) => {
-        const c = await github.api(acct, `/repos/${a.repo}/issues/${a.number}/comments`, { method: 'POST', body: JSON.stringify({ body: a.body }) });
+      run: async (env, a, repo = repoPath(a.repo), number = issueNumber(a.number)) => firstWorking(await chooseAccounts(env, 'github', a.account, 'GitHub'), async (acct) => {
+        const c = await github.api(acct, `/repos/${repo}/issues/${number}/comments`, { method: 'POST', body: JSON.stringify({ body: a.body }) });
         return { url: c.html_url };
       }),
     },
@@ -448,8 +464,20 @@ async function googleAccessToken(env, account) {
 }
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const fromB64url = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)));
+// A header value goes into the message as it is (only Subject is encoded), so a line break in it would start a header
+// of its own (a hidden Bcc or Reply-To) or end the headers early. gmail_draft runs without a card, and an agent steered
+// by mail it read could pass one: To, Cc and In-Reply-To with CR, LF or NUL are refused, and In-Reply-To must be one
+// <message-id> (what gmail_read returns as messageId).
+const headerValue = (v, name) => {
+  const s = String(v ?? '');
+  if (/[\r\n\0]/.test(s)) throw new ToolError(`${name} can’t contain line breaks.`);
+  return s;
+};
+const MESSAGE_ID = /^<[^<>\s]{1,995}>$/;
 function rfc822({ to, cc, subject, body, inReplyTo }) {
   const enc = (t) => `=?UTF-8?B?${btoa(String.fromCharCode(...new TextEncoder().encode(t)))}?=`;
+  to = headerValue(to, 'To'); cc = headerValue(cc, 'Cc'); inReplyTo = headerValue(inReplyTo, 'In-Reply-To').trim();
+  if (inReplyTo && !MESSAGE_ID.test(inReplyTo)) throw new ToolError('in_reply_to must be the original message’s Message-ID, like <abc@mail.example>.');
   const lines = [`To: ${to}`, cc ? `Cc: ${cc}` : '', `Subject: ${enc(subject || '')}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: 8bit',
     inReplyTo ? `In-Reply-To: ${inReplyTo}` : '', inReplyTo ? `References: ${inReplyTo}` : '', '', body || ''].filter((l, i, a) => l !== '' || i === a.length - 2);
   return b64url(new TextEncoder().encode(lines.join('\r\n')));

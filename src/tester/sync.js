@@ -2,6 +2,7 @@
 // the verified LinkedIn subject; client paths, request bodies and passcode headers can never select an account.
 // The owner's /api/sync routes and R2 keys are unchanged.
 import { handleSync } from '../sync.js';
+import { LIMITS } from '../../public/sync-merge.js';
 import { sha256, fail, signedOut } from './auth.js';
 import { SUB } from './ledger.js';
 
@@ -9,14 +10,29 @@ export const TESTER_SYNC_QUOTA_BYTES = 1024 ** 3;
 // Testers' cloud limits (the owner's are unchanged): the quota counts every stored byte (thread documents, media, trash
 // and history: SYNC_COUNT_ALL in src/sync.js), and at most this many threads.
 export const TESTER_SYNC_MAX_THREADS = 500;
-// A per-tester rate limit on what grows or recounts storage (LI_LIMIT, keyed sync:<sub>: the binding's 20 a minute), as
-// for read aloud and dictation. Reads (index, a thread, a blob, the trash list, missing-blob checks) are not counted.
-// Answered 503 sync_busy with Retry-After, never 429: the sync client reads a 429 as the passcode lockout and pauses.
+// Per-tester rate limits, each answered 503 sync_busy with Retry-After, never 429 (the sync client reads a 429 as the
+// passcode lockout and pauses):
+//   · what grows or recounts storage (writes, status): LI_LIMIT keyed sync:<sub> (the binding's 20 a minute), as for read
+//     aloud and dictation;
+//   · missing-blob checks (one R2 head per hash): LI_LIMIT keyed syncm:<sub>, 20 a minute, each at most
+//     TESTER_MISSING_HASHES hashes (the client chunks at that size), so at most 4,000 heads a minute per tester;
+//   · reads (the index, a thread, a blob, the trash list: an R2 list or get each): SYNC_READ_LIMIT keyed syncr:<sub>
+//     (300 a minute). The tester's AI budget never covered R2 operations; these do.
+// Without a binding (local dev) a route isn't throttled.
 const SYNC_RATE_RETRY_AFTER = '20';
-const throttledRoute = (method, suffix) => (method !== 'GET' && suffix !== 'blobs/missing') || suffix === 'status';
-async function syncThrottled(c) {
-  if (!c.env?.LI_LIMIT) return false;
-  try { return !(await c.env.LI_LIMIT.limit({ key: `sync:${c.who.sub}` })).success; } catch { return false; }
+export const TESTER_MISSING_HASHES = LIMITS.testerMissingHashes;
+const writeRoute = (method, suffix) => (method !== 'GET' && suffix !== 'blobs/missing') || suffix === 'status';
+const readRoute = (method, suffix) => method === 'GET' && suffix !== 'status';
+async function limited(binding, key) {
+  if (typeof binding?.limit !== 'function') return false;
+  try { return !(await binding.limit({ key })).success; } catch { return false; }
+}
+function syncThrottled(c, method, suffix) {
+  const sub = c.who.sub;
+  if (suffix === 'blobs/missing') return limited(c.env?.LI_LIMIT, `syncm:${sub}`);
+  if (writeRoute(method, suffix)) return limited(c.env?.LI_LIMIT, `sync:${sub}`);
+  if (readRoute(method, suffix)) return limited(c.env?.SYNC_READ_LIMIT, `syncr:${sub}`);
+  return false;
 }
 const SUFFIX = /^(?:index|status|trash|trash\/restore|blobs\/missing|thread\/[\w-]{1,120}|blob\/[0-9a-f]{64})$/;
 const ROOTS = new Set(['t', 'b', 'x', 'v', 'u']);
@@ -103,7 +119,7 @@ export async function handleTesterSync(c) {
   if (c.who?.kind !== 'tester' || typeof c.who.sub !== 'string' || !SUB.test(c.who.sub)) return signedOut();
   const suffix = typeof c.path === 'string' && c.path.startsWith('tester/sync/') ? c.path.slice('tester/sync/'.length) : '';
   if (!SUFFIX.test(suffix)) return failPath();
-  if (throttledRoute(c.req?.method, suffix) && await syncThrottled(c)) return fail(503, 'sync_busy', 'Sync is busy. Try again in a moment.', {}, { 'retry-after': SYNC_RATE_RETRY_AFTER });
+  if (await syncThrottled(c, c.req?.method, suffix)) return fail(503, 'sync_busy', 'Sync is busy. Try again in a moment.', {}, { 'retry-after': SYNC_RATE_RETRY_AFTER });
   // handleSync owns validation, compare-and-swap, media checksums, trash/history and retry behavior. A new env view
   // ensures it cannot see the owner's bucket or quota. A missing binding/kill switch still produces its normal 503.
   const env = {
@@ -112,6 +128,7 @@ export async function handleTesterSync(c) {
     SYNC_QUOTA_BYTES: TESTER_SYNC_QUOTA_BYTES,
     SYNC_COUNT_ALL: true,
     SYNC_MAX_THREADS: TESTER_SYNC_MAX_THREADS,
+    SYNC_MISSING_MAX: TESTER_MISSING_HASHES,
   };
   return handleSync(c.req, env, suffix);
 }

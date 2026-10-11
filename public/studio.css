@@ -352,7 +352,7 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
   /* Testers roster: photo · who · button on one row, spend under the name */
   .tp-tester { grid-template-columns: 40px minmax(0, 1fr) auto; row-gap: 4px; }
   .tp-tester .tp-spend { grid-area: 2 / 2; flex-direction: row; gap: 12px; align-items: baseline; }
-  .tp-tester > .chip { grid-area: 1 / 3 / span 2; }
+  .tp-tester > .tp-acts { grid-area: 1 / 3 / span 2; flex-direction: column; align-items: stretch; }
   .tp-refused :is(.chip, .tp-tag) { margin-left: 52px; } /* under the name, past the photo */
   .lookup:not([data-state='pill']) { width: min(420px, calc(100vw - 32px)); max-width: none; }
   .lk-title { font-size: 22px; }

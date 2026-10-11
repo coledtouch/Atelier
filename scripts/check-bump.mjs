@@ -3,14 +3,17 @@
 // their old cached modules (it happened twice in October 2026, with two commits made by other agents).
 // Docs-only and tests-only changes never need a bump, and neither does public/atelier-browser.zip (every deploy
 // regenerates it).
+// A change to extension/ must raise extension/manifest.json's version: the extension is installed unpacked from the zip
+// and never updates itself, so the version is the only way the owner and the app (public/app.js MIN_EXT) can tell an old
+// copy from the new one (v89 review, pipeline-ext-version-not-enforced).
 // Usage: node scripts/check-bump.mjs [<base> [<head>]]
 //   <base>: the PR base commit, or the commit before a push. Missing or all zeros (a new branch): the previous commit.
 //   Not in this clone (a force push rewrote the branch): FAIL, since what the push replaced can't be compared. Locally,
 //   `node scripts/check-bump.mjs origin/master` checks what a push would add.
 //   <head>: default HEAD.
 // A shallow clone is refused (exit 2): its "first commit" would pass anything. CI checks out with fetch-depth: 0.
-// Exit 0 = fine, 1 = public/ or src/ changed without a bump (or a force push), 2 = git trouble. tests/ship.test.mjs
-// covers the rules.
+// Exit 0 = fine, 1 = public/ or src/ changed without a bump, extension/ without a manifest version bump (or a force
+// push), 2 = git trouble. tests/ship.test.mjs covers the rules.
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +26,36 @@ export const NO_BUMP_FILES = new Set(['public/atelier-browser.zip']);
 export const needsBump = (paths) => paths.filter((p) => BUMP_DIRS.some((d) => p.startsWith(d)) && !NO_BUMP_FILES.has(p));
 
 export const isNullSha = (s) => !s || /^0+$/.test(s);
+
+export const EXT_DIR = 'extension/';
+/** extension/manifest.json's version, or null (no file, not JSON, no x.y.z version). */
+export function extVersion(src) {
+  try {
+    const v = JSON.parse(String(src ?? '')).version;
+    return typeof v === 'string' && /^\d+(\.\d+){0,3}$/.test(v) ? v : null;
+  } catch { return null; }
+}
+/** Compares dotted versions part by part ('1.3.10' > '1.3.9'): < 0, 0 or > 0. */
+export function compareVersions(a, b) {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0);
+  return 0;
+}
+/** → { ok, message, touched } for the changed paths and extension/manifest.json's version before and after. */
+export function extVerdict({ paths, baseVersion, headVersion }) {
+  const touched = paths.filter((p) => p.startsWith(EXT_DIR));
+  if (!touched.length) return { ok: true, touched, message: 'no extension/ changes' };
+  if (headVersion == null) return { ok: false, touched, message: 'extension/manifest.json has no version (x.y.z)' };
+  if (baseVersion == null) return { ok: true, touched, message: `extension/manifest.json is new at ${headVersion}` };
+  if (compareVersions(headVersion, baseVersion) > 0) return { ok: true, touched, message: `extension ${baseVersion} → ${headVersion} covers ${touched.length} changed file${touched.length === 1 ? '' : 's'} in extension/` };
+  const shown = touched.slice(0, 20).map((p) => `  ${p}`).join('\n');
+  return {
+    ok: false, touched,
+    message: `extension/ changed without a manifest version bump (still ${baseVersion}${compareVersions(headVersion, baseVersion) < 0 ? `, now ${headVersion}: it went backwards` : ''}):\n${shown}\n`
+      + 'The extension is installed unpacked and never updates itself: the version is the only sign an installed copy is old.\n'
+      + 'Fix: raise "version" in extension/manifest.json and MIN_EXT in public/app.js to match, update tests/extension.test.mjs, commit, push.',
+  };
+}
 
 export function swVersion(src) {
   const m = String(src ?? '').match(VERSION_RE);
@@ -89,11 +122,16 @@ export function main(argv = process.argv.slice(2)) {
   if (!diff.ok) { console.error(`check-bump: git diff ${base}...${head} failed: ${diff.stderr.trim()}`); return 2; }
   const paths = diff.stdout.split('\0').filter(Boolean);
   const versionAt = (ref) => { const r = git(['show', `${ref}:public/sw.js`]); return r.ok ? swVersion(r.stdout) : null; };
+  const extAt = (ref) => { const r = git(['show', `${ref}:extension/manifest.json`]); return r.ok ? extVersion(r.stdout) : null; };
   const verdict = bumpVerdict({ paths, baseVersion: versionAt(base), headVersion: versionAt(head) });
+  const ext = extVerdict({ paths, baseVersion: extAt(base), headVersion: extAt(head) });
   const range = `${base.slice(0, 12)}...${head}`;
-  if (verdict.ok) { console.log(`check-bump (${range}): ok, ${verdict.message}`); return 0; }
-  console.error(`check-bump (${range}): FAIL\n${verdict.message}`);
-  if (process.env.GITHUB_ACTIONS) console.log(`::error title=VERSION not bumped::${verdict.message.replace(/%/g, '%25').replace(/\r?\n/g, '%0A')}`);
+  if (verdict.ok && ext.ok) { console.log(`check-bump (${range}): ok, ${verdict.message}; ${ext.message}`); return 0; }
+  for (const [v, title] of [[verdict, 'VERSION not bumped'], [ext, 'Extension version not bumped']]) {
+    if (v.ok) continue;
+    console.error(`check-bump (${range}): FAIL\n${v.message}`);
+    if (process.env.GITHUB_ACTIONS) console.log(`::error title=${title}::${v.message.replace(/%/g, '%25').replace(/\r?\n/g, '%0A')}`);
+  }
   return 1;
 }
 

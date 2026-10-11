@@ -176,7 +176,8 @@ test('cleanTerm is self-contained, so the client copy can be compared as source 
 });
 const clientUrl = new URL('../public/lookup.js', import.meta.url);
 const client = existsSync(clientUrl) ? await import(clientUrl.href).catch(() => null) : null;
-test('cleanTerm parity: public/lookup.js has the same function, character for character', { skip: !client?.cleanTerm && 'public/lookup.js (client) not written yet' }, () => {
+test('cleanTerm parity: public/lookup.js has the same function, character for character', () => {
+  assert.equal(typeof client?.cleanTerm, 'function', 'public/lookup.js loads and exports cleanTerm');
   assert.equal(client.cleanTerm.toString(), cleanTerm.toString());
   for (const raw of [...KEEP.map(([r]) => r), ...REJECT]) assert.equal(client.cleanTerm(raw), cleanTerm(raw), JSON.stringify(raw));
 });

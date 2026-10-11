@@ -7,28 +7,28 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=90';
-import * as Sync from './sync.js?v=90';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=90';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=90';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=90';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=90';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=90';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=90';
-import { initLookup } from './lookup.js?v=90';
-import { createRemix } from './remix-app.js?v=90';
-import { sendMode, looksLikeQuestion } from './remix.js?v=90';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=90';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=90';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=90';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=90';
-import { createAppStore, createBridge, idbBackend, appKey, workspaceDb, fmtBytes } from './appdata.js?v=90';
-import * as ClaudeImport from './claude-import.js?v=90';
-import { createFeedback } from './feedback.js?v=90';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=90';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=90';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=90';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=90';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=91';
+import * as Sync from './sync.js?v=91';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=91';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=91';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=91';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=91';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=91';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=91';
+import { initLookup } from './lookup.js?v=91';
+import { createRemix } from './remix-app.js?v=91';
+import { sendMode, looksLikeQuestion } from './remix.js?v=91';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=91';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=91';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=91';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=91';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=91';
+import * as ClaudeImport from './claude-import.js?v=91';
+import { createFeedback } from './feedback.js?v=91';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=91';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=91';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=91';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=91';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -263,7 +263,8 @@ const workspace = workspaceOf();
 const threadDbName = workspace === 'owner' ? 'atelier-data' : workspace === 'guest' ? 'atelier-guest' : `atelier-account-${encodeURIComponent(workspace.slice(7))}`;
 const workspaceKey = (key) => workspace === 'owner' ? key : `${key}:${workspace}`;
 let accountReloading = false;
-function reloadWorkspace(external = false) {
+// extra: one more promise the reload waits for (at most the same 2 s), e.g. setTester's Read aloud clips being cleared.
+function reloadWorkspace(external = false, extra = null) {
   if (accountReloading) return true;
   if (!external && workspaceOf() === workspace) return false;
   if (!external) saveSettings();
@@ -278,10 +279,10 @@ function reloadWorkspace(external = false) {
   accountReloading = true;
   Sync.suspend(); clearTimeout(persistTimer); S.thread = null;
   if (!external) { try { sessionStorage.setItem('atelier.accountResume', '1'); } catch {} }
-  if (!flushed && !apps) location.reload();
+  if (!flushed && !apps && !extra) location.reload();
   else {
     let gone = false; const reload = () => { if (!gone) { gone = true; location.reload(); } };
-    setTimeout(reload, 2000); Promise.allSettled([flushed, apps]).then(reload);
+    setTimeout(reload, 2000); Promise.allSettled([flushed, apps, extra]).then(reload);
   }
   return true;
 }
@@ -497,6 +498,9 @@ const rawDB = (() => {
     // This workspace's keys only (one transaction): a tester's Clear this device never touches the owner's rx:* drafts,
     // Claude Code folder or passcode backup, nor another account's.
     kvClear: () => tx('readwrite', (s) => { const q = s.getAllKeys(); q.onsuccess = () => { for (const k of q.result || []) if (kvMine(k)) s.delete(k); }; }, 'kv'),
+    // Every tester account's kv rows on this device (the sign-in screen's "Remove my tester data"), never another's.
+    kvClearTesters: () => tx('readwrite', (s) => { const q = s.getAllKeys(); q.onsuccess = () => { for (const k of q.result || []) if (typeof k === 'string' && k.startsWith(`${KV_SCOPE}tester:`)) s.delete(k); }; }, 'kv'),
+    kvHasTesters: () => tx('readonly', (s) => s.getAllKeys(), 'kv').then((keys) => (keys || []).some((k) => typeof k === 'string' && k.startsWith(`${KV_SCOPE}tester:`))),
     // The owner's passcode backup (restored at boot after the browser dropped localStorage) is the owner's own key in
     // every workspace: written by an owner sign-in, read only by a signed-out page (boot), never cleared by another account.
     ownerPasscodeGet: () => tx('readonly', (s) => s.get('passcode'), 'kv'),
@@ -622,10 +626,32 @@ function persist(now = false) {
 function storageError(err) { console.error(err); toast('Couldn’t save your work on this device. Export a backup from Settings before closing.', { error: true }); }
 
 // ───────────────────────── API ─────────────────────────
+// This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
+// refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
+// MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
+const APP_BUILD = '91';
+const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
-  const h = { 'content-type': 'application/json', ...extra };
+  const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
   if (S.settings.passcode) h['x-app-pass'] = S.settings.passcode;
   return h;
+}
+// 426 app_outdated: this tab runs a build older than a safety rule the server now requires (a PWA window can stay open
+// for days). The open thread is saved, the service worker fetches the new version, and the page reloads into it (the
+// composer's draft is kept on the way out, as on any reload). At most once a minute: a reload that comes back still
+// outdated (a stale cache) says so instead of looping.
+let outdatedReload = false;
+function appOutdated() {
+  if (outdatedReload) return;
+  outdatedReload = true;
+  let last = 0;
+  try { last = Number(sessionStorage.getItem('atelier.outdatedAt')) || 0; } catch {}
+  if (Date.now() - last < 60_000) { toast('Atelier was updated — reload this page to keep going.', { error: true, ms: 9000 }); return; }
+  try { sessionStorage.setItem('atelier.outdatedAt', String(Date.now())); } catch {}
+  toast('Atelier was updated — reloading…');
+  Promise.resolve().then(() => persist(true)).catch(() => {})
+    .then(() => navigator.serviceWorker?.getRegistration?.()).then((r) => r?.update()).catch(() => {})
+    .then(() => appDataSaved()).catch(() => {}).finally(() => location.reload());
 }
 // extra: {code, scope, resetsAt} from Atelier's own {error, code} refusals (tester limits, model_no_images, …).
 class ApiError extends Error {
@@ -651,6 +677,7 @@ async function toApiError(r) {
   // Firewalls and gateways sometimes answer with a whole HTML page — don't dump markup into the chat.
   if (/^\s*<(!doctype|html|head|body)/i.test(detail)) detail = 'The provider answered with an error page instead of a response.';
   const code = typeof j?.code === 'string' && /^[a-z_]{1,40}$/.test(j.code) ? j.code : undefined;
+  if (code === 'app_outdated') { appOutdated(); return new ApiError(r.status, detail || 'Atelier was updated — reloading this page.', { code }); }
   // Tester refusals are already worded for people (and never mention a passcode): keep them as they are.
   if (isTesterCode(code) || code === 'model_no_images') return new ApiError(r.status, detail || `Request failed (${r.status}).`, { code, scope: typeof j.scope === 'string' ? j.scope : undefined, resetsAt: j.resetsAt });
   // So are the passcode guard's (how long to wait): no "Rate limited" lead in front of them.
@@ -1349,6 +1376,11 @@ function blockedImage(src) {
   return a;
 }
 const FETCH_ATTRS = ['src', 'srcset', 'poster', 'background', 'href', 'xlink:href'];
+const SVG_NS = 'http://www.w3.org/2000/svg', XLINK_NS = 'http://www.w3.org/1999/xlink';
+// An SVG <a>'s address (href or xlink:href), gone: a reply's links are its HTML ones, which guardLinks guards.
+function dropSvgHref(n) {
+  n.removeAttribute('href'); n.removeAttribute('xlink:href'); n.removeAttributeNS?.(XLINK_NS, 'href');
+}
 // A CSS value as the browser reads it: comments dropped, escapes (\75, \r, \( …) turned into the characters they stand for.
 function cssPlain(v) {
   return String(v).replace(/\/\*[\s\S]*?(?:\*\/|$)/g, '').replace(/\\(?:([0-9a-f]{1,6})[ \t\n\r\f]?|([\s\S]))/gi, (_, hex, ch) => {
@@ -1368,15 +1400,25 @@ const TEXT_ATTRS = /^(?:alt|title|aria-[\w-]+|data-[\w-]+)$/i; // never read as 
 // <img>), so nothing in the reply's HTML can carry trust.
 const madeHere = new WeakSet();
 const LANG_CLASS = /^language-[a-z0-9][a-z0-9+#._-]{0,30}$/;
+// Attributes that reach another element by its id, anywhere in the document (also inside a closed dialog): a reply's
+// <label for="syncToggle">, <button commandfor="settings" command="show-modal">, popovertarget, an <input list> or a
+// control's form="…" would let a tap on the reply's text work one of Atelier's own controls (turn sync off, rotate the
+// Assist key, submit Settings). md() forbids them (FORBID_ATTR); this drops them again whatever the sanitizer kept.
+// inert would take parts of the page away from the keyboard and screen readers.
+const ID_REFS = new Set(['for', 'command', 'commandfor', 'popover', 'popovertarget', 'popovertargetaction', 'list', 'form', 'inert']);
 function lockReplyFetches(n) {
   if (madeHere.has(n)) return;
   const tag = String(n.nodeName).toLowerCase();
   for (const { name, value } of [...n.attributes]) {
     const k = name.toLowerCase();
-    const keep = k === 'class' ? tag === 'code' && LANG_CLASS.test(value) : !k.startsWith('data-');
+    const keep = k === 'class' ? tag === 'code' && LANG_CLASS.test(value) : !k.startsWith('data-') && !ID_REFS.has(k);
     if (!keep) n.removeAttribute(name);
   }
+  // A named target would load into a window (or frame) of that name: a reply's link opens in a new tab or not at all.
+  if (n.hasAttribute('target') && n.getAttribute('target') !== '_blank') n.setAttribute('target', '_blank');
   if (tag === 'img' && !localUrl(n.getAttribute('src') || '')) { n.replaceWith(blockedImage(n.getAttribute('src') || '')); return; }
+  // An SVG <a> keeps no address at all: it would open with one tap whatever it carried, past guardLinks (v91 review).
+  if (tag === 'a' && n.namespaceURI === SVG_NS) dropSvgHref(n);
   const link = (a) => (a === 'href' || a === 'xlink:href') && (tag === 'a' || tag === 'area'); // a link waits for a tap
   for (const a of FETCH_ATTRS) {
     if (!n.hasAttribute(a) || link(a)) continue;
@@ -1388,13 +1430,19 @@ function lockReplyFetches(n) {
     if (value.includes('\\') || CSS_FETCH.test(cssPlain(value))) n.removeAttribute(name);
   }
 }
+// What a reply may not contain at all: <form> and <style> (above); <dialog> (the app treats any open dialog as one of its
+// own modals: toasts move into it, shortcuts and Escape stop, a new version never reloads); and the form controls that
+// only work by pointing at something else (<label>, <select>, <textarea>, <datalist> and their options). <input> stays:
+// marked writes a GFM task list as <input disabled type="checkbox">.
+const REPLY_FORBID_TAGS = ['form', 'style', 'dialog', 'label', 'select', 'textarea', 'datalist', 'option', 'optgroup'];
+const REPLY_FORBID_ATTR = ['style', 'id', 'name', ...ID_REFS];
 DOMPurify.addHook('afterSanitizeAttributes', lockReplyFetches);
 function md(text) {
   const html = marked.parse(text || '');
   // With a <pre> in it, the sanitized tree comes back as nodes (parsed once, as DOMPurify always does), the code bars
   // are added in an inert template, and it is serialized once: never re-parsed together with any HTML string.
   const pre = /<pre/i.test(html);
-  const clean = DOMPurify.sanitize(html, { ADD_ATTR: ['target'], ALLOW_DATA_ATTR: false, FORBID_TAGS: ['form', 'style'], FORBID_ATTR: ['style', 'id', 'name'], ...(pre ? { RETURN_DOM_FRAGMENT: true } : {}) });
+  const clean = DOMPurify.sanitize(html, { ADD_ATTR: ['target'], ALLOW_DATA_ATTR: false, FORBID_TAGS: REPLY_FORBID_TAGS, FORBID_ATTR: REPLY_FORBID_ATTR, ...(pre ? { RETURN_DOM_FRAGMENT: true } : {}) });
   if (!pre) return clean;
   const t = document.createElement('template');
   t.content.append(clean);
@@ -1405,9 +1453,98 @@ function highlightIn(el) {
   $$('pre code', el).forEach((c) => { if (!c.dataset.hl) { try { hljs.highlightElement(c); } catch {} c.dataset.hl = 1; } });
 }
 
+// ── reply links (the last way out for what a steered answer read) ──
+// By design, what your own accounts return (mail from anyone, a shared Drive file, Slack) never taints a thread, so an
+// inbox run reads on without asking (context.js). What stands between that text and someone else's server is the tap on
+// a link in the answer, and a link shows only its words. So after rendering (guardLinks):
+//   · every link to another site shows that site after its words, and opens in a new tab with no referrer;
+//   · once the answer could carry what the assistant read — its run read something (a done step), or outside text is in
+//     the thread or this turn (threadTaint / entryTaint) — a link the model wrote itself opens only after a confirm that
+//     shows the whole address. A link copied word for word from a tool result (a calendar event's link, a Canva edit
+//     link, a GitHub URL: e.toolUrls, noteToolUrls) opens as before: its address came from the service, not the model.
+// A guarded link has no href (nothing else can open it: a long press, a middle click, "open in new tab").
+const TOOL_URLS_MAX = 200;
+const URL_IN_TEXT = /\bhttps?:\/\/[^\s<>"'`]+/gi;
+const normUrl = (u) => { try { const x = new URL(String(u).trim()); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch { return ''; } };
+// The http(s) URLs in a tool result (a whole value first, then ones inside text) → e.toolUrls (kept, at most 200).
+function noteToolUrls(e, result) {
+  const whole = [], inside = [];
+  const walk = (v, depth) => {
+    if (depth > 12 || whole.length + inside.length > 2000) return;
+    if (typeof v === 'string') {
+      if (/^\s*https?:\/\/\S+\s*$/i.test(v)) whole.push(v);
+      else if (v.length <= 200_000) for (const m of v.matchAll(URL_IN_TEXT)) inside.push(m[0].replace(/[.,;:!?)\]}*_]+$/, ''));
+    } else if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); } else if (v && typeof v === 'object') { for (const x of Object.values(v)) walk(x, depth + 1); }
+  };
+  walk(result, 0);
+  const have = new Set(Array.isArray(e.toolUrls) ? e.toolUrls : []);
+  for (const u of [...whole, ...inside]) {
+    if (have.size >= TOOL_URLS_MAX) break;
+    const n = normUrl(u);
+    if (n && n.length <= 2048) have.add(n);
+  }
+  if (have.size) e.toolUrls = [...have];
+}
+// Why a model-written link in e's answer asks first: 'accounts' (its run, or an earlier turn of the thread, read
+// something: a later answer replays what that one said), 'outside' (outside text in the thread before it, or in this
+// entry), or '' (it doesn't).
+const readSomething = (x) => Array.isArray(x?.steps) && x.steps.some((st) => st?.status === 'done');
+function linkRisk(e, thread = S.thread) {
+  const all = thread?.entries || [], at = all.indexOf(e), prior = at < 0 ? all : all.slice(0, at);
+  if (readSomething(e) || prior.some(readSomething)) return 'accounts';
+  return worseTaint(threadTaint(prior), entryTaint(e)) ? 'outside' : '';
+}
+const guardedLinks = new WeakMap(); // <a> → { url, where, risk }
+// Every link of both kinds: an HTML <a> or <area>, and an SVG <a> (by href or xlink:href), which loses its address here
+// as in md() (lockReplyFetches). Attributes only, never .target or .rel: an SVG <a>'s are read-only, and one throw
+// used to leave that link and every later one unguarded (v91 review). A link that can't be guarded loses its address.
+function guardLinks(root, e, thread = S.thread) {
+  let risk;
+  // (A blocked image's link counts like any other: its address is the one the model wrote for the image.)
+  for (const a of $$('a, area', root)) {
+    try {
+      if (a.namespaceURI === SVG_NS) { dropSvgHref(a); continue; }
+      const href = a.getAttribute('href');
+      if (href == null) continue;
+      let u;
+      try { u = new URL(href, location.href); } catch { continue; }
+      if (u.origin === location.origin) continue;
+      const web = /^https?:$/.test(u.protocol);
+      let where = web ? u.host : u.protocol.replace(/:$/, '');
+      if (u.protocol === 'mailto:') { try { where = decodeURIComponent(u.pathname) || 'email'; } catch { where = u.pathname || 'email'; } }
+      a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer');
+      if (!a.textContent.toLowerCase().includes(where.toLowerCase())) {
+        const s = document.createElement('span');
+        s.className = 'link-host'; s.textContent = ` (${where})`;
+        a.append(s);
+      }
+      risk ??= linkRisk(e, thread);
+      if (!risk || (web && Array.isArray(e.toolUrls) && e.toolUrls.includes(u.href))) continue;
+      guardedLinks.set(a, { url: u.href, where, risk });
+      a.removeAttribute('href'); a.removeAttribute('target');
+      a.classList.add('link-guarded'); a.setAttribute('role', 'link'); a.setAttribute('tabindex', '0');
+      a.setAttribute('title', `Asks before opening — goes to ${where}`);
+    } catch { try { a.removeAttribute('href'); a.removeAttributeNS?.(XLINK_NS, 'href'); } catch {} }
+  }
+}
+// A guarded link, tapped (or Enter): it opens only once the owner has seen the whole address.
+function openGuardedLink(a) {
+  const g = guardedLinks.get(a);
+  if (!g) return false;
+  const why = g.risk === 'accounts' ? 'The assistant wrote this link itself after reading your accounts.'
+    : 'The assistant wrote this link itself, in a thread that holds text from outside Atelier (something shared or linked, web results, a page).';
+  if (confirm(`${why} Opening it sends everything in the address to ${g.where}:\n\n${g.url}\n\nOpen it?`)) window.open(g.url, '_blank', 'noopener,noreferrer');
+  return true;
+}
+
 // ───────────────────────── rendering ─────────────────────────
 const stream = $('#stream');
 const welcome = $('#welcome');
+// Atelier's own open dialogs, topmost last. Every "is a dialog open?" check asks this, never $('dialog[open]') over the
+// whole page: a <dialog open> inside a rendered reply (md() forbids it; this is the second layer) is not one of the
+// app's modals, so it can't swallow toasts, switch off shortcuts and Escape, hold Look up, or stall the reload into a
+// new version.
+const appDialogs = () => $$('dialog[open]').filter((d) => !stream.contains(d));
 
 function renderThread() {
   const live = !!S.thread && liveThreads.get(S.thread.id) === S.thread; // generation still running in this thread
@@ -1487,7 +1624,7 @@ function paintEntry(li, e) {
     if (reasoning && e.pending && stickThink) { const tb = $('.think-body', out); tb.scrollTop = tb.scrollHeight; }
     const prose = $('.prose', out);
     if (!text && e.pending && !reasoning) prose.innerHTML = e.steps?.some((st) => st.status === 'awaiting') ? '' : statusLine(e.status || (e.steps?.length ? 'Working' : e.kind === 'code' ? 'Thinking in code' : 'Composing'), e);
-    else prose.innerHTML = md(text) + (e.pending ? '<span class="caret"></span>' : '');
+    else { prose.innerHTML = md(text) + (e.pending ? '<span class="caret"></span>' : ''); guardLinks(prose, e); }
     if (!e.pending) highlightIn(prose);
     // A turn imported from Claude keeps Claude's answer: no Retry (it would replace it); ask a follow-up instead.
     if (!e.pending && text) acts.innerHTML = btn('copy', ICON.copy, 'Copy') + readBtns(e) + (e.via === ClaudeImport.VIA ? '' : btn('retry', ICON.retry, 'Retry')) + btn('to-build', ICON.hammer, 'Build from this');
@@ -1576,13 +1713,15 @@ function paintEntry(li, e) {
           <button class="mini" data-act="app-copy">${ICON.copy}Copy code</button>
           <span class="grow"></span>
           <button class="mini" data-act="app-refine" style="color:var(--accent)">${ICON.pen}Refine</button>
-        </div>${baseNote}${key ? appDataRow(key) : ''}</div>`;
-      appBridge.mount($('iframe', out), { key, html: e.app.html }); // its saved data (appdata.js): every version shares it
+        </div>${baseNote}${key ? appDataRow(key, Boolean(taintedFrom(S.thread.entries, e))) : ''}</div>`;
+      // its saved data (appdata.js): every version shares it, except from a version made from text that may not be yours
+      appBridge.mount($('iframe', out), { key, html: e.app.html, strict: Boolean(taintedFrom(S.thread.entries, e)) });
       if (key) paintAppData(key, out);
       $('.appcode code', out).textContent = e.app.html;
       acts.innerHTML = btn('retry', ICON.retry, 'Rebuild');
     } else if (!e.error && e.text) {
       out.innerHTML = meta + `<div class="prose">${md(e.text)}</div>`;
+      guardLinks($('.prose', out), e);
     }
   }
 
@@ -1633,6 +1772,10 @@ const reader = createReader({
   // A tester's session ended (401): signed out as a chat would be, which stops the read and opens sign-in.
   onSignedOut: () => testerSignedOut('expired'),
 });
+// Backstop for a browser whose tester signed out (or whose session ended, or access closed) under a build that reloaded
+// before their Read aloud clips were cleared: a signed-out page has no clips of its own (AI voices need an account), so
+// whatever is in the shared cache is theirs.
+if (workspace === 'guest' && ['signedout', 'expired', 'revoked', 'closed'].includes(LS.get('outReason', ''))) reader.clearCache().catch(() => {});
 // What the idle Read aloud button says it reads with: the voice the reader would really use for this account.
 const readTitle = () => `Read aloud · ${voiceFor(S.settings.readAloud.voice, readAllowed()) === 'device' ? 'device voice' : 'AI voice'}`;
 function retitleReads() { for (const b of $$('.actions [data-act="speak"][data-read="idle"]', stream)) b.title = readTitle(); }
@@ -1842,7 +1985,8 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 const appDataSaved = (ms = 2000) => (appStore.busy() ? Promise.race([appStore.flush().catch(() => {}), sleep(ms)]) : Promise.resolve());
 // The app a Build entry of the open thread belongs to ('' when it can't be named: that preview saves nothing).
 const appKeyOf = (e, thread = S.thread) => (thread ? appKey(thread.id, thread.entries, e) : '');
-const appDataRow = (key) => `<div class="appdata" data-appdata="${esc(key)}"><span class="appdata-size">App data</span><button class="mini" data-act="app-data-clear" hidden>${ICON.trash}Clear app data</button></div>`;
+// apart: this version (or one it was built on) came from text that may not be yours (appdata.js appKey): its data is its own.
+const appDataRow = (key, apart = false) => `<div class="appdata" data-appdata="${esc(key)}"><span class="appdata-size">App data</span><button class="mini" data-act="app-data-clear" hidden>${ICON.trash}Clear app data</button>${apart ? '<span class="appdata-apart">Separate from earlier versions: this one was made from text that came from a link, a share or a backup, so it can’t see what they saved.</span>' : ''}</div>`;
 // The "App data" line on every card of that app: how much it has saved here, and Clear app data when there is any.
 // root: where to look (a card being painted isn't in the stream yet).
 function paintAppData(key, root = stream) {
@@ -1988,7 +2132,10 @@ async function submit(textArg, modeArg, extra = {}) {
   if (video && route === 'ask' && mode !== 'ask') { mode = 'ask'; setMode('ask'); toast('Sent to Ask — videos are answered there'); }
 
   // One request, several deliverables ("answer this, make an image and a video") → parallel tasks.
-  if (mode === 'ask' && !images.length && !video && !extra.entry && !extra.images && !extra.launch && feat('helpers') && MULTI_HINT.test(text) && MULTI_JOIN.test(text)) {
+  // Never for marked text (a link, a share, or a button on a marked entry): the planner would read a stranger's words as
+  // the owner's request and start up to 4 paid jobs (Video, Image) at once with the saved options and no price on screen.
+  // A marked turn goes out as one Ask turn instead (v89 review, money-marked-text-splits-into-paid-tasks).
+  if (mode === 'ask' && !untrusted && !images.length && !video && !extra.entry && !extra.images && !extra.launch && feat('helpers') && MULTI_HINT.test(text) && MULTI_JOIN.test(text)) {
     if (textArg == null) { input.value = ''; autosize(); }
     const ctrl = new AbortController(); running.add(ctrl); setBusy();
     const tasks = await planTasks(text, ctrl.signal).catch(() => null).finally(() => { running.delete(ctrl); setBusy(); hideToast(); });
@@ -2230,10 +2377,14 @@ async function runChat(e, signal, thread = S.thread) {
   const messages = hasImg ? [...head, { role: 'user', content: withSent([{ type: 'text', text: e.prompt }, ...e.images.map((u) => ({ type: 'image_url', image_url: { url: u } }))], e) }]
     : !ctx ? [...head, { role: 'user', content: withSent(e.prompt, e) }]
       : (m) => { const t = ctxTurn(e, ctx, m); notes = [t.note]; setNote(); return [...head, { role: 'user', content: withSent(t.content, e) }]; };
+  // A turn that sends photos or video frames (its own, or earlier ones shown again) replays later as text, and images in
+  // a request invalidate Claude's messages cache: cache_turn false keeps Claude from writing the history and the turn at
+  // the 1-hour rate (2x input) when no later request can read them (src/anthropic.js). The system prompt is still cached.
+  const withMedia = (m) => hasImg || Boolean(ctx && ctxTurn(e, ctx, m).n > 0);
   await streamChat({
     model, messages, signal, max_tokens: think ? 12000 : 6000,
     role, cacheKey: cacheKey(thread?.id), onUsage: (u) => { e.meta.usage = addUsage(e.meta.usage, u); },
-    extra: (m) => { offered = web && providerOf(m) === 'anthropic'; setNote(); return { ...(offered ? { web_search: true } : {}), ...(think && /nemotron|gemma|qwen/i.test(m) ? { chat_template_kwargs: { enable_thinking: true } } : {}) }; },
+    extra: (m) => { offered = web && providerOf(m) === 'anthropic'; setNote(); return { ...(offered ? { web_search: true } : {}), ...(think && /nemotron|gemma|qwen/i.test(m) ? { chat_template_kwargs: { enable_thinking: true } } : {}), ...(withMedia(m) ? { cache_turn: false } : {}) }; },
     onModel: (m) => { e.meta.model = m; },
     onNote: (note) => { notes.push(note); setNote(); },
     temperature: e.kind === 'code' ? Math.min(S.settings.temperature, 0.3) : undefined,
@@ -2357,15 +2508,22 @@ function syncAttachBtn() {
 const AGENT_HINT = /\b(e-?mails?|inbox|gmail|unread|repl(y|ies)( to)?|respond to|messages?|messaged|texted|mentions?|threads?|slack|dms?|channels?|my boss|coworkers?|team ?mates?|github|repos?|pull requests?|prs?|issues?|commits?|notifications?|stripe|payments?|customers?|invoices?|subscriptions?|refund|revenue|mrr|cloudflare|dns|workers?|zones?|railway|deploy(ment)?s?|redeploy|canva|calendars?|my (schedule|day|week|agenda|docs?|files|tasks|to-?dos?|plans?)|to-?do( list)?|what (do|should) i (need to |have to )?do( today| tomorrow| this (morning|afternoon|week))?|what('?s| is)? on (today|tomorrow|my plate)|meetings?|appointments?|agenda|free (time|slots?)|invites?|(my|google|in) drive|google (docs?|sheets?|slides)|spreadsheets?)\b/i;
 // ── Atelier Browser extension bridge (desktop Chrome / Edge) ──
 const EXT = { ready: false, version: null, pending: new Map() };
+// The extension is installed unpacked from /atelier-browser.zip and never updates itself, so the app asks for the build
+// it ships: MIN_EXT is extension/manifest.json's version (tests/extension.test.mjs keeps them equal, and
+// scripts/check-bump.mjs makes every change to extension/ raise that version). 1.3.3: sign-in codes, ID numbers and a
+// password shown as text are refused too.
+const MIN_EXT = '1.3.3';
+const olderExt = (v) => { const a = String(v || '0').split('.').map((n) => Number(n) || 0), b = MIN_EXT.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== b[i]) return (a[i] || 0) < b[i]; return false; };
 window.addEventListener('message', (ev) => {
   if (ev.source !== window || ev.origin !== location.origin) return;
   const d = ev.data;
   if (!d || typeof d !== 'object') return;
   if (d.__atelier === 'hello' && !EXT.ready) {
     EXT.ready = true; EXT.version = d.version; renderOptions(); setTimeout(autoPair, 500);
-    // 1.3.0 asks on this computer before every click or type; older builds act without asking.
-    const [maj, min] = String(d.version || '0').split('.').map(Number);
-    if (maj < 1 || (maj === 1 && min < 3)) setTimeout(() => toast('Atelier Browser has an update: v1.3 asks on this computer before any click or typing. Unzip it over the old folder, then Reload it in chrome://extensions.', { ms: 15000, link: { href: '/atelier-browser.zip', label: 'Download v1.3' } }), 1500);
+    // Older than MIN_EXT: the copy installed here lacks protections the app counts on (1.3.0 asks on this computer
+    // before every click or type; 1.3.2 needs Atelier's approval to open or read a page by its address; 1.3.3 refuses
+    // more sensitive fields).
+    if (olderExt(d.version)) setTimeout(() => toast(`Atelier Browser has an update (v${MIN_EXT}): it asks before it acts and never types into password, sign-in code, payment or ID fields. Unzip it over the old folder, then Reload it in chrome://extensions.`, { ms: 15000, link: { href: '/atelier-browser.zip', label: `Download v${MIN_EXT}` } }), 1500);
   }
   if (d.__atelier === 'res') {
     const p = EXT.pending.get(d.id);
@@ -2658,7 +2816,10 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
         if (!result.ok) step.error = result.error;
         if (result.ok) {
           accountRead = true; // web search is withdrawn for the rest of this run (see web above)
-          if (step.service === 'github' && !step.write && githubOutside(step.name, step.args)) step.outside = true; // readsPage
+          noteToolUrls(e, result.result); // a reply link copied from these opens unasked (guardLinks)
+          // readsPage: someone else's repo. Written as a boolean on every GitHub read, so a read of your own repo says so
+          // (one with no key is from before v84 and may have been anyone's: context.js githubLegacy).
+          if (step.service === 'github' && !step.write && ['github_read', 'github_issues'].includes(step.name)) step.outside = githubOutside(step.name, step.args);
           if (readsPage(step) && step.name === 'browser_tabs') { // titles only: the first look at a tab it lists may run (lookAgain)
             titlesRead = true;
             for (const t of Array.isArray(result.result) ? result.result : []) { const o = pageOrigin(t?.url); if (Number.isInteger(t?.tabId) && o) listed.set(t.tabId, o); }
@@ -3086,6 +3247,8 @@ async function nameThread(e, thread) {
 
 // ───────────────────────── entry actions ─────────────────────────
 stream.addEventListener('click', async (ev) => {
+  const guarded = ev.target.closest('a.link-guarded');
+  if (guarded && openGuardedLink(guarded)) { ev.preventDefault(); return; }
   const b = ev.target.closest('[data-act]');
   if (!b) {
     const p = ev.target.closest('.prompt');
@@ -3135,6 +3298,10 @@ stream.addEventListener('click', async (ev) => {
       if (e.pending || e.canva) return;
       if (!navigator.onLine) return toast('You’re offline — try again once you’re connected', { error: true });
       if (reader.stateFor(e.id) !== 'idle') reader.stop(); // the answer being read is about to be replaced
+      // What this run read stays on record: a page, someone else's GitHub, Claude history or a shared chat taint the thread
+      // through its steps, and later turns may already quote it. The retry clears the steps; ranTaint keeps the reason
+      // (context.js entryTaint reads it; sync keeps it, STICKY).
+      { const was = entryTaint(e); if (was) e.ranTaint = worseTaint(e.ranTaint, was); }
       Object.assign(e, { text: '', think: '', media: [], ideas: null, app: null, error: null, errorKind: null, cut: null, steps: null, enhanced: null, budget: null });
       if (e.params?.seed) delete e.params.seed;
       rearmRetry(e); // a spoken request this device sent, tried again, reads its new answer too
@@ -3196,7 +3363,7 @@ stream.addEventListener('click', async (ev) => {
       if (code) highlightIn(pre);
       return;
     }
-    case 'app-full': return openViewer({ title: e.app.title, html: e.app.html, app: appKeyOf(e), full: true, dl: () => download(e.app.html, slug(e.app.title) + '.html', 'text/html') });
+    case 'app-full': return openViewer({ title: e.app.title, html: e.app.html, app: appKeyOf(e), strict: Boolean(S.thread && taintedFrom(S.thread.entries, e)), full: true, dl: () => download(e.app.html, slug(e.app.title) + '.html', 'text/html') });
     case 'app-data-clear': return clearAppData(e);
     case 'app-download': return download(e.app.html, slug(e.app.title) + '.html', 'text/html');
     case 'app-copy': return copy(e.app.html);
@@ -3221,6 +3388,13 @@ stream.addEventListener('click', async (ev) => {
     }
     case 'stop-entry': return entryRuns.get(e.id)?.abort();
   }
+});
+
+// A guarded reply link has no href, so the keyboard gets what a link does: Enter (and Space) open it, after the confirm.
+stream.addEventListener('keydown', (ev) => {
+  if ((ev.key !== 'Enter' && ev.key !== ' ') || ev.isComposing) return;
+  const a = ev.target.closest?.('a.link-guarded');
+  if (a && openGuardedLink(a)) ev.preventDefault();
 });
 
 function dlMedia(e, k) {
@@ -3263,7 +3437,7 @@ let toastT;
 function toast(msg, { error = false, ms, link, action, silent = false } = {}) {
   const t = $('#toast');
   // Modal <dialog>s render in the top layer, above every z-index: show the toast inside the topmost open one.
-  const host = $$('dialog[open]').pop() || document.body;
+  const host = appDialogs().pop() || document.body;
   if (t.parentElement !== host) host.append(t);
   if (silent) t.setAttribute('aria-hidden', 'true'); else t.removeAttribute('aria-hidden'); // before the text changes
   t.textContent = msg; t.classList.toggle('bad', !!error); t.classList.add('show');
@@ -3571,13 +3745,18 @@ function armSend() { $('#sendBtn').classList.add('armed'); }
 function clearArm() { $$('.armed').forEach((b) => b.classList.remove('armed')); }
 document.addEventListener('click', (ev) => ev.target.closest?.('.armed')?.classList.remove('armed'), true); // any click on an armed button clears it
 let sendHold = null;
-// The keyed hold's toast: where it is going ("Sending to Image…"). Video also says how long and what it will cost, from
-// the same table as the Video options (tester.js veoShape/veoCost: Omni's reserve, price × 1.25). A model with no price
-// there (Runway, local) shows no price rather than a wrong one.
+// The keyed hold's toast: where it is going ("Sending to Image…"). Video also says how long and what it will cost, with the
+// figures the Video options strip shows: Omni from tester.js veoShape/veoCost (its reserve, price × 1.25), a Runway model
+// (Gen-4.5, Veo 3.1, Grok Imagine, Seedance) from runway.js optionQuote, Grok Imagine direct from xai.js xaiQuote. Only a
+// model with no price at all (the local one) shows none. (v89 review: Runway and Grok showed no price, although
+// docs/quick-launch.md promises that the hold and the first-use dialog name Video's price.)
 function holdNote(launchMode) {
   if (launchMode !== 'video') return sendingNote(launchMode);
-  const o = S.opts.video, vm = videoModel(o.model), { seconds, resolution } = veoShape(o);
-  const cost = vm?.veo ? veoCost(vm.id, seconds, resolution) : null;
+  const o = S.opts.video, vm = videoModel(o.model);
+  let { seconds, resolution } = veoShape(o), cost = null; // cost in µ$, as money() takes it
+  if (vm?.runway) { const q = runwayOptQuote(vm, o.secs, o.aspect); if (q) { seconds = q.seconds; cost = Math.round(q.usd * 1e6); } }
+  else if (vm?.xai) { seconds = xaiSeconds(o.secs); const usd = xaiQuote(vm.xai, seconds); if (usd != null) cost = Math.round(usd * 1e6); }
+  else if (vm?.veo) cost = veoCost(vm.id, seconds, resolution);
   return `Making a ${seconds} s video${cost != null ? ` · ≈ ${money(cost, { up: true })}` : ''}`;
 }
 // The first-use dialog says what this send will do: its mode, and for Video its length, price and the 4 s hold.
@@ -4538,7 +4717,7 @@ $('#libGrid').addEventListener('click', (ev) => {
   const el = ev.target.closest('.lib-item[data-i]'); if (!el) return;
   if (el.classList.contains('lib-wrap') && !ev.target.closest('.lib-open')) return;
   const x = libItems[+el.dataset.i]; if (!x) return;
-  if (x.type === 'app') return openViewer({ title: x.e.app.title, html: x.e.app.html, app: appKey(x.t.id, x.t.entries, x.e), full: true, dl: () => download(x.e.app.html, slug(x.e.app.title) + '.html', 'text/html') });
+  if (x.type === 'app') return openViewer({ title: x.e.app.title, html: x.e.app.html, app: appKey(x.t.id, x.t.entries, x.e), strict: Boolean(taintedFrom(x.t.entries, x.e)), full: true, dl: () => download(x.e.app.html, slug(x.e.app.title) + '.html', 'text/html') });
   const media = x.type === 'video' ? { video: x.src, poster: libThumbs.get(libKey(x)) || x.still } : { img: x.src };
   openViewer({ title: x.e.prompt, ...media, dl: () => dlMedia(x.e, x.k) });
 });
@@ -4927,7 +5106,7 @@ $('#canvaPick').addEventListener('click', (ev) => {
 // `app`: a Build app's key (appdata.js): the preview gets that app's saved data, as its card does. Download is the app as
 // it was generated: none of the data goes in the file (it can be shared), and the file uses its own browser storage.
 let viewerApp = null; // { key, version } of the app in the viewer, to start its cards over if it saved something there
-function openViewer({ title, img, video, poster, frames, html, app = '', full, dl, more }) {
+function openViewer({ title, img, video, poster, frames, html, app = '', strict = false, full, dl, more }) {
   viewerReturn = document.activeElement;
   const v = $('#viewer'), body = $('#viewerBody'), t = $('#viewerTitle');
   t.textContent = title || ''; t.title = title || ''; t.classList.remove('open');
@@ -4954,7 +5133,7 @@ function openViewer({ title, img, video, poster, frames, html, app = '', full, d
     const f = document.createElement('iframe');
     f.title = title || 'App preview';
     f.sandbox = 'allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock allow-downloads';
-    appBridge.mount(f, { key: app, html }); // a code block's preview (no app key) gets a shim that saves nothing
+    appBridge.mount(f, { key: app, html, strict }); // a code block's preview (no app key) gets a shim that saves nothing
     viewerApp = app ? { key: app, version: appStore.version(app) } : null;
     body.append(f);
   }
@@ -5029,7 +5208,7 @@ function openSettings() {
       return `<span class="${on ? 'ok' : 'bad'}">${PROVIDER_NAMES[p]}${why ? `<small>${why}</small>` : ''}</span>`;
     }).join('');
   }
-  if (S.settings.passcode && !S.tester) { loadSpending(); if (testersOpen) loadTesters(); }
+  if (S.settings.passcode && !S.tester) { loadSpending(); loadTesters(); } // the roster also while access is closed: Delete data
   const dl = $('#modelList');
   if (!dl.children.length) dl.innerHTML = [...new Set(Object.values(CHAT_MODELS).flat().map(([id]) => id))].map((id) => `<option value="${id}">`).join('');
   $('#passResult').textContent = ''; $('#passResult').className = 'hint';
@@ -5656,11 +5835,75 @@ const SIGNIN_NOTES = {
 const SIGNIN_REASONS = { rejected: 'The server didn’t accept the saved passcode (it may have changed). Enter the current one.' };
 // Notes that send someone to LinkedIn: while tester access is closed they read as "closed" instead.
 const TESTER_NOTES = new Set(['expired', 'full', 'revoked', 'paused', 'denied', 'error', 'nocookie']);
+// A former tester's device data stays in this browser after they sign out, their session ends or tester access closes:
+// their threads, Build app data and sync state (IndexedDB), their kv rows ('ws/tester:…' in atelier-kv), their scoped
+// settings (atelier.*:tester:<sub>), Read aloud clips and a waiting share. A signed-out page can't reach Settings → Your
+// data, so the sign-in screen offers to remove it: every tester account's on this device (a signed-out page can't tell
+// whose is whose). Never the owner's: none of these names is one of the owner's.
+const TESTER_DB = /^(?:atelier-account-|atelier-appdata-account-|atelier-sync:tester-)/;
+const testerLsKey = (k) => k === 'atelier.tester' || k === 'atelier.meTester' || /^atelier\.[^:]+:tester:/.test(k);
+function testerDataHere() {
+  if (workspace !== 'guest') return false;
+  try { return testerTrace || Object.keys(localStorage).some(testerLsKey); } catch { return testerTrace; }
+}
+// What localStorage no longer shows (v91 review): a tester account's databases or kv rows still on this device after
+// the browser dropped localStorage, or after an owner's Clear this device took every atelier.* key but only the owner's
+// databases. The sign-in screen asks this when testerDataHere() says no.
+async function testerDataStored() {
+  if (workspace !== 'guest') return false;
+  try {
+    if (typeof indexedDB.databases === 'function' && (await indexedDB.databases()).some((d) => typeof d?.name === 'string' && TESTER_DB.test(d.name))) return true;
+  } catch {}
+  try { return (await rawDB.kvHasTesters()) === true; } catch { return false; }
+}
+const deleteDb = (name) => new Promise((res, rej) => {
+  const r = indexedDB.deleteDatabase(name);
+  r.onsuccess = () => res(); r.onerror = () => rej(r.error || new Error('Couldn’t remove it.'));
+  r.onblocked = () => rej(new Error('Close any other Atelier tab, then try again.'));
+});
+async function removeTesterData() {
+  let lsKeys = [];
+  try { lsKeys = Object.keys(localStorage).filter(testerLsKey); } catch {}
+  let names = null;
+  try { names = typeof indexedDB.databases === 'function' ? (await indexedDB.databases()).map((d) => d?.name).filter((n) => typeof n === 'string' && TESTER_DB.test(n)) : null; } catch {}
+  // A browser that can't list its databases: the testers this browser's scoped settings name.
+  if (!names) {
+    const subs = new Set(lsKeys.map((k) => /:tester:(.+)$/.exec(k)?.[1]).filter(Boolean));
+    names = [...subs].flatMap((sub) => [`atelier-account-${encodeURIComponent(sub)}`, `atelier-appdata-account-${encodeURIComponent(sub)}`]);
+  }
+  for (const n of names) await deleteDb(n);
+  await rawDB.kvClearTesters();
+  await reader.clearCache().catch(() => {});
+  await self.caches?.delete(SHARE_CACHE).catch(() => {});
+  for (const k of lsKeys) { try { localStorage.removeItem(k); } catch {} }
+  LS.set('outReason', '');
+  return names.length;
+}
+$('#testerForget').addEventListener('click', async (ev) => {
+  const b = ev.currentTarget;
+  if (!confirm('Remove everything Atelier kept on this device from LinkedIn tester accounts: their threads, app data, settings and Read aloud clips? This can’t be undone. Nothing on the server changes.')) return;
+  const done = busyBtn(b, 'Removing…');
+  try {
+    await removeTesterData(); done(); b.hidden = true;
+    if (!$('#signinNote').hidden) $('#signinNote').textContent = 'The tester data that was on this device is gone.';
+    toast('Removed the tester data from this device');
+  }
+  catch (err) { done(); toast(err?.message || 'Couldn’t remove it — try again.', { error: true }); }
+});
 let onboardReason = '';
 function openOnboard(reason = 'new') {
   onboardReason = reason;
+  const forget = testerDataHere(); // a former tester's data on this device: they can remove it here (removeTesterData)
   const note = SIGNIN_NOTES[!testersOpen && TESTER_NOTES.has(reason) ? 'closed' : reason] || '';
-  $('#signinNote').textContent = note; $('#signinNote').hidden = !note;
+  const STAY = /stay on this device\.$/;
+  const offerForget = (on) => {
+    $('#signinNote').textContent = note && on && STAY.test(note) ? note.replace(STAY, 'stay on this device: remove them below if you like.') : note;
+    $('#testerForget').hidden = !on;
+  };
+  offerForget(forget);
+  $('#signinNote').hidden = !note;
+  // No trace in localStorage: the databases may still be here (testerDataStored).
+  if (!forget) testerDataStored().then((yes) => { if (yes && onboardReason === reason && $('#onboard').open) offerForget(true); });
   $('#onboardMsg').textContent = SIGNIN_REASONS[reason] || ''; $('#onboardMsg').className = 'hint';
   if (reason === 'rejected' || LS.get('owner', false) || !testersOpen) $('#ownerEntry').open = true; // owner devices keep owner mode; with tester access closed the passcode is the only way in
   if (testersOpen) loadSpots();
@@ -5747,8 +5990,10 @@ function setTester(raw) {
     // as privacy §2 and terms §3 promise (an earlier person's “Automatic” would send selections without a tap).
     if (!S.settings.passcode && S.settings.lookup) { S.settings.lookup = ''; saveSettings(); }
     if (t) LS.set('outReason', '');
-    if (reloadWorkspace()) return;
-    reader.clearCache(); // sign-out or another account: no Read aloud clip of theirs stays on this device
+    // Sign-out or another account: no Read aloud clip of theirs stays on this device. Cleared BEFORE the workspace reload
+    // (which waits for it): after the reload this page is another workspace's and would never clear them.
+    const clips = Promise.resolve().then(() => reader.clearCache()).catch(() => {});
+    if (reloadWorkspace(false, clips)) return;
     deadProviders.clear(); ME = loadMe(); setSync('');
     if (!$('#youDrawer').hidden) renderYou();
     if ($('[data-settings="connections"]').classList.contains('on')) selectSettings('general');
@@ -5918,9 +6163,9 @@ function paintTesters() {
   const month = /^\d{4}-\d{2}$/.test(pool.month || '') ? new Date(`${pool.month}-01T12:00:00Z`).toLocaleDateString([], { month: 'long', year: 'numeric', timeZone: 'UTC' }) : 'this month';
   const row = (x) => {
     const off = Boolean(toMs(x.revoked_at)), seen = ago(x.last_seen);
-    return `<li class="tp-tester${off ? ' off' : ''}">${avatar(x.picture, x.name)}<p class="tp-who"><b>${esc(x.name || 'LinkedIn member')}</b>${x.email ? `<span>${esc(x.email)}</span>` : ''}<span>joined ${esc(dayLabel(x.joined_at))}${seen ? ` · seen ${esc(seen)}` : ''}${off ? ' · revoked' : ''}</span></p><p class="tp-spend"><span><b>${money(x.day?.spent, { up: true })}</b> today</span><span><b>${money(x.month?.spent, { up: true })}</b> month</span></p><button type="button" class="chip${off ? '' : ' danger'}" data-tp="${off ? 'restore' : 'revoke'}" data-sub="${esc(x.sub)}" data-name="${esc(x.name || 'this tester')}">${off ? 'Restore' : 'Revoke'}</button></li>`;
+    return `<li class="tp-tester${off ? ' off' : ''}">${avatar(x.picture, x.name)}<p class="tp-who"><b>${esc(x.name || 'LinkedIn member')}</b>${x.email ? `<span>${esc(x.email)}</span>` : ''}<span>joined ${esc(dayLabel(x.joined_at))}${seen ? ` · seen ${esc(seen)}` : ''}${off ? ' · revoked' : ''}</span></p><p class="tp-spend"><span><b>${money(x.day?.spent, { up: true })}</b> today</span><span><b>${money(x.month?.spent, { up: true })}</b> month</span></p><span class="tp-acts"><button type="button" class="chip${off ? '' : ' danger'}" data-tp="${off ? 'restore' : 'revoke'}" data-sub="${esc(x.sub)}" data-name="${esc(x.name || 'this tester')}">${off ? 'Restore' : 'Revoke'}</button><button type="button" class="chip danger" data-tp="forget" data-sub="${esc(x.sub)}" data-name="${esc(x.name || 'this tester')}"${off ? ' data-off="1"' : ''}>Delete data</button></span></li>`;
   };
-  box.innerHTML = `<div class="tp-pool">
+  box.innerHTML = `${testersOpen ? '' : '<p class="hint">Tester sign-in is switched off on the server (TESTERS_ENABLED), so nobody can sign in or spend. The roster stays until each record’s 90 days run out; Delete data removes a tester and everything of theirs on the server now.</p>'}<div class="tp-pool">
       <p class="tp-row"><span class="tp-label">Pool · ${esc(month)}</span><span class="tp-num"><b>${money(spent, { up: true })}</b> of ${money(limit)}</span></p>
       <span class="tp-bar" style="--s:${frac(spent)};--r:${frac(spent + reserved)}" aria-hidden="true"><i class="r"></i><i class="s"></i></span>
       <p class="hint">${active} of ${Number.isInteger(+c.cap) ? +c.cap : '—'} spots taken${reserved ? ` · ${money(reserved, { up: true })} held for calls in flight` : ''}</p>
@@ -5990,6 +6235,12 @@ $('#testersPanel').addEventListener('click', async (ev) => {
       return;
     case 'restore':
       if (await testersPost('restore', { sub }, b, 'Restoring…')) { toast(`${b.dataset.name} restored`); loadTesters(); }
+      return;
+    // A tester's erasure request (privacy §8): POST /api/testers/forget (src/tester/router.js testerAdmin). With their
+    // record gone nothing keeps them out, a revocation included (the Ledger's admit refuses only a revoked row): say so.
+    case 'forget':
+      if (!confirm(`Delete ${b.dataset.name} and all their data on the server? Their sessions end, and their synced threads, media, trash, profile, spend record and feedback are deleted now, and once more within about 20 minutes for anything a tab of theirs still sends. This can’t be undone. (Anything on their own devices stays there.)\n\n${b.dataset.off ? 'This also ends their revocation: with no record left, they can sign in again as a new tester whenever a spot is free and tester access is open. To keep them out, leave them revoked instead.' : 'With no record left, they can sign in again later as a new tester whenever a spot is free.'}`)) return;
+      if (await testersPost('forget', { sub }, b, 'Deleting…')) { toast(`${b.dataset.name} and their data were deleted`); loadTesters(); }
   }
 });
 $('#testersPanel').addEventListener('change', async (ev) => {
@@ -6382,7 +6633,7 @@ function lookupPrefill(prompt, from) {
 const lookup = initLookup({
   stage, stream, dock: $('#dock'), topBar: $('.top'), status: $('#lookupStatus'),
   apiHeaders, mode: lookupMode, coarse: COARSE, reducedMotion: REDUCED_MOTION, toast,
-  ready: () => hasCredentials() && !$('dialog[open]'),
+  ready: () => hasCredentials() && !appDialogs().length,
   // The owner's one-tap ask: an Ask entry with its own (empty) images, never the composer's waiting photos (A7/A8). The
   // composer's mode is left alone too, so a Video draft or an Image edit's photos still go where they were headed.
   ask: (prompt, from) => submit(prompt, 'ask', { images: [], untrusted: markOfEntry(from) }),
@@ -6392,7 +6643,7 @@ const lookup = initLookup({
 
 // ───────────────────────── global keys ─────────────────────────
 document.addEventListener('keydown', (ev) => {
-  const modal = $('dialog[open]');
+  const modal = appDialogs()[0];
   if (modal) return; // Native dialogs own their focus and Escape behavior.
   const overlay = !$('#viewer').hidden ? $('#viewer') : $('.drawer:not([hidden])');
   if (overlay) {
@@ -6436,7 +6687,6 @@ $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
 
 // The build feedback reports when app.js was loaded without its ?v= (scripts/bump-version.mjs moves it with sw.js VERSION).
-const APP_BUILD = '90';
 const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || APP_BUILD}`, online: navigator.onLine !== false }), toast });
 $('#feedbackBtn').onclick = () => feedback.open();
 $('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };
@@ -6575,7 +6825,7 @@ const launchDeps = {
   holdThenSend, confirmLinkSend,
   markSpoken: (text, from) => noteVoice(text, from), // a keyed Atelier Assist (or dictated Shortcut) prefill: its words were said
   startVoice: ({ autoSend = false } = {}) => (dictation.needsGesture() ? false : dictation.start({ reason: 'launch', auto: true, autoSend })),
-  composerEmpty: () => !hasDraft(), dialogOpen: () => Boolean($('dialog[open]')),
+  composerEmpty: () => !hasDraft(), dialogOpen: () => appDialogs().length > 0,
   whenVisible: (ms) => whenVisible(document, { ms }), caches: self.caches, File, // ms: launch.js VISIBLE_WAIT_MS
   addFiles: (files, opts) => addFiles(files, opts),
   focusInput: () => { if (!COARSE.matches) input.focus({ preventScroll: true }); },
@@ -6584,7 +6834,7 @@ async function launchCtx(extra = {}) {
   const perm = await micPermission(navigator);
   return {
     signedIn: hasCredentials(), role: roleNow(), standalone: STANDALONE(), sr: dictation.available(), needsTap: dictation.needsGesture(),
-    perm, dialogOpen: Boolean($('dialog[open]')), online: navigator.onLine, busy: S.busy, visible: document.visibilityState === 'visible',
+    perm, dialogOpen: appDialogs().length > 0, online: navigator.onLine, busy: S.busy, visible: document.visibilityState === 'visible',
     ios: PLATFORM === 'ios', now: Date.now(), composer: input.value, attachments: S.attachments.length + (S.video ? 1 : 0), store: LS, ...extra,
   };
 }
@@ -6733,6 +6983,7 @@ window.atelierBoot?.started();
   const scopeHash = testerWorkspace ? [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(workspace)))].map((x) => x.toString(16).padStart(2, '0')).join('') : '';
   Sync.init({
     rawDB, uid, toast, account: testerWorkspace ? 'tester' : 'owner', scope: testerWorkspace ? `tester-${scopeHash}` : undefined,
+    onOutdated: appOutdated, // 426 app_outdated on a sync write: reload into the deployed version
     // The passcode as stored now (not this tab's copy): every Atelier tab's sync sends the same one, so a tab with an
     // older copy never gets refused and pauses the others.
     apiHeaders: () => { const h = apiHeaders(), p = LS.get('settings', null)?.passcode; if (typeof p === 'string') { if (p) h['x-app-pass'] = p; else delete h['x-app-pass']; } return h; },
@@ -6842,11 +7093,20 @@ window.atelierBoot?.started();
       let reloaded = false;
       const reloadWhenIdle = () => {
         if (reloaded) return;
-        if (S.busy || Sync.busy() || dictation.busy() || hasDraft() || sendHold || micOn() || lookup.pinned() || $('dialog[open]') || $('.drawer:not([hidden])') || !$('#viewer').hidden || learning) return setTimeout(reloadWhenIdle, 3000);
+        if (S.busy || Sync.busy() || dictation.busy() || hasDraft() || sendHold || micOn() || lookup.pinned() || appDialogs().length || $('.drawer:not([hidden])') || !$('#viewer').hidden || learning) return setTimeout(reloadWhenIdle, 3000);
         reloaded = true; appDataSaved().then(() => location.reload()); // a Build app's last write lands first
       };
       navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) reloadWhenIdle(); });
       navigator.serviceWorker.register('/sw.js').then((r) => r.update()).catch(() => {});
+      // A tab left open for days (a desktop PWA window) never navigates, so the browser never checks for a new version:
+      // it checks when the tab comes back into view, at most hourly, and the update reloads it once it is idle (above),
+      // so a fix to one of the app's own safety rules reaches it.
+      let swCheckedAt = Date.now();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible' || Date.now() - swCheckedAt < SW_CHECK_MS) return;
+        swCheckedAt = Date.now();
+        navigator.serviceWorker.getRegistration().then((r) => r?.update()).catch(() => {});
+      });
     }
   }
   document.fonts?.ready.then(moveInk);

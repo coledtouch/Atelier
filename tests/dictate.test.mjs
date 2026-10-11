@@ -265,7 +265,9 @@ test('sniffAudio matches src/transcribe.js', async () => {
     new TextEncoder().encode('fLaC\0\0\0\x22\0\0\0\0'), new Uint8Array(16), new Uint8Array(3)];
   for (const b of samples) assert.equal(sniffAudio(b), kindOf(server.sniffAudio(b)), String([...b.slice(0, 12)]));
   // Every kind the client can label is one the server accepts.
-  if (server.AUDIO_FORMATS) for (const b of samples) { const k = sniffAudio(b); if (k) assert.ok(server.AUDIO_FORMATS[k], k); }
+  // (asserted first, so a rename fails here instead of switching this check off: v91 review)
+  assert.ok(server.AUDIO_FORMATS && typeof server.AUDIO_FORMATS === 'object', 'src/transcribe.js exports AUDIO_FORMATS');
+  for (const b of samples) { const k = sniffAudio(b); if (k) assert.ok(server.AUDIO_FORMATS[k], k); }
 });
 
 test('isoLang: the server gets ISO 639-1 from a BCP 47 tag, or nothing', () => {

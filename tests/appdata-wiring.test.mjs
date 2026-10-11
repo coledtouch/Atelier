@@ -22,10 +22,16 @@ test('the Build preview sandbox is unchanged: no allow-same-origin, nothing that
 
 test('every preview document comes from the bridge (shim first); app.js never writes srcdoc itself', () => {
   assert.equal((APP.match(/\.srcdoc\s*=/g) || []).length, 0);
-  assert.match(APP, /appBridge\.mount\(\$\('iframe', out\), \{ key, html: e\.app\.html \}\)/, 'the card');
-  assert.match(APP, /appBridge\.mount\(f, \{ key: app, html \}\)/, 'Full screen, the Library and code previews (no key: saves nothing)');
-  assert.match(APP, /case 'app-full': return openViewer\(\{ title: e\.app\.title, html: e\.app\.html, app: appKeyOf\(e\),/);
-  assert.match(APP, /openViewer\(\{ title: x\.e\.app\.title, html: x\.e\.app\.html, app: appKey\(x\.t\.id, x\.t\.entries, x\.e\),/);
+  // strict: a version made from text that may not be the owner's (appdata.js taintedFrom) runs under the preview policy
+  assert.match(APP, /appBridge\.mount\(\$\('iframe', out\), \{ key, html: e\.app\.html, strict: Boolean\(taintedFrom\(S\.thread\.entries, e\)\) \}\)/, 'the card');
+  assert.match(APP, /appBridge\.mount\(f, \{ key: app, html, strict \}\)/, 'Full screen, the Library and code previews (no key: saves nothing)');
+  assert.match(APP, /case 'app-full': return openViewer\(\{ title: e\.app\.title, html: e\.app\.html, app: appKeyOf\(e\), strict: Boolean\(S\.thread && taintedFrom\(S\.thread\.entries, e\)\),/);
+  // the Library too (v91 review: it passed no strict, so a fresh page opened a marked app there without the policy)
+  assert.match(APP, /openViewer\(\{ title: x\.e\.app\.title, html: x\.e\.app\.html, app: appKey\(x\.t\.id, x\.t\.entries, x\.e\), strict: Boolean\(taintedFrom\(x\.t\.entries, x\.e\)\),/);
+  // every openViewer call with an app key says whether it is strict
+  const withKey = APP.match(/openViewer\(\{[^\n]*\bapp: [^\n]*/g) || [];
+  assert.ok(withKey.length >= 2);
+  for (const call of withKey) assert.match(call, /\bstrict: /, call.slice(0, 120));
   // Download is the app as generated: no data in a file that can be shared.
   assert.match(APP, /case 'app-download': return download\(e\.app\.html, /);
   assert.match(APP, /window\.addEventListener\('message', \(ev\) => \{ appBridge\.onMessage\(ev\); \}\);/);
@@ -72,12 +78,13 @@ test('Atelier’s own reloads wait for the Build apps’ writes; a refused write
   // A page that is unloading can't finish an IndexedDB write: an account change and a new version's reload flush first.
   const ws = APP.slice(APP.indexOf('function reloadWorkspace('), APP.indexOf('function onAccountStorage('));
   assert.match(ws, /const apps = appStore\.busy\(\) \? appStore\.flush\(\) : null;/);
-  assert.match(ws, /if \(!flushed && !apps\) location\.reload\(\);/);
-  assert.match(ws, /setTimeout\(reload, 2000\); Promise\.allSettled\(\[flushed, apps\]\)\.then\(reload\);/);
+  assert.match(ws, /if \(!flushed && !apps && !extra\) location\.reload\(\);/);
+  assert.match(ws, /setTimeout\(reload, 2000\); Promise\.allSettled\(\[flushed, apps, extra\]\)\.then\(reload\);/);
   assert.match(APP, /reloaded = true; appDataSaved\(\)\.then\(\(\) => location\.reload\(\)\);/);
   assert.match(APP, /const appDataSaved = \(ms = 2000\) => \(appStore\.busy\(\) \? Promise\.race\(\[appStore\.flush\(\)\.catch\(\(\) => \{\}\), sleep\(ms\)\]\) : Promise\.resolve\(\)\);/);
   const reloads = [...APP.matchAll(/location\.reload\(\)/g)].map((m) => APP.slice(APP.lastIndexOf('\n', m.index) + 1, APP.indexOf('\n', m.index)).trim());
-  assert.equal(reloads.length, 4, 'reloadWorkspace (2), the new-version reload, and Clear this device (its app data is gone by then)');
+  assert.equal(reloads.length, 5, 'reloadWorkspace (2), the new-version reload, Clear this device (its app data is gone by then) and an outdated build’s reload');
+  assert.match(APP, /\.then\(\(\) => appDataSaved\(\)\)\.catch\(\(\) => \{\}\)\.finally\(\(\) => location\.reload\(\)\);/, 'appOutdated lets the Build apps’ writes land first too');
   assert.match(APP, /await appStore\.clearAll\(\);[\s\S]{0,1200}location\.reload\(\);/);
   assert.match(APP, /onRefused: \(\) => \{ if \(!appRoomShown\) \{ appRoomShown = true; toast\(/);
   assert.match(APP, /onStall: \(key\) => queueAppData\(key\)/);

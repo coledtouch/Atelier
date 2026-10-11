@@ -1,6 +1,5 @@
 // Look up through the real worker (worker.fetch): the owner's passcode branch and the testers' free TESTER_ROUTES
-// entries for GET /api/lookup and GET /api/lookup/img. Every test skips itself until src/worker.js and
-// src/tester/router.js are wired (docs: the lookup integration patches); no edit is needed here at integration time.
+// entries for GET /api/lookup and GET /api/lookup/img. Every test always runs: the ship gate and CI refuse a skipped test (v89 review, pipeline-skipped-tests-pass-gate).
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -8,11 +7,6 @@ import { makeEnv, mockFetch, restoreFetch, upstream, reply, api, signIn, PROFILE
 import { resetLookupState, proxyImageUrl } from '../src/lookup.js';
 
 const source = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
-const workerSrc = source('../src/worker.js'), routerSrc = source('../src/tester/router.js');
-const wired = workerSrc.includes("path === 'lookup'") && routerSrc.includes("match: 'lookup'");
-const wiredImg = wired && workerSrc.includes("path === 'lookup/img'") && routerSrc.includes("match: 'lookup/img'");
-const SKIP = { skip: !wired && 'integration pending (src/worker.js and src/tester/router.js don’t route lookup yet)' };
-const SKIP_IMG = { skip: !wiredImg && 'integration pending (lookup/img is not routed yet)' };
 
 beforeEach(() => resetTesterCaches());
 afterEach(() => { restoreFetch(); resetLookupState(); });
@@ -37,18 +31,17 @@ async function tester(extraEnv = {}) {
   return { env, L, ...t };
 }
 
-test('owner without the passcode: 401 for both routes, nothing sent upstream', SKIP, async () => {
+test('owner without the passcode: 401 for both routes, nothing sent upstream', async () => {
   const { env } = makeEnv();
   wikimedia();
   for (const path of ['lookup?q=Domus%20Aurea', IMG_PATH]) {
-    if (path === IMG_PATH && !wiredImg) continue;
     const r = await api(env, path);
     assert.equal(r.status, 401, path);
     assert.equal(upstream.calls.length, 0);
   }
 });
 
-test('owner with the passcode: the article, wrapped by the /api security headers', SKIP, async () => {
+test('owner with the passcode: the article, wrapped by the /api security headers', async () => {
   const { env, L } = makeEnv();
   wikimedia();
   const r = await api(env, 'lookup?q=Domus%20Aurea&lang=en', {}, { pass: 'pw' });
@@ -66,7 +59,7 @@ test('owner with the passcode: the article, wrapped by the /api security headers
   assert.deepEqual(L.calls, []);
 });
 
-test('owner image proxy: the Commons thumbnail as a sniffed, sandboxed, uncacheable same-origin image', SKIP_IMG, async () => {
+test('owner image proxy: the Commons thumbnail as a sniffed, sandboxed, uncacheable same-origin image', async () => {
   const { env } = makeEnv();
   wikimedia();
   const r = await api(env, IMG_PATH, {}, { pass: 'pw' });
@@ -80,7 +73,7 @@ test('owner image proxy: the Commons thumbnail as a sniffed, sandboxed, uncachea
   assert.equal(upstream.calls[0].url, `https://upload.wikimedia.org/wikipedia/commons/${DOMUS_KEY}`);
 });
 
-test('a tester: the same answer, free (no allowance header), only the session lookup in the Ledger, the KV untouched', SKIP, async () => {
+test('a tester: the same answer, free (no allowance header), only the session lookup in the Ledger, the KV untouched', async () => {
   const { env, L, token } = await tester();
   wikimedia();
   L.calls.length = 0;
@@ -97,7 +90,7 @@ test('a tester: the same answer, free (no allowance header), only the session lo
   assert.deepEqual(await owner.json(), body);
 });
 
-test('a tester’s image proxy call is free too', SKIP_IMG, async () => {
+test('a tester’s image proxy call is free too', async () => {
   const { env, L, token } = await tester();
   wikimedia();
   L.calls.length = 0;
@@ -109,10 +102,10 @@ test('a tester’s image proxy call is free too', SKIP_IMG, async () => {
   assert.deepEqual([...env.ATELIER_KV.m.keys()], []);
 });
 
-test('a tester can only GET: other methods are owner_only, before anything is sent', SKIP, async () => {
+test('a tester can only GET: other methods are owner_only, before anything is sent', async () => {
   const { env, token } = await tester();
   wikimedia();
-  for (const path of ['lookup?q=Domus%20Aurea', ...(wiredImg ? [IMG_PATH] : [])]) {
+  for (const path of ['lookup?q=Domus%20Aurea', IMG_PATH]) {
     for (const method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
       const r = await api(env, path, { method, body: '' }, { cookie: token });
       assert.equal(r.status, 403, `${method} ${path}`);
@@ -123,7 +116,7 @@ test('a tester can only GET: other methods are owner_only, before anything is se
   assert.equal(upstream.calls.length, 0);
 });
 
-test('a tester over the per-tester limit gets lookup_rate, keyed by their LinkedIn id; no error mentions a passcode', SKIP, async () => {
+test('a tester over the per-tester limit gets lookup_rate, keyed by their LinkedIn id; no error mentions a passcode', async () => {
   const keys = [];
   const LOOKUP_LIMIT = { limit: async ({ key }) => { keys.push(key); return { success: false }; } };
   const { env, token, sub } = await tester({ LOOKUP_LIMIT });
@@ -136,7 +129,7 @@ test('a tester over the per-tester limit gets lookup_rate, keyed by their Linked
   assert.deepEqual(keys, [`t:${sub}`]);
   assert.equal(upstream.calls.length, 0);
   // a bad request is refused before the limit is spent
-  for (const path of ['lookup', 'lookup?title=', ...(wiredImg ? ['lookup/img', 'lookup/img?k=..%2Fx'] : [])]) {
+  for (const path of ['lookup', 'lookup?title=', 'lookup/img', 'lookup/img?k=..%2Fx']) {
     const bad = await api(env, path, {}, { cookie: token });
     assert.equal(bad.status, 400, path);
     assert.equal(await codeOf(bad), 'lookup_query', path);
@@ -145,7 +138,7 @@ test('a tester over the per-tester limit gets lookup_rate, keyed by their Linked
   assert.equal(keys.length, 1);
 });
 
-test('an ended tester session is told to sign in again, and nothing is looked up', SKIP, async () => {
+test('an ended tester session is told to sign in again, and nothing is looked up', async () => {
   const { env } = makeEnv();
   wikimedia();
   const stale = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
@@ -155,10 +148,10 @@ test('an ended tester session is told to sign in again, and nothing is looked up
   assert.equal(upstream.calls.length, 0);
 });
 
-test('the owner gets the same status with or without a tester cookie (no per-isolate failure state)', SKIP, async () => {
+test('the owner gets the same status with or without a tester cookie (no per-isolate failure state)', async () => {
   const { env, L, token } = await tester();
   mockFetch([[/./, () => reply(503, { error: 'stub' })]]);
-  const paths = ['lookup', 'lookup?q=Domus%20Aurea', ...(wiredImg ? ['lookup/img', IMG_PATH] : [])];
+  const paths = ['lookup', 'lookup?q=Domus%20Aurea', 'lookup/img', IMG_PATH];
   for (const path of paths) {
     for (const method of ['GET', 'POST', 'DELETE']) {
       const init = { method, ...(method === 'POST' ? { body: '{}' } : {}) };

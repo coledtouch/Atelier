@@ -21,6 +21,7 @@ export const LIMITS = Object.freeze({
   entry: 2 * MB, // one dehydrated entry (canonical JSON, UTF-8); larger ones stay on the device
   doc: 8 * MB, docEntries: 5000, threads: 10000, // one thread document; threads per account (matches validateBackup)
   pushBody: 8 * MB, pushEntries: 200, deleteBody: 1 * MB, restoreBody: 4 * KB, missingBody: 128 * KB, missingHashes: 1000,
+  testerMissingHashes: 200, // a tester's missing-blob check (src/tester/sync.js: each hash is one R2 head, 20 checks a minute)
   blob: 95 * MB, // one raw blob upload (the zone's 100 MB request-body limit)
   depth: 40, // JSON nesting, as data-safety.js checkObject
   title: 1000, hh: 3, old: 3, dead: 1000, // dead: removed entries a record still remembers
@@ -29,11 +30,12 @@ export const INLINE_MAX = LIMITS.inline;
 // Device-local entry keys that never leave the device. 'recovered' marks a crash-recovered or interrupted entry.
 export const TRANSIENT = Object.freeze(['pending', 'stage', 'status', 'startedAt', 'chars', 'recovered']);
 // Marks that only ever go onto an entry and never come off it (the app sets them when the entry is made and nothing
-// removes them, a retry included): 'untrusted' (its text came from a link or a share) and 'imported' (restored from a
-// backup file). Both make later accounts-agent turns in the thread ask before reading (context.js threadTaint). They
+// removes them, a retry included): 'untrusted' (its text came from a link or a share), 'imported' (restored from a
+// backup file) and 'ranTaint' (what an earlier run of the entry read, which a Retry's cleared steps would otherwise lose:
+// app.js). Each makes later accounts-agent turns in the thread ask before reading (context.js threadTaint). They
 // sync like any key; on top of that a pulled version that lacks one the local copy has never takes it off here: the
 // mark stays and that copy goes back up (keepMarks), so another device (an old build, a bug) can't unmark it everywhere.
-export const STICKY = Object.freeze(['untrusted', 'imported']);
+export const STICKY = Object.freeze(['untrusted', 'imported', 'ranTaint']);
 // Identical to the data: branch of data-safety.js safeMediaUrl (tests/sync-merge.test.mjs checks parity).
 export const MEDIA_RE = /^data:(image\/(png|jpe?g|webp|gif|avif)|video\/(mp4|webm));base64,[a-z\d+/=\s]+$/i;
 const MEDIA_PREFIX = /^data:(image\/(png|jpe?g|webp|gif|avif)|video\/(mp4|webm));base64,/i;

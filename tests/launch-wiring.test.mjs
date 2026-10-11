@@ -133,7 +133,7 @@ test('toast({ silent }) keeps the message out of #toast’s live region; the nex
     setAttribute: (k, v) => attrs.set(k, v), removeAttribute: (k) => attrs.delete(k),
     set textContent(v) { log.push([v, attrs.get('aria-hidden') ?? null]); }, get textContent() { return log.at(-1)?.[0] ?? ''; },
   };
-  const vars = { $: (sel) => (sel === '#toast' ? t : null), $$: () => [], document: { body, createElement: () => ({}) }, toastT: 0, ...timers };
+  const vars = { $: (sel) => (sel === '#toast' ? t : null), $$: () => [], appDialogs: () => [], document: { body, createElement: () => ({}) }, toastT: 0, ...timers };
   const { toast } = evalIn(vars, `return { toast: (${fnSource('toast')}) };`);
   toast(NOTES.listening, { silent: true });
   assert.deepEqual(log.at(-1), [NOTES.listening, 'true'], 'aria-hidden="true" is set before the text changes');

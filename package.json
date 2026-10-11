@@ -19,6 +19,7 @@
   "license": "ISC",
   "type": "module",
   "devDependencies": {
+    "mediabunny": "1.61.0",
     "sharp": "^0.35.5",
     "wrangler": "^4.144.0"
   },

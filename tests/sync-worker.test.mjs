@@ -1,6 +1,6 @@
 // /api/sync/* (src/sync.js) over the in-memory R2 fake. Most checks call handleSync directly; the auth/isolation
-// checks go through the real worker.fetch (api() from tester-env.mjs). Those that need the worker.js route block skip
-// until it is wired (sync-integration.md, SERVER §1) and then run unchanged.
+// checks go through the real worker.fetch (api() from tester-env.mjs). Every one always runs: the ship gate and CI refuse a skipped test (v89 review, pipeline-skipped-tests-pass-gate).
+// The route tests ('wired: …') are the end-to-end check of the owner sync passcode gate.
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -11,8 +11,6 @@ import { FORMAT, LIMITS, INLINE_MAX, dehydrate, sha256hex, applyPush, TEXT_TYPE 
 
 const workerSrc = await readFile(new URL('../src/worker.js', import.meta.url), 'utf8');
 const syncSrc = await readFile(new URL('../src/sync.js', import.meta.url), 'utf8');
-const WIRED = /\bhandleSync\(/.test(workerSrc);
-const wired = WIRED ? {} : { skip: 'src/worker.js has no /api/sync route block yet (sync-integration.md, SERVER §1)' };
 
 const NOW = 1_800_000_000_000, MIN = 60_000, DAY = 86_400_000;
 const real = { ...SYNC_TIMING };
@@ -687,7 +685,7 @@ test('the owner gets the same status with and without a tester cookie, and the L
   }
 });
 
-test('wired: every sync route answers 401 sync_passcode without the passcode', wired, async () => {
+test('wired: every sync route answers 401 sync_passcode without the passcode', async () => {
   const { env } = makeEnv({ SYNC_BUCKET: fakeR2() });
   for (const path of SAMPLES) {
     for (const method of ['GET', 'POST', 'PUT', 'DELETE']) {
@@ -699,7 +697,7 @@ test('wired: every sync route answers 401 sync_passcode without the passcode', w
   assert.equal(env.SYNC_BUCKET.totalCalls(), 0);
 });
 
-test('wired: the owner reaches the sync routes; without a bucket they answer 503 sync_unconfigured', wired, async () => {
+test('wired: the owner reaches the sync routes; without a bucket they answer 503 sync_unconfigured', async () => {
   const { env } = makeEnv({ SYNC_BUCKET: fakeR2() });
   const r = await api(env, 'sync/status', { method: 'GET' }, { pass: 'pw' });
   assert.equal(r.status, 200);

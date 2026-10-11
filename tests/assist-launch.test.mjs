@@ -13,6 +13,8 @@ import {
   applyLaunch, keyState, createHold, stashLaunch, takePendingLaunch, confirmLaunchKey, CONFIRM_SCOPE,
 } from '../public/launch.js';
 import { money, veoCost, veoShape } from '../public/tester.js';
+import { optionQuote as runwayOptQuote, RUNWAY_VIDEO_MODELS } from '../public/runway.js';
+import { xaiSeconds, xaiQuote, XAI_VIDEO_MODELS } from '../public/xai.js';
 
 const read = async (p) => (await readFile(new URL(`../${p}`, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const [APP, HTML] = await Promise.all(['public/app.js', 'public/index.html'].map(read));
@@ -182,7 +184,7 @@ function holdRig({ mode = 'ask', video = { model: '', aspect: '16:9', secs: 4, e
   const timers = { setTimeout: (f, ms) => { due.set(++id, { f, ms }); return id; }, clearTimeout: (t) => due.delete(t) };
   const vars = {
     calls, sendHold: null, S: { mode, busy: false, attachments: [], video: null, opts: { video } },
-    NOTES, HOLD_MS, MODE_LABELS, sendingNote, money, veoCost, veoShape, videoModel: () => vm,
+    NOTES, HOLD_MS, MODE_LABELS, sendingNote, money, veoCost, veoShape, videoModel: () => vm, runwayOptQuote, xaiSeconds, xaiQuote,
     hasDraft: () => true, micOn: () => false, createHold: (o) => createHold({ ...o, timers }),
     $: () => ({ classList: { add() {}, remove() {} }, style: { setProperty() {}, removeProperty() {} }, contains: () => false }),
     input: { addEventListener() {}, removeEventListener() {} },
@@ -206,9 +208,25 @@ test('the hold’s toast names the mode; Video says its length and price; the se
   vid.holdThenSend({ ms: HOLD_MS.video, mode: 'video', via: 'assist' });
   assert.deepEqual(vid.calls[0], ['toast', 'Making a 4 s video · ≈ $0.51', 'Cancel']);
   assert.equal([...vid.due.values()][0].ms, 4000);
-  // 16:9 HD is always 8 s at 1080p; a model with no price here (Runway, local) shows no price rather than a wrong one.
   assert.equal(holdRig({ mode: 'video', video: { model: '', aspect: '16:9hd', secs: 4 } }).holdNote('video'), 'Making a 4 s video · ≈ $1.02'); // Omni HD (1080p) keeps the chosen length
-  assert.equal(holdRig({ mode: 'video', vm: { id: 'runway:gen4.5', veo: false } }).holdNote('video'), 'Making a 4 s video');
+  // v89 review (money-keyed-video-replay-no-price-no-cap): every paid video model says its price, the figure the Video
+  // options strip shows: Runway (credits at $0.01) and Grok Imagine direct (xAI's price list). Only the local one has none.
+  const rw = (runway, secs, aspect = '16:9') => holdRig({ mode: 'video', video: { model: `runway:${runway}`, aspect, secs }, vm: RUNWAY_VIDEO_MODELS.find((m) => m.runway === runway) }).holdNote('video');
+  assert.equal(rw('gen4.5', 4), 'Making a 4 s video · ≈ $0.48');
+  assert.equal(rw('seedance2_5', 30, '16:9hd'), 'Making a 30 s video · ≈ $20.40', 'Seedance 2.5 at 1080p: 68 credits a second');
+  assert.equal(rw('seedance2_5', 30, '16:9'), 'Making a 30 s video · ≈ $9.00');
+  assert.equal(rw('veo3.1', 7), 'Making a 6 s video · ≈ $2.40', 'the length Runway will make (Veo 3.1: 4/6/8 s)');
+  assert.equal(rw('grok_imagine_1_5', 8, '16:9hd'), 'Making a 8 s video · ≈ $2.32');
+  const grok = (xai, secs) => holdRig({ mode: 'video', video: { model: xai, aspect: '16:9', secs }, vm: XAI_VIDEO_MODELS.find((m) => m.xai === xai) }).holdNote('video');
+  assert.equal(grok('grok-imagine-video-1.5', 10), 'Making a 10 s video · ≈ $0.80');
+  assert.equal(grok('grok-imagine-video-1.5-lite', 7), 'Making a 6 s video · ≈ $0.12');
+  for (const m of [...RUNWAY_VIDEO_MODELS, ...XAI_VIDEO_MODELS]) {
+    const note = holdRig({ mode: 'video', video: { model: m.id, aspect: '16:9', secs: 6 }, vm: m }).holdNote('video');
+    assert.match(note, / · ≈ \$\d+\.\d\d$/, `${m.id}: ${note}`);
+  }
+  assert.equal(holdRig({ mode: 'video', vm: { id: 'nvidia:cosmos', local: true } }).holdNote('video'), 'Making a 4 s video', 'a model with no price shows none');
+  const rwConfirm = holdRig({ mode: 'video', video: { model: 'runway:seedance2_5', aspect: '16:9hd', secs: 30 }, vm: RUNWAY_VIDEO_MODELS.find((m) => m.runway === 'seedance2_5') });
+  assert.equal(rwConfirm.confirmWhat('video', 'assist'), 'This one: Making a 30 s video · ≈ $20.40, after a 4-second pause you can cancel.', 'the first-use dialog names it too');
 
   // The first-use dialog says where this send goes; Video also says its length and price.
   assert.equal(img.confirmWhat('image'), 'This one goes to Image, after a short pause you can cancel.');

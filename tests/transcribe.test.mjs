@@ -706,11 +706,7 @@ test('tester hooks: on a Gemini-only server a tester is admitted before countTok
   assert.ok(!upstream.calls.some((c) => /countTokens/.test(c.url)));
 });
 
-// ── the owner route (worker.js) and the tester route (src/tester/router.js), once wired ──
-const workerSrc = await readFile(new URL('../src/worker.js', import.meta.url), 'utf8');
-const routerSrc = await readFile(new URL('../src/tester/router.js', import.meta.url), 'utf8');
-const OWNER_ROUTE = /path === 'transcribe'/.test(workerSrc) ? false : 'src/worker.js has no /api/transcribe route yet (dictation-integration.md)';
-const TESTER_ROUTE = /match: 'transcribe'/.test(routerSrc) ? false : 'src/tester/router.js has no transcribe route yet (dictation-integration.md)';
+// ── the owner route (worker.js) and the tester route (src/tester/router.js), always run (the ship gate and CI refuse a skipped test (v89 review, pipeline-skipped-tests-pass-gate)) ──
 const P = await import('../src/tester/prices.js');
 const STT_OPENAI = 'openai:gpt-transcribe', STT_GEMINI = 'gemini:gemini-3.5-flash-lite#stt';
 const audioPost = (body, headers = {}) => ({ method: 'POST', body, headers: { 'content-type': 'audio/mp4', ...headers } });
@@ -729,7 +725,7 @@ async function tester({ config = {}, env: extra = {} } = {}) {
   return { env, L, ...t, call };
 }
 
-test('POST /api/transcribe needs the passcode; the owner path never touches the Ledger', { skip: OWNER_ROUTE }, async () => {
+test('POST /api/transcribe needs the passcode; the owner path never touches the Ledger', async () => {
   const { env, L } = makeEnv();
   mockFetch([[OPENAI, () => openaiOk()]]);
   let r = await api(env, 'transcribe', audioPost(MP4), { origin: null });
@@ -751,7 +747,7 @@ test('POST /api/transcribe needs the passcode; the owner path never touches the 
   assert.deepEqual(L.calls, []);
 });
 
-test('tester: invalid recordings reserve nothing and call no provider; another Origin is refused first', { skip: TESTER_ROUTE }, async () => {
+test('tester: invalid recordings reserve nothing and call no provider; another Origin is refused first', async () => {
   const { L, sub, call } = await tester();
   mockFetch([]);
   for (const [body, status] of [[new Uint8Array(0), 400], [MP4.subarray(0, 60), 422], [pad(ascii('{"text":"hi"}'), 300), 415], [wav(181, { rate: 8_000, bits: 8 }), 413], [new Uint8Array(TRANSCRIBE_LIMITS.maxBytes + 1), 413]]) {
@@ -769,7 +765,7 @@ test('tester: invalid recordings reserve nothing and call no provider; another O
   assert.deepEqual(spent(L, sub), { spent: 0, reserved: 0, limit: 1_000_000 });
 });
 
-test('tester: OpenAI gpt-transcribe is reserved on the recording’s length (WAV seconds, else bytes) and settled on the billed duration', { skip: TESTER_ROUTE }, async () => {
+test('tester: OpenAI gpt-transcribe is reserved on the recording’s length (WAV seconds, else bytes) and settled on the billed duration', async () => {
   const { L, sub, call } = await tester();
   mockFetch([[OPENAI, () => openaiOk()]]);
   L.calls.length = 0;
@@ -801,7 +797,7 @@ test('tester: OpenAI gpt-transcribe is reserved on the recording’s length (WAV
   assert.equal(spent(L, sub).spent, actual + worst + 4 * 75 + 75);
 });
 
-test('tester: a recording whose OpenAI reservation passes the $0.25 call cap goes to Gemini instead; without Gemini it is refused', { skip: TESTER_ROUTE }, async () => {
+test('tester: a recording whose OpenAI reservation passes the $0.25 call cap goes to Gemini instead; without Gemini it is refused', async () => {
   // 3 MB of WebM, length unknown: reserved as 3,000 s at OpenAI (> $0.25), so Gemini (counted, then capped at 3 minutes) takes it
   const BIG = pad([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0x82, 0x84, ...ascii('webm')], 3_000_000);
   assert.ok(P.sttWorstCase({ model: STT_OPENAI, seconds: null, bytes: BIG.length }) > P.PER_CALL_RESERVE_CAP);
@@ -827,7 +823,7 @@ test('tester: a recording whose OpenAI reservation passes the $0.25 call cap goe
   assert.ok(!solo.L.calls.includes('reserve'));
 });
 
-test('tester: a provider refusal settles at $0 and never passes the provider’s error through', { skip: TESTER_ROUTE }, async () => {
+test('tester: a provider refusal settles at $0 and never passes the provider’s error through', async () => {
   const { L, sub, call } = await tester({ env: { GEMINI_API_KEY: undefined } });
   let status = 401;
   mockFetch([[OPENAI, () => openaiErr(status, LEAK, { 'retry-after': '3', 'x-request-id': 'req_1' })]]);
@@ -845,7 +841,7 @@ test('tester: a provider refusal settles at $0 and never passes the provider’s
   assert.deepEqual(spent(L, sub), { spent: 0, reserved: 0, limit: 1_000_000 });
 });
 
-test('tester: OpenAI down → Gemini counts, reserves its own ceiling and settles from usageMetadata', { skip: TESTER_ROUTE }, async () => {
+test('tester: OpenAI down → Gemini counts, reserves its own ceiling and settles from usageMetadata', async () => {
   const { L, sub, call } = await tester();
   mockFetch([[OPENAI, () => openaiErr(503, 'x')], [COUNT, () => reply(200, { totalTokens: 2_000 })], [GEMINI, () => geminiOk()]]);
   L.calls.length = 0;
@@ -864,7 +860,7 @@ test('tester: OpenAI down → Gemini counts, reserves its own ceiling and settle
   assert.ok(!upstream.calls.some((c) => /generateContent/.test(c.url)));
 });
 
-test('tester: a refused reservation is 402 tester_budget; no key is 503 transcribe_unavailable; neither calls a provider', { skip: TESTER_ROUTE }, async () => {
+test('tester: a refused reservation is 402 tester_budget; no key is 503 transcribe_unavailable; neither calls a provider', async () => {
   const { call } = await tester({ config: { day_limit: 1_000 } });
   mockFetch([]);
   const MP4_20S = pad([0, 0, 0, 0x1c, ...ascii('ftypiso5'), 0, 0, 2, 0, ...ascii('iso5iso6mp41')], 20_000); // reserved as 20 s: $0.0019
@@ -889,7 +885,7 @@ test('tester: a refused reservation is 402 tester_budget; no key is 503 transcri
   assert.equal(upstream.calls.length, 0);
 });
 
-test('tester: a per-tester rate limit (LI_LIMIT, stt:<sub>) answers 429 before anything is reserved, once per request', { skip: TESTER_ROUTE }, async () => {
+test('tester: a per-tester rate limit (LI_LIMIT, stt:<sub>) answers 429 before anything is reserved, once per request', async () => {
   const { env, L, sub, call } = await tester();
   const keys = [];
   env.LI_LIMIT = { async limit({ key }) { keys.push(key); return { success: keys.length <= 2 }; } };
@@ -907,7 +903,7 @@ test('tester: a per-tester rate limit (LI_LIMIT, stt:<sub>) answers 429 before a
   assert.equal((await call(wav(1))).status, 200, 'a limiter that fails never blocks dictation');
 });
 
-test('tester: on a Gemini-only server the rate limit and the allowance come before Gemini’s countTokens', { skip: TESTER_ROUTE }, async () => {
+test('tester: on a Gemini-only server the rate limit and the allowance come before Gemini’s countTokens', async () => {
   const routes = () => [[COUNT, () => reply(200, { totalTokens: 2_000 })], [GEMINI, () => geminiOk()]];
   const { env, L, sub, call } = await tester({ env: { OPENAI_API_KEY: undefined } });
   env.LI_LIMIT = { async limit() { return { success: false }; } };
@@ -936,7 +932,7 @@ test('tester: on a Gemini-only server the rate limit and the allowance come befo
   assert.deepEqual(spent(L, sub), { spent: P.sttActual({ model: STT_GEMINI, usage: G_USAGE }), reserved: 0, limit: 1_000_000 });
 });
 
-test('tester/me: features.dictation follows the provider keys', { skip: TESTER_ROUTE }, async () => {
+test('tester/me: features.dictation follows the provider keys', async () => {
   for (const [missing, on] of [[{}, true], [{ OPENAI_API_KEY: undefined }, true], [{ GEMINI_API_KEY: undefined }, true], [{ OPENAI_API_KEY: undefined, GEMINI_API_KEY: undefined }, false]]) {
     const t = await tester({ env: missing });
     const j = await (await api(t.env, 'tester/me', {}, { cookie: t.token })).json();

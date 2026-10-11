@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { worker, makeEnv, api, signIn, PROFILE, resetTesterCaches, sha256 } from './tester-env.mjs';
 import { fakeR2, workerRequest } from './fake-r2.mjs';
-import { FORMAT, dehydrate, sha256hex } from '../public/sync-merge.js';
+import { FORMAT, LIMITS, dehydrate, sha256hex } from '../public/sync-merge.js';
 import { SYNC_TIMING } from '../src/sync.js';
 import { COOKIE } from '../src/tester/auth.js';
 
@@ -273,11 +273,61 @@ test('tester sync writes and status recounts are rate limited per tester (LI_LIM
   keys.length = 0;
   assert.equal((await call(env, a.token, 'GET', 'index')).status, 200);
   assert.equal((await call(env, a.token, 'GET', 'thread/limited')).status, 200);
-  assert.equal((await call(env, a.token, 'POST', 'blobs/missing', { hashes: [] })).status, 200);
   assert.equal((await api(env, 'sync/thread/owner', { method: 'POST', body: await pushBody('owner') }, { pass: 'pw' })).status, 200);
-  assert.deepEqual(keys, [], 'reads and owner sync never consult the tester limit');
+  assert.deepEqual(keys, [], 'reads (their own limit: SYNC_READ_LIMIT) and owner sync never consult LI_LIMIT');
+  // v91: a missing-blob check (one R2 head per hash) has its own key on the same binding, and is refused with it
+  assert.equal((await call(env, a.token, 'POST', 'blobs/missing', { hashes: [] })).status, 503);
+  assert.deepEqual(keys, [`syncm:${a.sub}`]);
+  allow = true;
   env.LI_LIMIT = { async limit() { throw new Error('down'); } };
   assert.equal((await call(env, a.token, 'POST', 'thread/limited-2', await pushBody('limiter down'))).status, 200, 'a limiter outage fails open, as for read aloud');
+});
+
+// v91 review (access-tester-sync-read-amplification): reads and missing-blob checks were never counted, so one tester
+// could turn each request into up to 1,000 R2 operations without limit.
+test('tester sync reads have their own per-tester limit (SYNC_READ_LIMIT syncr:<sub>), missing checks theirs (syncm:<sub>, 200 hashes at most)', async () => {
+  const { env, a, b } = await setup();
+  const reads = [], checks = [];
+  let readOk = () => true, checkOk = () => true;
+  env.SYNC_READ_LIMIT = { async limit({ key }) { reads.push(key); return { success: readOk(key) }; } };
+  env.LI_LIMIT = { async limit({ key }) { checks.push(key); return { success: key.startsWith('syncm:') ? checkOk(key) : true }; } };
+  assert.equal((await call(env, a.token, 'POST', 'thread/t1', await pushBody('hello'))).status, 200);
+  for (const path of ['index', 'thread/t1', 'trash']) assert.equal((await call(env, a.token, 'GET', path)).status, 200, path);
+  const hash = await sha256hex(new Uint8Array([9]));
+  assert.equal((await blobCall(env, a.token, 'GET', hash)).status, 404);
+  assert.deepEqual(reads, Array(4).fill(`syncr:${a.sub}`), 'every read, keyed by the tester');
+  // 30 rapid checks against a 20-a-minute limit: the excess gets the retryable 503, nothing is read from R2 for them
+  let n = 0;
+  checkOk = () => ++n <= 20;
+  const statuses = [];
+  for (let i = 0; i < 30; i++) statuses.push((await call(env, a.token, 'POST', 'blobs/missing', { hashes: [hash] })).status);
+  assert.deepEqual(statuses, [...Array(20).fill(200), ...Array(10).fill(503)]);
+  assert.ok(checks.filter((k) => k.startsWith('syncm:')).every((k) => k === `syncm:${a.sub}`));
+  // reads refused: 503 sync_busy with Retry-After (never 429, which the client reads as a passcode lockout)
+  readOk = (key) => key !== `syncr:${a.sub}`;
+  const r = await call(env, a.token, 'GET', 'index');
+  assert.equal(r.status, 503);
+  assert.equal(r.headers.get('retry-after'), '20');
+  assert.equal((await r.json()).code, 'sync_busy');
+  assert.equal((await call(env, b.token, 'GET', 'index')).status, 200, 'another tester has their own budget');
+  // at most 200 hashes per check for a tester (each is an R2 head); the owner keeps 1,000
+  checkOk = () => true;
+  const many = (k) => Array.from({ length: k }, (_, i) => i.toString(16).padStart(64, '0'));
+  assert.equal(LIMITS.testerMissingHashes, 200);
+  assert.equal((await call(env, b.token, 'POST', 'blobs/missing', { hashes: many(200) })).status, 200);
+  const over = await call(env, b.token, 'POST', 'blobs/missing', { hashes: many(201) });
+  assert.equal(over.status, 400);
+  assert.equal((await over.json()).code, 'bad_shape');
+  assert.equal((await api(env, 'sync/blobs/missing', { method: 'POST', body: { hashes: many(1000) } }, { pass: 'pw' })).status, 200, 'the owner: 1,000 as before');
+});
+
+test('the sync client checks missing blobs in chunks the server takes: 200 for a tester, 1,000 for the owner', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = (await readFile(new URL('../public/sync.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  assert.match(src, /chunk = accountTester \? LIMITS\.testerMissingHashes : LIMITS\.missingHashes;/);
+  assert.match(src, /for \(let i = 0; i < unknown\.length; i \+= chunk\) \{\n\s+const r = await api\('POST', 'blobs\/missing', \{ json: \{ hashes: unknown\.slice\(i, i \+ chunk\)/);
+  const wrangler = await readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+  assert.match(wrangler, /\{ "name": "SYNC_READ_LIMIT", "namespace_id": "4716", "simple": \{ "limit": 300, "period": 60 \} \}/);
 });
 
 test('tester feedback is rate limited per tester (LI_LIMIT fb:<sub>) before anything is stored', async () => {

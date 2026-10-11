@@ -206,6 +206,95 @@ test('switching between guest/tester/owner always reloads instead of presenting 
   assert.equal(becomingOwner.settings.get('settings').passcode, 'owner-pass');
 });
 
+// v91 review (privacy-tts-clips-survive-tester-signout): the workspace reload came before reader.clearCache(), so a
+// tester's Read aloud clips (Gemini audio of their answers) stayed in the shared Cache Storage after every sign-out.
+test('a tester’s sign-out (or another account) clears their Read aloud clips before the page reloads, and the reload waits for it', async () => {
+  for (const next of [null, { sub: 'person-b', name: 'B' }]) {
+    const page = lifecycle({ tester: person('person-a') });
+    page.setTester(next);
+    await page.reloaded();
+    const at = (e) => page.events.indexOf(e);
+    assert.ok(at('clear-reader') >= 0, `${next ? 'another account' : 'sign-out'}: the clips are cleared`);
+    assert.ok(at('clear-reader') < at('reload'), 'before the reload');
+    assert.equal(page.events.filter((e) => e === 'reload').length, 1);
+  }
+  // a reload that waits on nothing else still waits for the clear (at most the same 2 s)
+  const stuck = lifecycle({ tester: person('person-a') });
+  stuck.S.thread = { id: 'empty', entries: [] };
+  stuck.setTester(null);
+  assert.ok(!stuck.events.includes('reload'), 'not at once: the clear comes first');
+  await stuck.reloaded();
+  // a backstop at boot for browsers that signed out under an older build
+  const APP_SRC = APP.replace(/\r\n/g, '\n');
+  assert.match(APP_SRC, /if \(workspace === 'guest' && \['signedout', 'expired', 'revoked', 'closed'\]\.includes\(LS\.get\('outReason', ''\)\)\) reader\.clearCache\(\)\.catch\(\(\) => \{\}\);/);
+});
+
+// v91 review (privacy-former-tester-device-data-unreachable): with access closed (or after signing out) a former tester
+// had no way in to Settings → Your data; the sign-in screen now offers to remove what Atelier kept here.
+test('“Remove my tester data from this device”: every tester database, kv row, scoped setting and clip goes; nothing of the owner’s or the guest’s', async () => {
+  const APP_SRC = APP.replace(/\r\n/g, '\n');
+  const src = APP_SRC.slice(APP_SRC.indexOf('const TESTER_DB = '), APP_SRC.indexOf("$('#testerForget').addEventListener"));
+  const run = async ({ databases = true, blocked = false } = {}) => {
+    const deleted = [], removed = [], log = [];
+    const ls = new Map([['atelier.tester', 'null'], ['atelier.meTester', 'null'], ['atelier.lastThread:tester:sub-1', '"t1"'], ['atelier.pinnedThreads:tester:sub-2', '[]'],
+      ['atelier.settings', '{}'], ['atelier.lastThread', '"owner-thread"'], ['atelier.lastThread:guest', '"g"'], ['atelier.outReason', '"closed"']]);
+    const dbNames = ['atelier-data', 'atelier-guest', 'atelier-kv', 'atelier-account-sub-1', 'atelier-appdata-account-sub-1', 'atelier-sync:tester-abc', 'atelier-sync', 'atelier-appdata', 'atelier-appdata-guest'];
+    const deps = {
+      workspace: 'guest', testerTrace: true, SHARE_CACHE: 'atelier-share',
+      localStorage: { removeItem: (k) => { removed.push(k); ls.delete(k); } },
+      LS: { set: (k, v) => log.push(['ls', k, v]) },
+      indexedDB: {
+        databases: databases ? async () => dbNames.map((name) => ({ name })) : undefined,
+        deleteDatabase: (name) => { const r = {}; queueMicrotask(() => { if (blocked) r.onblocked(); else { deleted.push(name); r.onsuccess(); } }); return r; },
+      },
+      rawDB: { kvClearTesters: async () => log.push('kv') }, reader: { clearCache: async () => log.push('clips') }, self: { caches: { delete: async (k) => log.push(['cache', k]) } },
+    };
+    const keysOf = () => [...ls.keys()];
+    // (Object.keys(localStorage) reads this fake's keys: the source is run as written, that one call redirected)
+    const make = new Function(...Object.keys(deps), 'Object', `${src.replace(/Object\.keys\(localStorage\)/g, 'Object.keysOf()')}\nreturn { removeTesterData, testerDataHere };`);
+    const api = make(...Object.values(deps), { keysOf, keys: Object.keys });
+    let error = null;
+    try { await api.removeTesterData(); } catch (err) { error = err; }
+    return { deleted, removed, log, ls, error, here: api.testerDataHere };
+  };
+  const r = await run();
+  assert.deepEqual(r.deleted, ['atelier-account-sub-1', 'atelier-appdata-account-sub-1', 'atelier-sync:tester-abc'], 'tester databases only');
+  assert.deepEqual(r.removed.sort(), ['atelier.lastThread:tester:sub-1', 'atelier.meTester', 'atelier.pinnedThreads:tester:sub-2', 'atelier.tester']);
+  assert.ok(r.ls.has('atelier.settings') && r.ls.has('atelier.lastThread') && r.ls.has('atelier.lastThread:guest'), 'the owner’s and the guest’s stay');
+  assert.deepEqual(r.log, ['kv', 'clips', ['cache', 'atelier-share'], ['ls', 'outReason', '']]);
+  // a browser that can't list its databases: the testers its scoped settings name
+  const f = await run({ databases: false });
+  assert.deepEqual(f.deleted.sort(), ['atelier-account-sub-1', 'atelier-account-sub-2', 'atelier-appdata-account-sub-1', 'atelier-appdata-account-sub-2']);
+  // another Atelier tab holds one open: it says so, and nothing is said to be removed
+  const b = await run({ blocked: true });
+  assert.match(b.error?.message || '', /Close any other Atelier tab/);
+  // shown only on a signed-out page with tester traces; the owner's kv rows are never touched (ws/tester: prefix only)
+  assert.match(APP_SRC, /const forget = testerDataHere\(\);[^\n]*\n[\s\S]{0,600}\$\('#testerForget'\)\.hidden = !on;\n\s+\};\n\s+offerForget\(forget\);/);
+  // v91 review (tester-privacy): no trace in localStorage (the browser dropped it, or the owner's Clear this device took
+  // every atelier.* key) while a tester's databases or kv rows are still here: the screen asks IndexedDB as well
+  assert.match(APP_SRC, /if \(!forget\) testerDataStored\(\)\.then\(\(yes\) => \{ if \(yes && onboardReason === reason && \$\('#onboard'\)\.open\) offerForget\(true\); \}\);/);
+  assert.match(APP_SRC, /kvHasTesters: \(\) => tx\('readonly', \(s\) => s\.getAllKeys\(\), 'kv'\)\.then\(\(keys\) => \(keys \|\| \[\]\)\.some\(\(k\) => typeof k === 'string' && k\.startsWith\(`\$\{KV_SCOPE\}tester:`\)\)\),/);
+  const probe = async ({ names = null, kv = false, workspace = 'guest' } = {}) => {
+    const deps = {
+      workspace, testerTrace: false, localStorage: {}, SHARE_CACHE: 'atelier-share', LS: {}, reader: {}, self: {},
+      indexedDB: { databases: names ? async () => names.map((name) => ({ name })) : undefined },
+      rawDB: { kvHasTesters: async () => { if (kv === 'throws') throw new Error('blocked'); return kv; } },
+    };
+    const make = new Function(...Object.keys(deps), 'Object', `${src.replace(/Object\.keys\(localStorage\)/g, 'Object.keysOf()')}\nreturn { testerDataHere, testerDataStored };`);
+    const api = make(...Object.values(deps), { keysOf: () => [], keys: Object.keys });
+    return [api.testerDataHere(), await api.testerDataStored()];
+  };
+  assert.deepEqual(await probe({ names: ['atelier-guest', 'atelier-kv', 'atelier-account-abc'] }), [false, true], 'a tester database, no localStorage trace');
+  assert.deepEqual(await probe({ names: ['atelier-guest', 'atelier-sync:tester-x'] }), [false, true]);
+  assert.deepEqual(await probe({ names: ['atelier-guest', 'atelier-kv', 'atelier-data', 'atelier-appdata'], kv: true }), [false, true], 'only ws/tester: kv rows');
+  assert.deepEqual(await probe({ names: ['atelier-guest', 'atelier-kv', 'atelier-data', 'atelier-appdata', 'atelier-sync'] }), [false, false], 'the owner’s and the guest’s are not tester data');
+  assert.deepEqual(await probe({ kv: 'throws' }), [false, false], 'a browser that can’t list databases and a kv read that fails: nothing offered');
+  assert.deepEqual(await probe({ names: ['atelier-account-abc'], workspace: 'owner' }), [false, false], 'never on a signed-in page');
+  assert.match(APP_SRC, /kvClearTesters: \(\) => tx\('readwrite', \(s\) => \{ const q = s\.getAllKeys\(\); q\.onsuccess = \(\) => \{ for \(const k of q\.result \|\| \[\]\) if \(typeof k === 'string' && k\.startsWith\(`\$\{KV_SCOPE\}tester:`\)\) s\.delete\(k\); \}; \}, 'kv'\),/);
+  const html = (await import('node:fs/promises')).readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(await html, /<button type="button" class="chip ob-forget" id="testerForget" hidden>Remove my tester data from this device<\/button>/);
+});
+
 test('tester continuity is offered only when the server explicitly enables it, including conservative behavior for cached records', () => {
   assert.equal(person('person-a', { features: { sync: true } }).features.sync, true);
   assert.equal(person('person-a', { features: { sync: false } }).features.sync, false);

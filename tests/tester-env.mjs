@@ -89,7 +89,15 @@ export const guardFails = (G) => G.shim.db.prepare('SELECT COALESCE(SUM(fails), 
 
 export function fakeKV(init = {}) {
   const m = new Map(Object.entries(init));
-  return { m, async get(k, type) { const v = m.get(k); return v == null ? null : type === 'json' ? JSON.parse(v) : v; }, async put(k, v) { m.set(k, String(v)); }, async delete(k) { m.delete(k); } };
+  return {
+    m, async get(k, type) { const v = m.get(k); return v == null ? null : type === 'json' ? JSON.parse(v) : v; }, async put(k, v) { m.set(k, String(v)); }, async delete(k) { m.delete(k); },
+    // KV's list: names in order, a page of at most limit (1,000 by default), a cursor to the next page.
+    async list({ prefix = '', limit = 1000, cursor } = {}) {
+      const names = [...m.keys()].filter((k) => k.startsWith(prefix)).sort(), at = cursor ? Number(cursor) : 0, page = names.slice(at, at + limit);
+      const done = at + page.length >= names.length;
+      return { keys: page.map((name) => ({ name })), list_complete: done, ...(done ? {} : { cursor: String(at + page.length) }) };
+    },
+  };
 }
 
 export const KEYS = {

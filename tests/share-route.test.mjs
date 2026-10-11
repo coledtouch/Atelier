@@ -56,4 +56,13 @@ test('the accepted quick-launch risks live in the repo (docs/quick-launch.md), a
   for (const f of ['src/worker.js', 'public/sw.js', 'public/app.js', 'public/launch.js'])
     assert.ok(!(await read(f)).includes('quicklaunch-integration'), `${f}: no reference to a document outside the repo`);
   for (const f of ['src/worker.js', 'public/sw.js', 'public/app.js']) assert.ok((await read(f)).includes('docs/quick-launch.md'), f);
+  // v91 review (client-money): what bounds a keyed replay, as the code does it. The 'busy' review is one page's own runs
+  // (S.busy), and every keyed launch is a new page (boot → runLaunch), so it never holds a replay back.
+  const [APP, LAUNCH] = await Promise.all([read('public/app.js'), read('public/launch.js')]);
+  assert.match(APP, /busy: S\.busy,/);
+  assert.match(APP, /\n  runLaunch\(launch\)\.then\(/);
+  assert.match(LAUNCH, /lastAutoAt: num\(store\.get\('lastAutoSend', 0\)\)/);
+  const flat = doc.replace(/\s+/g, ' ');
+  assert.ok(flat.includes('What bounds a replay is one keyed send every 15 s per browser (`lastAutoSend` in local storage) and the priced 4 s hold each one shows first. Replays do not wait for each other'));
+  assert.ok(!/one at a time/.test(flat), 'replays are not serialized');
 });

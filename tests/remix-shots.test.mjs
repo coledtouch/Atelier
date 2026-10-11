@@ -233,7 +233,8 @@ test('Veo 3.1 on Runway: owner-only alternatives that take Veo’s own 16:9 / 9:
   }
 });
 
-test('Veo 3.1 on Runway: the request goes to Runway with model veo3.1 (once runway.js knows the model)', { skip: !RUNWAY_MODELS['veo3.1'] && 'runway.js has no veo3.1 yet' }, () => {
+test('Veo 3.1 on Runway: the request goes to Runway with model veo3.1', () => {
+  assert.ok(RUNWAY_MODELS['veo3.1'], 'runway.js knows veo3.1');
   const r = S.shotRequest({ prompt: 'p', camera: 'static', seconds: 6 }, { model: 'runway:veo3.1', seconds: 6, image: JPEG, out: { w: 1080, h: 1350 } });
   assert.deepEqual([r.provider, r.runway.body.model, r.runway.body.ratio], ['runway', 'veo3.1', '720:1280']);
 });

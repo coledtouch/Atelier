@@ -32,7 +32,9 @@ code is in `public/launch.js` (pure logic), `public/sw.js` (share intake), `src/
   - the per-browser 22-character fragment key;
   - a role match;
   - a first-use confirm;
-  - a visible, cancellable hold (2.5 s for a link, 4 s for Video with its price, 1.5 s for voice);
+  - a visible, cancellable hold (2.5 s for a link, 4 s for Video with its price, 1.5 s for voice). The price
+    shows for every paid video model (Omni, every Runway model, Grok Imagine direct), the figure the Video options
+    strip shows; up to v90, Runway and Grok Imagine showed only the length;
   - at most one keyed send every 15 s;
   - in the link's own mode (`start=`, any of the six since v57: Atelier Assist on Android, and Shortcut links that
     name a mode), never a voice start and never a `/mode` prefix in the text;
@@ -144,7 +146,12 @@ iOS, a blocked mic, and a start that failed.
     device.
   - A keyed send is still a rate-limited, held and labelled turn. Since v57 it can be any of the six modes, so a key
     read from History or History sync can start paid Image or Video work, after the hold (4 s and the price for
-    Video), and only in a browser that holds that confirmed key. Atelier Assist's links land in Chrome's History
+    Video), and only in a browser that holds that confirmed key. Nothing totals or caps repeated keyed sends: v85
+    removed the owner's spending limits on purpose. What bounds a replay is one keyed send every 15 s per browser
+    (`lastAutoSend` in local storage) and the priced 4 s hold each one shows first. Replays do not wait for each other:
+    every keyed launch is a new page load (`boot()` → `runLaunch`), where nothing is running yet, so the 'busy' review
+    (`S.busy`, one page's own runs) never applies to one, and a video started by an earlier replay keeps running at the
+    provider while the next starts. Atelier Assist's links land in Chrome's History
     the same way. Retire a key that may have been seen with **New link**. Since v58 a keyed send is the owner's own
     (it may use account tools, with the usual approval cards); a leaked key is therefore worth retiring at once.
 - **A stranger's link can start the mic.** Once mic permission is granted, a stranger's link can open the installed

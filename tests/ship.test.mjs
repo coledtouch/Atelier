@@ -6,11 +6,14 @@ import { readFile, readdir } from 'node:fs/promises';
 import {
   parseArgs, strayNpmFlags, confirmShip, confirmRaw, versionIn, appVersionIn, versionGate, parsePorcelainZ, dirtyProblems,
   parseAheadBehind, syncDecision, bumpedFiles, bumpProblems, pathProblems, parseRecord, shipRecord, liveOriginDecision,
-  afterWranglerFailure, worktreeAddArgs, parseCatFileBatch, parseTap, isSafeTempDir, waitForLive, main, DEPLOY_COMMANDS,
+  afterWranglerFailure, worktreeAddArgs, parseCatFileBatch, parseTap, testGate, isSafeTempDir, waitForLive, main, DEPLOY_COMMANDS,
   SITE, ZIP, RECORD, RAW_ENV, RAW_CONSENT,
 } from '../scripts/ship.mjs';
-import { needsBump, bumpVerdict, isNullSha, swVersion, baseDecision } from '../scripts/check-bump.mjs';
+import { needsBump, bumpVerdict, isNullSha, swVersion, baseDecision, extVerdict, extVersion, compareVersions } from '../scripts/check-bump.mjs';
 import { guardDecision } from '../scripts/deploy-guard.mjs';
+import { readFileSync } from 'node:fs';
+
+const SHIP_SRC = readFileSync(new URL('../scripts/ship.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 const z = (...records) => records.map((r) => `${r}\0`).join('');
 
@@ -318,8 +321,9 @@ const TAP = [
 test('test output: failing test names (suite > test), errors and counts come out of the TAP report, LF or CRLF', () => {
   for (const eol of ['\n', '\r\n']) {
     const r = parseTap(TAP.join(eol));
-    assert.deepEqual([r.tests, r.pass, r.fail, r.cancelled], [7, 4, 3, 0]);
+    assert.deepEqual([r.tests, r.pass, r.fail, r.cancelled, r.skipped, r.todo], [7, 4, 3, 0, 1, 0]);
     assert.deepEqual(r.failures.map((f) => f.name), ['fails top', 'group > nested fail', 'tests\\c.test.mjs']);
+    assert.deepEqual(r.skips, [{ name: 'skipped', kind: 'SKIP', reason: '' }]);
     assert.equal(r.failures[0].error, 'Expected values to be strictly equal: / 1 !== 2');
     assert.equal(r.failures[0].location, 'C:\\Temp\\atelier-ship-x\\atelier\\tests\\a.test.mjs:4:1');
     assert.equal(r.failures[1].error, 'boom');
@@ -328,6 +332,82 @@ test('test output: failing test names (suite > test), errors and counts come out
   const green = parseTap('TAP version 13\n# Subtest: a\nok 1 - a\n1..1\n# tests 1\n# pass 1\n# fail 0\n# cancelled 0\n');
   assert.deepEqual([green.tests, green.pass, green.fail, green.failures.length], [1, 1, 0, 0]);
   assert.deepEqual([parseTap('').tests, parseTap(undefined).failures.length], [0, 0], 'no report = no tests (ship treats that as a failure)');
+});
+
+// v89 review (pipeline-skipped-tests-pass-gate): a test that skipped itself or is marked todo checked nothing, so the
+// gate refuses it and names it. Self-skipping 'integration pending' tests used to pass the gate while a refactor broke
+// the very route they guard.
+const SKIPPY = [
+  'TAP version 13',
+  '# Subtest: runs', 'ok 1 - runs', '  ---', '  ...',
+  '# Subtest: wired: every sync route answers 401 sync_passcode without the passcode',
+  'ok 2 - wired: every sync route answers 401 sync_passcode without the passcode # SKIP src/worker.js has no /api/sync route block yet', '  ---', '  ...',
+  '# Subtest: group',
+  '    # Subtest: later', '    not ok 1 - later # TODO not written yet', '      ---', '      ...', '    1..1',
+  'ok 3 - group', '  ---', '  ...',
+  '1..3', '# tests 3', '# suites 0', '# pass 1', '# fail 0', '# cancelled 0', '# skipped 1', '# todo 1', '# duration_ms 9',
+];
+test('the test gate: every test must run; a skipped or todo test fails it, by name, and a failing todo is not a failure', () => {
+  for (const eol of ['\n', '\r\n']) {
+    const tap = parseTap(SKIPPY.join(eol));
+    assert.deepEqual([tap.tests, tap.pass, tap.fail, tap.skipped, tap.todo], [3, 1, 0, 1, 1]);
+    assert.deepEqual(tap.failures, [], 'a todo that fails is not listed as a failure');
+    assert.deepEqual(tap.skips, [
+      { name: 'wired: every sync route answers 401 sync_passcode without the passcode', kind: 'SKIP', reason: 'src/worker.js has no /api/sync route block yet' },
+      { name: 'group > later', kind: 'TODO', reason: 'not written yet' },
+    ]);
+    const g = testGate({ ok: true, status: 0 }, tap);
+    assert.equal(g.ok, false);
+    assert.match(g.message, /not every test ran in the clean checkout \(0 failed, 0 cancelled, 1 skipped, 1 todo, 1\/3 passed\)/);
+    assert.match(g.message, /skipped: wired: every sync route answers 401 sync_passcode without the passcode \(src\/worker\.js has no \/api\/sync route block yet\)/);
+    assert.match(g.message, /todo: group > later \(not written yet\)/);
+  }
+  const green = parseTap('TAP version 13\n# Subtest: a\nok 1 - a\n1..1\n# tests 1\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n');
+  assert.deepEqual(testGate({ ok: true, status: 0 }, green), { ok: true, message: '1/1 tests passed' });
+  assert.equal(testGate({ ok: false, status: 1 }, green).ok, false, 'node exiting non-zero fails it');
+  assert.match(testGate({ ok: false, status: 1 }, parseTap(TAP.join('\n'))).message, /^tests failed in the clean checkout \(exit 1; 3 failed/);
+  assert.equal(testGate({ ok: true, status: 0 }, parseTap('')).ok, false, 'no report = no tests');
+  // ship uses this gate, not its own sum
+  assert.match(SHIP_SRC, /const tested = testGate\(run, tap\);\n\s+if \(!tested\.ok\) \{/);
+  assert.doesNotMatch(SHIP_SRC, /const passed = run\.ok && tap\.tests > 0/);
+});
+
+// The skips the review found (sync, Runway, transcribe, Look up, Canva routes) were conditions over the source text that
+// happened to be false: a later refactor would have turned them on silently. None may come back.
+test('no test can turn itself off: no skip or todo option, and no skip or todo call', async () => {
+  const dir = new URL('./', import.meta.url);
+  const files = (await readdir(dir)).filter((n) => n.endsWith('.mjs'));
+  assert.ok(files.length > 50);
+  for (const f of files) {
+    const src = await readFile(new URL(f, dir), 'utf8');
+    assert.doesNotMatch(src, /[{,]\s*(skip|todo)\s*:/, `${f}: a skip/todo option`);
+    assert.doesNotMatch(src, /\b(test|it|t|describe|suite)\.(skip|todo)\(/, `${f}: a skip/todo call`);
+    // nor a check that runs only while an export exists (v91 review: an assert or loop behind "'CHUNK_MAX' in G" or
+    // "G.isFileName" in video.test): a rename would switch it off and still pass. Assert the export, then compare.
+    assert.doesNotMatch(src, /\bif \('[A-Za-z_$][\w$]*' in [A-Za-z_$][\w$]*\) (assert|for)\b/, `${f}: a check guarded by an export's presence`);
+    assert.doesNotMatch(src, /\bif \([A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\) (assert|for) /, `${f}: a check guarded by an export's presence`);
+  }
+});
+
+test('check-bump and ship: a change to extension/ must raise extension/manifest.json’s version', () => {
+  assert.equal(extVersion('{"version": "1.3.3"}'), '1.3.3');
+  for (const bad of ['', '{', '{"version": 3}', '{"version": "1.3.x"}', '{}']) assert.equal(extVersion(bad), null, bad);
+  assert.ok(compareVersions('1.3.10', '1.3.9') > 0 && compareVersions('1.4', '1.3.9') > 0 && compareVersions('1.3.3', '1.3.3') === 0 && compareVersions('1.3', '1.3.0') === 0);
+  assert.equal(extVerdict({ paths: ['README.md', 'public/app.js'], baseVersion: '1.3.2', headVersion: '1.3.2' }).ok, true, 'no extension/ change');
+  assert.equal(extVerdict({ paths: ['extension/background.js'], baseVersion: '1.3.2', headVersion: '1.3.3' }).ok, true);
+  const same = extVerdict({ paths: ['extension/background.js', 'extension/bridge.js', 'README.md'], baseVersion: '1.3.2', headVersion: '1.3.2' });
+  assert.equal(same.ok, false);
+  assert.deepEqual(same.touched, ['extension/background.js', 'extension/bridge.js']);
+  assert.match(same.message, /extension\/ changed without a manifest version bump \(still 1\.3\.2\)/);
+  assert.match(same.message, /MIN_EXT in public\/app\.js/);
+  assert.match(extVerdict({ paths: ['extension/manifest.json'], baseVersion: '1.3.2', headVersion: '1.3.1' }).message, /went backwards/);
+  assert.equal(extVerdict({ paths: ['extension/background.js'], baseVersion: '1.3.2', headVersion: null }).ok, false);
+  // CI's check-bump runs both rules; ship compares extension/ with the live commit and refuses the same way
+  const BUMP_SRC = readFileSync(new URL('../scripts/check-bump.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(BUMP_SRC, /const ext = extVerdict\(\{ paths, baseVersion: extAt\(base\), headVersion: extAt\(head\) \}\);/);
+  assert.match(BUMP_SRC, /if \(verdict\.ok && ext\.ok\)/);
+  assert.match(SHIP_SRC, /if \(origin\.liveSha\) \{ const ext = extSinceLive\(origin\.liveSha, sha\); check\(ext\.ok, ext\.message\); \}/);
+  assert.match(SHIP_SRC, /git\(\['diff', '--name-only', '-z', liveSha, sha, '--', 'extension\/'\]\)/);
 });
 
 test('cleanup only ever deletes a ship folder directly inside the temp folder', () => {
@@ -473,6 +553,9 @@ test('CI runs the checks on Linux and Windows (CRLF), with no secrets and no dep
   for (const s of ['ubuntu-latest', 'windows-latest', 'core.autocrlf true', 'node-version: 24', 'npm ci', 'npm run check',
     'node --test tests/*.test.mjs', 'node scripts/check-bump.mjs', 'pull_request', 'push', 'fetch-depth: 0']) assert.ok(yml.includes(s), `ci.yml has ${s}`);
   assert.doesNotMatch(yml, /secrets\./, 'CI needs no secrets');
+  // every test must run there too: a skipped or todo test fails the job (v89 review)
+  assert.ok(yml.includes('--test-reporter=tap --test-reporter-destination=tests.tap tests/*.test.mjs'));
+  assert.ok(yml.includes("if grep -E '^# (skipped|todo) [1-9]' tests.tap; then"));
   assert.doesNotMatch(yml, /wrangler|npm run (deploy|ship)|scripts\/ship\.mjs/, 'CI never deploys');
   // A cancelled run would hide an unbumped push (check-bump compares only that push's range): one group per pushed
   // commit, and only pull request runs cancel their older ones.

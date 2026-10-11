@@ -362,6 +362,7 @@ async function chat(c) {
   if (p.webUses) body.web_search = true;
   // A helper call writes no Claude cache (src/anthropic.js): it only ever lowers the bill the reservation already covers.
   if (b.cache === false) body.cache = false;
+  if (b.cache_turn === false) body.cache_turn = false; // a photo turn: no history or turn write that is never read
 
   let res;
   try {
@@ -690,14 +691,26 @@ async function video(c) {
 }
 
 // ── owner: /api/testers* (the caller has already checked the passcode) ──
+// POST testers/forget {sub}: deletes a tester and all their data on the server (privacy §8, deletion on request): the
+// Ledger's forgetTester (sessions, cloud threads/media/trash/history, feedback in KV, then the roster row, spend, jobs and
+// profile; a second pass by the Ledger's alarm 10-20 minutes later). Answers {ok, removed: {cloud, feedback}, ...roster};
+// 503 forget_retry when the cloud purge or the feedback deletion couldn't finish (the tester stays on the roster,
+// revoked: run it again). Reachable whether or not tester access is on.
 export async function testerAdmin(req, env, path) {
   const stub = ledger(env);
   if (!stub) return json({ error: 'Tester access isn’t set up on this server (no LEDGER binding).' }, 503);
   if (path === 'testers' && req.method === 'GET') return json(await stub.roster());
-  const action = path.match(/^testers\/(revoke|restore|config)$/)?.[1];
+  const action = path.match(/^testers\/(revoke|restore|config|forget)$/)?.[1];
   if (!action || req.method !== 'POST') return json({ error: 'Not found' }, 404);
   const { big, body } = await readJson(req, 16 * KB);
   if (big || !body) return json({ error: 'Bad JSON body' }, 400);
+  if (action === 'forget') {
+    if (typeof body.sub !== 'string' || !SUB.test(body.sub)) return json({ error: 'sub is required' }, 400);
+    const r = await stub.forgetTester(body.sub);
+    resetTesterCaches(); // their sessions are gone: this isolate stops honouring them at once (others within 60 s)
+    if (!r?.ok) return json({ error: 'Couldn’t delete all of their data just now. They are revoked; try Delete data again in a minute.', code: 'forget_retry', removed: { cloud: r?.removed || 0 } }, 503);
+    return json({ ok: true, found: r.found === true, removed: { cloud: r.removed || 0, feedback: r.feedback || 0 }, ...(await stub.roster()) });
+  }
   if (action === 'config') {
     const r = await stub.setConfig(body);
     if (!r.ok) return json({ error: r.error, code: 'bad_config' }, 400);

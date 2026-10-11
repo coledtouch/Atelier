@@ -126,6 +126,10 @@ export const claudeMaxOutput = (model) => (Object.hasOwn(CLAUDE_MAX_OUTPUT, mode
 // No marker where it can't pay: on a prefix shorter than the model's minimum (the API caches nothing there) or on a call
 // whose prompt is never sent again (body.cache === false, public/app.js streamChatRaw: titles, memory, prompt polish,
 // routing, Build, Ideas, Remix plans, a nudge at a changed effort — a write there would never be read).
+// body.cache_turn === false (public/app.js runChat: a turn that carries photos or video frames): only 1 (and 4 on later
+// rounds). Images in a request invalidate the messages cache, and the turn replays as text ('[attached N images]'), so no
+// later request starts with this one's messages: 2 and 3 would be 1-hour writes (2x input) that are never read (v89
+// review, money-photo-turn-1h-cache-writes-never-read). runWatch replays its frames, so it keeps them.
 // Minimum cacheable prompt per model (prompt-caching docs, read 2026-10-08); an id not listed: 1,024.
 const CACHE_MIN = Object.freeze({
   'claude-fable-5-1': 512, 'claude-mythos-5-1': 512, 'claude-opus-5-5': 512, 'claude-sonnet-5-5': 512, 'claude-haiku-5-5': 512,
@@ -159,15 +163,17 @@ function marked(m, cc) {
   }
   return null;
 }
-// Places breakpoints 1-3 on params (system becomes a block list when it is marked). → whether caching is on for it.
-function placeCache(params, { tester, off }) {
+// Places breakpoints 1-3 on params (system becomes a block list when it is marked); with turn false, 1 only. → whether
+// caching is on for it.
+function placeCache(params, { tester, off, turn = true }) {
   if (off) return false;
   const min = cacheMin(params.model), cc = tester ? { type: 'ephemeral' } : { type: 'ephemeral', ttl: '1h' };
   let size = tokensOf(params.tools || []) + tokensOf(params.system || '');
   if (params.system && size >= min) params.system = [{ type: 'text', text: params.system, cache_control: cc }];
-  const msgs = params.messages, turn = msgs.findLastIndex((m) => m.role === 'user' && !isToolResults(m));
+  if (!turn) return true;
+  const msgs = params.messages, at = msgs.findLastIndex((m) => m.role === 'user' && !isToolResults(m));
   const upTo = msgs.map((m) => (size += tokensOf(m.content)));
-  for (const i of [turn - 1, turn]) {
+  for (const i of [at - 1, at]) {
     if (i < 0 || upTo[i] < min) continue;
     const m = marked(msgs[i], cc);
     if (m) msgs[i] = m;
@@ -214,7 +220,7 @@ function buildParams(body, tester = null) {
   // A refusal fallback (fallbacks 'default') re-runs this same body on the fallback model, markers included, and caches
   // in that model's own cache.
   // cached: breakpoint 4's cache_control for this body and its continuations; null with caching off.
-  const cached = !placeCache(params, { tester, off: body.cache === false }) ? null
+  const cached = !placeCache(params, { tester, off: body.cache === false, turn: body.cache_turn !== false }) ? null
     : body.cache_tail === '1h' && !tester ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
   if (FALLBACK_MODELS.has(model) && (!tester || tester.fallbacks !== false)) {
     params.betas = ['server-side-fallback-2026-07-01'];

@@ -26,9 +26,11 @@ const unref = (f) => (...a) => { const t = f(...a); t?.unref?.(); return t; };
 
 // ── a fake page: numbered elements as pageElements would have tagged them ──
 // row: the text of the list row / table row the element sits in.
-function fakeEl({ tag = 'BUTTON', attrs = {}, text = '', value = '', row } = {}) {
+// labels: the text of the <label for> elements that name it (el.labels).
+function fakeEl({ tag = 'BUTTON', attrs = {}, text = '', value = '', row, labels = [] } = {}) {
   const el = {
     tagName: tag, innerText: text, value, id: attrs.id || '', attrs: { ...attrs }, isContentEditable: false, form: null,
+    labels: labels.map((t) => ({ innerText: t })),
     clicks: 0, events: [], focused: false,
     ...(row ? { parentElement: { closest: () => ({ innerText: row }) } } : {}),
     getAttribute: (n) => el.attrs[n] ?? null,
@@ -39,7 +41,8 @@ function fakeEl({ tag = 'BUTTON', attrs = {}, text = '', value = '', row } = {})
   return el;
 }
 // page.elements (number → element) can be replaced to renumber the page, as browser_elements would.
-function fakePage({ title = 'Settings · acme/site', url = 'https://github.com/acme/site/settings', elements = {} } = {}) {
+// byId: other elements by id (aria-labelledby points at them).
+function fakePage({ title = 'Settings · acme/site', url = 'https://github.com/acme/site/settings', elements = {}, byId = {} } = {}) {
   const page = { title, url, elements };
   const all = () => Object.values(page.elements);
   page.document = {
@@ -51,6 +54,7 @@ function fakePage({ title = 'Settings · acme/site', url = 'https://github.com/a
       return m ? all().find((el) => el.attrs['data-atelier-c'] === m[1]) ?? null : null;
     },
     querySelectorAll(sel) { return sel === '[data-atelier-c]' ? all().filter((el) => 'data-atelier-c' in el.attrs) : []; },
+    getElementById: (id) => (Object.hasOwn(byId, id) ? { innerText: byId[id] } : null),
     execCommand() {},
   };
   return page;
@@ -267,6 +271,91 @@ test('password and payment fields are refused before any window opens', async ()
   }
   assert.equal(h.windows.length, 0);
   assert.equal(typings(h).length, 0);
+});
+
+// v89 review (pipeline-ext-sensitive-field-gaps): the refusal covers what REFUSED_FIELD and the agent prompt promise —
+// passwords (also shown as text by a show-password toggle), sign-in codes, payment and ID numbers — read from the
+// field's labels too; short words common in ordinary text count only in the field's own name, id or autocomplete.
+test('typing is refused into every password, sign-in code, payment and ID field, however the page names it', async () => {
+  const fields = {
+    'show-password toggle (type=text, current-password)': { attrs: { type: 'text', name: 'password', autocomplete: 'current-password' } },
+    'new-password': { attrs: { type: 'text', name: 'pw2', autocomplete: 'new-password' } },
+    'masked by -webkit-text-security': { attrs: { type: 'text', name: 'f1', 'data-mask': 'disc' } },
+    'PIN by name': { attrs: { type: 'tel', name: 'pin' } },
+    'PIN by id': { attrs: { type: 'text', id: 'card_pin', name: 'f2' } },
+    'one-time-code': { attrs: { type: 'text', name: 'code', autocomplete: 'one-time-code' } },
+    'verification code label': { attrs: { type: 'text', name: 'f3', 'aria-label': 'Verification code' } },
+    'SSN by <label for> only': { attrs: { type: 'text', id: 'f3', name: 'field3' }, labels: ['Social Security Number'] },
+    'SSN by aria-labelledby': { attrs: { type: 'text', name: 'f4', 'aria-labelledby': 'lab4 hint4' }, byId: { lab4: 'Social security number', hint4: '9 digits' } },
+    'bank account number': { attrs: { type: 'text', name: 'account_number' } },
+    'account no. label': { attrs: { type: 'text', name: 'f5' }, labels: ['Account No.'] },
+    'tax ID (EIN)': { attrs: { type: 'text', name: 'ein' } },
+    'tax ID label': { attrs: { type: 'text', name: 'f6' }, labels: ['Tax ID'] },
+    passport: { attrs: { type: 'text', name: 'passport_no' } },
+    "driver's licence": { attrs: { type: 'text', name: 'f7' }, labels: ["Driver's license number"] },
+    'national insurance': { attrs: { type: 'text', name: 'ni', placeholder: 'National Insurance number' } },
+    'card expiry month': { attrs: { type: 'text', name: 'exp_month' } },
+    'card number': { attrs: { type: 'text', name: 'cardnumber' } },
+    'cc-csc': { attrs: { type: 'text', name: 'f8', autocomplete: 'cc-csc' } },
+    // v91 review: camelCase identifiers (React-style pages) count word by word
+    'otpCode (camelCase name)': { attrs: { type: 'text', name: 'otpCode', placeholder: 'Enter code' } },
+    'otpInput / pinInput': { attrs: { type: 'text', name: 'otpInput', id: 'pinInput' } },
+    pinNumber: { attrs: { type: 'text', name: 'pinNumber' } },
+    userPin: { attrs: { type: 'text', id: 'userPin', name: 'f9' } },
+    cardPin: { attrs: { type: 'tel', name: 'cardPin' } },
+    'userPIN (capitals)': { attrs: { type: 'text', name: 'userPIN' } },
+    pwdInput: { attrs: { type: 'text', name: 'pwdInput' } },
+    acctNumber: { attrs: { type: 'text', name: 'acctNumber' } },
+    'SSNNumber (an acronym run)': { attrs: { type: 'text', name: 'SSNNumber' } },
+    'ssn by id': { attrs: { type: 'text', id: 'user_ssn', name: 'f10' } },
+    'SSN label': { attrs: { type: 'text', name: 'f11' }, labels: ['SSN'] },
+  };
+  const elements = {}, byId = {}, names = {};
+  Object.entries(fields).forEach(([what, f], i) => { elements[20 + i] = fakeEl({ tag: 'INPUT', ...f }); Object.assign(byId, f.byId || {}); names[20 + i] = what; });
+  const page = fakePage({ elements, byId });
+  const h = loadBackground({ pages: { 7: page } });
+  // the page's computed style: only the masked one has -webkit-text-security
+  h.ctx.getComputedStyle = (el) => ({ webkitTextSecurity: el.attrs['data-mask'] || 'none' });
+  for (const [n, what] of Object.entries(names)) {
+    const d = await h.local('describe', { tabId: 7, element: Number(n) });
+    assert.equal(d.result?.sensitive, true, `${what}: described as sensitive`);
+    const res = await h.local('type', { tabId: 7, element: Number(n), text: '123-45-6789' });
+    assert.equal(res.ok, false, what);
+    assert.match(res.error, /never types into password, payment or ID fields/, what);
+  }
+  assert.equal(h.windows.length, 0, 'refused before any window opens');
+  assert.equal(typings(h).length, 0);
+});
+
+test('ordinary fields stay typeable: a short word in a label or placeholder is not a field name', async () => {
+  const fields = {
+    'search, German placeholder': { attrs: { type: 'search', name: 'q', placeholder: 'Geben Sie ein Stichwort ein' } },
+    'shipping address': { attrs: { type: 'text', name: 'shipping_address', autocomplete: 'shipping street-address' } },
+    'pin a note (label)': { attrs: { type: 'text', name: 'note' }, labels: ['Pin this note to the top'] },
+    'settings title': { attrs: { type: 'text', name: 'setting_title', id: 'spinner_label' } },
+    'export date': { attrs: { type: 'text', name: 'export_date' } },
+    'email': { attrs: { type: 'email', name: 'email', autocomplete: 'email' } },
+    'username': { attrs: { type: 'text', name: 'username', autocomplete: 'username' } },
+    // v91 review: "ssn" inside a word was a match (busine-ss-n-ame), and camelCase splitting adds no new one
+    businessName: { attrs: { type: 'text', name: 'businessName' } },
+    'business name by id': { attrs: { type: 'text', id: 'businessName', name: 'f1' } },
+    addressName: { attrs: { type: 'text', name: 'addressName' } },
+    className: { attrs: { type: 'text', name: 'className' } },
+    'businessname (one word)': { attrs: { type: 'text', name: 'businessname' } },
+    'spinnerLabel / isPinned': { attrs: { type: 'text', name: 'spinnerLabel', id: 'isPinned' } },
+    'tinyUrl / pinnedAt': { attrs: { type: 'text', name: 'tinyUrl', id: 'pinnedAt' } },
+  };
+  const elements = {}, names = {};
+  Object.entries(fields).forEach(([what, f], i) => { elements[40 + i] = fakeEl({ tag: 'INPUT', ...f }); names[40 + i] = what; });
+  const h = loadBackground({ pages: { 7: fakePage({ elements }) } });
+  h.ctx.getComputedStyle = () => ({ webkitTextSecurity: 'none' });
+  for (const [n, what] of Object.entries(names)) {
+    const d = await h.local('describe', { tabId: 7, element: Number(n) });
+    assert.equal(d.result?.sensitive, false, `${what}: not sensitive`);
+  }
+  // and the check still works where getComputedStyle is missing (it runs inside any page)
+  const bare = loadBackground({ pages: { 7: fakePage({ elements: { 1: fakeEl({ tag: 'INPUT', attrs: { type: 'text', name: 'q' } }) } }) } });
+  assert.equal((await bare.local('describe', { tabId: 7, element: 1 })).result.sensitive, false);
 });
 
 test('describe never reports a password field’s value', async () => {
@@ -892,10 +981,23 @@ test('confirm.html: no inline script (MV3 extension pages forbid it), and the pa
 });
 
 // ── packing ──
-test('manifest: version 1.3.2, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
-  assert.equal(SOURCE_MANIFEST.version, '1.3.2');
+test('manifest: version 1.3.3, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
+  assert.equal(SOURCE_MANIFEST.version, '1.3.3');
   assert.ok(SOURCE_MANIFEST.description.length <= 132);
   assert.ok(Number(SOURCE_MANIFEST.minimum_chrome_version) >= 116);
+});
+
+// v89 review (pipeline-ext-version-not-enforced): the extension never updates itself, so the app asks for the build it
+// ships. An older copy (an old 1.3.x, too) gets the update toast; scripts/check-bump.mjs makes every extension/ change
+// raise the version.
+test('the app asks for the extension build it ships: MIN_EXT is the manifest version, and an older copy gets the update toast', () => {
+  const APP = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const min = /const MIN_EXT = '([\d.]+)';/.exec(APP)?.[1];
+  assert.equal(min, SOURCE_MANIFEST.version, 'public/app.js MIN_EXT = extension/manifest.json version');
+  const olderExt = new Function(`const MIN_EXT = '${min}'; return ${/\nconst olderExt = ([^\n]+);\n/.exec(APP)[1]};`)();
+  for (const v of ['1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
+  for (const v of [min, '1.3.10', '1.4.0', '2.0.0']) assert.equal(olderExt(v), false, v);
+  assert.match(APP, /if \(olderExt\(d\.version\)\) setTimeout\(\(\) => toast\(`Atelier Browser has an update \(v\$\{MIN_EXT\}\)/);
 });
 
 test('isLocalPattern spots local development hosts only', () => {
@@ -907,7 +1009,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
   const prod = packExtension();
   const files = unzipSync(prod.zip);
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  assert.equal(manifest.version, '1.3.2');
+  assert.equal(manifest.version, '1.3.3');
   assert.deepEqual(manifest.content_scripts.map((c) => c.matches), [['https://atelier.ciprari.ai/*']]);
   assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
   assert.ok(!/localhost|127\.0\.0\.1/.test(strFromU8(files['manifest.json'])));
@@ -916,7 +1018,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
 
   const dev = packExtension({ dev: true });
   assert.deepEqual(dev.manifest.content_scripts[0].matches, ['https://atelier.ciprari.ai/*', 'http://localhost:8787/*']);
-  assert.equal(dev.manifest.version, '1.3.2');
+  assert.equal(dev.manifest.version, '1.3.3');
   assert.deepEqual(SOURCE_MANIFEST.content_scripts[0].matches, dev.manifest.content_scripts[0].matches, 'the source keeps localhost for Load unpacked');
 });
 

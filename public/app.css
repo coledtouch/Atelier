@@ -323,6 +323,11 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 .prose blockquote { margin: 1em 0; padding: 0.2em 0 0.2em 1.1em; border-left: 2px solid var(--accent); color: var(--ink-2); font-family: var(--serif); font-size: 1.2em; font-style: italic; }
 .prose hr { border: 0; height: 1px; background: var(--line-2); margin: 2em 0; }
 .prose a { text-underline-offset: 3px; text-decoration-thickness: 1px; }
+/* A reply link's site, shown after its text (app.js guardLinks): phones have no hover to show where a link goes. */
+.prose .link-host { font: 0.82em var(--mono); color: var(--ink-2); text-decoration: none; display: inline-block; overflow-wrap: anywhere; }
+/* A link the assistant wrote after reading your accounts (or with outside text in the thread): it asks before opening. */
+.prose a.link-guarded { color: var(--accent); text-decoration: underline dotted; cursor: pointer; }
+.prose a.link-guarded:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 .prose .img-blocked { font: 0.82em var(--mono); color: var(--ink-2); } /* a remote image md() didn't load (app.js lockReplyFetches) */
 .prose :not(pre) > code { font: 0.86em var(--mono); background: var(--surface-2); border: 1px solid var(--line); padding: 0.12em 0.4em; border-radius: 6px; }
 .prose table { width: 100%; border-collapse: collapse; font-size: 0.92em; margin: 1em 0; display: block; overflow-x: auto; }
@@ -449,6 +454,7 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 /* Build app data (appdata.js): what this app saved on this device, and Clear app data */
 .appdata { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 36px; padding: 2px 8px 2px 14px; border-top: 1px solid var(--line); font: 500 11.5px/1.3 var(--mono); color: var(--ink-3); }
 .appdata .appdata-size { min-width: 0; overflow-wrap: anywhere; }
+.appdata .appdata-apart { flex: 1 1 100%; order: 3; padding-bottom: 6px; font-family: var(--sans); color: var(--ink-2); overflow-wrap: anywhere; }
 .appdata .mini { margin-left: auto; min-height: 44px; }
 .appcard.queued .buildmeter { flex-wrap: wrap; }
 .options .chip.refine-chip { max-width: min(62vw, 320px); }
@@ -837,6 +843,8 @@ dialog::backdrop { background: rgba(5, 5, 4, 0.6); backdrop-filter: blur(6px); }
 .li-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 12px; }
 .li-in { flex: none; width: 24px; height: 24px; fill: var(--li-on); stroke: none; }
 .ob-spots { margin: 2px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--ink); text-wrap: balance; }
+.onboard .ob-forget { align-self: center; min-height: 44px; max-width: 100%; white-space: normal; text-align: center; }
+.onboard .ob-forget[hidden] { display: none; }
 .ob-spots b { color: var(--c-ask); font-weight: 700; }
 .ob-owner { width: 100%; margin-top: 8px; border-top: 1px solid var(--line); text-align: left; }
 .ob-owner summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding-top: 4px; font: 500 12.5px/1.3 var(--sans); color: var(--ink-2); border-radius: 10px; }
@@ -1016,7 +1024,8 @@ a.chip { text-decoration: none; display: inline-flex; align-items: center; }
 .tp-roster small { display: inline; margin: 0 auto 0 0; }
 .tp-list { list-style: none; margin: 0; padding: 0; }
 .tp-tester { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto; align-items: center; column-gap: 12px; padding: 10px 0; border-bottom: 1px dashed var(--line); }
-.tp-tester.off > :not(.chip) { opacity: 0.55; }
+.tp-tester.off > :not(.tp-acts) { opacity: 0.55; }
+.tp-acts { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
 .tp-spend { margin: 0; display: flex; flex-direction: column; align-items: flex-end; font: 400 11px/1.5 var(--mono); color: var(--ink-3); white-space: nowrap; }
 .tp-spend b { color: var(--ink); font-weight: 500; }
 /* owner: Settings → Spending, this month's spend (read only: the Testers panel's labels, the breakdown list) */

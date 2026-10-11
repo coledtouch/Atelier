@@ -78,6 +78,25 @@ async function trim(kv, tag) {
   await Promise.all(remove.map((name) => kv.delete(name)));
 }
 
+/** Every feedback entry a tester sent (keys end in :tester-<sha256(sub)>) is deleted: the owner's "Delete tester and all
+ * their data" (src/tester/router.js testerAdmin forget). Lists every page of the prefix (KV lists are eventually
+ * consistent: an entry written seconds ago may be missed, and it still expires on its own after FEEDBACK_LIMITS.days).
+ * → how many were deleted. */
+export async function forgetFeedback(kv, sub) {
+  if (!kv?.list || !kv?.delete || typeof sub !== 'string' || !sub) return 0;
+  const tag = `:${await identityTag({ role: 'tester', sub })}`;
+  let cursor, removed = 0;
+  for (let page = 0; page < 50; page++) {
+    const listed = await kv.list({ prefix: PREFIX, limit: 1000, ...(cursor ? { cursor } : {}) });
+    const mine = (listed.keys || []).map((k) => k.name).filter((name) => name.endsWith(tag));
+    await Promise.all(mine.map((name) => kv.delete(name)));
+    removed += mine.length;
+    if (listed.list_complete !== false || !listed.cursor) break;
+    cursor = listed.cursor;
+  }
+  return removed;
+}
+
 /** POST /api/feedback for authenticated users; GET for the owner only. `who` comes from server authentication. */
 export async function handleFeedback(req, env, who = {}) {
   if (!['owner', 'tester'].includes(who.role) || who.role === 'tester' && (typeof who.sub !== 'string' || !who.sub || who.sub.length > 1024)) return fail('Sign in to send feedback.', 401);

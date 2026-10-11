@@ -40,7 +40,9 @@
        opened, and a pending ?share=<id> rides along to the reload so the next start still finds it.
        Error reports (POST /api/client-error, src/client-errors.js): version, kind, error name, the failing file's path
        inside the app, line/column, same-origin frames, platform class and start-up phase; never the message, a URL
-       query or anything typed. Five a session at most, each failure once. -->
+       query or anything typed. Five a session at most, each failure once. On the owner's device the saved passcode goes
+       with a report as x-app-pass (the one localStorage read here: the report is stored as verified, so made-up ones
+       can't push it off the list); never cookies. -->
   <style id="bootWatchStyle">
     #atelierRecovery { position: fixed; inset: 0; z-index: 2147483647; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; border: 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); background: transparent; color: #ece6d9; overflow: auto; overscroll-behavior: contain; pointer-events: none; color-scheme: dark; text-align: left; font: 400 15px/1.55 'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%; }
     dialog#atelierRecovery:not([open]) { display: none; }
@@ -154,7 +156,12 @@
       try { var saved = JSON.parse(sget(SENT) || 'null'); if (saved && typeof saved.n === 'number' && Array.isArray(saved.keys)) log = saved; } catch (e) {}
       if (log.n >= MAX_REPORTS || log.keys.indexOf(key) >= 0) return false;
       log.n++; log.keys.push(key); memo = log; sset(SENT, JSON.stringify(log));
-      try { w.fetch('/api/client-error', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(r), keepalive: true, credentials: 'omit', cache: 'no-store' }).catch(noop); } catch (e) {}
+      // The owner's device says so with the saved passcode: its reports are stored as verified, which no flood of
+      // made-up ones can keep off the list (src/client-errors.js). Nothing else about the device goes with it.
+      var headers = { 'content-type': 'application/json' }, pass = '';
+      try { pass = (JSON.parse(w.localStorage.getItem('atelier.settings') || 'null') || {}).passcode || ''; } catch (e) {}
+      if (typeof pass === 'string' && pass && pass.length <= 256 && !/[\r\n]/.test(pass)) headers['x-app-pass'] = pass;
+      try { w.fetch('/api/client-error', { method: 'POST', headers: headers, body: JSON.stringify(r), keepalive: true, credentials: 'omit', cache: 'no-store' }).catch(noop); } catch (e) {}
       return true;
     }
     function failure(kind, info, isFatal) {
@@ -389,10 +396,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=90" />
-  <link rel="stylesheet" href="/studio.css?v=90" />
-  <link rel="stylesheet" href="/feedback.css?v=90" />
-  <link rel="stylesheet" href="/remix.css?v=90" />
+  <link rel="stylesheet" href="/app.css?v=91" />
+  <link rel="stylesheet" href="/studio.css?v=91" />
+  <link rel="stylesheet" href="/feedback.css?v=91" />
+  <link rel="stylesheet" href="/remix.css?v=91" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -650,7 +657,8 @@
           <div class="testers spending" id="spendingPanel"></div>
         </section>
 
-        <section class="field-group needs-owner tester-ui">
+        <!-- Shown to the owner whether or not tester access is on: a tester's erasure request (Delete data) works either way. -->
+        <section class="field-group needs-owner">
           <h4>Testers</h4>
           <div class="testers" id="testersPanel"></div>
         </section>
@@ -858,6 +866,8 @@
       <h2 class="onboard-title" id="onboardTitle">Come make<br /><em>something yours.</em></h2>
       <p class="onboard-copy" id="onboardLead">A personal AI studio for answers, code, images, video, ideas and apps.</p>
       <p class="ob-note" id="signinNote" role="alert" hidden></p>
+      <!-- A former tester's threads and settings on this device (app.js removeTesterData): shown only where some are left. -->
+      <button type="button" class="chip ob-forget" id="testerForget" hidden>Remove my tester data from this device</button>
       <a class="li-btn tester-ui" id="liBtn" href="/api/li/start"><svg class="li-in" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zm1.78 13.02H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/></svg><span>Sign in with LinkedIn</span></a>
       <p class="ob-spots tester-ui" id="spotsLine"><b>25 tester spots.</b> Paid models included.</p>
       <p class="ob-spots tester-closed" id="closedLine">Tester sign-in is closed right now.</p>
@@ -913,6 +923,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=90" type="module"></script>
+  <script src="/app.js?v=91" type="module"></script>
 </body>
 </html>

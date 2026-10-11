@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=90';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=91';
 
 export const CHAT_KINDS = ['ask', 'code'];
 // Earlier turns replayed (chat answers and notes alike): every one while a thread has fewer than HISTORY_TURNS +
@@ -305,6 +305,11 @@ const hasMedia = (x) => (Array.isArray(x.images) && x.images.length > 0) || Bool
 // tab to the front) returns page text, controls or at least titles, all written by whoever made the page; so does a
 // GitHub search (it spans all of GitHub) or a GitHub read from a repo none of your accounts owns (st.outside, runAgent).
 export const readsPage = (st) => Boolean(st) && ((isBrowserStep(st) && st.name !== 'browser_show') || st.outside === true || st.name === 'github_search');
+// GitHub reads that say whose repo they read: from v91 runAgent writes st.outside as a boolean on every one. Before v84
+// nothing marked them, and v84–v90 wrote only outside: true. A read without the key in an entry from before every device
+// ran v84 (MEDIA_MARKS_SINCE) can't be told apart from someone else's repo: it counts as one.
+const GITHUB_READS = new Set(['github_read', 'github_issues']);
+const githubLegacy = (st, x) => GITHUB_READS.has(st.name) && !('outside' in st) && Number.isFinite(x?.createdAt) && x.createdAt < MEDIA_MARKS_SINCE;
 // The origin of a browser result's address ('' for none, or an opaque one: about:blank, data:, file:). Another look at a
 // tab runs unasked only while the tab is still on the origin read before (app.js runAgent).
 export function pageOrigin(url) {
@@ -326,10 +331,15 @@ export function ownTaint(x) {
 }
 // Why one entry taints whatever follows it in its thread ('' when it doesn't). Defensive: synced and restored entries
 // are only shape-checked (data-safety validateBackup), so steps or meta may be anything.
+// x.ranTaint: what an earlier run of this entry read, kept when Retry cleared its steps (app.js; STICKY in sync-merge).
+// A GitHub read or issue list written before v84 marked outside repos (no 'outside' key, an entry older than
+// MEDIA_MARKS_SINCE) may have been someone else's repo: it counts as one (githubLegacy), since nothing recorded whose.
 export function entryTaint(x) {
   if (!x || typeof x !== 'object') return '';
   const steps = Array.isArray(x.steps) ? x.steps.filter((st) => st && typeof st === 'object' && st.status === 'done') : [];
   let why = ownTaint(x);
+  if (typeof x.ranTaint === 'string' && TAINTS.includes(x.ranTaint)) why = worseTaint(why, x.ranTaint);
+  if (steps.some((st) => githubLegacy(st, x))) why = worseTaint(why, 'browser');
   for (const st of steps) if (st.untrusted) why = worseTaint(why, markOf(st.untrusted));
   if ((Number.isFinite(x.web) && x.web > 0) || /\blive web\b/.test(typeof x.meta?.note === 'string' ? x.meta.note : '')) why = worseTaint(why, 'web');
   if (steps.some(readsPage)) why = worseTaint(why, 'browser');

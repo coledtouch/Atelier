@@ -722,6 +722,68 @@ test('a follow-up about earlier photos sends its per-model turn behind its send 
   check(sent[0], 'find the email with this plant', 'Thu, Oct 8, 2026, 9:02 AM');
 });
 
+// v89 review (money-photo-turn-1h-cache-writes-never-read): a request that carries photos (a photo turn, or a follow-up that
+// shows earlier photos again) replays later as text, and images invalidate Claude's messages cache, so a history or turn
+// breakpoint there is a 1-hour write (2x input) that no later request reads. The app sends cache_turn false and Claude
+// gets the system breakpoint only; a follow-up whose model can't see the photos (a text note) keeps its usual breakpoints.
+test('Claude: cache_turn false marks the system prompt only (a tester’s too); the hint never reaches Anthropic', async () => {
+  let sent = anthropic(ok);
+  await run({ messages: thread(6), cache_turn: false });
+  assert.deepEqual(marks(sent[0]), [['s', H1]]);
+  assert.ok(!('cache_turn' in sent[0]), 'the hint itself never reaches Anthropic');
+  sent = anthropic(ok);
+  await run({ messages: thread(6), cache_turn: false }, { maxTokens: 4096, webUses: 0, fallbacks: true, onUsage() {} });
+  assert.deepEqual(marks(sent[0]), [['s', M5]]);
+  sent = anthropic(ok);
+  await run({ messages: thread(6), cache_turn: false, cache: false });
+  assert.deepEqual(marks(sent[0]), [], 'cache false still writes nothing');
+  sent = anthropic(ok);
+  await run({ messages: thread(6) });
+  assert.deepEqual(marks(sent[0]).map(([k]) => k), ['s', 'm11', 'm12'], 'without the hint: as before');
+  // the tester router passes it on (and nothing else of the app's hints)
+  assert.match(await readFile(new URL('../src/tester/router.js', import.meta.url), 'utf8'), /if \(b\.cache_turn === false\) body\.cache_turn = false;/);
+});
+
+test('runChat: a photo turn and a follow-up that shows photos again send cache_turn false; Claude writes the system prompt only', async () => {
+  const PNG = 'data:image/png;base64,iVBORw0KGgo=';
+  const history = Array.from({ length: 6 }, (_, i) => ({ id: `h${i}`, kind: 'ask', prompt: `q${i} ${'x'.repeat(400)}`, text: `a${i} ${'y'.repeat(400)}`, createdAt: T9 + i, sent: 'Thu, Oct 8, 2026, 9:00 AM' }));
+  // 1. the owner's own photos on a Claude turn (Vision pinned to Claude)
+  let sent = anthropic(ok);
+  let { vars, bodies } = chatRig();
+  const own = { id: 'p1', kind: 'ask', prompt: 'what plant is this?', images: [PNG], params: {}, createdAt: Date.now(), sent: 'Thu, Oct 8, 2026, 9:01 AM' };
+  await vars.runChat(own, null, { id: 'tp', entries: [...history, own] });
+  assert.equal(bodies[0].cache_turn, false);
+  assert.deepEqual(marks(sent[0]).map(([k]) => k), ['s'], 'the system prompt only');
+  // 2. a follow-up that shows the earlier photo again to a model that sees it
+  const ctx = { kind: 'images', src: { ...own, text: 'A fern.' } };
+  const follow = (sees) => {
+    const rig = chatRig();
+    Object.assign(rig.vars, { contextOf: () => ctx, seesImages: () => sees, photoFollowUp, mediaTurn, CTX_IMAGES });
+    rig.vars.ctxTurn = evalIn(rig.vars, `return (${constExpr('ctxTurn')});`);
+    return rig;
+  };
+  sent = anthropic(ok);
+  ({ vars, bodies } = follow(true));
+  const e = { id: 'p2', kind: 'ask', prompt: 'how often do I water it?', params: {}, createdAt: Date.now(), sent: 'Thu, Oct 8, 2026, 9:02 AM' };
+  await vars.runChat(e, null, { id: 'tp', entries: [...history, ctx.src, e] });
+  assert.equal(bodies[0].cache_turn, false);
+  assert.ok(sent[0].messages.at(-1).content.some((b) => b.type === 'image'), 'the photo is shown again');
+  assert.deepEqual(marks(sent[0]).map(([k]) => k), ['s']);
+  // 3. the same follow-up to a model that can't see photos: a text note, replayed as sent, so the usual breakpoints
+  sent = anthropic(ok);
+  ({ vars, bodies } = follow(false));
+  await vars.runChat(e, null, { id: 'tp', entries: [...history, ctx.src, e] });
+  assert.ok(!('cache_turn' in bodies[0]));
+  assert.deepEqual(marks(sent[0]).map(([k]) => k), ['s', `m${sent[0].messages.length - 2}`, `m${sent[0].messages.length - 1}`]);
+  // 4. a plain text turn: no hint
+  sent = anthropic(ok);
+  ({ vars, bodies } = chatRig());
+  const plainTurn = { id: 'p3', kind: 'ask', prompt: 'and in winter?', params: {}, createdAt: Date.now(), sent: 'Thu, Oct 8, 2026, 9:03 AM' };
+  await vars.runChat(plainTurn, null, { id: 'tp', entries: [...history, plainTurn] });
+  assert.ok(!('cache_turn' in bodies[0]));
+  assert.equal(marks(sent[0]).length, 3);
+});
+
 test('a tester replays at most 10 turns (6-10, in blocks): Opus 5.5’s per-call reservation fits every turn of a long thread', () => {
   const v = promptRig({ tester: { id: 'tt' } });
   const SYS_TEXT = 'S'.repeat(5100), P = 'p'.repeat(300), A = 'a'.repeat(3000);
@@ -815,13 +877,13 @@ test('Worker: every OpenAI-style stream asks for its usage; OpenAI and xAI get t
   const post = (body) => api(env, 'chat', { method: 'POST', body, headers: { 'content-type': 'application/json' } }, { pass: 'pw' });
   const models = { openai: 'openai:gpt-6-luna', gemini: 'gemini:gemini-3.8-flash', deepseek: 'deepseek:deepseek-flash', zai: 'zai:glm-5.3', xai: 'xai:grok-4.7', meta: 'meta:muse-spark-1.3' };
   for (const [p, model] of Object.entries(models)) {
-    const r = await post({ model, stream: true, cache_key: 'at-0123456789abcdef', cache: false, messages: [{ role: 'user', content: 'hi' }] });
+    const r = await post({ model, stream: true, cache_key: 'at-0123456789abcdef', cache: false, cache_turn: false, cache_tail: '1h', messages: [{ role: 'user', content: 'hi' }] });
     const text = await r.text();
     const call = upstream.calls.at(-1);
     assert.match(call.url, OPENAI_STYLE[p], p);
     assert.deepEqual(call.json.stream_options, { include_usage: true }, p);
     assert.equal(call.json.prompt_cache_key, p === 'openai' || p === 'xai' ? 'at-0123456789abcdef' : undefined, p);
-    assert.ok(!('cache' in call.json) && !('cache_key' in call.json), `${p}: the app's hints never go on as fields`);
+    for (const k of ['cache', 'cache_key', 'cache_turn', 'cache_tail']) assert.ok(!(k in call.json), `${p}: the app's hint ${k} never goes on as a field`);
     const passed = text.split('\n').filter((l) => l.startsWith('data: {')).map((l) => JSON.parse(l.slice(6))).find((c) => c.usage);
     assert.deepEqual(readUsage(passed.usage), { input: 6000, cached: 5120, written: null, output: 50 }, `${p}: passed through to the app`);
   }

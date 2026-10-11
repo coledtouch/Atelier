@@ -36,7 +36,7 @@
 // tester account): it isn't synced, backed up or embedded in a download. Deleting a thread that can't be restored removes
 // its apps' data at once; a thread no longer on this device for another reason (in Recently deleted, deleted on another
 // device) keeps it 30 days, so a restore finds it, then prune deletes it. Clear this device removes all of this workspace's.
-import { rootOf } from './builds.js?v=90';
+import { rootOf } from './builds.js?v=91';
 
 export const MSG = 'atelier-appdata';
 export const APP_CAP = 5 * 1024 * 1024;     // bytes per app: 2 per UTF-16 code unit of keys + values (as browsers count)
@@ -53,10 +53,34 @@ export const cost = (k, v) => (k.length + v.length) * 2;
 
 // The app a Build entry belongs to: its thread and the first build of its lineage. '' when it can't be named safely
 // (that preview then gets a shim that saves nothing).
+// A version whose own request is marked as not the owner's (buildMarked: text from a link or a share, a restored backup,
+// an imported Claude turn) starts a store of its own, and so does every later version built on it: the model took that
+// text as the owner's request, so its code may send the data away. The key is then the thread and the FIRST such
+// version on the way from the entry up to the root (taintedFrom), never the root: what the owner's own versions saved
+// stays out of it. The card says so (app.js appDataRow).
 export function appKey(threadId, entries, entry) {
   if (typeof threadId !== 'string' || !ID.test(threadId) || !Array.isArray(entries) || !entries.includes(entry)) return '';
-  const root = rootOf(entries, entry);
-  return root && typeof root.id === 'string' && ID.test(root.id) ? `${threadId}/${root.id}` : '';
+  const base = taintedFrom(entries, entry) || rootOf(entries, entry);
+  return base && typeof base.id === 'string' && ID.test(base.id) ? `${threadId}/${base.id}` : '';
+}
+// Only an explicit mark counts here, never ownTaint's date rule ('legacy': every entry made before the marks, Oct 3, or
+// one with media before Oct 10): the owner's own older apps keep their one store, their network access and no "made
+// from a link" note (v91 review). The mark values are the ones ownTaint (context.js) reads.
+export const buildMarked = (x) => Boolean(x) && typeof x === 'object' && (Boolean(x.untrusted) || Boolean(x.imported) || x.via === 'claude');
+// The version nearest the root, on the refineOf path from entry up to its lineage's root, whose own words are marked as
+// not the owner's; null when there is none.
+export function taintedFrom(entries, entry) {
+  const byId = new Map(entries.map((y) => [y.id, y]));
+  const seen = new Set();
+  let cur = entry, first = null;
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    if (buildMarked(cur)) first = cur;
+    const up = cur.refineOf ? byId.get(cur.refineOf) : null;
+    if (!up || up.kind !== 'build') break;
+    cur = up;
+  }
+  return first;
 }
 // Each workspace has its own database, like its threads (app.js threadDbName).
 export function workspaceDb(workspace) {
@@ -328,11 +352,21 @@ export function injectFirst(html, s) {
   const at = m ? m[0].length : 0;
   return html.slice(0, at) + s + html.slice(at);
 }
-// The preview document: the shim (cfg null: one that saves nothing), then `head` (app.js's focus guard), then the app.
-export function previewDoc(html, cfg = null, head = '') {
+// A preview of an app whose request may not be the owner's (appKey: a tainted lineage) gets this policy, ahead of
+// everything else in its document: scripts, styles and fonts only inline or from the CDNs the Build prompt names, and no
+// fetch, XHR, beacon, image, media or form to any other address, so whatever is typed into it can't be sent away that
+// way. (Defence in depth: a sandboxed frame may still navigate itself, and window.open needs a tap.) Remote images in
+// such an app don't load.
+export const STRICT_PREVIEW_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; "
+  + "style-src 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://unpkg.com; font-src data: https://fonts.gstatic.com https://cdn.jsdelivr.net https://unpkg.com; "
+  + "img-src data: blob: https://cdn.jsdelivr.net https://unpkg.com; media-src data: blob:; worker-src blob:; connect-src https://cdn.jsdelivr.net https://unpkg.com; form-action 'none'; base-uri 'none'";
+// The preview document: (strict: the policy above,) the shim (cfg null: one that saves nothing), then `head` (app.js's
+// focus guard), then the app.
+export function previewDoc(html, cfg = null, head = '', { strict = false } = {}) {
   const c = cfg || { type: MSG, token: '', origin: '', persist: false, items: [], quota: APP_CAP };
   const full = { keyMax: KEY_MAX, keysMax: KEYS_MAX, opsMax: OPS_MAX, msgMax: MSG_MAX, ...c };
-  return injectFirst(String(html), `<script>(${storageShim})(${scriptJson(full)})</script>${head}`);
+  const policy = strict ? `<meta http-equiv="Content-Security-Policy" content="${STRICT_PREVIEW_CSP}">` : '';
+  return injectFirst(String(html), `${policy}<script>(${storageShim})(${scriptJson(full)})</script>${head}`);
 }
 
 // ───────────────────────── in Atelier ─────────────────────────
@@ -682,8 +716,10 @@ export function createBridge({ store, origin, head = '', makeToken = randomToken
   warn = () => {}, onRefused = () => {}, onStall = () => {} }) {
   const byToken = new Map(), byFrame = new WeakMap();
   const stalled = new Map(); // frame → { key, html, timer }: an app reloading itself in a loop, until its next document
-  const docFor = (b) => previewDoc(b.html, { type: MSG, token: b.token, origin, persist: true, items: store.items(b.key), quota: store.room(b.key) }, head);
-  const plainDoc = (html) => previewDoc(html, null, head);
+  // Apps mounted strict (a tainted lineage: appKey) keep their policy on every later document (a rebuild, a remount).
+  const strictKeys = new Set();
+  const docFor = (b) => previewDoc(b.html, { type: MSG, token: b.token, origin, persist: true, items: store.items(b.key), quota: store.room(b.key) }, head, { strict: strictKeys.has(b.key) });
+  const plainDoc = (html, strict = false) => previewDoc(html, null, head, { strict });
   function unbind(b) {
     byToken.delete(b.token);
     if (byFrame.get(b.frame) === b) byFrame.delete(b.frame);
@@ -703,19 +739,20 @@ export function createBridge({ store, origin, head = '', makeToken = randomToken
       else if (t - b.goneAt > graceMs) unbind(b);
     }
   }
-  function mount(frame, { key, html }, rebuilds = []) {
+  function mount(frame, { key, html, strict = false }, rebuilds = []) {
     sweep();
     unstall(frame);
     const old = byFrame.get(frame);
     if (old) unbind(old);
     if (!validKey(key)) { frame.srcdoc = plainDoc(html); return null; }
+    if (strict) strictKeys.add(key);
     const b = { frame, key, html, token: makeToken(), port: null, state: 'loading', goneAt: 0, rebuilds, behind: false, ok: null };
     byToken.set(b.token, b); byFrame.set(frame, b);
     const set = () => { if (byToken.get(b.token) !== b) return; b.state = 'new'; frame.srcdoc = docFor(b); };
     if (store.peek(key)) set();
     else store.load(key).then(set, (err) => {
       if (byToken.get(b.token) !== b) return;
-      warn(err); unbind(b); frame.srcdoc = plainDoc(html); // can't read its data: the app runs, saving nothing
+      warn(err); unbind(b); frame.srcdoc = plainDoc(html, strictKeys.has(key)); // can't read its data: the app runs, saving nothing
     });
     return b;
   }
