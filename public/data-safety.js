@@ -1,6 +1,6 @@
-import { validVideo } from './video.js?v=89';
-import { validRemix, recoverRemix } from './remix.js?v=89';
-import { SPOKEN_FROM } from './readaloud.js?v=89';
+import { validVideo } from './video.js?v=90';
+import { validRemix, recoverRemix } from './remix.js?v=90';
+import { SPOKEN_FROM } from './readaloud.js?v=90';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -10,7 +10,7 @@ const safeId = value => text(value) && /^[\w-]{1,120}$/.test(value);
 // Error kinds app.js renders (errorBox); 'budget' and 'signin' are LinkedIn tester refusals (402/403/413/503, 401, 410).
 // An entry saved with v83–v84's 'cap' (the owner's spending limits, removed in v85) still imports: errorBox doesn't know
 // the kind any more, so it classifies the entry's text instead.
-export const ERROR_KINDS = Object.freeze(['offline', 'passcode', 'key', 'rate', 'model', 'busy', 'filtered', 'stopped', 'interrupted', 'budget', 'signin', 'error']);
+export const ERROR_KINDS = Object.freeze(['offline', 'passcode', 'guard', 'key', 'rate', 'model', 'busy', 'filtered', 'stopped', 'interrupted', 'budget', 'signin', 'error']);
 // What stopped a tester request (e.budget): its scope, when a day/month/pool allowance resets (ms), and short: true when
 // money was still left in that scope (the request was just bigger than what remained).
 const BUDGET_SCOPES = new Set(['day', 'month', 'pool', 'call', 'paused', 'model', 'owner', 'large', 'origin']);
@@ -64,6 +64,7 @@ export function validateBackup(data) {
       if (e.web != null) assert(Number.isSafeInteger(e.web) && e.web >= 0);
       if (e.imported != null) assert(e.imported === true);
       if (e.untrustedFiles != null) assert(e.untrustedFiles === true); // only the shared photos / video marked it (submit)
+      if (e.composed != null) assert(e.composed === true); // a prompt Atelier wrote from an answer: never memory (learnFrom)
       // A chat turn's send time (app.js run(), a short locale date): it goes in front of the turn's message (context.js
       // withSent, which also flattens and caps it), so nothing longer than a date is taken.
       if (e.sent != null) assert(text(e.sent) && e.sent.length <= 80);

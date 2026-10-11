@@ -14,7 +14,8 @@ window.addEventListener('message', async (ev) => {
   if (d.__atelier !== 'req' || typeof d.id !== 'string' || typeof d.cmd !== 'string') return;
   let reply;
   try {
-    reply = await chrome.runtime.sendMessage({ cmd: d.cmd, args: d.args || {} });
+    // approved: the owner OK'd this step in Atelier (opening a page or reading one by its address needs it).
+    reply = await chrome.runtime.sendMessage({ cmd: d.cmd, args: d.args || {}, approved: d.approved === true });
   } catch (err) {
     reply = { ok: false, error: `Extension error: ${err.message}` };
   }

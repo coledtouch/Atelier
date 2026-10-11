@@ -61,8 +61,8 @@ test('Cloudflare Web Analytics is disclosed whenever the CSP lets its beacon run
   assert.match(PRIVACY, /<b>In short:<\/b>[^<]*cookieless page-view counts/);
 });
 
-test('the legal pages carry the October 8, 2026 effective date (xAI added as a provider)', () => {
-  for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective October 8, 2026<\/p>/);
+test('the legal pages carry the October 11, 2026 effective date (passcode Guard cookie, testers reopened)', () => {
+  for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective October 11, 2026<\/p>/);
 });
 
 test('Google Fonts is disclosed while any page loads it: in Technical data, as a processor and in the short summary', async () => {
@@ -136,7 +136,7 @@ test('owner thread sync is disclosed as it behaves: images and videos sync, medi
   assert.match(MERGE, /inline: 32768, \/\/ strings longer than this/, 'the long-text threshold changed: update "about 32 KB"');
   assert.match(SYNC, /cellularMaxBytes: 10 \* 1024 \* 1024, \/\/ a video bigger than this waits for Wi-Fi on mobile data \/ Data Saver \(both ways\)/, 'the Wi-Fi rule changed: update "videos over 10 MB"');
   assert.match(SYNC, /cellular: 'Download videos on mobile data'/);
-  assert.doesNotMatch(await read('src/sync.js'), /bucket\.delete\(blobKey|delete\(`b\//, 'blobs are deleted now: update "until a later clean-up"');
+  assert.doesNotMatch(await read('src/sync.js'), /bucket\.delete\(blobKey|delete\(`b\//, 'blobs are deleted now: update "not removed automatically"');
   assert.match(SYNC, /wipeConfirm: 'Clear Atelier threads[^']*synced threads stay on your Atelier server/);
   const items = [...PRIVACY.matchAll(/<li><b>The studio owner’s threads:?<\/b>([\s\S]*?)<\/li>/g)].map((m) => text(m[1]));
   assert.equal(items.length, 2, 'the tester section and section 6');
@@ -150,7 +150,10 @@ test('owner thread sync is disclosed as it behaves: images and videos sync, medi
   // the rule rests on navigator.connection, which Safari and Firefox don't have: there, videos sync on any network
   assert.match(SYNC, /connection: \(\) => navigator\.connection \|\| null/);
   assert.match(items[1], /On a phone whose browser reports mobile data or Data Saver \(Chrome on Android does; Safari on iPhone doesn’t, so there videos sync on any network\)/);
-  assert.match(items[1], /except copies of images, videos and long texts \(over about 32 KB, such as long answers or pasted documents\), which remain in that private storage until a later clean-up removes the ones no thread uses/);
+  // No clean-up of b/ exists (nothing in src/ deletes a blob, and no lifecycle rule covers b/: scripts/check-r2-lifecycle.mjs
+  // flags one as dangerous), so the page must not promise one.
+  assert.match(items[1], /except copies of images, videos and long texts \(over about 32 KB, such as long answers or pasted documents\), which are not removed automatically: one copy can be shared by several threads, so they stay in that private storage until the owner deletes them there/);
+  assert.doesNotMatch(PRIVACY, /later clean-up/);
   const cache = text(/<li><b>Look-up cache \(Cloudflare\):<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
   assert.doesNotMatch(cache, /is the one exception|the only exception/);
   assert.match(cache, /stored separately from your profile and memory, optional synced threads and voluntary feedback/);

@@ -50,8 +50,8 @@ import {
   FORMAT, MEDIA_SYNC, MEDIA_HELD, TRANSIENT, syncId, validDate, isRev, sha256hex, utf8, utf8Length, fromBase64, base64Length, jsonClone, dehydrate,
   hydrate, mediaKinds, gateHeld, refsOf, refValue, reborn, bornOf, forkEntry, checkView, checkPulledEntry, newRecord, planPull, planPush, pushBodies,
   planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder, fullPrint, blobKind,
-} from './sync-merge.js?v=89';
-import { validateBackup } from './data-safety.js?v=89';
+} from './sync-merge.js?v=90';
+import { validateBackup } from './data-safety.js?v=90';
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 // The owner's choices and the engine's timing, kept together so they are easy to change.
@@ -61,7 +61,7 @@ export const SYNC_CLIENT = Object.freeze({
   visibleThrottleMs: 15_000, drawerThrottleMs: 5_000, // a pull on becoming visible / opening the Threads drawer
   pushDebounceMs: 3_000, pushMaxWaitMs: 20_000, // push after the last write, but never later than this
   backoffMinMs: 2_000, backoffMaxMs: 5 * MIN, // network errors and 5xx (and one failing thread, on its own)
-  lockoutMs: 15 * MIN, // 429: passcodeGuard locked this network out
+  lockoutMs: 15 * MIN, // 429: the passcode guard (src/guard.js) locked this network out, or paused guessing for everyone
   unconfiguredRetryMs: HOUR, // 503 sync_unconfigured / sync_disabled: retried at most hourly (or on Sync now)
   requestTimeoutMs: 30_000, blobBytesPerSec: 50_000, // a request that stalls is abandoned (blobs get time for their size)
   keepaliveMaxBytes: 60 * 1024, // on hidden: one small delta may go with fetch keepalive (UTF-8 bytes, under the 64 KiB cap)

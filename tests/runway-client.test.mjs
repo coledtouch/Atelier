@@ -19,8 +19,8 @@ const {
 const appErrorKind = (() => {
   try {
     const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-    const a = src.match(/\nconst accountProblem = [\s\S]*?\);\n/), k = src.match(/\nfunction errorKind\([\s\S]*?\n}\n/);
-    return a && k ? new Function('isTesterCode', `${a[0]}\n${k[0]}\nreturn errorKind;`)(() => false) : null;
+    const a = src.match(/\nconst accountProblem = [\s\S]*?\);\n/), k = src.match(/\nfunction errorKind\([\s\S]*?\n}\n/), g = src.match(/\nconst GUARD_CODES = [^\n]*\n/);
+    return a && k && g ? new Function('isTesterCode', `${g[0]}\n${a[0]}\n${k[0]}\nreturn errorKind;`)(() => false) : null;
   } catch { return null; }
 })();
 

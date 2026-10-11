@@ -2,6 +2,9 @@
 // bridge.js) or from Atelier on another device (through the server relay).
 // Every click and every typing action first waits for the user's own OK in a window this extension opens itself
 // (confirm.html), whatever Atelier already approved, so a hijacked page or relay can never drive the browser silently.
+// Opening a page, and reading one by its address, run only with Atelier's own approval flag (the owner OK'd that step in
+// the app): the address the model chose loads signed in as the user, so it could carry data out. The server's relay
+// checks the same flag first (src/relay.js relayNeedsApproval); this is the last check.
 // This worker also refuses to type into password or payment fields no matter what it is asked.
 
 // The pages allowed to talk to this worker are exactly the ones bridge.js runs on. They are read from the manifest, so
@@ -31,6 +34,7 @@ const TIMING = { confirm: 45_000, settle: 1200, read: 10_000 };
 const COOLDOWN = { first: 30_000, max: 600_000 };
 const REFUSED_FIELD = 'Refused: Atelier never types into password, payment or ID fields. Ask the user to fill this in themselves.';
 const NOT_RESPONDING = 'The page isn’t responding (it may be showing a dialog box), so nothing was done. Ask the user to close it, then try again.';
+const NEEDS_APPROVAL = 'Opening a page or reading one by its address needs the user’s approval in Atelier first, so nothing was loaded.';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -299,7 +303,8 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 chrome.windows.onRemoved.addListener((windowId) => { if (asking && asking.windowId === windowId) asking.answer('closed'); });
 
-// ── commands ── (ctx.via: 'local' for the Atelier tab in this browser, 'remote' for the relay)
+// ── commands ── (ctx.via: 'local' for the Atelier tab in this browser, 'remote' for the relay; ctx.approved: the
+// owner approved this step in Atelier)
 const COMMANDS = {
   async tabs() {
     const tabs = await chrome.tabs.query({});
@@ -307,13 +312,15 @@ const COMMANDS = {
     return tabs.filter((t) => t.url && !t.url.startsWith(own) && !ALLOWED_ORIGINS.some((o) => t.url.startsWith(o)))
       .map((t) => ({ tabId: t.id, title: t.title, url: t.url, active: t.active }));
   },
-  async open({ url, active = false }) {
+  async open({ url, active = false }, ctx = {}) {
+    if (ctx.approved !== true) throw new Error(NEEDS_APPROVAL);
     const tab = await chrome.tabs.create({ url: checkUrl(url), active: Boolean(active) });
     await waitForLoad(tab.id);
     const t = await chrome.tabs.get(tab.id);
     return { tabId: t.id, title: t.title, url: t.url };
   },
-  async read({ tabId, url }) {
+  async read({ tabId, url }, ctx = {}) {
+    if (url && ctx.approved !== true) throw new Error(NEEDS_APPROVAL); // a url needs it even beside a tabId, as in the app
     let id = tabId;
     let opened = false;
     if (!id && url) {
@@ -404,7 +411,7 @@ async function connectRelay() {
     try { msg = JSON.parse(ev.data); } catch { return; }
     const fn = REMOTE_COMMANDS.includes(msg?.cmd) && COMMANDS[msg.cmd];
     let reply;
-    try { reply = fn ? { ok: true, result: await fn(msg.args || {}, { via: 'remote' }) } : { ok: false, error: `Unknown command ${msg?.cmd}` }; }
+    try { reply = fn ? { ok: true, result: await fn(msg.args || {}, { via: 'remote', approved: msg.approved === true }) } : { ok: false, error: `Unknown command ${msg?.cmd}` }; }
     catch (err) { reply = { ok: false, error: friendly(err) }; }
     // The relay matches a reply to its command by id on any connection, so answer on whichever one is open now.
     const out = ws?.readyState === WebSocket.OPEN ? ws : sock;
@@ -457,7 +464,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.cmd === 'pair') msg.args = { ...(msg.args || {}), origin };
   const fn = Object.hasOwn(COMMANDS, msg?.cmd) && COMMANDS[msg.cmd];
   if (!fn) { sendResponse({ ok: false, error: `Unknown command ${msg?.cmd}` }); return false; }
-  fn(msg.args || {}, { via: 'local' })
+  fn(msg.args || {}, { via: 'local', approved: msg?.approved === true })
     .then((result) => sendResponse({ ok: true, result }))
     .catch((err) => sendResponse({ ok: false, error: friendly(err) }));
   return true; // async response

@@ -16,6 +16,8 @@ const {
   CANVA_EXPORT_HOSTS, CANVA_FILE_LIMITS, checkCanvaFileUrl, canvaFetchFile,
 } = await import('../src/tools.js');
 const worker = (await import('../src/worker.js')).default;
+// The passcode lockout (src/guard.js) as the real Durable Object on SQLite, like every Worker test's env.
+const { makeGuard } = await import('./tester-env.mjs');
 
 // ── fakes ──
 function fakeKV(init = {}) {
@@ -38,7 +40,7 @@ function fakeKV(init = {}) {
 }
 const ACCOUNT = { id: 'uAbc123', label: 'Jane Doe', team: 'tXyz', refresh: 'r1', scope: CANVA_SCOPES, connectedAt: 1 };
 const makeEnv = ({ accounts = [ACCOUNT], access, secrets = true, extra = {} } = {}) => ({
-  APP_PASSCODE: 'pw',
+  APP_PASSCODE: 'pw', GUARD: makeGuard().ns,
   ...(secrets ? { CANVA_CLIENT_ID: 'OC-client', CANVA_CLIENT_SECRET: 'cnvca-secret' } : {}),
   ATELIER_KV: fakeKV({ ...(accounts ? { canva_accounts: accounts } : {}), ...(access ? { [`canva_access:${ACCOUNT.id}`]: access } : {}), ...extra }),
 });
@@ -812,7 +814,8 @@ test('file proxy streams allowed files without credentials and never follows red
   assert.equal(r.headers.get('cache-control'), 'private, no-store');
   assert.equal(r.headers.get('content-length'), '4096');
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
-  assert.equal(r.headers.get('set-cookie'), null, 'upstream headers are not passed through');
+  // the only cookie is Atelier's own (the owner's clearance, src/guard.js): Canva's never comes through
+  assert.deepEqual(r.headers.getSetCookie().filter((c) => !c.startsWith('__Host-atelier_owner=')), [], 'upstream headers are not passed through');
   assert.deepEqual(new Uint8Array(await r.arrayBuffer()), bytes);
   const up = calls[0];
   assert.equal(up.url, EXPORT_URL(1));

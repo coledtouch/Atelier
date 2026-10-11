@@ -58,7 +58,8 @@ test('owner with the passcode: the article, wrapped by the /api security headers
   assert.equal(r.headers.get('cache-control'), 'no-store');
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(r.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
-  assert.equal(r.headers.get('set-cookie'), null);
+  // Wikimedia's cookie never comes through; the only one is Atelier's own (the owner's clearance, src/guard.js)
+  assert.deepEqual(r.headers.getSetCookie().filter((c) => !c.startsWith('__Host-atelier_owner=')), []);
   assert.equal(upstream.calls.length, 1);
   assert.equal(upstream.calls[0].headers.get('x-app-pass'), null);
   assert.match(upstream.calls[0].headers.get('user-agent'), /^Atelier\/1\.0 \(https:\/\/atelier\.ciprari\.ai\//);

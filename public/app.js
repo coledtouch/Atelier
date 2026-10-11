@@ -7,28 +7,28 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=89';
-import * as Sync from './sync.js?v=89';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=89';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=89';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=89';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=89';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=89';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=89';
-import { initLookup } from './lookup.js?v=89';
-import { createRemix } from './remix-app.js?v=89';
-import { sendMode, looksLikeQuestion } from './remix.js?v=89';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=89';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=89';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=89';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=89';
-import { createAppStore, createBridge, idbBackend, appKey, workspaceDb, fmtBytes } from './appdata.js?v=89';
-import * as ClaudeImport from './claude-import.js?v=89';
-import { createFeedback } from './feedback.js?v=89';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=89';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=89';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=89';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=89';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=90';
+import * as Sync from './sync.js?v=90';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=90';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=90';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=90';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=90';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=90';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=90';
+import { initLookup } from './lookup.js?v=90';
+import { createRemix } from './remix-app.js?v=90';
+import { sendMode, looksLikeQuestion } from './remix.js?v=90';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=90';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=90';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=90';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=90';
+import { createAppStore, createBridge, idbBackend, appKey, workspaceDb, fmtBytes } from './appdata.js?v=90';
+import * as ClaudeImport from './claude-import.js?v=90';
+import { createFeedback } from './feedback.js?v=90';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=90';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=90';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=90';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=90';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -631,6 +631,10 @@ function apiHeaders(extra = {}) {
 class ApiError extends Error {
   constructor(status, msg, extra) { super(msg); this.status = status; if (extra) Object.assign(this, extra); }
 }
+// The passcode guard's refusals (src/guard.js): a lock on this network (429), the global seal (429) or the guard itself
+// unreachable (503). Every model and every request is refused alike, so nothing falls back to another model on them
+// (each try would only be refused again), and the passcode is fine: never the "Enter passcode" screen.
+const GUARD_CODES = new Set(['passcode_locked', 'passcode_busy', 'guard_unavailable']);
 async function toApiError(r) {
   noteAllowance(r);
   let detail = '', j = null;
@@ -649,6 +653,8 @@ async function toApiError(r) {
   const code = typeof j?.code === 'string' && /^[a-z_]{1,40}$/.test(j.code) ? j.code : undefined;
   // Tester refusals are already worded for people (and never mention a passcode): keep them as they are.
   if (isTesterCode(code) || code === 'model_no_images') return new ApiError(r.status, detail || `Request failed (${r.status}).`, { code, scope: typeof j.scope === 'string' ? j.scope : undefined, resetsAt: j.resetsAt });
+  // So are the passcode guard's (how long to wait): no "Rate limited" lead in front of them.
+  if (GUARD_CODES.has(code)) return new ApiError(r.status, detail || `Request failed (${r.status}).`, { code, ...(Number(j.retryAfter) > 0 ? { retryAfter: Number(j.retryAfter) } : {}) });
   if (r.status === 401 && /passcode|key on the server/i.test(detail)) return new ApiError(401, detail);
   if (/^error code: \d+$/i.test(detail.trim())) detail = '';
   const lead = {
@@ -679,6 +685,8 @@ function errorKind(msg = '', status, code) {
   if (isTesterCode(code)) return 'budget'; // tester limits: never a dead provider, never the passcode screen
   if (m === 'Stopped.') return 'stopped';
   if (/interrupted/i.test(m)) return 'interrupted'; // renderThread + data-safety recoverThread/prepareImport messages
+  // the passcode guard (by its code, or its words on an older entry): wait, the passcode itself is fine
+  if (GUARD_CODES.has(code) || /too many wrong passcodes|too many passcode tries|couldn[’']t check the passcode/i.test(m)) return 'guard';
   if (/passcode/i.test(m)) return 'passcode';
   if (status === 0 || /couldn[’']t reach atelier|connection dropped|failed to fetch|networkerror|\bload failed/i.test(m)) return 'offline';
   if (accountProblem({ status, message: m, code }) || /key on the server|api key|isn[’']t allowed|billing|quota|credit|workspace/i.test(m)) return 'key';
@@ -688,7 +696,7 @@ function errorKind(msg = '', status, code) {
   if (/safety|filtered|rephras/i.test(m)) return 'filtered';
   return 'error';
 }
-const ERROR_TITLE = { offline: 'Couldn’t reach the studio', passcode: 'Passcode needed', key: 'A provider key needs attention', rate: 'Too many requests', model: 'That model isn’t available', busy: 'The model is busy', filtered: 'Try rephrasing', stopped: 'Stopped', interrupted: 'Interrupted', budget: 'Over the tester allowance', signin: 'Sign in again', error: 'Couldn’t finish' };
+const ERROR_TITLE = { offline: 'Couldn’t reach the studio', passcode: 'Passcode needed', guard: 'Too many passcode tries', key: 'A provider key needs attention', rate: 'Too many requests', model: 'That model isn’t available', busy: 'The model is busy', filtered: 'Try rephrasing', stopped: 'Stopped', interrupted: 'Interrupted', budget: 'Over the tester allowance', signin: 'Sign in again', error: 'Couldn’t finish' };
 // The 'budget' card's title by what stopped it (e.budget.scope, from the 402/403/413/503 code).
 const BUDGET_TITLE = { day: 'Today’s allowance is used up', month: 'This month’s allowance is used up', pool: 'The tester budget is used up this month', call: 'Too much for one request', paused: 'Tester access is paused', model: 'Not in the tester plan', owner: 'Not part of tester mode', large: 'That request is too large', origin: 'Request blocked', video: 'This clip isn’t ready yet' };
 // A day/month/pool refusal while at least a cent is still left: this request was bigger than what remains (short).
@@ -709,6 +717,7 @@ function errorTitle(kind, msg = '', budget) {
   if (/only thought and never wrote/i.test(msg)) return 'No answer came back'; // kind stays 'busy': synced/backed-up kinds are a fixed list // testers have no provider keys to check
   if (kind === 'offline') return /dropped/i.test(msg) ? 'The connection dropped' : navigator.onLine ? ERROR_TITLE.offline : 'You’re offline';
   if (kind === 'passcode' && /too many/i.test(msg)) return 'Too many passcode tries';
+  if (kind === 'guard') return /couldn[’']t check/i.test(msg) ? 'Couldn’t check the passcode' : /being tried right now/i.test(msg) ? 'Sign-ins are paused for a moment' : ERROR_TITLE.guard;
   return ERROR_TITLE[kind] || ERROR_TITLE.error;
 }
 // Sent when a thinking model ended its turn with reasoning only (streamChat).
@@ -790,6 +799,7 @@ async function streamChat(opts) {
         // refusal ('call': too big for one tester request on THIS model) isn't: a cheaper model in the chain may fit.
         const callCap = err.code === 'tester_budget' && err.scope === 'call';
         if (isTesterCode(err.code) && !callCap) throw err;
+        if (GUARD_CODES.has(err.code)) throw err; // the passcode guard refuses every model alike: no fallback fan-out
         stale = got;
         if (network) {
           if (!navigator.onLine) throw err; // offline fails every model the same way
@@ -1262,16 +1272,59 @@ const ICON = {
   in: '<svg viewBox="0 0 24 24"><path d="M11 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6M20 4l-9 9M11 7v6h6"/></svg>',
 };
 
+// Only Atelier makes a reply's action buttons, and never through the HTML string. marked's code renderer below writes
+// a plain <pre><code class="language-…"> with no button, data attribute or mark of trust: the reply's own markup is
+// parsed together with that string, and a tag the reply left open (an unclosed title=", a <div with no >) takes over
+// the attributes that follow it. After sanitizing, addCodeBars builds each block's bar and buttons with DOM calls
+// around a <pre> that holds only a <code> that holds only text, and rebuilds that <pre> and <code> fresh, so what
+// Preview, Copy and Download act on is exactly the text the block shows. A reply keeps no data-* at all and no class
+// but a <code>'s language (lockReplyFetches): its own <div class="codeblock"><button data-act="code-preview">, with
+// whatever it likes hidden in a <code hidden>, comes out as plain markup that no click handler answers.
+const CODE_LANG = /^[a-z0-9][a-z0-9+#._-]{0,30}$/;
+const codeLang = (lang) => { const l = String(lang || '').trim().split(/\s+/)[0].toLowerCase(); return CODE_LANG.test(l) ? l : ''; };
 marked.use({
   gfm: true, breaks: false,
   renderer: {
     code({ text, lang }) {
-      const l = (lang || '').trim().split(/\s+/)[0].toLowerCase();
-      const canPreview = l === 'html' || l === 'svg';
-      return `<div class="codeblock" data-lang="${esc(l)}"><div class="codeblock-bar"><span>${esc(l || 'text')}</span><span class="acts">${canPreview ? `<button class="mini" data-act="code-preview">${ICON.play}Preview</button>` : ''}<button class="mini" data-act="code-download" aria-label="Download code">${ICON.down}</button><button class="mini" data-act="code-copy">${ICON.copy}Copy</button></span></div><pre><code class="${l ? 'language-' + esc(l) : ''}">${esc(text)}</code></pre></div>`;
+      const l = codeLang(lang);
+      return `<pre><code${l ? ` class="language-${l}"` : ''}>${esc(text)}</code></pre>`;
     },
   },
 });
+// The bar of one code block, built with DOM calls in the document `pre` belongs to (md()'s inert template).
+function codeBlock(d, text, lang) {
+  const el = (tag, cls) => { const n = d.createElement(tag); if (cls) n.className = cls; return n; };
+  const button = (act, icon, label, aria) => {
+    const b = el('button', 'mini');
+    b.dataset.act = act;
+    if (aria) b.setAttribute('aria-label', aria);
+    b.innerHTML = icon; // Atelier's own icon markup (ICON)
+    if (label) b.append(label);
+    return b;
+  };
+  const block = el('div', 'codeblock'), bar = el('div', 'codeblock-bar'), name = el('span'), acts = el('span', 'acts');
+  if (lang) block.dataset.lang = lang;
+  name.textContent = lang || 'text';
+  if (lang === 'html' || lang === 'svg') acts.append(button('code-preview', ICON.play, 'Preview'));
+  acts.append(button('code-download', ICON.down, '', 'Download code'), button('code-copy', ICON.copy, 'Copy'));
+  bar.append(name, acts);
+  const pre = el('pre'), code = el('code', lang ? `language-${lang}` : '');
+  code.textContent = text;
+  pre.append(code);
+  block.append(bar, pre);
+  return block;
+}
+// Every <pre> whose only child is an HTML <code> holding only text becomes a code block (marked's, or one the reply
+// wrote as HTML: either way its buttons act on the text it shows). Anything else in a <pre> stays plain, with no bar.
+function addCodeBars(root) {
+  for (const pre of [...root.querySelectorAll('pre')]) {
+    const code = pre.firstChild;
+    if (pre.childNodes.length !== 1 || code.nodeType !== 1 || code.localName !== 'code' || code.namespaceURI !== 'http://www.w3.org/1999/xhtml'
+      || [...code.childNodes].some((c) => c.nodeType !== 3)) continue;
+    const lang = /^language-(.+)$/.exec(code.getAttribute('class') || '')?.[1] || '';
+    pre.replaceWith(codeBlock(pre.ownerDocument, code.textContent, CODE_LANG.test(lang) ? lang : ''));
+  }
+}
 // A rendered reply (model output, which a web page, an email or shared text can steer) loads nothing from another site
 // by itself: an image, poster or CSS url() is fetched the moment the answer shows, so its URL could carry data out with
 // no tap (the CSP is still Report-Only). Same-origin, data: and blob: stay; a remote <img> becomes a small link that
@@ -1292,6 +1345,7 @@ function blockedImage(src) {
   a.className = 'img-blocked';
   a.textContent = `Image from ${web ? u.host : 'another site'} blocked`;
   if (web) Object.assign(a, { href: u.href, target: '_blank', rel: 'noopener noreferrer', title: 'Open the image in a new tab' });
+  madeHere.add(a); // DOMPurify visits it next, with this hook: it is Atelier's, and keeps its class
   return a;
 }
 const FETCH_ATTRS = ['src', 'srcset', 'poster', 'background', 'href', 'xlink:href'];
@@ -1305,16 +1359,22 @@ function cssPlain(v) {
 }
 const CSS_FETCH = /url\s*\(\s*['"]?\s*[^\s'"#)]|image-set\s*\(|\bimage\s*\(|\bsrc\s*\(/i; // url(#local) stays
 const TEXT_ATTRS = /^(?:alt|title|aria-[\w-]+|data-[\w-]+)$/i; // never read as CSS
-// The only data-* a reply keeps: the code-block bar's buttons (marked's code renderer) and the block's language. Any
-// other data-act (dl-media, approve, vary, idea-build…), data-k, data-step or data-id would let a reply draw a button
-// that runs one of its entry's actions, or stand in for the entry itself (stream's click handler reads data-act,
-// data-k and the nearest [data-id]).
-const REPLY_ACTS = new Set(['code-copy', 'code-download', 'code-preview']);
+// A reply keeps no data-* attribute and no class, except a <code>'s one language class (what marked's renderer writes;
+// a reply writing it too only names a language). A reply's own data-act (code-preview as much as dl-media, approve,
+// vary, idea-build…), data-k, data-step, data-id or class would let it draw a button that runs one of its entry's
+// actions, a code block whose Preview, Copy or Download acts on code it hid, or stand in for the entry itself (stream's
+// click handler reads data-act, data-k, .codeblock and the nearest [data-id]). Atelier's own nodes are made after this
+// (addCodeBars) or marked as made here (madeHere: the blocked-image link, which DOMPurify visits once it replaces the
+// <img>), so nothing in the reply's HTML can carry trust.
+const madeHere = new WeakSet();
+const LANG_CLASS = /^language-[a-z0-9][a-z0-9+#._-]{0,30}$/;
 function lockReplyFetches(n) {
+  if (madeHere.has(n)) return;
   const tag = String(n.nodeName).toLowerCase();
   for (const { name, value } of [...n.attributes]) {
     const k = name.toLowerCase();
-    if (k.startsWith('data-') && !(k === 'data-lang' || (k === 'data-act' && REPLY_ACTS.has(value)))) n.removeAttribute(name);
+    const keep = k === 'class' ? tag === 'code' && LANG_CLASS.test(value) : !k.startsWith('data-');
+    if (!keep) n.removeAttribute(name);
   }
   if (tag === 'img' && !localUrl(n.getAttribute('src') || '')) { n.replaceWith(blockedImage(n.getAttribute('src') || '')); return; }
   const link = (a) => (a === 'href' || a === 'xlink:href') && (tag === 'a' || tag === 'area'); // a link waits for a tap
@@ -1330,7 +1390,16 @@ function lockReplyFetches(n) {
 }
 DOMPurify.addHook('afterSanitizeAttributes', lockReplyFetches);
 function md(text) {
-  return DOMPurify.sanitize(marked.parse(text || ''), { ADD_ATTR: ['data-act', 'data-lang', 'target'], ALLOW_DATA_ATTR: false, FORBID_TAGS: ['form', 'style'], FORBID_ATTR: ['style', 'id', 'name'] });
+  const html = marked.parse(text || '');
+  // With a <pre> in it, the sanitized tree comes back as nodes (parsed once, as DOMPurify always does), the code bars
+  // are added in an inert template, and it is serialized once: never re-parsed together with any HTML string.
+  const pre = /<pre/i.test(html);
+  const clean = DOMPurify.sanitize(html, { ADD_ATTR: ['target'], ALLOW_DATA_ATTR: false, FORBID_TAGS: ['form', 'style'], FORBID_ATTR: ['style', 'id', 'name'], ...(pre ? { RETURN_DOM_FRAGMENT: true } : {}) });
+  if (!pre) return clean;
+  const t = document.createElement('template');
+  t.content.append(clean);
+  addCodeBars(t.content);
+  return t.innerHTML;
 }
 function highlightIn(el) {
   $$('pre code', el).forEach((c) => { if (!c.dataset.hl) { try { hljs.highlightElement(c); } catch {} c.dataset.hl = 1; } });
@@ -1861,6 +1930,12 @@ stream.addEventListener('load', () => { if (stickToBottom) scrollDown(); }, true
 stream.addEventListener('loadedmetadata', () => { if (stickToBottom) scrollDown(); }, true);
 
 // ───────────────────────── run pipeline ─────────────────────────
+// Turns whose prompt Atelier wrote itself from another entry's answer or idea (a button's own text: an idea's Expand,
+// Build it or Visualize, Build from this, Variation, Look up's ask), never the owner's typed or spoken words, carry
+// composed: true on the entry. The memory learner never reads them (learnFrom), wherever they land: an answer can carry
+// what a link or a share steered it to say even when the turn it quotes is in another thread, or no longer in any. The
+// mark is on the entry itself, so it holds wherever the entry goes: saved and read back when the thread is reopened
+// (Retry or Rebuild then runs learnFrom again), synced to another device, or restored from a backup.
 async function submit(textArg, modeArg, extra = {}) {
   if (textArg == null && micHold()) return; // dictation is still writing into the box: it sends once that's done (C2)
   // Spoken (readaloud.js spokenFrom): the composer's words are mostly what voice put there (Atelier Assist, Talk, the mic),
@@ -1922,7 +1997,7 @@ async function submit(textArg, modeArg, extra = {}) {
   }
 
   if (!S.thread) S.thread = newThread();
-  const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(untrusted && { untrusted }), ...(untrusted && !textMark && { untrustedFiles: true }), ...(extra.via === 'assist' && { via: 'assist' }), ...(said && { spoken: said }), ...extra.entry };
+  const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(untrusted && { untrusted }), ...(untrusted && !textMark && { untrustedFiles: true }), ...(extra.via === 'assist' && { via: 'assist' }), ...(said && { spoken: said }), ...(textArg != null && { composed: true }), ...extra.entry };
   delete e.images_;
   // Video mode after Edit on an Omni clip (the chip shows it): this prompt edits that clip. Once only.
   if (mode === 'video' && omniEdit && !video && !images.length && !extra.entry && route !== 'remix' && videoModel(e.params.model)?.omni) {
@@ -2312,9 +2387,11 @@ async function refreshRemote(force = false) {
 }
 const browserAvailable = () => !S.tester && (EXT.ready || REMOTE.online);
 
-// Runs a browser command here (extension in this browser) or on the user's computer (relay).
+// Runs a browser command here (extension in this browser) or on the user's computer (relay). approved: the owner OK'd
+// this step in the app (an approval card): click and type need it, and so do opening a page and reading one by its
+// address. The relay (src/relay.js relayNeedsApproval) and the extension check it again on their side.
 async function extCall(cmd, args = {}, timeout = 60000, approved = false) {
-  if (EXT.ready) return extLocal(cmd, args, timeout);
+  if (EXT.ready) return extLocal(cmd, args, timeout, approved);
   const r = await fetch('/api/relay/cmd', { method: 'POST', headers: apiHeaders(), body: JSON.stringify({ cmd, args, approved }) });
   const j = await r.json().catch(() => ({}));
   if (!j.ok) { if (r.status === 503) REMOTE.online = false; throw new Error(j.error || `Browser command failed (${r.status})`); }
@@ -2343,13 +2420,13 @@ async function autoPair() {
   finally { pairing = false; }
 }
 
-function extLocal(cmd, args = {}, timeout = 60000) {
+function extLocal(cmd, args = {}, timeout = 60000, approved = false) {
   if (!EXT.ready) return Promise.reject(new Error('The Atelier Browser extension isn’t connected.'));
   return new Promise((resolve, reject) => {
     const id = uid();
     const timer = setTimeout(() => { EXT.pending.delete(id); reject(new Error('The browser took too long to respond.')); }, timeout);
     EXT.pending.set(id, { resolve, reject, timer });
-    window.postMessage({ __atelier: 'req', id, cmd, args }, location.origin);
+    window.postMessage({ __atelier: 'req', id, cmd, args, approved: approved === true }, location.origin);
   });
 }
 window.postMessage({ __atelier: 'ping' }, location.origin);
@@ -2548,11 +2625,13 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
       if (why) step.taint = why;
       e.steps.push(step);
       const declined = () => { step.status = 'declined'; return { ok: false, declined: true, error: 'The user declined this action.' }; };
+      // exec runs a step that asked (write or confirm) only after the owner approved it, so for the browser the flag says
+      // so: the relay and the extension refuse click, type, open and a read by address without it.
       const exec = async () => {
         step.status = 'running'; repaint(e);
         try {
           return step.service === 'browser'
-            ? { ok: true, result: await extCall(step.name.replace('browser_', ''), step.args, 60000, step.write) }
+            ? { ok: true, result: await extCall(step.name.replace('browser_', ''), step.args, 60000, step.write || step.confirm === true) }
             : step.service === 'claude' && ClaudeImport.TOOL_NAMES.has(step.name) ? await runClaudeTool(step.name, step.args)
             : await callTool(step.name, step.args, step.write);
         } catch (err) { if (err.name === 'AbortError') throw err; return { ok: false, error: err.message }; }
@@ -2671,7 +2750,7 @@ async function runImage(e, signal) {
         return m.run ? await m.run(prompt, { aspect: e.params.aspect, seed }, signal)
           : extractMedia(await genai(m.id, m.body(prompt, { ...e.params, seed }), { signal, onTick: (ms) => tick(e, ms) }), 'image');
       } catch (err) {
-        const skippable = !isTesterCode(err.code) && (accountProblem(err) || err.status === 429 || err.status === 503);
+        const skippable = !isTesterCode(err.code) && !GUARD_CODES.has(err.code) && (accountProblem(err) || err.status === 429 || err.status === 503);
         if (err.name === 'AbortError' || !skippable || ci >= candidates.length - 1) throw err;
         if (candidates[ci] === m) { ci++; e.meta.model = candidates[ci].id; toast(`${m.label} unavailable — using ${candidates[ci].label}`); repaint(e); }
       }
@@ -2742,7 +2821,7 @@ async function runVideo(e, signal) {
       return;
     } catch (err) {
       // An Omni video that may exist (resumable) is never swapped for a motion still: Try again checks on it.
-      if (err.name === 'AbortError' || S.tester || err.resumable || !(accountProblem(err) || err.status === 429)) throw err;
+      if (err.name === 'AbortError' || S.tester || err.resumable || GUARD_CODES.has(err.code) || !(accountProblem(err) || err.status === 429)) throw err;
       toast('Gemini Omni unavailable on this key (billing/quota) — making a motion still instead');
       await runMotionStill(e, prompt, still, signal);
       e.meta.note = `motion still · Omni said: ${err.message.replace(/^Request failed \(\d+\)\.\s*/, '').slice(0, 140)}`;
@@ -3019,8 +3098,11 @@ stream.addEventListener('click', async (ev) => {
   const k = +b.dataset.k;
 
   if (act === 'code-copy' || act === 'code-download' || act === 'code-preview') {
-    const block = b.closest('.codeblock');
-    const code = $('code', block).textContent;
+    // Only addCodeBars makes these (a reply keeps no data-act, lockReplyFetches). Belt and braces: the button sits in its
+    // block's own bar, and what it acts on is that block's own <pre><code>, the text the block shows.
+    const block = b.closest('.codeblock'), el = block && $(':scope > pre > code', block);
+    if (!el || b.closest('.codeblock-bar')?.parentElement !== block) return;
+    const code = el.textContent;
     const lang = block.dataset.lang;
     if (act === 'code-copy') return copy(code);
     if (act === 'code-download') return download(code, `atelier-snippet.${LANG_EXT[lang] || 'txt'}`, 'text/plain');
@@ -4900,10 +4982,36 @@ $('#viewerBody').addEventListener('click', (ev) => { if (ev.target === ev.curren
 
 // ───────────────────────── settings ─────────────────────────
 const MODEL_ROLES = [['ask', 'Ask · everyday'], ['smart', 'Ask · hard prompts'], ['reason', 'Deep think'], ['code', 'Code'], ['write', 'Writes as you'], ['vision', 'Vision'], ['watch', 'Video'], ['ideas', 'Ideas'], ['build', 'Build'], ['agent', 'Accounts agent'], ['fast', 'Helper (fast)']];
+// Settings → Access: a note when the passcode looks easy to guess. Worked out here on this device from the field's own
+// value; nothing about it is sent, logged or stored. The server's lockout (src/guard.js) slows online guessing to a few
+// thousand tries a day, which a short or common passcode can't stand up to for long.
+const COMMON_PASSCODES = new Set(['password', 'passcode', 'passw0rd', 'atelier', 'studio', 'letmein', 'welcome', 'admin', 'administrator',
+  'qwerty', 'iloveyou', 'monkey', 'dragon', 'sunshine', 'princess', 'football', 'baseball', 'master', 'secret', 'changeme', 'trustno1',
+  'superman', 'batman', 'starwars', 'hello', 'login', 'shadow', 'michael', 'charlie', 'whatever', 'freedom', 'opensesame', 'test']);
+const RUNS = ['01234567890', 'abcdefghijklmnopqrstuvwxyz', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm', '1qaz2wsx3edc4rfv'];
+function passcodeWeakness(p) {
+  const s = String(p ?? '');
+  if (!s) return '';
+  const low = s.toLowerCase(), core = low.replace(/^[\d\W_]+|[\d\W_]+$/g, ''); // password123! → password
+  const run = low.length >= 4 && RUNS.some((r) => r.includes(low) || [...r].reverse().join('').includes(low));
+  if (COMMON_PASSCODES.has(low) || COMMON_PASSCODES.has(core) || run || /^(.)\1*$/.test(s) || (/^\d+$/.test(s) && s.length < 16)) return 'common';
+  if (s.length < 12) return 'short';
+  if (new Set(s).size < 5) return 'common';
+  return '';
+}
+function showPassWeak() {
+  const box = $('#passWeak'), field = $('#passcodeField');
+  if (!box || !field) return;
+  const why = S.tester ? '' : passcodeWeakness(field.value.trim()), n = [...field.value.trim()].length;
+  box.hidden = !why;
+  box.textContent = !why ? '' : `${why === 'short' ? `This passcode is short (${n} character${n === 1 ? '' : 's'}).` : 'This passcode is easy to guess: a common word, a run of digits or letters, or a keyboard pattern.'} Atelier locks out repeated wrong guesses, but a long passcode is much safer: 12 or more characters, such as four unrelated words. Change APP_PASSCODE on the server, then enter the new one here. (Checked on this device only.)`;
+}
+$('#passcodeField')?.addEventListener('input', showPassWeak);
 function openSettings() {
   const f = $('#settingsForm');
   const s = S.settings;
   f.passcode.value = s.passcode;
+  showPassWeak();
   f.temperature.value = s.temperature; $('#tempVal').textContent = s.temperature;
   $$('input[name=theme]', f).forEach((r) => (r.checked = r.value === s.theme));
   $$('input[name=lookup]', f).forEach((r) => (r.checked = r.value === lookupMode()));
@@ -4985,7 +5093,10 @@ $('#settingsForm').addEventListener('submit', async (ev) => {
   }
   const f = ev.target;
   const s = S.settings;
+  const hadPasscode = Boolean(s.passcode);
   s.passcode = f.passcode.value.trim();
+  // The owner signing out here: the browser's passcode-guard clearance (an HttpOnly cookie) goes too (src/guard.js).
+  if (hadPasscode && !s.passcode) fetch('/api/clearance/end', { method: 'POST' }).catch(() => {});
   // A page that isn't the owner's (a tester's Settings) never clears the owner's passcode backup; typing one in signs in.
   if (s.passcode || workspace === 'owner') await DB.ownerPasscodeSet(s.passcode).catch(() => {});
   s.temperature = +f.temperature.value;
@@ -5234,6 +5345,7 @@ $('#wipeBtn').onclick = async () => {
     clearTimeout(persistTimer); clearTimeout(meTimer);
     await reader.clearCache(); // Read aloud clips (Cache Storage 'atelier-tts'); its localStorage keys go with atelier.* below
     if (S.tester) await fetch('/api/li/logout', { method: 'POST' }).catch(() => {}); // "saved sign-in" includes the tester session
+    else await fetch('/api/clearance/end', { method: 'POST' }).catch(() => {}); // ...and the owner's passcode-guard clearance (src/guard.js)
     remix?.wipe(); // stop filming jobs and drop pending remix drafts: nothing writes rx:* after kvClear
     await Sync.forget(); await DB.clear(); await DB.kvClear(); // forget: the sync state goes, nothing is deleted on the server; this workspace's threads and kv keys only
     await appStore.clearAll(); // this workspace's Build app data (appdata.js; its own database, never another account's)
@@ -5508,7 +5620,9 @@ async function checkPasscode(pass) {
   try {
       const r = await fetch('/api/me', { headers: { 'x-app-pass': pass }, signal: AbortSignal.timeout(12000) });
     if (r.status === 401) return { ok: false, msg: 'That passcode isn’t right.' };
-    if (r.status === 429) return { ok: false, msg: 'Too many wrong tries — wait 15 minutes, then try again.' };
+    // The guard's own words (src/guard.js): how long this network is locked, or that guessing is paused for everyone.
+    if (r.status === 429) { const j = await r.json().catch(() => ({})); return { ok: false, msg: typeof j.error === 'string' && /passcode/i.test(j.error) ? j.error : 'Too many wrong tries — wait 15 minutes, then try again.' }; }
+    if (r.status === 503) { const j = await r.json().catch(() => ({})); if (j.code === 'guard_unavailable' && typeof j.error === 'string') return { ok: false, msg: j.error.slice(0, 200) }; }
     if (!r.ok) return { ok: false, msg: `Server error (${r.status}).` };
     return { ok: true };
   } catch { return { ok: false, msg: 'Network error — are you offline?' }; }
@@ -6038,10 +6152,12 @@ let learning = false;
 // prompt, the accounts agent's included, and syncs to every owner device — anyone can write a link or POST a share.
 // Nor from any turn whose words may not be the user's (ownTaint: a retried restored or pre-mark turn), or in a thread
 // that holds outside text (threadTaint, as runAgent counts it): To app, an idea's Expand or Look up's ask build a prompt
-// from an answer that may quote it, and carry only their own entry's mark.
+// from an answer that may quote it, and carry only their own entry's mark. And never from a prompt Atelier composed
+// from an answer at all (e.composed, saved with the entry): those are the model's words, not facts the owner stated,
+// and the thread check only sees the turn that steered the answer while it is still earlier in the same thread.
 async function learnFrom(e, thread = null) {
   const all = thread?.entries || [], at = all.indexOf(e);
-  if (e.untrusted || learning || !feat('helpers') || !['ask', 'code', 'ideas', 'build'].includes(e.kind) || e.prompt.length < 25 || ownTaint(e) || threadTaint(at < 0 ? all : all.slice(0, at))) return;
+  if (e.untrusted || e.composed === true || learning || !feat('helpers') || !['ask', 'code', 'ideas', 'build'].includes(e.kind) || e.prompt.length < 25 || ownTaint(e) || threadTaint(at < 0 ? all : all.slice(0, at))) return;
   learning = true;
   try {
     const raw = await completeChat({
@@ -6320,7 +6436,7 @@ $('#newBtn').onclick = startFresh;
 $('#brandBtn').onclick = startFresh;
 
 // The build feedback reports when app.js was loaded without its ?v= (scripts/bump-version.mjs moves it with sw.js VERSION).
-const APP_BUILD = '89';
+const APP_BUILD = '90';
 const feedback = createFeedback({ headers: apiHeaders, role: () => S.settings.passcode && !S.tester ? 'owner' : S.tester ? 'tester' : 'signedout', context: () => ({ mode: S.mode, version: `v${new URL(import.meta.url).searchParams.get('v') || APP_BUILD}`, online: navigator.onLine !== false }), toast });
 $('#feedbackBtn').onclick = () => feedback.open();
 $('#studioMenu').onclick = () => { $('#studioDialog').showModal(); };

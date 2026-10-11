@@ -31,6 +31,7 @@ NVIDIA's APIs don't allow browser CORS. The Worker forwards only these routes:
 Atelier is **passcode-only**. All provider keys live in Worker secrets; a device only needs the passcode.
 ```bash
 npx wrangler secret put APP_PASSCODE
+npx wrangler secret put GUARD_SECRET        # required: 32+ random characters (signs the passcode guard's clearance)
 npx wrangler secret put NVIDIA_API_KEY      # any of these four
 npx wrangler secret put ANTHROPIC_API_KEY   # (+ ANTHROPIC_WORKSPACE_ID for org-level keys)
 npx wrangler secret put OPENAI_API_KEY
@@ -40,12 +41,48 @@ npx wrangler secret put RUNWAYML_API_SECRET # optional: Runway video, owner only
 Connected accounts use more secrets (GITHUB_TOKEN, STRIPE_API_KEY, CLOUDFLARE_API_TOKEN, RAILWAY_API_TOKEN,
 SLACK_USER_TOKEN, GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET, CANVA_CLIENT_ID + CANVA_CLIENT_SECRET) — see Settings → Connections.
 
+### Passcode guard
+Wrong passcodes are held off by the `Guard` Durable Object (`src/guard.js`, binding `GUARD`; the first deploy with it adds
+the class, migration `v3`). It counts failures per network (an IPv4 address, or an IPv6 `/64`) in one serialized step,
+so parallel guesses can't race past it: 10 failures lock that network for 15 minutes, and the lock is checked before the
+passcode is compared, so a right passcode is refused there too. Across all networks, 20 compared wrong passcodes in 15
+minutes leave guessing only to networks with no recent failure (one try each), and 30 stop it (the seal) for everyone
+without a clearance. A guess refused by the seal or the strict mode counts nowhere, so the owner's own app, retrying
+while someone else holds the seal, never locks its own network. In front of the Guard, the `GUARD_LIMIT` ratelimit
+binding lets at most 30 passcode requests a minute from one network reach it; the rest get the same 429 with nothing
+compared, so one address can't flood the single object.
+
+A clearance is the `__Host-atelier_owner` cookie (HttpOnly, 30 days) that a passcode the Guard accepted gets. It is signed
+in the Worker with a key derived from `GUARD_SECRET` and the passcode, so with it and the right passcode a request never
+waits on the Guard: the owner's signed-in devices pay no extra round trip, and no lock, seal, flood or Guard outage shuts
+them out. Without `GUARD_SECRET` no clearance is minted or honoured, and `npm run ship` refuses to deploy (for
+`npm run dev`, put a made-up one in `.dev.vars`, or every request goes through the Guard and its throttle). A new
+`APP_PASSCODE` or `GUARD_SECRET` voids every clearance. A clearance sent with a wrong passcode is burned (the Guard keeps a
+one-way code of it until it would have expired, and every Worker isolate picks that up within about 15 seconds), so a
+copied cookie can't be used to test guesses past the lockout. Clearing the passcode in Settings, or Clear this device,
+ends the browser's own (`POST /api/clearance/end`, which answers only the app's own pages). Settings → Access warns, on
+the device only, when the passcode is short or common.
+
+Runbook:
+- **Someone is holding the seal** ("Too many wrong passcodes are being tried right now"): devices already signed in keep
+  working; use one of them. To sign in a new device meanwhile, `npx wrangler secret put GUARD_RELAX` (value `1`; it takes
+  effect at once, no ship), sign in, then `npx wrangler secret delete GUARD_RELAX`. While it is set the global cap is off
+  (per-network locks stay), so keep it short.
+- **Changing the passcode during a seal** signs every device out into that seal: rotate the passcode only if it leaked,
+  and set `GUARD_RELAX` first, then sign each device in again before deleting it.
+- **The Guard itself failing** (every passcode request without a clearance answers 503 `guard_unavailable`): signed-in
+  devices are unaffected. `GUARD_RELAX` also lets the others through on `GUARD_LIMIT`'s per-network throttle alone (the
+  routes compare the passcode; no clearance is minted) until a fix ships.
+- **No rollback past the Guard:** once the deploy that adds the `Guard` class (migration `v3`) is live, this Worker cannot
+  be rolled back to a version before it (Cloudflare refuses rollbacks across a Durable Object class change, and ship
+  refuses an older VERSION). Recovery is a forward fix through `npm run ship`, with `GUARD_RELAX` to bridge the gap.
+
 ### LinkedIn testers
-**Switched off since v85** (`TESTERS_ENABLED` in wrangler.jsonc `vars`: `"1"` on, `"0"` or unset off). Off, every
+**On** (reopened in v90; it was switched off in v85–v89). `TESTERS_ENABLED` in wrangler.jsonc `vars`: `"1"` on, `"0"` or unset off. Off, every
 `/api/li/*` route answers `410 {code:"tester_closed"}`, a tester cookie is never looked up (and is cleared), every tester
 route refuses with `410 tester_closed`, owner routes still need the passcode, and the app hides the sign-in button,
 spots, allowance pill, feedback and the Testers panel (`/api/health` → `testers: false`). The code and the Ledger stay;
-set `"1"` and deploy to switch it back on. What follows describes it while it is on.
+`"1"` and a deploy switch it on. What follows describes it while it is on.
 
 Up to 25 people can sign in with LinkedIn and use paid models under a hard spending ceiling. The passcode path is
 unchanged: a request with the passcode is always the owner, even if it also carries a tester cookie.
@@ -142,7 +179,8 @@ only when it is safe, in this order:
    The live deploy's record (`https://atelier.ciprari.ai/ship.json`, written by every ship) names a commit that is in
    HEAD's history, so a ship never rolls back someone else's deploy; when it isn't, ship lists the commits that would go.
    A live site without a record (deployed before this check, from an older branch, or by a rollback) needs
-   `--allow-unrecorded-live` once you have checked it.
+   `--allow-unrecorded-live` once you have checked it. (Since v90 a Cloudflare rollback can't go back past the deploy
+   that added the `Guard` Durable Object: see Passcode guard.)
 3. A clean, detached worktree of HEAD in the OS temp folder runs `npm ci`, `npm run check` and every
    `tests/*.test.mjs`, gated on the real exit codes. On Windows that checkout is forced to CRLF line endings
    (`core.autocrlf=true`, whatever git's own config says), so tests that only pass with LF fail here. Failing test names
@@ -156,6 +194,17 @@ only when it is safe, in this order:
 6. `git push origin <deployed commit>:master` (skip with `--no-push`).
 7. The worktree is always removed. Windows "Permission denied" leftovers there are harmless, and nothing outside the temp
    folder is ever deleted.
+
+Step 2 also reads the `atelier-sync` bucket's R2 lifecycle rules (`scripts/check-r2-lifecycle.mjs`, read-only, via
+`wrangler r2 bucket lifecycle list`) and warns, without stopping the ship, when one of the four rules privacy.html's
+30-day promise rests on is missing or different: `expire-trash` (`x/`), `expire-history` (`v/`), `expire-tester-trash`
+(`testers-x/`) and `expire-tester-history` (`testers-v/`), each expiring objects after 30 days. It also flags any rule
+that would expire thread documents or media, and any other expiring rule (by days or on a date) that would remove trash
+or earlier versions before 30 days. `node scripts/check-r2-lifecycle.mjs --add-missing` adds only rules that are wholly
+absent; it never removes, disables or changes one (fix those in the Cloudflare dashboard).
+
+Step 2 also lists the Worker's secret names (`wrangler secret list`: names only, never values) and refuses to ship when
+`APP_PASSCODE` or `GUARD_SECRET` is missing (see Passcode guard above); when the list can't be read it only notes that.
 
 Flags: `--dry-run`, `--no-push`, `--yes`, `--allow-unrecorded-live`, and `--skip-live-check` (offline, only together
 with `--dry-run`). Pass flags after `--`. ship honours `npm run deploy --dry-run` without the `--`, and refuses to run
@@ -207,8 +256,12 @@ Release verification still requires the deployed environment: real provider gene
 ## Atelier Browser (Chrome / Edge extension)
 `extension/` is a Manifest V3 companion that lets the agent use your real, logged-in browser.
 - Talks **only** to the Atelier page (content script on atelier.ciprari.ai / localhost:8787 ↔ `window.postMessage`).
-- Free: list tabs, read a page, open a page, list page controls, bring a tab to the front.
-- Needs your approval in Atelier: click, type. The approval card shows the real target element and page.
+- Free: list tabs, read an open tab, list page controls, bring a tab to the front.
+- Needs your approval in Atelier: open a page, read a page by its address (both load an address the model chose, signed
+  in as you), click, type. The approval card shows the address, or the real target element and page. The approval
+  travels as a flag that the server (`/api/relay/cmd`), the Relay and the extension each check again: since this change
+  the extension refuses open and a read by address without it, so reload the installed extension (Load unpacked → the
+  reload icon, or unzip the new `/atelier-browser.zip` over the old folder) to get that last check.
 - Since v1.3.0 the extension also asks on the computer itself before every click or type (a small Atelier Browser window:
   Deny is the default, Allow unlocks after ~1 s). After a Deny or timeout, further click/type from that source is refused
   for 30 s (doubling, up to 10 min). Password and payment fields are refused outright.
@@ -222,5 +275,6 @@ use Load unpacked on `extension/` or `node scripts/pack-extension.mjs --dev` (wr
 ### Remote browser (use your computer's browser from your phone)
 The extension keeps a WebSocket open to the `Relay` Durable Object (`src/relay.js`) while Chrome is running.
 Opening Atelier on the computer pairs the extension automatically (`/api/relay/pair` issues a device token; re-pairing
-revokes the old one). Other devices send browser commands through `/api/relay/cmd` (passcode + approval for click/type).
+revokes the old one). Other devices send browser commands through `/api/relay/cmd` (passcode + approval for click, type,
+open and a read by address; `src/relay.js` relayNeedsApproval).
 Works whenever the computer is awake and Chrome is open (minimized is fine).

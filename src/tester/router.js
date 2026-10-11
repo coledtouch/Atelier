@@ -168,8 +168,10 @@ export const TESTER_ROUTES = Object.freeze([
 ]);
 // Reached by everyone before identity is checked (worker.js): health, CSP reports, app error reports (POST public; the
 // owner's GET checks the passcode itself, src/client-errors.js), the LinkedIn sign-in routes and the extension relay
-// socket (authenticated by its device token only, so a tester cookie in the owner's browser never breaks it).
-export const PUBLIC_PATHS = Object.freeze(['health', 'csp-report', 'client-error', 'li/', 'relay/ws']);
+// socket (authenticated by its device token only, so a tester cookie in the owner's browser never breaks it), and the
+// end of the owner's passcode-guard clearance (POST /api/clearance/end: only from the app's own pages, and it only
+// removes the caller's own cookie).
+export const PUBLIC_PATHS = Object.freeze(['health', 'csp-report', 'client-error', 'clearance/end', 'li/', 'relay/ws']);
 
 export function matchTesterRoute(method, path) {
   for (const route of TESTER_ROUTES) {

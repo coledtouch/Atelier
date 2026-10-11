@@ -7,7 +7,7 @@ import { hasVideoPart, geminiNativeChat, handleVideoApi, VIDEO_NEEDS_GEMINI } fr
 import { toolList, runTool, GOOGLE_SCOPES, saveGoogleAccount, removeGoogleAccount, addTokenAccount, removeTokenAccount, googleTokenFor,
   CANVA_ID, CANVA_MAX_IMAGE, CanvaError, canvaConfigured, canvaAuthUrl, canvaTakeState, canvaCompleteAuth, removeCanvaAccount, canvaSendImage,
   canvaListDesigns, canvaDesignFormats, canvaImport, canvaFetchFile } from './tools.js';
-import { identify, handleLinkedIn, signedOut, fail, readCookie, clearSession, COOKIE } from './tester/auth.js';
+import { identify, handleLinkedIn, signedOut, fail, readCookie, clearSession, COOKIE, ALLOWED_ORIGINS } from './tester/auth.js';
 import { testerRouter, testerAdmin, matchTesterRoute } from './tester/router.js';
 import { handleTts } from './tts.js';
 import { handleSync } from './sync.js';
@@ -20,8 +20,11 @@ import { handleTranscribe } from './transcribe.js';
 import { ownerSpend, handleOwnerApi, imageQuote, imageSettle, IMAGE_BODY_MAX, isGatewayStatus } from './spend.js';
 import { testersOn } from './tester/ledger.js';
 import { handleClientError } from './client-errors.js';
+import { passcodeGate, endClearance, CLEAR_COOKIE } from './guard.js';
+import { relayNeedsApproval } from './relay.js';
 export { Relay } from './relay.js';
 export { Ledger } from './tester/ledger.js';
+export { Guard } from './guard.js';
 
 const NVIDIA = {
   chat: 'https://integrate.api.nvidia.com/v1',
@@ -102,10 +105,13 @@ function canvaFail(err, fallback) {
   return json({ error: err instanceof CanvaError ? err.message : fallback }, status);
 }
 
-function safeEqual(a, b) {
-  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+// Constant time in what the caller sent (a): the loop always runs over the secret's own length (b) and a length mismatch
+// is folded into the result, never an early return, so how long it takes says nothing about how much of a guess was
+// right or how long the passcode is. (Past the end of a, charCodeAt is NaN, which | 0 turns into 0.)
+export function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < b.length; i++) diff |= (a.charCodeAt(i) | 0) ^ b.charCodeAt(i);
   return diff === 0;
 }
 
@@ -296,18 +302,6 @@ async function handlePassthrough(req, env, provider, sub, search) {
 // What the tester router borrows from the owner's proxy (passed in, so tester code never imports worker.js).
 const UPSTREAM = { forward, shapeChatBody, CHAT_UPSTREAM, PROVIDERS, PASSTHRU };
 
-// Brute-force guard: 10 wrong passcodes from one IP locks it out for 15 minutes.
-const LOCK_LIMIT = 10;
-const LOCK_SECONDS = 900;
-async function passcodeGuard(req, env) {
-  if (!req.headers.get('x-app-pass') || !env.APP_PASSCODE) return null;
-  const key = `fail:${req.headers.get('cf-connecting-ip') || 'unknown'}`;
-  const fails = Number((await env.ATELIER_KV.get(key)) || 0);
-  if (fails >= LOCK_LIMIT) return json({ error: 'Too many wrong passcodes — try again in 15 minutes.' }, 429);
-  if (!passOk(req, env)) await env.ATELIER_KV.put(key, String(fails + 1), { expirationTtl: LOCK_SECONDS });
-  return null;
-}
-
 // Reads at most `cap` bytes of a request body → text, or null when it is larger.
 async function readCapped(req, cap) {
   if (Number(req.headers.get('content-length') || 0) > cap) return null;
@@ -403,9 +397,7 @@ async function handleCspReport(req, env) {
 async function handleApi(req, env, url) {
   const path = url.pathname.replace(/^\/api\/?/, '');
   const relay = () => env.RELAY.get(env.RELAY.idFromName('main'));
-
-  const locked = await passcodeGuard(req, env);
-  if (locked) return locked;
+  // (The passcode guard, src/guard.js passcodeGate, already ran in fetch() below, before any of this.)
 
   if (path === 'health') {
     const server = Object.fromEntries(Object.entries(PROVIDERS).map(([n, p]) => [n, Boolean(env[p.secret] && env.APP_PASSCODE)]));
@@ -417,6 +409,17 @@ async function handleApi(req, env, url) {
   // Public and answered before identity, like csp-report: a crash can come before the passcode is known (same-origin,
   // capped, rate-limited per IP by ERR_LIMIT; src/client-errors.js). GET → the newest reports, passcode only.
   if (path === 'client-error') return handleClientError(req, env, { owner: passOk(req, env) });
+  // POST /api/clearance/end → ends this browser's passcode-guard clearance (the HttpOnly __Host-atelier_owner cookie, which
+  // the app can't remove itself): sent when the owner clears the passcode in Settings or uses Clear this device. Public,
+  // but only from the app's own pages (Origin one of tester/auth.js ALLOWED_ORIGINS, and Sec-Fetch-Site same-origin when
+  // the browser sends it): another site's form POST would otherwise strip the owner's clearance, which is all that keeps
+  // a signed-in device working while someone holds the guard's seal. Refused: 403, and no Set-Cookie.
+  if (path === 'clearance/end') {
+    if (req.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+    const site = req.headers.get('sec-fetch-site');
+    if (!ALLOWED_ORIGINS.has(req.headers.get('origin') || '') || (site && site !== 'same-origin')) return json({ error: 'Sign out from the Atelier app itself.', code: 'clearance_origin' }, 403);
+    return new Response(null, { status: 204, headers: { 'set-cookie': endClearance(), 'cache-control': 'no-store' } });
+  }
 
   // ── LinkedIn testers (docs/superpowers/specs/2026-09-30-atelier-tester-access-*.md), behind TESTERS_ENABLED ──
   // Public before identity: health, csp-report, the sign-in routes and relay/ws. Then: passcode → owner (wins over a
@@ -432,7 +435,7 @@ async function handleApi(req, env, url) {
   if (path === 'relay/ws') return relay().fetch(new Request('https://relay/ws', req));
   // Thread sync with a wrong passcode is refused as one (401, which pauses the client) even when a tester cookie is
   // in the same browser: identify() would otherwise hand it to the tester router, whose 403 a sync client might retry
-  // into the lockout. (passcodeGuard above already counted the failure.)
+  // into the lockout. (passcodeGate already counted the failure.)
   if ((path === 'sync' || path.startsWith('sync/')) && req.headers.get('x-app-pass') && !passOk(req, env)) {
     return json({ error: 'Thread sync needs the server passcode.', code: 'sync_passcode' }, 401);
   }
@@ -548,13 +551,17 @@ async function handleApi(req, env, url) {
     // GET /api/relay/status → is the computer's browser connected?
     if (path === 'relay/status' && req.method === 'GET') return relay().fetch('https://relay/status');
 
-    // POST /api/relay/cmd {cmd, args, approved} → run a browser command on the computer
+    // POST /api/relay/cmd {cmd, args, approved} → run a browser command on the computer. approved: the owner approved
+    // this step in the app. Click and type need it, and so do opening a page and reading one by its address (an address
+    // the model chose, loaded in the owner's signed-in browser, could carry data out): src/relay.js relayNeedsApproval,
+    // which the Relay checks again and the extension checks once more.
     if (path === 'relay/cmd' && req.method === 'POST') {
       const { cmd, args, approved } = await req.json().catch(() => ({}));
       const allowed = ['tabs', 'read', 'open', 'elements', 'describe', 'click', 'type', 'show'];
       if (!allowed.includes(cmd)) return json({ ok: false, error: 'Unknown browser command' }, 400);
-      if ((cmd === 'click' || cmd === 'type') && approved !== true) return json({ ok: false, error: 'This action needs your approval in the app.' }, 403);
-      return relay().fetch('https://relay/cmd', { method: 'POST', body: JSON.stringify({ cmd, args: args || {} }) });
+      const a = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
+      if (relayNeedsApproval(cmd, a) && approved !== true) return json({ ok: false, error: 'This action needs your approval in the app.' }, 403);
+      return relay().fetch('https://relay/cmd', { method: 'POST', body: JSON.stringify({ cmd, args: a, approved: approved === true }) });
     }
     return json({ error: 'Not found' }, 404);
   }
@@ -872,11 +879,14 @@ function apiFailed(url, err) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
     if (url.pathname.startsWith('/api/')) {
       try {
-        const response = await handleApi(req, env, url);
+        // The passcode guard comes first, before any route (public ones included) looks at the request: a refused guess
+        // (429) or an unreachable guard (503) ends here; an allowed one may bring the owner's clearance cookie.
+        const gate = await passcodeGate(req, env, passOk, ctx);
+        const response = gate.refuse || await handleApi(req, env, url);
         if (response.status === 101) return response;
         const secured = new Response(response.body, response); // keeps the route's headers (content-type, retry-after…)
         // Keep a stricter no-store policy a route set itself (e.g. "private, no-store" on proxied files).
@@ -887,6 +897,9 @@ export default {
         if (url.protocol === 'https:') secured.headers.set('Strict-Transport-Security', HSTS);
         // Tester access off: a tester cookie still in this browser is cleared on the way out (signed out for good).
         if (!testersOn(env) && readCookie(req, COOKIE) && !secured.headers.has('set-cookie')) secured.headers.append('set-cookie', clearSession());
+        // after that check (only a route's own cookies count there), and never on the route that ends the clearance
+        // (its 204 removes it; its 403 sets nothing) or over another route's own clearance cookie
+        if (gate.cookie && url.pathname !== '/api/clearance/end' && !secured.headers.getSetCookie().some((c) => c.startsWith(`${CLEAR_COOKIE}=`))) secured.headers.append('set-cookie', gate.cookie);
         return secured;
       } catch (err) {
         return apiFailed(url, err);

@@ -6,6 +6,17 @@ import { DurableObject } from 'cloudflare:workers';
 // Long enough for the extension's own click/type confirmation (it gives up after 45 s) plus the action itself.
 const COMMAND_TIMEOUT_MS = 90_000;
 
+// Commands that only run once the owner approved the step in the app (the {approved} flag): click and type, opening a
+// page, and reading one by its address (browser_read with a url: the extension loads it, signed in as the owner, so the
+// address the model chose could carry data out). Reading a tab that is already open (a tabId alone) doesn't need it; a
+// url needs it even beside a tabId, as the app asks for it then (public/app.js asksFirst). The Worker's /api/relay/cmd
+// checks this, the Relay below checks it again before anything reaches the browser, and the extension
+// (extension/background.js) checks open and read once more.
+export function relayNeedsApproval(cmd, args) {
+  if (cmd === 'click' || cmd === 'type' || cmd === 'open') return true;
+  return cmd === 'read' && Boolean(args?.url);
+}
+
 function timingSafe(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
   let diff = 0;
@@ -62,14 +73,16 @@ export class Relay extends DurableObject {
     if (url.pathname === '/cmd' && req.method === 'POST') {
       const ws = this.browser();
       if (!ws) return Response.json({ ok: false, error: 'Your computer’s browser isn’t connected — make sure the computer is on and Chrome is open.' }, { status: 503 });
-      const { cmd, args } = await req.json();
+      const { cmd, args, approved } = await req.json();
+      // Defence in depth behind the Worker's own check: nothing that needs the owner's OK reaches the browser without it.
+      if (relayNeedsApproval(cmd, args) && approved !== true) return Response.json({ ok: false, error: 'This action needs your approval in the app.' }, { status: 403 });
       const id = crypto.randomUUID();
       const reply = new Promise((resolve) => {
         const timer = setTimeout(() => { this.pending.delete(id); resolve({ ok: false, error: 'Your computer didn’t respond in time.' }); }, COMMAND_TIMEOUT_MS);
         this.pending.set(id, { resolve, timer });
       });
       try {
-        ws.send(JSON.stringify({ id, cmd, args }));
+        ws.send(JSON.stringify({ id, cmd, args, approved: approved === true })); // the extension checks it again
       } catch {
         const p = this.pending.get(id);
         if (p) { clearTimeout(p.timer); this.pending.delete(id); }

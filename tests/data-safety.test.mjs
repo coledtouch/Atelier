@@ -171,6 +171,11 @@ test('validateBackup checks the files-only share flag; a restored GitHub read fr
   const ok = fixture(); Object.assign(ok.threads[0].entries[0], { untrusted: 'share', untrustedFiles: true });
   assert.equal(validateBackup(ok).length, 1);
   for (const v of ['yes', 1, false]) { const data = fixture(); data.threads[0].entries[0].untrustedFiles = v; assert.throws(() => validateBackup(data), JSON.stringify(v)); }
+  // a prompt Atelier composed from an answer (app.js submit, learnFrom): only composed: true, and it survives the import
+  const comp = fixture(); comp.threads[0].entries[0].composed = true;
+  assert.equal(validateBackup(comp).length, 1);
+  assert.equal(prepareImport(comp, (() => { let n = 0; return () => `k${++n}`; })())[0].entries[0].composed, true);
+  for (const v of ['true', 1, false, {}]) { const data = fixture(); data.threads[0].entries[0].composed = v; assert.throws(() => validateBackup(data), JSON.stringify(v)); }
   const at = Date.UTC(2026, 9, 12);
   const gh = { id: 'e1', kind: 'ask', prompt: 'read that README', createdAt: at, text: 'It says…', steps: [
     { id: 's1', name: 'github_read', label: 'Read a GitHub file', service: 'github', args: { repo: 'stranger/tool', path: 'README.md' }, write: false, status: 'done', outside: true },

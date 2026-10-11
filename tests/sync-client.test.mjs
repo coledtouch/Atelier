@@ -33,7 +33,7 @@ function world({ bucket = true, pageSize } = {}) {
     if (dev.offline) throw new TypeError('Failed to fetch');
     const hooked = await dev.before?.(entry);
     if (hooked) return hooked;
-    // worker.js in front of handleSync: passcodeGuard → 401 on a wrong passcode
+    // worker.js in front of handleSync: passcodeGate (src/guard.js) → 401 on a wrong passcode
     if (headers.get('x-app-pass') !== 'pw') return new Response('{"error":"Wrong passcode"}', { status: 401 });
     if (init.body != null) headers.set('content-length', String(typeof init.body === 'string' ? Buffer.byteLength(init.body) : init.body.byteLength));
     const res = await handleSync(workerRequest(u, { method: entry.method, headers, body: init.body }), w.env, u, u.pathname.slice('/api/'.length));

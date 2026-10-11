@@ -11,6 +11,8 @@ registerHooks({
   },
 });
 const worker = (await import('../src/worker.js')).default;
+// The passcode lockout (src/guard.js): the real Durable Object on SQLite.
+const { makeGuard } = await import('./tester-env.mjs');
 const { GEMINI_BASE, VIDEO_NEEDS_GEMINI, FILE_GONE_ERROR, CHUNK_MAX, GRANULARITY_DEFAULT } = await import('../src/gemini.js');
 
 // ── fakes ──
@@ -27,10 +29,18 @@ function fakeKV(init = {}) {
   const m = new Map(Object.entries(init));
   return { m, async get(k, type) { const v = m.get(k); return v == null ? null : type === 'json' ? JSON.parse(v) : v; }, async put(k, v) { m.set(k, String(v)); }, async delete(k) { m.delete(k); } };
 }
-const makeEnv = (extra = {}) => ({
-  APP_PASSCODE: 'pw', GEMINI_API_KEY: KEY, ANTHROPIC_API_KEY: 'sk-ant-test', OPENAI_API_KEY: 'sk-openai-test', NVIDIA_API_KEY: 'nvapi-test',
-  ATELIER_KV: fakeKV(), ...extra,
-});
+const guards = new WeakMap(); // env → its Guard
+const makeEnv = (extra = {}) => {
+  const g = makeGuard();
+  const env = {
+    APP_PASSCODE: 'pw', GEMINI_API_KEY: KEY, ANTHROPIC_API_KEY: 'sk-ant-test', OPENAI_API_KEY: 'sk-openai-test', NVIDIA_API_KEY: 'nvapi-test',
+    ATELIER_KV: fakeKV(), GUARD: g.ns, ...extra,
+  };
+  guards.set(env, g);
+  return env;
+};
+// The failed passcode attempts the Guard has counted, all networks together (here only one: no cf-connecting-ip).
+const failsOf = (env) => guards.get(env).shim.db.prepare('SELECT COALESCE(SUM(fails), 0) AS n FROM nets').get().n;
 const reply = (status, body, headers = {}) => new Response(body === undefined ? '' : typeof body === 'string' ? body : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 const sse = (lines) => new Response(new ReadableStream({ start(c) { for (const l of lines) c.enqueue(new TextEncoder().encode(l)); c.close(); } }), { headers: { 'content-type': 'text/event-stream' } });
 const gem = (obj) => `data: ${JSON.stringify(obj)}\r\n\r\n`;
@@ -109,14 +119,15 @@ test('every /api/video/* route needs the passcode and the Gemini key before anyt
     assert.match(JSON.parse(await read(r)).error, /No Gemini key on the server/);
   }
   assert.equal(calls.length, 0, 'nothing reached Google');
-  assert.equal(env.ATELIER_KV.m.get('fail:unknown'), String(VIDEO_ROUTES.length), 'wrong passcodes count toward the lockout');
+  assert.equal(failsOf(env), VIDEO_ROUTES.length, 'wrong passcodes count toward the lockout (src/guard.js)');
 });
 
 test('the passcode lockout covers the video routes', async () => {
   mockFetch([]);
-  const env = makeEnv({ ATELIER_KV: fakeKV({ 'fail:unknown': '10' }) });
+  const env = makeEnv();
+  for (let i = 0; i < 10; i++) assert.equal((await api(env, 'video/upload/start', { method: 'POST', body: VIDEO_ROUTES[0][2] }, 'wrong')).status, 401);
   const r = await api(env, 'video/upload/start', { method: 'POST', body: VIDEO_ROUTES[0][2] });
-  assert.equal(r.status, 429);
+  assert.equal(r.status, 429, 'locked: the right passcode is refused too');
   assert.equal(calls.length, 0);
 });
 

@@ -801,6 +801,7 @@ dialog::backdrop { background: rgba(5, 5, 4, 0.6); backdrop-filter: blur(6px); }
 .file-chip { display: inline-flex; align-items: center; }
 .hint { font-size: 12.5px; color: var(--ink-3); margin: 0; }
 .hint.ok { color: var(--c-ask); } .hint.bad { color: var(--c-video); }
+.hint.pass-weak { color: var(--ink-2); margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--c-video); line-height: 1.45; }
 .sheet-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line); }
 /* Settings: head + tabs and the Save footer stay pinned; only .sheet-scroll scrolls */
 #settings { height: min(720px, 88dvh); }

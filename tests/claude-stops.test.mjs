@@ -258,7 +258,7 @@ function scope(vars) {
   });
 }
 const evalIn = (vars, body) => new Function('scope', `with (scope) { ${body} }`)(scope(vars));
-const CONSTS = ['EMPTY_NUDGE', 'shows', 'THINKING_BLOCKS', 'replayRounds', 'replayable', 'MAX_OUTPUT', 'HELPER_ROLES', 'UNLISTED_CLAUDE_ROOM', 'roomFor', 'SSE_ERRORS', 'EFFORT', 'FIRST_TOKEN_MS', 'providerOf', 'accountProblem', 'sleep', 'asksFirst', 'urlHost', 'githubOutside'];
+const CONSTS = ['GUARD_CODES', 'EMPTY_NUDGE', 'shows', 'THINKING_BLOCKS', 'replayRounds', 'replayable', 'MAX_OUTPUT', 'HELPER_ROLES', 'UNLISTED_CLAUDE_ROOM', 'roomFor', 'SSE_ERRORS', 'EFFORT', 'FIRST_TOKEN_MS', 'providerOf', 'accountProblem', 'sleep', 'asksFirst', 'urlHost', 'githubOutside'];
 const FNS = ['withoutThinking', 'streamChat', 'streamChatOnce', 'streamChatRaw', 'apiHeaders', 'toApiError', 'runChat', 'runAgent'];
 
 // OpenAI-style providers (the Worker forwards their SSE as it is): script(body) → deltas, last one with finish.
@@ -533,4 +533,43 @@ test('Worker: each listed Claude model goes out with up to its 128K (streamed, f
   const t = anthropic(() => claudeSSE([T('ok')], 'end_turn'));
   await (await chat({ max_tokens: 128000 }, { maxTokens: 3000, webUses: 0, fallbacks: false })).text();
   assert.equal(t[0].max_tokens, 3000);
+});
+
+// v90 review: the passcode guard's 429 / 503 (src/guard.js) were read as "model busy", so one Ask sent a guarded request
+// to every model in the chain (17 with every provider keyed), each a failure the guard counted against the network.
+test('app: the passcode guard’s 429 or 503 ends an Ask at once: no "busy — switching" across the chain, and its own card', async () => {
+  const cases = [
+    [429, 'passcode_busy', 'Too many wrong passcodes are being tried right now — try again in 12 minutes. Devices already signed in keep working.', 'Sign-ins are paused for a moment'],
+    [429, 'passcode_locked', 'Too many wrong passcodes from this network — try again in 15 minutes.', 'Too many passcode tries'],
+    [429, 'passcode_locked', 'Too many passcode tries from this network — try again in 1 minute.', 'Too many passcode tries'],
+    [503, 'guard_unavailable', 'Atelier couldn’t check the passcode just now — try again in a moment.', 'Couldn’t check the passcode'],
+  ];
+  for (const [status, code, error, title] of cases) {
+    const { vars, calls } = rig({
+      chains: { ask: ['zai:glm-5.3', 'deepseek:deepseek-v4-pro', 'meta:llama-5', 'nvidia:x'] },
+      other: () => new Response(JSON.stringify({ error, code, retryAfter: 720 }), { status, headers: { 'content-type': 'application/json' } }),
+    });
+    const e = { kind: 'ask', prompt: 'what should I cook tonight?', params: {} };
+    let thrown = null;
+    await assert.rejects(vars.runChat(e, null, { entries: [e] }), (err) => { thrown = err; return err.code === code && err.status === status; });
+    assert.equal(thrown.message, error, 'the guard’s own words, with no “Rate limited” lead');
+    assert.equal(calls.bodies.length, 1, `${code}: one request, not one per model`);
+    assert.deepEqual(calls.toasts, [], 'no “busy — switching”');
+    vars.ERROR_TITLE = evalIn(vars, `return (${constExpr('ERROR_TITLE')});`);
+    for (const n of ['errorKind', 'errorTitle']) vars[n] = evalIn(vars, `return (${fnSource(n)});`);
+    const kind = vars.errorKind(thrown.message, thrown.status, thrown.code);
+    assert.equal(kind, 'guard', `${code}: never the passcode screen (the passcode is right)`);
+    assert.equal(vars.errorKind(thrown.message), 'guard', 'an older entry, by its words alone');
+    assert.equal(vars.errorTitle(kind, thrown.message), title);
+  }
+  // control: a provider's own 429 still moves down the chain
+  const busy = rig({ chains: { ask: ['zai:glm-5.3', 'deepseek:deepseek-v4-pro', 'meta:llama-5', 'nvidia:x'] }, other: () => new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 }) });
+  const b = { kind: 'ask', prompt: 'what should I cook tonight?', params: {} };
+  await assert.rejects(busy.vars.runChat(b, null, { entries: [b] }));
+  assert.equal(busy.calls.bodies.length, 4);
+  assert.equal(busy.calls.toasts.length, 4);
+  // the image and Omni fallbacks don't move on either
+  assert.match(APP, /const skippable = !isTesterCode\(err\.code\) && !GUARD_CODES\.has\(err\.code\) && /);
+  assert.match(APP, /if \(err\.name === 'AbortError' \|\| S\.tester \|\| err\.resumable \|\| GUARD_CODES\.has\(err\.code\) \|\| /);
+  assert.match(APP, /errorKind === 'string' && Object\.hasOwn\(ERROR_TITLE, e\.errorKind\)/, 'an older app without the guard kind falls back to the words');
 });

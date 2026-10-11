@@ -31,7 +31,7 @@ class FakeSocket {
 }
 globalThis.WebSocketPair = class { constructor() { this[0] = new FakeSocket(); this[1] = new FakeSocket(); } };
 
-const { Relay } = await import('../src/relay.js');
+const { Relay, relayNeedsApproval } = await import('../src/relay.js');
 
 function fakeCtx() {
   const store = new Map(), accepted = [];
@@ -110,14 +110,43 @@ test('a command reaches the browser, and a refusal from the extension comes back
   const { ctx, relay } = await pairedRelay();
   await relay.fetch(upgrade('', `atelier, ${TOKEN}`));
   const server = ctx.accepted[0].ws;
-  const pending = relay.fetch(new Request('https://relay/cmd', { method: 'POST', body: JSON.stringify({ cmd: 'click', args: { tabId: 3, element: 7 } }) }));
+  const pending = relay.fetch(new Request('https://relay/cmd', { method: 'POST', body: JSON.stringify({ cmd: 'click', args: { tabId: 3, element: 7 }, approved: true }) }));
   for (let i = 0; i < 50 && !server.sent.length; i++) await new Promise((r) => setTimeout(r, 1));
   const sent = JSON.parse(server.sent[0]);
   assert.equal(sent.cmd, 'click');
   assert.deepEqual(sent.args, { tabId: 3, element: 7 });
+  assert.equal(sent.approved, true, 'the approval goes on to the extension, which checks it again');
   const error = 'The user declined this click in the Atelier Browser confirmation window, so nothing was clicked.';
   await relay.webSocketMessage(server, JSON.stringify({ id: sent.id, ok: false, error }));
   assert.deepEqual(await (await pending).json(), { ok: false, error });
+});
+
+test('relayNeedsApproval: click, type, open and a read by address need the owner’s OK; tabs, a tab read and the rest don’t', () => {
+  for (const [cmd, args] of [['click', { tabId: 1, element: 2 }], ['type', { tabId: 1, element: 2, text: 'x' }], ['open', { url: 'https://example.com' }], ['open', {}],
+    ['read', { url: 'https://evil.example/r?d=x' }], ['read', { tabId: 3, url: 'https://evil.example/r' }]]) assert.equal(relayNeedsApproval(cmd, args), true, `${cmd} ${JSON.stringify(args)}`);
+  for (const [cmd, args] of [['tabs', {}], ['read', { tabId: 3 }], ['read', { url: '' }], ['elements', { tabId: 3 }], ['describe', { tabId: 3, element: 1 }], ['show', { tabId: 3 }]])
+    assert.equal(relayNeedsApproval(cmd, args), false, `${cmd} ${JSON.stringify(args)}`);
+});
+
+test('the Relay refuses click, type, open and a read by address without the approval flag: nothing reaches the browser', async () => {
+  const { ctx, relay } = await pairedRelay();
+  await relay.fetch(upgrade('', `atelier, ${TOKEN}`));
+  const server = ctx.accepted[0].ws;
+  for (const [cmd, args] of [['click', { tabId: 3, element: 7 }], ['type', { tabId: 3, element: 7, text: 'hi' }], ['open', { url: 'https://evil.example/c?d=SECRET' }], ['read', { url: 'https://evil.example/r?d=SECRET' }]]) {
+    for (const approved of [undefined, false, 'true', 1]) {
+      const r = await relay.fetch(new Request('https://relay/cmd', { method: 'POST', body: JSON.stringify({ cmd, args, ...(approved === undefined ? {} : { approved }) }) }));
+      assert.equal(r.status, 403, `${cmd} approved=${approved}`);
+      assert.deepEqual(await r.json(), { ok: false, error: 'This action needs your approval in the app.' });
+    }
+  }
+  assert.deepEqual(server.sent, [], 'nothing was sent to the extension');
+  // a read of an open tab needs no approval, and says it has none
+  const pending = relay.fetch(new Request('https://relay/cmd', { method: 'POST', body: JSON.stringify({ cmd: 'read', args: { tabId: 3 } }) }));
+  for (let i = 0; i < 50 && !server.sent.length; i++) await new Promise((r) => setTimeout(r, 1));
+  const sent = JSON.parse(server.sent[0]);
+  assert.deepEqual([sent.cmd, sent.args, sent.approved], ['read', { tabId: 3 }, false]);
+  await relay.webSocketMessage(server, JSON.stringify({ id: sent.id, ok: true, result: { text: 'x' } }));
+  assert.deepEqual(await (await pending).json(), { ok: true, result: { text: 'x' } });
 });
 
 test('a command with no browser connected is a 503', async () => {

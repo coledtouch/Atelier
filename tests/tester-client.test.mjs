@@ -212,8 +212,7 @@ test('link previews no longer advertise tester spots while tester access is clos
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const privacy = await readFile(new URL('../public/privacy.html', import.meta.url), 'utf8');
   assert.match(html, /<meta property="og:title" content="Atelier — Come make something yours\." \/>/);
-  assert.match(html, /<meta property="og:description" content="A personal AI studio for answers, code, images, video, ideas and apps\. Built by Cole Ciprari\." \/>/);
-  assert.doesNotMatch(html, /og:description" content="[^"]*tester/i);
+  assert.match(html, /<meta property="og:description" content="25 LinkedIn tester spots\. Paid models included\. Built by Cole Ciprari\." \/>/); // tester access reopened in v90
   assert.match(html, /<meta name="twitter:card" content="summary_large_image" \/>/);
   for (const c of ['__Host-atelier_tester', '__Host-atelier_li']) assert.ok(privacy.includes(`<code>${c}</code>`), c);
   assert.doesNotMatch(privacy, /the only cookie is/);

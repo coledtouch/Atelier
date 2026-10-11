@@ -10,7 +10,7 @@
 // requests with the owner's bucket, a tester's (src/tester/sync.js) with a bucket view scoped to that tester. A tester
 // view also sets SYNC_COUNT_ALL (every stored byte counts toward the cap: t/, x/ and v/ as well as b/, with the
 // reservations below) and SYNC_MAX_THREADS; the owner's requests never set either, so owner sync is unchanged. This module never reads cookies, LEDGER or ATELIER_KV, imports nothing but the shared pure
-// core, and never answers 429 (to the client that status means passcodeGuard's IP lockout).
+// core, and never answers 429 (to the client that status means the passcode lockout, src/guard.js).
 import {
   FORMAT, LIMITS, BLOB_TYPES, HASH_RE, normalizeType, canonical, sha256hex, utf8Length, checkPush, checkDelete,
   applyPush, applyDelete, applyRestore, newRefs, docMeta, docView, bornOf, reborn,
@@ -169,9 +169,12 @@ async function missingBlobs(bucket, hashes, cache = new Map()) {
   }
   return hashes.filter((h) => !cache.get(h));
 }
+// Live threads, for the thread cap: a tombstone (customMetadata del '1', a thread deleted everywhere) is kept forever so
+// that absence from the index never means "deleted" (sync-merge applyDelete), so it never counts, or deleted threads
+// would use up the cap for good. Its bytes still count wherever bytes do (a tester's SYNC_COUNT_ALL quota).
 async function countThreads(bucket, stopAt) {
   let n = 0;
-  for await (const o of listAll(bucket, 't/', false)) { if (o.key.endsWith('.json') && ++n >= stopAt) break; }
+  for await (const o of listAll(bucket, 't/', true)) { if (o.key.endsWith('.json') && o.customMetadata?.del !== '1' && ++n >= stopAt) break; }
   return n;
 }
 // u/usage.json {bytes, blobs, images, videos, at}: recomputed from list('b/') (customMetadata t: the blob's type) when
@@ -336,7 +339,8 @@ async function postThread(ctx) {
     if (out.error) return { response: fail(413, 'thread_too_large') };
     const answer = (etag) => json({ ...out.response, etag });
     if (!out.changed) return { response: answer(cur ? cur.etag : null) };
-    if (!cur && (await countThreads(bucket, cap)) >= cap) return { response: fail(413, 'too_many_threads') };
+    // A push that makes a live thread out of nothing or out of a tombstone (revived) takes a place under the cap.
+    if ((!cur || cur.doc.deletedAt) && !out.doc.deletedAt && (await countThreads(bucket, cap)) >= cap) return { response: fail(413, 'too_many_threads') };
     const missing = await missingBlobs(bucket, newRefs(cur?.doc, out.doc, out.changedIds), heads);
     if (missing.length) return { response: fail(409, 'missing_blobs', { missing }) };
     // The document replaces the old one (whose copy may go to v/), so it grows the stored bytes by at most its size.
@@ -397,7 +401,7 @@ async function getTrash({ bucket, now }) {
 
 // POST trash/restore {key} → {v, id, rev, restored, title}. A v/ snapshot first, then the write, then the x/ key goes.
 async function postRestore(ctx) {
-  const { req, bucket, now } = ctx;
+  const { req, env, bucket, now } = ctx;
   const { big, body } = await readJson(req, LIMITS.restoreBody);
   if (big) return fail(413, 'too_large');
   const m = typeof body?.key === 'string' ? TRASH_KEY.exec(body.key) : null;
@@ -417,6 +421,12 @@ async function postRestore(ctx) {
     const out = applyRestore(cur.doc, snap, SYNC_TIMING.now());
     if (out.error) return { response: fail(413, 'thread_too_large') };
     if (!out.changed) return { response: await finish(cur.doc, [], cur.etag) };
+    // Restoring into a tombstone makes a live thread again: it takes a place under the cap, as a reviving push does.
+    // (The trash copy stays, so it can be restored once there is room.)
+    if (cur.doc.deletedAt && !out.doc.deletedAt) {
+      const cap = threadCap(env);
+      if ((await countThreads(bucket, cap)) >= cap) return { response: fail(413, 'too_many_threads') };
+    }
     const full = await room.need(utf8Length(out.json)); // the old document moves to v/; the new one is the growth
     if (full) return { response: full };
     return { write: out.doc, json: out.json, snapshot: 'always', done: (etag) => finish(out.doc, out.restored, etag) };

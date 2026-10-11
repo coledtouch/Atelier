@@ -12,6 +12,10 @@
 //      write public/ship.json (this commit), then wrangler deploy with ATELIER_SHIP=1, which wrangler.jsonc's build
 //      guard (scripts/deploy-guard.mjs) requires: a plain `wrangler deploy` anywhere else stops before uploading.
 //   5. Poll the live sw.js until it reports the new VERSION (about 120 s at most), then check index.html loads it.
+//   (Step 2 also reads the sync bucket's R2 lifecycle rules, scripts/check-r2-lifecycle.mjs, and warns when the 30-day
+//   expiry privacy.html promises for trash and earlier versions isn't in place. A warning only: it never stops a ship.
+//   And it lists the Worker's secret NAMES (wrangler secret list; never a value) and refuses when APP_PASSCODE or
+//   GUARD_SECRET is missing: without GUARD_SECRET the passcode guard mints no clearance, src/guard.js.)
 //   6. git push origin <deployed commit>:master (--no-push skips it).
 //   7. Always remove the worktree, and never delete anything outside the temp folder.
 // Flags: --dry-run (steps 1-3 only), --skip-live-check (with --dry-run only, offline), --no-push, --yes,
@@ -25,6 +29,7 @@ import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { VERSION_RE, HTML_RE, IMPORT_RE, BUILD_RE } from './bump-version.mjs';
+import { BUCKET as SYNC_BUCKET_NAME, checkR2Lifecycle, describe as describeLifecycle, runWrangler } from './check-r2-lifecycle.mjs';
 
 export const SITE = 'https://atelier.ciprari.ai';
 export const ZIP = 'public/atelier-browser.zip';
@@ -423,6 +428,43 @@ export async function waitForLive({ n, fetchText, sleep: wait = sleep, now = Dat
   }
 }
 
+/**
+ * The R2 lifecycle check (scripts/check-r2-lifecycle.mjs checkR2Lifecycle) as ship's lines: [['ok' | 'note', text]].
+ * Never a failure: a missing rule is a warning with the command that adds it, an unreadable listing a note.
+ */
+export function lifecycleLines(result, bucket = SYNC_BUCKET_NAME) {
+  if (!result?.ok) return [['note', `R2 lifecycle rules on ${bucket} not checked (${result?.error || 'unknown error'}): run node scripts/check-r2-lifecycle.mjs`]];
+  const lines = describeLifecycle(bucket, result.problems);
+  if (result.problems.ok) return [['ok', lines[0]]];
+  return [['note', `WARNING (not a ship blocker): the R2 lifecycle rules on ${bucket} don't match privacy.html`], ...lines.map((l) => ['note', `  ${l}`])];
+}
+
+// Worker secrets a deploy needs. GUARD_SECRET signs the owner's passcode-guard clearance (src/guard.js): without it no
+// clearance is minted or honoured, so every owner request goes through the Guard and its per-network throttle.
+export const REQUIRED_SECRETS = Object.freeze(['APP_PASSCODE', 'GUARD_SECRET']);
+const GUARD_SECRET_HOWTO = 'npx wrangler secret put GUARD_SECRET (paste 32+ random characters, e.g. from node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64url\'))")';
+/**
+ * The Worker's secret names, read-only: `wrangler secret list --format json` prints [{name, type}], never a value.
+ * run: (args) → {ok, stdout, stderr} (check-r2-lifecycle.mjs runWrangler; tests pass a fake). → {ok, names} | {ok: false, error}
+ */
+export function workerSecretNames({ run = runWrangler } = {}) {
+  const r = run(['secret', 'list', '--format', 'json']);
+  const last = (t) => String(t || '').trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] || '';
+  if (!r.ok) return { ok: false, error: last(r.stderr) || last(r.stdout) || 'wrangler failed' };
+  const out = String(r.stdout || ''), a = out.indexOf('['), b = out.lastIndexOf(']');
+  let list = null;
+  try { list = a >= 0 && b > a ? JSON.parse(out.slice(a, b + 1)) : null; } catch { list = null; }
+  if (!Array.isArray(list)) return { ok: false, error: 'wrangler printed something that isn’t a secret listing' };
+  return { ok: true, names: list.map((x) => x?.name).filter((n) => typeof n === 'string') };
+}
+/** The secrets check as ship's lines: {fatal: [message], notes: [message], ok: [message]}. Missing ones block a ship. */
+export function secretLines(result) {
+  if (!result?.ok) return { fatal: [], ok: [], notes: [`Worker secrets not checked (${result?.error || 'unknown error'}): make sure ${REQUIRED_SECRETS.join(' and ')} are set (npx wrangler secret list)`] };
+  const missing = REQUIRED_SECRETS.filter((n) => !result.names.includes(n));
+  if (!missing.length) return { fatal: [], notes: [], ok: [`Worker secrets ${REQUIRED_SECRETS.join(' and ')} are set (names only)`] };
+  return { fatal: missing.map((n) => `Worker secret ${n} is not set: ${n === 'GUARD_SECRET' ? GUARD_SECRET_HOWTO : `npx wrangler secret put ${n}`}`), notes: [], ok: [] };
+}
+
 // ── side effects ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The environment for every child: no git password prompt, and none of the npm flags meant for ship itself. */
@@ -655,6 +697,17 @@ export async function main(argv = process.argv.slice(2), env = process.env, { tt
       const origin = await liveOrigin(sha, live.version, opts.allowUnrecorded);
       check(origin.ok, origin.message);
     }
+  }
+  // Non-fatal, read-only: the R2 lifecycle rules behind privacy.html's 30-day removal of trash and earlier versions.
+  if (opts.skipLiveCheck) say.note('--skip-live-check: the R2 lifecycle rules were not checked (node scripts/check-r2-lifecycle.mjs)');
+  else for (const [level, text] of lifecycleLines(checkR2Lifecycle())) say[level](text);
+  // Read-only, secret names only: a missing APP_PASSCODE or GUARD_SECRET blocks the ship; an unreadable list is a note.
+  if (opts.skipLiveCheck) say.note('--skip-live-check: the Worker secrets were not checked (npx wrangler secret list)');
+  else {
+    const sec = secretLines(workerSecretNames());
+    for (const m of sec.ok) say.ok(m);
+    for (const m of sec.notes) say.note(m);
+    for (const m of sec.fatal) check(false, m);
   }
 
   if (problems.length && !opts.dryRun) {

@@ -14,6 +14,7 @@ const { DatabaseSync } = await import('node:sqlite');
 
 export const worker = (await import('../src/worker.js')).default;
 export const { Ledger } = await import('../src/tester/ledger.js');
+export const { Guard, resetGuardCaches, guardSynced, GUARD, CLEAR_COOKIE } = await import('../src/guard.js');
 export const { resetTesterCaches, sha256, COOKIE } = await import('../src/tester/auth.js');
 
 // ctx.storage for a SQLite-backed Durable Object: sql.exec (one statement), transactionSync, alarms.
@@ -60,6 +61,32 @@ export function makeLedger(env = {}) {
   return { ledger, ns, stub, shim, calls };
 }
 
+// A real Guard (src/guard.js, the passcode lockout) on the same SQLite shim, behind a stub that clones arguments and
+// results like Workers RPC. ns.calls lists every RPC method called. before(name, args): awaited before a call reaches
+// the object (a test can hold one request back, as the network may). The object runs each call's synchronous part
+// to completion, as a Durable Object does, so parallel calls interleave only at its own awaits.
+export function makeGuard({ before = null } = {}) {
+  const shim = sqlCtx();
+  const guard = new Guard(shim.ctx, {});
+  const calls = [];
+  const stub = new Proxy({}, {
+    get(_, name) {
+      if (name === 'then') return undefined;
+      return async (...args) => {
+        calls.push(name);
+        if (before) await before(name, args);
+        if (typeof guard[name] !== 'function' || String(name).startsWith('#')) throw new Error(`no RPC method ${String(name)}`);
+        const r = await guard[name](...structuredClone(args));
+        return r === undefined ? r : structuredClone(r);
+      };
+    },
+  });
+  const ns = { calls, idFromName: (n) => `id:${n}`, get: () => stub };
+  return { guard, ns, stub, shim, calls };
+}
+// The failed passcode attempts a Guard has counted, all networks together.
+export const guardFails = (G) => G.shim.db.prepare('SELECT COALESCE(SUM(fails), 0) AS n FROM nets').get().n;
+
 export function fakeKV(init = {}) {
   const m = new Map(Object.entries(init));
   return { m, async get(k, type) { const v = m.get(k); return v == null ? null : type === 'json' ? JSON.parse(v) : v; }, async put(k, v) { m.set(k, String(v)); }, async delete(k) { m.delete(k); } };
@@ -69,14 +96,17 @@ export const KEYS = {
   APP_PASSCODE: 'pw', ANTHROPIC_API_KEY: 'sk-ant-test', OPENAI_API_KEY: 'sk-openai-test', GEMINI_API_KEY: 'AQ.test-gemini-key-0123456789abcdef',
   ZAI_API_KEY: 'zai-test', DEEPSEEK_API_KEY: 'ds-test', META_API_KEY: 'meta-test', NVIDIA_API_KEY: 'nvapi-test', XAI_API_KEY: 'xai-test-key-0123456789',
   LINKEDIN_CLIENT_ID: 'li-client', LINKEDIN_CLIENT_SECRET: 'li-secret-xyz',
+  GUARD_SECRET: 'guard-secret-test-0123456789abcdef-0123456789', // signs the owner's clearance (src/guard.js)
 };
 // env with every provider key, a fake KV and a real Ledger (pass ledger: null for none). Tester access is switched ON
 // here (TESTERS_ENABLED "1"), because the tester suites exercise the tester code the switch can turn back on; the
 // Worker's default is off, so pass testers: false for the production default (no TESTERS_ENABLED var at all). The
 // default Ledger sees the same switch, as the Durable Object shares the Worker's vars (its alarm ends sessions while off).
-export function makeEnv({ ledger, testers = true, ...extra } = {}) {
+// Every env has its own Guard (the passcode lockout, src/guard.js) as GUARD: pass guard to share one, or GUARD in extra.
+export function makeEnv({ ledger, testers = true, guard, ...extra } = {}) {
   if (ledger === undefined) ledger = makeLedger(testers ? { TESTERS_ENABLED: '1' } : {});
-  return { env: { ...KEYS, ATELIER_KV: fakeKV(), ...(ledger ? { LEDGER: ledger.ns } : {}), ...(testers ? { TESTERS_ENABLED: '1' } : {}), ...extra }, L: ledger };
+  guard ??= makeGuard();
+  return { env: { ...KEYS, ATELIER_KV: fakeKV(), ...(ledger ? { LEDGER: ledger.ns } : {}), GUARD: guard.ns, ...(testers ? { TESTERS_ENABLED: '1' } : {}), ...extra }, L: ledger, G: guard };
 }
 
 // ── fetch mock: routes [regex on "METHOD url", handler(call)]; an unmatched call throws ──

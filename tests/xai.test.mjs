@@ -1,7 +1,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { makeEnv, mockFetch, restoreFetch, upstream, reply, sseOf, api, KEYS } from './tester-env.mjs';
+import { makeEnv, makeGuard, mockFetch, restoreFetch, upstream, reply, sseOf, api, KEYS } from './tester-env.mjs';
 
 // xAI (Grok), owner only: /api/chat with xai: models (worker.js shapeChatBody), /api/xai/* (src/xai.js: Grok Imagine
 // image and video), the diag, the client (public/xai.js) and the catalogue in app.js. Every upstream call is mocked —
@@ -89,7 +89,7 @@ test('health and diag: server.xai follows XAI_API_KEY; Check provider keys reads
   const { env: none } = makeEnv({ ledger: null }); delete none.XAI_API_KEY;
   assert.equal((await health(none)).xai, false);
   // only the xAI key, so the diag calls nothing else
-  const only = { APP_PASSCODE: 'pw', XAI_API_KEY: KEY, ATELIER_KV: makeEnv({ ledger: null }).env.ATELIER_KV };
+  const only = { APP_PASSCODE: 'pw', XAI_API_KEY: KEY, ATELIER_KV: makeEnv({ ledger: null }).env.ATELIER_KV, GUARD: makeGuard().ns };
   const info = { redacted_api_key: 'xai-...b14o', team_id: 't', api_key_id: 'k', acls: [], team_blocked: false, api_key_blocked: false, api_key_disabled: false };
   mockFetch([[/^GET https:\/\/api\.x\.ai\/v1\/api-key$/, (c) => { assert.equal(c.headers.get('authorization'), `Bearer ${KEY}`); return reply(200, info); }]]);
   let d = JSON.parse(await text(await owner('diag', {}, only)));
@@ -123,9 +123,9 @@ test('xAI error messages: out of credit / spending limit → 402 xai_credits on 
   assert.deepEqual(JSON.parse(await (await owner('xai/image', post({ model: 'grok-imagine-image-2.0', prompt: 'a fox' }))).text()).code, 'xai_key');
   // app.js's accountProblem + errorKind, lifted from its source (as tests/runway-client.test.mjs does): the chat route
   // passes xAI's own error body through, so these are the messages streamChat sees.
-  const a = APP.match(/\nconst accountProblem = [\s\S]*?\);\n/), k = APP.match(/\nfunction errorKind\([\s\S]*?\n}\n/);
-  assert.ok(a && k, 'accountProblem and errorKind are still where this test looks');
-  const { accountProblem, errorKind } = new Function('isTesterCode', `${a[0]}\n${k[0]}\nreturn { accountProblem, errorKind };`)(() => false);
+  const a = APP.match(/\nconst accountProblem = [\s\S]*?\);\n/), k = APP.match(/\nfunction errorKind\([\s\S]*?\n}\n/), g = APP.match(/\nconst GUARD_CODES = [^\n]*\n/);
+  assert.ok(a && k && g, 'accountProblem, errorKind and GUARD_CODES are still where this test looks');
+  const { accountProblem, errorKind } = new Function('isTesterCode', `${g[0]}\n${a[0]}\n${k[0]}\nreturn { accountProblem, errorKind };`)(() => false);
   assert.equal(accountProblem({ status: 403, message: NO_CREDITS }), true);
   assert.equal(accountProblem({ status: 429, message: LIMIT }), true, 'a spending-limit 429 is not a rate limit: move to the next provider');
   assert.equal(accountProblem({ status: 500, message: 'Your team has reached its monthly spending limit' }), true);

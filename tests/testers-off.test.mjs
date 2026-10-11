@@ -43,11 +43,11 @@ const SAMPLES = [...new Set([
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 const isPublic = (path) => PUBLIC_PATHS.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p));
 
-test('the switch: off unless TESTERS_ENABLED is exactly "1"; wrangler.jsonc ships it "0"; /api/health says which', async () => {
+test('the switch: off unless TESTERS_ENABLED is exactly "1"; wrangler.jsonc ships it "1" (reopened in v90); /api/health says which', async () => {
   for (const v of [undefined, '', '0', 'false', 'true', 'yes', '01', 'on']) assert.equal(testersOn(v === undefined ? {} : { TESTERS_ENABLED: v }), false, String(v));
   for (const v of ['1', ' 1 ']) assert.equal(testersOn({ TESTERS_ENABLED: v }), true, v);
   assert.equal(testersOn(undefined), false);
-  assert.match(WRANGLER, /"vars": \{[^}]*"TESTERS_ENABLED": "0"[^}]*\}/);
+  assert.match(WRANGLER, /"vars": \{[^}]*"TESTERS_ENABLED": "1"[^}]*\}/);
   for (const [env, want] of [[makeEnv({ testers: false }).env, false], [makeEnv({ testers: false, TESTERS_ENABLED: '0' }).env, false], [makeEnv().env, true]]) {
     const j = await (await api(env, 'health')).json();
     assert.equal(j.testers, want);

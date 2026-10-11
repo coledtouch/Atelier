@@ -4,7 +4,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { makeEnv, api, signIn, PROFILE, resetTesterCaches, mockFetch, restoreFetch, reply } from './tester-env.mjs';
+import { makeEnv, api, signIn, PROFILE, resetTesterCaches, mockFetch, restoreFetch, reply, guardFails } from './tester-env.mjs';
 import { fakeR2, workerRequest, knownLength } from './fake-r2.mjs';
 import { handleSync, SYNC_OPTIONS, SYNC_TIMING } from '../src/sync.js';
 import { FORMAT, LIMITS, INLINE_MAX, dehydrate, sha256hex, applyPush, TEXT_TYPE } from '../public/sync-merge.js';
@@ -524,6 +524,66 @@ test('delete is rev-aware, writes the pre-image to the trash first, and restore 
   assert.equal((await call(env, 'DELETE', 'thread/t1', { body: { v: 1, seen: { e1: 'x' } } })).status, 400);
 });
 
+// Peer review (v56, LOW 1): tombstones (threads deleted everywhere, kept forever so absence never means deleted) counted
+// against the thread cap for good. They no longer count; reviving one takes a place again.
+test('the thread cap counts live threads only: tombstones don’t use it up, and reviving one counts again', async () => {
+  const env = syncEnv({ SYNC_MAX_THREADS: 2 });
+  assert.equal((await push(env, 't1', [ask('a1', 1)])).status, 200);
+  assert.equal((await push(env, 't2', [ask('b1', 1)])).status, 200);
+  let r = await push(env, 't3', [ask('c1', 1)]);
+  assert.equal(r.status, 413);
+  assert.equal(await codeOf(r), 'too_many_threads');
+  const del = await bodyOf(await call(env, 'DELETE', 'thread/t1', { body: { v: 1, seen: { a1: 1 } } }));
+  assert.equal(del.deleted, true, 't1 is a tombstone now');
+  assert.equal(env.SYNC_BUCKET.has('t/t1.json'), true, 'and kept');
+  assert.equal((await push(env, 't3', [ask('c1', 1)])).status, 200, 'the tombstone left its place under the cap');
+  // reviving the tombstone (new work pushed into t1) makes a third live thread: refused at the cap of 2
+  r = await push(env, 't1', [ask('a2', 2)]);
+  assert.equal(r.status, 413);
+  assert.equal(await codeOf(r), 'too_many_threads');
+  await call(env, 'DELETE', 'thread/t2', { body: { v: 1, seen: { b1: 1 } } });
+  assert.equal((await push(env, 't1', [ask('a2', 2)])).status, 200, 'room again once t2 is a tombstone');
+  const st = await bodyOf(await call(env, 'GET', 'status'));
+  assert.deepEqual([st.threads, st.deleted], [2, 1]);
+  // a push that changes a live thread never consults the cap
+  assert.equal((await push(env, 't3', [ask('c2', 3)])).status, 200);
+  assert.match(syncSrc, /o\.customMetadata\?\.del !== '1'/, 'countThreads skips tombstones by their metadata (no body read)');
+});
+
+// v90 review: once tombstones stopped counting, restoring one from the trash made it live again with no cap check, so
+// the live threads could go past the cap (2 deleted, 2 new pushed, both restored: 4 live under a cap of 2).
+test('restoring a deleted thread from the trash takes a place under the cap: refused at the cap (the trash copy stays), allowed below it', async () => {
+  const env = syncEnv({ SYNC_MAX_THREADS: 2 });
+  assert.equal((await push(env, 't1', [ask('a1', 1)])).status, 200);
+  assert.equal((await push(env, 't2', [ask('b1', 1)])).status, 200);
+  const d1 = await bodyOf(await call(env, 'DELETE', 'thread/t1', { body: { v: 1, seen: { a1: 1 } } }));
+  const d2 = await bodyOf(await call(env, 'DELETE', 'thread/t2', { body: { v: 1, seen: { b1: 1 } } }));
+  assert.ok(d1.trashKey && d2.trashKey);
+  assert.equal((await push(env, 't3', [ask('c1', 1)])).status, 200);
+  assert.equal((await push(env, 't4', [ask('d1', 1)])).status, 200);
+  let r = await call(env, 'POST', 'trash/restore', { body: { key: d1.trashKey } });
+  assert.equal(r.status, 413, 'two live threads already: the restore would make a third');
+  assert.equal(await codeOf(r), 'too_many_threads');
+  assert.equal(env.SYNC_BUCKET.has(d1.trashKey), true, 'the trash copy stays for later');
+  let st = await bodyOf(await call(env, 'GET', 'status'));
+  assert.deepEqual([st.threads, st.deleted], [2, 2]);
+  // room again: t3 deleted, then t1 comes back
+  await call(env, 'DELETE', 'thread/t3', { body: { v: 1, seen: { c1: 1 } } });
+  r = await call(env, 'POST', 'trash/restore', { body: { key: d1.trashKey } });
+  assert.equal(r.status, 200);
+  assert.equal((await bodyOf(r)).restored, 1);
+  assert.equal(env.SYNC_BUCKET.has(d1.trashKey), false);
+  r = await call(env, 'POST', 'trash/restore', { body: { key: d2.trashKey } });
+  assert.equal(r.status, 413, 'and the cap holds for the next one');
+  st = await bodyOf(await call(env, 'GET', 'status'));
+  assert.deepEqual([st.threads, st.deleted], [2, 2], 'never more live threads than the cap');
+  // restoring into a live thread (an entry back into one that still has others) never consults the cap
+  assert.equal((await push(env, 't1', [ask('a2', 2)])).status, 200);
+  const partial = await bodyOf(await call(env, 'DELETE', 'thread/t1', { body: { v: 1, seen: { a2: 2 } } }));
+  assert.equal(partial.deleted, false, 't1 keeps a1: still live');
+  assert.equal((await call(env, 'POST', 'trash/restore', { body: { key: partial.trashKey } })).status, 200);
+});
+
 test('trash lists only the last 30 days, newest first; older items cannot be restored', async () => {
   const env = syncEnv();
   for (const [i, id] of ['old', 'mid', 'new'].entries()) {
@@ -601,12 +661,13 @@ test('a tester cookie gets 403 owner_only on every sync route, with no R2 or KV 
   assert.deepEqual([...env.ATELIER_KV.m.keys()], []);
 });
 
-test('a wrong passcode counts toward the IP lockout and never reaches R2', async () => {
-  const { env } = makeEnv({ SYNC_BUCKET: fakeR2() });
+test('a wrong passcode counts toward the network lockout and never reaches R2', async () => {
+  const { env, G } = makeEnv({ SYNC_BUCKET: fakeR2() });
   mockFetch([[/./, () => reply(500, { error: 'should not be called' })]]);
   const r = await api(env, 'sync/index', { method: 'GET' }, { pass: 'nope' });
   assert.equal(r.status, 401);
-  assert.equal(env.ATELIER_KV.m.get('fail:unknown'), '1');
+  assert.equal(guardFails(G), 1, 'counted by the Guard (src/guard.js)');
+  assert.deepEqual([...env.ATELIER_KV.m.keys()], [], 'KV holds no lockout counter any more');
   assert.equal(env.SYNC_BUCKET.totalCalls(), 0);
 });
 
