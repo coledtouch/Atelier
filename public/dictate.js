@@ -102,7 +102,7 @@ export const SAY = Object.freeze({
 export const MIC_HELP = Object.freeze({
   iosApp: 'Atelier can’t use the microphone. Tap the mic again and choose Allow. If it doesn’t ask: Settings → Apps → Safari → Microphone → Ask, then reopen Atelier.',
   ios: 'Atelier can’t use the microphone. In Safari, open the page menu (aA) → Website Settings → Microphone → Allow, then try again.',
-  iosBrowser: 'Atelier can’t use the microphone. Allow it for this site in {app}, or turn it on in Settings → Apps → {app} → Microphone, then try again.',
+  iosBrowser: 'Atelier can’t use the microphone. Allow it for this site in {app}. Or turn it on in Settings → Apps → {app} → Microphone, then try again.',
   iosInApp: 'This app’s built-in browser won’t let Atelier use the microphone. Open Atelier in Safari, then tap the mic.',
   androidApp: 'The mic is off for Atelier. Touch and hold the Atelier icon → Site settings → Microphone → Allow. If it’s still off: Android Settings → Apps → Chrome → Permissions → Microphone.',
   android: 'The mic is off for this site. Tap the icon left of the address → Permissions → Microphone → Allow, then try again.',

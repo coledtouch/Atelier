@@ -373,7 +373,7 @@ test('chat (Claude web search): a context too big for Opus runs on Sonnet 5.5 an
   assert.equal(upstream.calls[0].json.model, 'claude-sonnet-5-5');
   r = await call('chat', post({ model: 'anthropic:claude-opus-5-5', web_search: true, messages: [{ role: 'user', content: 'word '.repeat(70_000) }] }));
   assert.equal(r.status, 402);
-  assert.deepEqual(await r.json(), { error: 'This request is bigger than one tester call allows — start a new thread, attach less or pick a lighter model.', code: 'tester_budget', scope: 'call', resetsAt: null });
+  assert.deepEqual(await r.json(), { error: 'This request is bigger than one tester call allows. Start a new thread, attach less or pick a lighter model.', code: 'tester_budget', scope: 'call', resetsAt: null });
   assert.equal(upstream.calls.length, 1);
 });
 
@@ -412,7 +412,7 @@ test('budget refusals: 402 tester_budget with scope, resetsAt and the allowance 
   r = await call('chat', post({ model: 'anthropic:claude-opus-5-5', messages: [{ role: 'user', content: 'hi' }] }));
   const short = await r.json();
   assert.equal(short.scope, 'day');
-  assert.equal(short.error, 'This request needs more than the $0.20 left today — pick a lighter model, a shorter clip or attach less.');
+  assert.equal(short.error, 'This request needs more than the $0.20 left today. Pick a lighter model, a shorter clip or attach less.');
   assert.equal(allowanceOf(r).dayLeft, 200_000);
   L.ledger.setConfig({ day_limit: 1_000_000, pool_limit: 10 });
   r = await call('chat', body);

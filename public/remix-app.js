@@ -8,19 +8,19 @@
 // Money rules kept here: nothing billable starts before an Approve tap (filmQueue only starts shots whose approval key
 // matches their cost key); a shot whose start may have reached the provider ('unknown') needs a fresh approval; global
 // Stop never touches filming; a reload never starts anything new (boot only polls ops it finds in rx:ops).
-import * as R from './remix.js?v=91';
-import { cutsFrom } from './remix-cuts.js?v=91';
-import { advanceShot, shotRequest, firstFrameShape } from './remix-shots.js?v=91';
-import { buildGraph } from './remix-graph.js?v=91';
-import { createRemixStore, keys as rxKeys, SOURCE_MAX } from './remix-store.js?v=91';
-import { cardThumb, padFrameAt, grabFrame, canvasToDataUrl, ensureFonts, makeCanvas, composeFrame } from './remix-draw.js?v=91';
-import { frameAt as graphFrameAt } from './remix-graph.js?v=91';
-import { videoParts, planFor, noteFor, fmtDur } from './video.js?v=91';
+import * as R from './remix.js?v=92';
+import { cutsFrom } from './remix-cuts.js?v=92';
+import { advanceShot, shotRequest, firstFrameShape } from './remix-shots.js?v=92';
+import { buildGraph } from './remix-graph.js?v=92';
+import { createRemixStore, keys as rxKeys, SOURCE_MAX } from './remix-store.js?v=92';
+import { cardThumb, padFrameAt, grabFrame, canvasToDataUrl, ensureFonts, makeCanvas, composeFrame } from './remix-draw.js?v=92';
+import { frameAt as graphFrameAt } from './remix-graph.js?v=92';
+import { videoParts, planFor, noteFor, fmtDur } from './video.js?v=92';
 
 export const PLACEHOLDER = 'How should we remix it?'; // one line on a 360 px phone (the composer note and chips carry the rest)
 export const COPY = Object.freeze({
   empty: 'Tell Atelier what to change — or tap Ask about it',
-  cantCut: 'Can’t cut this video in this browser — export it as MP4 (H.264) or open Atelier in Chrome',
+  cantCut: 'Can’t cut this video in this browser. Export it as MP4 (H.264) or open Atelier in Chrome',
   hdr: 'HDR video will look flat when cut — export as SDR for best colour',
   checking: 'Checking the video for editing',
   choose: 'Choose Revise or New clip first',
@@ -122,7 +122,7 @@ export function shotChip(s, now = Date.now()) {
   }
   if (t === 'downloading') return { text: 'Downloading', acts: [] };
   if (t === 'ready') return { text: 'Ready', acts: ['play'] };
-  if (t === 'filtered') return { text: 'Filtered — not billed', acts: ['edit', 'retry', 'card'] };
+  if (t === 'filtered') return { text: 'Filtered · not billed', acts: ['edit', 'retry', 'card'] };
   if (t === 'budget') return { text: `Doesn’t fit today${s.resetsAt ? ` · resets ${new Date(s.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}`, acts: ['card'] };
   if (t === 'unknown') return { text: 'Couldn’t confirm the provider started this shot — retrying may bill twice', acts: ['retry-anyway', 'card'] };
   if (t === 'expired') return { text: 'The provider no longer has this shot', acts: ['refilm', 'card'] };
@@ -156,7 +156,7 @@ export function createRemix(deps) {
   const toast = deps.toast || (() => {});
   const ApiError = deps.ApiError || class extends Error { constructor(status, msg) { super(msg); this.status = status; } };
   let renderMod = null;
-  const loadRender = () => (renderMod ||= (deps.loadRender ? Promise.resolve(deps.loadRender()) : import('./remix-render.js?v=91')).catch((err) => { renderMod = null; throw err; }));
+  const loadRender = () => (renderMod ||= (deps.loadRender ? Promise.resolve(deps.loadRender()) : import('./remix-render.js?v=92')).catch((err) => { renderMod = null; throw err; }));
 
   const probes = new WeakMap(); // composer video → {status, info, caps, error}
   const files = new Map(); // entryId → source File (this session)
@@ -399,7 +399,7 @@ export function createRemix(deps) {
     const v = e.video || {};
     const got = deps.ensureClip ? await deps.ensureClip(e, e, signal, thread) : { file: null };
     const clip = got?.file || null;
-    if (!clip && !v.frames?.length) throw new ApiError(got?.error?.status || 502, 'Gemini couldn’t get the clip to plan this remix — tap Try again (Atelier needs to upload it).');
+    if (!clip && !v.frames?.length) throw new ApiError(got?.error?.status || 502, 'Gemini couldn’t get the clip to plan this remix. Tap Try again so Atelier can upload it.');
     const ctx = { source: r.source, maxNew: r.opts.maxNew, fit: r.opts.fit, audioMode: r.opts.audioMode };
     const plans = new Map();
     const messages = (compact) => (m) => {

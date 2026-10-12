@@ -36,7 +36,7 @@
 // tester account): it isn't synced, backed up or embedded in a download. Deleting a thread that can't be restored removes
 // its apps' data at once; a thread no longer on this device for another reason (in Recently deleted, deleted on another
 // device) keeps it 30 days, so a restore finds it, then prune deletes it. Clear this device removes all of this workspace's.
-import { rootOf } from './builds.js?v=91';
+import { rootOf } from './builds.js?v=92';
 
 export const MSG = 'atelier-appdata';
 export const APP_CAP = 5 * 1024 * 1024;     // bytes per app: 2 per UTF-16 code unit of keys + values (as browsers count)

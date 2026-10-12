@@ -18,6 +18,7 @@ const C = await import('../public/spend.js');
 const RemixShots = await import('../public/remix-shots.js');
 const RW = await import('../public/runway.js');
 const { validateBackup, ERROR_KINDS } = await import('../public/data-safety.js');
+const { problems } = await import('./humanizer-lint.mjs');
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const APP = read('../public/app.js'), HTML = read('../public/index.html'), CSS = read('../public/app.css');
 
@@ -96,7 +97,10 @@ test('the readout paints this month’s spend and its breakdown from GET /api/ow
     byProvider: [{ provider: 'runway', kind: 'video', usd: 21.6, heldUsd: 1.2, jobs: 2 }, { provider: 'openai', kind: 'image', usd: 0.0527, heldUsd: 0, jobs: 1 }] });
   const text = box.innerHTML.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
   assert.match(text, /This month’s spend · October 2026 \$21\.66/);
-  assert.match(text, /\$1\.20 of it for jobs still running/);
+  assert.match(text, /Paid video and images on your own keys\. \$1\.20 of it is for jobs still running\. Starts again [^.]+\. Chat, free FLUX images and Cosmos video aren’t counted\./);
+  const hint = /<p class="hint">([^<]*Paid video[^<]*)<\/p>/.exec(box.innerHTML)?.[1] || '';
+  assert.ok(hint);
+  assert.deepEqual(problems(hint), [], 'every branch rendered, the hint still passes Cole’s humanizer');
   assert.match(text, /Runway · video 2 jobs · \$21\.60/);
   assert.match(text, /GPT Image · images 1 job · \$0\.06/);
   assert.doesNotMatch(box.innerHTML, /<input|<button|limit|left/i, 'read only: no fields, no Save, no “left of a limit”');

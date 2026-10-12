@@ -760,7 +760,7 @@ async function handleApi(req, env, url) {
         if (r.status === 403 && /scope|insufficient/i.test(msg)) msg = 'This Google account hasn’t allowed Photos yet — reconnect it with “+ Add account” in Settings → Connections.';
         else if (r.status === 403 && /disabled|not been used/i.test(msg)) {
           const project = msg.match(/project (\d+)/)?.[1];
-          msg = `Google says the Photos Picker API isn’t enabled${project ? ` in project ${project}` : ''} (the project that owns your OAuth client). If you just enabled it, wait a few minutes.`;
+          msg = `Google says the Photos Picker API is off ${project ? `in project ${project}. That project owns your OAuth client` : 'in the project that owns your OAuth client'}. If you just enabled it, wait a few minutes.`;
         }
         throw Object.assign(new Error(String(msg).slice(0, 300)), { status: r.status });
       }

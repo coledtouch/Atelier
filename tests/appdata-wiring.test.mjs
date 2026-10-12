@@ -70,7 +70,7 @@ test('the Build prompt asks for localStorage and for keys that survive a refine;
   assert.match(APP, /Persist state with localStorage \(Atelier keeps it for this app, on this device;/);
   assert.match(APP, /keep its localStorage keys and data format \(or migrate the old format\) so what the user saved still loads/);
   assert.match(PRIVACY, /<li id="app-data"><b>Build app data \(this device\):<\/b>/);
-  assert.match(PRIVACY, /isn’t synced, sent to Atelier’s server, put in thread backups or added to a downloaded app/);
+  assert.match(PRIVACY, /It isn’t synced or sent to Atelier’s server\. It isn’t put in thread backups or added to a downloaded app\./);
   assert.match(FIXTURE, /localStorage\.setItem\("review-count",String\(n\)\)/, 'the review fixture’s Build app saves its count');
 });
 

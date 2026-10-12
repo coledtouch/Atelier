@@ -57,7 +57,7 @@ function convsIn(data) {
   return list.map(asConv).filter(Boolean);
 }
 const isManifest = (d) => d && typeof d === 'object' && !Array.isArray(d) && Array.isArray(d.data_files) && d.data_files.some((f) => f && f.export_url);
-const MANIFEST_MSG = 'That’s the export’s list of download links, not the chats themselves. Download conversations-000.zip (and any conversations-001.zip …) from the links in your claude.ai export email, then import that zip here.';
+const MANIFEST_MSG = 'That file is the export’s list of download links. Download conversations-000.zip (and any conversations-001.zip …) from the links in your claude.ai export email. Then import that zip here.';
 function parseText(text, name = '') {
   const t = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   if (/\.jsonl$/i.test(name)) return t.split('\n').filter((l) => l.trim()).flatMap((l) => { try { return convsIn(JSON.parse(l)); } catch { return []; } });
@@ -80,7 +80,7 @@ export function readConversations(bytes, fflate) {
       if (f.originalSize > LIMITS.bytes || total > LIMITS.bytes) { big = true; return false; }
       return true;
     } });
-    if (big) throw new Error('That export is too large to open in a browser (over 480 MB of chats in one zip).');
+    if (big) throw new Error('That export is too large to open in a browser. It holds over 480 MB of chats in one zip.');
     const names = Object.keys(files);
     // conversations*.json first; other JSON files only when they hold conversations (users.json, projects.json don't)
     const ordered = [...names.filter((n) => CONV_RE.test(n)), ...names.filter((n) => !CONV_RE.test(n))];
@@ -93,7 +93,7 @@ export function readConversations(bytes, fflate) {
     convs = parseText(new TextDecoder().decode(bytes));
   }
   if (!convs.length && emptyExport) return [];
-  if (!convs.length) throw new Error('No Claude chats found in that file. Choose conversations-000.zip from your claude.ai export (not projects, memories or light_metadata). For ChatGPT, use Your profile → ChatGPT export.');
+  if (!convs.length) throw new Error('No Claude chats found in that file. Choose conversations-000.zip from your claude.ai export. The projects, memories and light_metadata files hold no chats. For ChatGPT, use Your profile → ChatGPT export.');
   // the same conversation in two files (split exports overlap): keep the copy with more messages
   const byId = new Map();
   for (const c of convs) { const k = c.uuid || JSON.stringify([c.created_at, c.name]); const o = byId.get(k); if (!o || c.chat_messages.length > o.chat_messages.length) byId.set(k, c); }

@@ -73,7 +73,8 @@ test('voices are a frozen server allow-list; the default is Gemini 3.8 Flash TTS
   // The preview line is part of its cache key.
   assert.match(PREVIEW_ID, /^[0-9a-f]{8}$/);
   assert.equal(PREVIEW_ID, previewId(PREVIEW_TEXT));
-  assert.notEqual(previewId(PREVIEW_TEXT.replace('calmly', 'gently')), PREVIEW_ID);
+  assert.ok(PREVIEW_TEXT.includes('break'));
+  assert.notEqual(previewId(PREVIEW_TEXT.replace('break', 'rest')), PREVIEW_ID);
 });
 
 test('spokenUnits: a character each, more for digits, symbols read as words and CJK characters', () => {

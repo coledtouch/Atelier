@@ -290,9 +290,9 @@ test('privacy.html discloses the owner’s clearance cookie and how long a faile
   assert.equal(CLEAR_COOKIE, '__Host-atelier_owner');
   assert.equal(GUARD.clearDays, 30);
   assert.equal(GUARD.windowMs, 15 * 60_000);
-  for (const words of ['__Host-atelier_owner', 'lasts up to 30 days', 'one-way keyed code for the network', 'never the address itself',
+  for (const words of ['__Host-atelier_owner', 'lasts up to 30 days', 'one-way keyed code for the network', 'Atelier keeps only that code and a count of failures. It never stores the address itself.',
     'deleted 15 minutes after that network’s last failure', 'never used for tracking', 'a cap on wrong attempts from all networks together',
-    'If it is ever sent with a wrong passcode, Atelier keeps a one-way code of it (never the cookie itself) until the date it would have expired'])
+    'If it is ever sent with a wrong passcode, Atelier keeps a one-way code of it. Atelier never keeps the cookie itself. The code is kept until the date the cookie would have expired.'])
     assert.ok(text.includes(words), words);
   assert.doesNotMatch(text, /the only cookies are the tester sign-in cookies/);
 });

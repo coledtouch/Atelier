@@ -141,6 +141,8 @@ for (const choice of ['keep', 'close', 'enable']) test(`tester consent UI: ${cho
   ui = bindUi(eng, { account: 'tester' }, doc);
   await eng.verified();
   assert.match(doc.querySelector('#syncFirstBody').textContent, /Sync threads privately to this LinkedIn account\?/);
+  // asked before anything is stored: the storage is what happens with sync on, never a fact already
+  assert.match(doc.querySelector('#syncFirstBody').textContent, /\? With sync on, your threads and creations are stored in Atelier’s private storage\. Then you can continue on another device\./);
   assert.equal(doc.querySelector('#syncFirstNew').textContent, 'Keep on this device');
   assert.equal(doc.querySelector('#syncFirstAll').textContent, 'Enable private sync');
   if (choice === 'close') doc.querySelector('#syncFirst').close();

@@ -62,9 +62,9 @@ test('an account without a mailbox gets a plain explanation instead of "Precondi
   assert.doesNotMatch(read.error, /Precondition/);
 });
 
-// v91 review (agent-gmail-draft-crlf): To, Cc and In-Reply-To went into the message as they were, and gmail_draft runs
-// without a card, so a steered agent could add a hidden Bcc or Reply-To. Line breaks are refused; In-Reply-To must be one
-// <message-id>.
+// v91 review (agent-gmail-draft-crlf): To, Cc and In-Reply-To went into the message as they were, so a steered agent
+// could add a hidden Bcc or Reply-To. Line breaks are refused; In-Reply-To must be one <message-id>. (v92: gmail_draft
+// needs approval too, so both tools are called approved here; the refusal must come from the header check.)
 function mailSink() {
   const sent = [];
   globalThis.fetch = async (url, init = {}) => {
@@ -87,7 +87,7 @@ test('gmail_draft and gmail_send refuse a line break in To, Cc or In-Reply-To (n
     { to: 'bob@example.com', in_reply_to: '<a@mail> <b@mail>' },
   ];
   for (const args of bad) {
-    for (const [tool, approved] of [['gmail_draft', false], ['gmail_send', true]]) {
+    for (const [tool, approved] of [['gmail_draft', true], ['gmail_send', true]]) {
       const r = await runTool(env([MAIL]), tool, { subject: 'Q3', body: 'Hi', account: MAIL, ...args }, approved);
       assert.equal(r.ok, false, `${tool} ${JSON.stringify(args)}`);
       assert.match(r.error, /can’t contain line breaks|must be the original message’s Message-ID/);
@@ -95,12 +95,29 @@ test('gmail_draft and gmail_send refuse a line break in To, Cc or In-Reply-To (n
   }
   assert.deepEqual(sent, [], 'nothing reached Gmail');
   // A normal reply still goes: one To, one Cc, In-Reply-To and References from the Message-ID.
-  const ok = await runTool(env([MAIL]), 'gmail_draft', { to: 'Bob <bob@example.com>', cc: 'amy@example.com', subject: 'Re: Q3', body: 'Thanks', in_reply_to: ' <CAx1@mail.gmail.com> ', threadId: 't1', account: MAIL }, false);
+  const ok = await runTool(env([MAIL]), 'gmail_draft', { to: 'Bob <bob@example.com>', cc: 'amy@example.com', subject: 'Re: Q3', body: 'Thanks', in_reply_to: ' <CAx1@mail.gmail.com> ', threadId: 't1', account: MAIL }, true);
   assert.equal(ok.ok, true);
   const msg = decode(sent[0].raw);
   assert.match(msg, /^To: Bob <bob@example\.com>\r\nCc: amy@example\.com\r\nSubject: =\?UTF-8\?B\?/);
   assert.match(msg, /\r\nIn-Reply-To: <CAx1@mail\.gmail\.com>\r\nReferences: <CAx1@mail\.gmail\.com>\r\n\r\nThanks$/);
   assert.doesNotMatch(msg, /^(Bcc|Reply-To):/m);
+});
+
+// v92 (Cole, 2026-10-11): saving a Gmail draft shows an approval card like sending does. Unapproved, nothing reaches
+// Gmail; the tool list marks it write so the app asks.
+test('gmail_draft needs the user\u2019s approval: unapproved it saves nothing, approved it saves the draft', async () => {
+  const sent = mailSink();
+  const args = { to: 'bob@example.com', subject: 'Q3', body: 'Hi', account: MAIL };
+  for (const approved of [undefined, false, 'yes', 1]) {
+    const r = await runTool(env([MAIL]), 'gmail_draft', args, approved);
+    assert.equal(r.ok, false, String(approved));
+    assert.match(r.error, /needs the user's approval/);
+  }
+  assert.deepEqual(sent, [], 'nothing reached Gmail');
+  const ok = await runTool(env([MAIL]), 'gmail_draft', args, true);
+  assert.equal(ok.ok, true);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].url, /\/drafts$/);
 });
 
 // v91 review (critic-github-outside-taint-gaps b): the repo went into the API path raw, and fetch resolves dot segments,

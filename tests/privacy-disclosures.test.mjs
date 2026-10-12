@@ -45,7 +45,7 @@ test('Canva and its scopes are disclosed, and the terms name Google and Canva', 
   for (const s of canvaScopes()) assert.ok(canva.includes(`<code>${s}</code>`), `Canva scope ${s}`);
   assert.match(PRIVACY, /<tr><td>Google \(Gmail, Calendar, Drive, Photos\), Canva, Slack, GitHub, Stripe, Cloudflare, Railway<\/td>/);
   assert.match(PRIVACY, /<b>Disconnect Canva:<\/b>/);
-  assert.match(TOS, /works with your Google \(Gmail, Calendar, Drive and Photos\), Canva, Slack, GitHub, Stripe, Cloudflare and Railway accounts/);
+  assert.match(TOS, /work with accounts you connect: Google \(Gmail, Calendar, Drive and Photos\), Canva and Slack\. It can also work with GitHub, Stripe, Cloudflare and Railway/);
   assert.match(TOS, /Testers cannot connect accounts \(such as Google, Canva or Slack\)/);
 });
 
@@ -58,10 +58,10 @@ test('Cloudflare Web Analytics is disclosed whenever the CSP lets its beacon run
   assert.doesNotMatch(PRIVACY, /do not use analytics/i);
   assert.match(PRIVACY, /<tr><td>Cloudflare<\/td><td>[^<]*Cloudflare Web Analytics/);
   assert.match(PRIVACY, /<h3 id="technical">Technical data<\/h3>/);
-  assert.match(PRIVACY, /<b>In short:<\/b>[^<]*cookieless page-view counts/);
+  assert.match(PRIVACY, /<b>At a glance:<\/b>[^<]*cookieless page-view counts/);
 });
 
-test('the legal pages carry the October 11, 2026 effective date (passcode Guard cookie, testers reopened)', () => {
+test('the legal pages carry the October 11, 2026 effective date (passcode Guard cookie, testers reopened, humanizer rewrite)', () => {
   for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective October 11, 2026<\/p>/);
 });
 
@@ -76,7 +76,7 @@ test('Google Fonts is disclosed while any page loads it: in Technical data, as a
   for (const words of ['Google Fonts', 'fonts.googleapis.com', 'fonts.gstatic.com', 'directly from Google', 'IP address', 'browser details', 'no cookies', 'jsDelivr', 'unpkg'])
     assert.ok(text(item).includes(words), words);
   assert.match(PRIVACY, /<tr><td>Google Fonts<\/td><td>[^<]*directly from Google/);
-  assert.match(PRIVACY, /<b>In short:<\/b>[^<]*web-font downloads/);
+  assert.match(PRIVACY, /<b>At a glance:<\/b>[^<]*web-font downloads/);
 });
 
 test('the Look-up cache is disclosed with the lifetimes src/lookup.js gives it, and the tester section no longer says nothing is stored', async () => {
@@ -93,8 +93,8 @@ test('the Look-up cache is disclosed with the lifetimes src/lookup.js gives it, 
   assert.ok(testers, 'the tester section');
   assert.doesNotMatch(testers, /No prompts or outputs are stored on our servers\.<\/b>/, 'no unqualified promise');
   // The ledger never stores prompt text; profile, opt-in synced threads, feedback and Look up are separate stores.
-  assert.match(text(testers), /The ledger holds amounts and dates, not prompts or answers\./);
-  assert.match(text(testers), /Server-stored profile and memory, optional synced threads, voluntary feedback and the Look up cache are described separately below\./);
+  assert.match(text(testers), /Usage ledger — for each request, how much it cost and when\. It lets Atelier enforce your daily and monthly allowance\. The ledger doesn’t hold prompts or answers\./);
+  assert.match(text(testers), /Other stores are described separately below\. They are server-stored profile and memory, optional synced threads, voluntary feedback and the Look up cache\./);
   assert.match(text(/<li><b>Look up<\/b> — free([\s\S]*?)<\/li>/.exec(testers)?.[1] || ''), /cached briefly at Cloudflare for you alone/);
   // The addendum records it as an exception to spec §10, next to the profile and memory (A6) — not the only one.
   const a83 = /### A8\.3([\s\S]*?)\n### /.exec(await read('docs/superpowers/specs/2026-09-30-atelier-tester-access-addendum.md'))?.[1] || '';
@@ -111,7 +111,7 @@ test('Quick launch’s on-device storage is disclosed with the lifetimes public/
   const item = /<li><b>Quick launch \(this device only\):<\/b>([\s\S]*?)<\/li>/.exec(s6)?.[1];
   assert.ok(item, 'a Quick launch item in section 6');
   // The limits are checked on read (freshMeta, takeDraft, peekPendingLaunch), not timers: say when things are deleted.
-  for (const words of ['share to Atelier', 'a website sends to it the same way', 'Cache Storage', 'can be used for 30 minutes', 'checked when Atelier reads it, not by a timer',
+  for (const words of ['share to Atelier', 'a website sends to it the same way', 'Cache Storage', 'can be used for 30 minutes', 'That limit is checked when Atelier reads it. Nothing deletes it on a timer.',
     'one video or 4 photos', 'deleted once opened, the next time Atelier opens after that', 'when you sign out', 'Clear this device', 'typed or dictated',
     'can come back for 6 hours', 'can continue for 15 minutes after you sign in', 'deleted when you next sign in or open Atelier signed in',
     'Quick launch choices', 'Send without a tap', 'the key never does',
@@ -122,10 +122,10 @@ test('Quick launch’s on-device storage is disclosed with the lifetimes public/
   for (const gone of ['up to 30 minutes', 'up to 6 hours', 'up to 15 minutes']) assert.ok(!text(item).includes(gone), `no "${gone}": nothing deletes on a timer`);
   // The mic can open without a tap (Talk to Atelier, listen-on-open): both dictation descriptions say so.
   const voice = /<li><b>Voice dictation<\/b> — on an iPhone([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '';
-  assert.match(text(voice), /whether you tap it, or Talk to Atelier or “Start listening when I open Atelier” opens it for you/);
+  assert.match(text(voice), /The mic may open from your tap\. Talk to Atelier can also open it for you\. So can “Start listening when I open Atelier”\./);
   const row = /<tr><td>OpenAI and Google \(dictation\)<\/td><td>([\s\S]*?)<\/td><\/tr>/.exec(PRIVACY)?.[1] || '';
   assert.doesNotMatch(row, /^When you tap the microphone/, 'not only a tap');
-  assert.match(text(row), /Talk to Atelier or “Start listening when I open Atelier” opens the microphone for you/);
+  assert.match(text(row), /That includes when Talk to Atelier opens the microphone for you\. It also includes when “Start listening when I open Atelier” opens it\./);
 });
 
 test('owner thread sync is disclosed as it behaves: images and videos sync, media and long texts outlive a delete, the Wi-Fi rule, Clear this device keeps synced copies', async () => {
@@ -145,20 +145,20 @@ test('owner thread sync is disclosed as it behaves: images and videos sync, medi
     assert.match(it, /including their images and videos/);
     assert.match(it, /Tester sync uses a separate namespace and does not give testers access to the owner’s threads/);
   }
-  assert.match(items[1], /The original of a video attached to a question isn’t synced \(only the frames and preview Atelier took from it are\)/);
-  assert.match(items[1], /videos over 10 MB wait for Wi-Fi before they upload or download, unless the owner turns on “Download videos on mobile data”/);
+  assert.match(items[1], /The original of a video attached to a question isn’t synced\. Only the frames and preview Atelier took from it are synced\./);
+  assert.match(items[1], /Videos over 10 MB wait for Wi-Fi before they upload or download\. The owner can turn on “Download videos on mobile data” to skip the wait\./);
   // the rule rests on navigator.connection, which Safari and Firefox don't have: there, videos sync on any network
   assert.match(SYNC, /connection: \(\) => navigator\.connection \|\| null/);
-  assert.match(items[1], /On a phone whose browser reports mobile data or Data Saver \(Chrome on Android does; Safari on iPhone doesn’t, so there videos sync on any network\)/);
+  assert.match(items[1], /On a phone whose browser reports mobile data or Data Saver, a Wi-Fi rule applies\. [^.]*\. [^.]*\. Chrome on Android reports this\. Safari on iPhone doesn’t, so there videos sync on any network\./);
   // No clean-up of b/ exists (nothing in src/ deletes a blob, and no lifecycle rule covers b/: scripts/check-r2-lifecycle.mjs
   // flags one as dangerous), so the page must not promise one.
-  assert.match(items[1], /except copies of images, videos and long texts \(over about 32 KB, such as long answers or pasted documents\), which are not removed automatically: one copy can be shared by several threads, so they stay in that private storage until the owner deletes them there/);
+  assert.match(items[1], /After that its saved copies are removed, except copies of images, videos and long texts\. Long texts are over about 32 KB, such as long answers or pasted documents\. Those copies are not removed automatically\. One copy can be shared by several threads\. So they stay in that private storage until the owner deletes them there\./);
   assert.doesNotMatch(PRIVACY, /later clean-up/);
   const cache = text(/<li><b>Look-up cache \(Cloudflare\):<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
   assert.doesNotMatch(cache, /is the one exception|the only exception/);
   assert.match(cache, /stored separately from your profile and memory, optional synced threads and voluntary feedback/);
   const del = text(/<li><b>Delete conversations and media:<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
-  assert.match(del, /Clear this device leaves synced copies in private cloud storage: delete synced threads from the Threads drawer instead/);
+  assert.match(del, /With thread sync on, Clear this device leaves synced copies in private cloud storage\. Delete synced threads from the Threads drawer instead\./);
 });
 
 test('tester private sync disclosures match consent, account separation, quotas and the inactive-account purge', async () => {
@@ -183,11 +183,11 @@ test('tester private sync disclosures match consent, account separation, quotas 
   assert.match(SERVER, /SYNC_COUNT_ALL: true,/, 'the tester quota no longer counts everything: update "counts everything kept there"');
   assert.doesNotMatch(SYNC_CORE, /bucket\.delete\(blobKey|delete\(`b\/|delete\(`v\//, 'blobs or history are deleted now: update the tester retention wording');
   assert.doesNotMatch(retention, /until clean-up/, 'there is no clean-up before the 90-day purge');
-  for (const words of ['1 GiB limit that counts everything kept there', 'up to 500 threads', 'Copies of images, videos and long texts (over about 32 KB) aren’t removed when a thread is deleted', 'until the entire tester cloud namespace is removed', 'are removed 30 days after they were saved']) assert.ok(retention.includes(words), words);
+  for (const words of ['1 GiB limit that counts everything kept there', 'up to 500 threads', 'Deleting a thread leaves its copies of images, videos and long texts (over about 32 KB)', 'until the entire tester cloud namespace is removed', 'are removed 30 days after they were saved']) assert.ok(retention.includes(words), words);
   // "removed 30 days after they were saved" rests on R2 lifecycle rules (30 days) on these two prefixes, which only hold
   // tester trash (x/) and history (v/): keep the mapping, or update the wording.
   assert.match(SERVER, /const split = \{ x: `testers-x\/\$\{hash\}\/`, v: `testers-v\/\$\{hash\}\/` \};/);
-  assert.match(text(TOS), /1 GiB cloud-storage limit \(which also counts deleted threads’ saved copies and earlier versions\) and up to 500 threads/);
+  assert.match(text(TOS), /Your cloud storage is limited to 1 GiB and up to 500 threads\. Deleted threads’ saved copies and earlier versions count toward the 1 GiB\./);
   const imported = text(/<li id="claude-chats">([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
   assert.match(imported, /imported threads sync to your other devices when thread sync is enabled/);
   assert.doesNotMatch(PRIVACY, /testers’ threads are never uploaded|a tester’s imported chats never leave the device/);
@@ -215,7 +215,7 @@ test('Read aloud names the provider the voices really use (src/tts.js): Google o
   const { AI_CAPTION } = await import('../public/readaloud.js');
   assert.deepEqual([...new Set(Object.values(TTS_VOICES).map((v) => v.provider))], ['gemini'], 'a new provider: update the privacy row and AI_CAPTION');
   const row = /<tr><td>Google \(Read aloud\)<\/td><td>([\s\S]*?)<\/td><\/tr>/.exec(PRIVACY)?.[1] || '';
-  assert.match(text(row), /the answer’s text, including any email, calendar or Drive details it mentions, is sent to Google’s Gemini API to generate the speech/);
+  assert.match(text(row), /The answer’s text is sent, including any email, calendar or Drive details it mentions\. It goes to Google’s Gemini API to generate the speech\./);
   assert.doesNotMatch(row, /OpenAI/);
   assert.doesNotMatch(PRIVACY, /OpenAI and Google \(Read aloud\)/);
   assert.match(AI_CAPTION, /sent to Google\./);
@@ -236,7 +236,7 @@ test('every AI provider the Worker can send prompts to is named as a processor, 
     assert.ok(text(xai).includes(words), `xAI row: ${words}`);
   assert.match(PRIVACY, /<li><b>xAI \(owner only\):<\/b>/);
   assert.match(PRIVACY, /xAI’s Grok Imagine and ByteDance’s Seedance 2\.5 through Runway/);
-  assert.match(TOS, /Meta, xAI and Runway, and ByteDance for Seedance through Runway\)/);
+  assert.match(TOS, /They are Anthropic, OpenAI, Google, NVIDIA, Z\.ai, DeepSeek, Meta, xAI and Runway\. So is ByteDance for Seedance through Runway\./);
 });
 
 // ── v89 review, the privacy-copy findings: each disclosure rests on the code fact checked next to it ──
@@ -250,8 +250,8 @@ test('Google Photos picks and Canva imports are disclosed as synced to the owner
   assert.match(MERGE, /export const MEDIA_SYNC = Object\.freeze\(\{ image: true, video: true \}\);/, 'image sync changed: update §3');
   assert.match(APP, /const CANVA_THREAD = 'canva-imports';/);
   const google = section(/<h3>How Google user data is stored<\/h3>([\s\S]*?)<\/ul>/);
-  for (const words of ['A photo you pick from Google Photos is attached to your message (resized to at most 1280 pixels)', 'owner’s private Cloudflare R2 storage',
-    'deleting the thread doesn’t remove that copy automatically', 'through the owner’s thread sync, in the owner’s private Cloudflare storage']) assert.ok(google.includes(words), words);
+  for (const words of ['A photo you pick from Google Photos is attached to your message. It is resized to at most 1280 pixels.', 'It also syncs with the owner’s thread to the owner’s private Cloudflare R2 storage',
+    'Deleting the thread doesn’t remove that copy automatically', 'through the owner’s thread sync, in the owner’s private Cloudflare storage']) assert.ok(google.includes(words), words);
   assert.doesNotMatch(google, /Email, calendar, Drive and photo content is not stored on our servers/, 'photos are stored when picked');
   assert.doesNotMatch(google, /in your own browser, where you can delete them\./);
   const canva = section(/<li><b>Canva<\/b>([\s\S]*?)<\/li>/);
@@ -284,7 +284,7 @@ test('automatic Read aloud of spoken requests is disclosed: Gemini gets the answ
     assert.ok(row.includes(words), words);
   const used = section(/<h3>How Google user data is used<\/h3>([\s\S]*?)<\/ul>/);
   assert.match(used, /also sent to Google’s Gemini speech API to make the audio/, '§3 names the second Google recipient');
-  assert.match(text(TOS), /Answers to spoken requests \(Talk or the mic\) are read aloud automatically unless you turn that off in Settings → Read aloud, and count against your allowance the same way\./);
+  assert.match(text(TOS), /Answers to spoken requests \(Talk or the mic\) are read aloud automatically\. You can turn that off in Settings → Read aloud\. Those readings count against your allowance the same way\./);
 });
 
 test('the Runway row names Seedance and the Aleph clip upload (privacy-runway-row-seedance-aleph)', async () => {
@@ -314,7 +314,7 @@ test('prompt caches: every provider that caches is named, DeepSeek’s days, and
   const WORKER = await read('src/worker.js');
   assert.match(WORKER, /caches a repeated prompt prefix on its own \(OpenAI, Gemini's implicit caching, DeepSeek's context\r?\n\s*\/\/ cache, Z\.ai, xAI, Meta\)/, 'the list of caching providers changed: update §6');
   const item = section(/<li><b>Prompt caches at AI providers:<\/b>([\s\S]*?)<\/li>/);
-  for (const words of ['up to 1 hour', 'OpenAI, Google, xAI, Z.ai and Meta cache repeated request starts automatically for minutes to hours', 'DeepSeek for up to a few days', 'can include what the accounts agent read for that answer'])
+  for (const words of ['up to 1 hour', 'OpenAI, Google, xAI, Z.ai and Meta cache repeated request starts automatically for minutes to hours', 'DeepSeek caches them for up to a few days', 'can include what the accounts agent read for that answer'])
     assert.ok(item.includes(words), words);
 });
 
@@ -325,14 +325,14 @@ test('tester deletion: the owner’s Delete data and the device button are discl
   assert.match(HTML, /id="testerForget" hidden>Remove my tester data from this device<\/button>/);
   assert.match(APP, /data-tp="forget"[^>]*>Delete data<\/button>/);
   const s8 = section(/<li><b>Testers:<\/b>([\s\S]*?)<\/li>/);
-  for (const words of ['the owner’s Delete data removes your record, sessions, usage ledger, profile, cloud-sync namespace and feedback from the server at once',
+  for (const words of ['The owner’s Delete data then removes your record, sessions, usage ledger, profile, cloud-sync namespace and feedback.', 'It removes them from the server at once',
     'Remove my tester data from this device', 'also while you can’t sign in', 'threads, Build app data, settings and Read aloud clips', 'clearing this site’s data in your browser'])
     assert.ok(s8.includes(words), words);
   const records = section(/<li><b>Tester records:<\/b>([\s\S]*?)<\/li>/);
   assert.match(records, /the owner’s Delete data \(in the owner’s Testers panel\) removes a tester at once/);
-  assert.match(text(TOS), /the owner can then delete your record and cloud data at once/);
+  assert.match(text(TOS), /The owner can then delete your record and cloud data at once/);
   // and the Read aloud promise for a tester's sign-out holds (pass A cleared the clips before the reload)
-  assert.match(PRIV, /until it is cleared with Settings → Your data → Clear this device, or when a tester signs out/);
+  assert.match(PRIV, /It stays until Settings → Your data → Clear this device clears it\. It is also cleared when a tester signs out\./);
 });
 
 // v91 review (tester-privacy): Delete data runs a second pass (a still-open tab can write for up to a minute after it),
@@ -343,8 +343,8 @@ test('tester deletion copy: the second pass and the re-sign-in are disclosed as 
   assert.match(LEDGER, /'CREATE TABLE IF NOT EXISTS forgotten \(sub TEXT PRIMARY KEY, at INTEGER NOT NULL\)'/, 'only the sub is kept for it');
   assert.match(LEDGER, /if \(t\?\.revoked_at\) return refuse\('revoked'\);/, 'admit refuses only a revoked row: a deleted one can come back');
   const records = section(/<li><b>Tester records:<\/b>([\s\S]*?)<\/li>/);
-  for (const words of ['the same deletion runs once more 10 to 20 minutes later', 'until then only their LinkedIn ID is kept, for that second pass',
-    'can sign in again later as a new tester while a spot is free, even if their access had been revoked'])
+  for (const words of ['the same deletion runs once more 10 to 20 minutes later', 'Until then only their LinkedIn ID is kept, for that second pass',
+    'that person can sign in again later as a new tester. They can do so while a spot is free, even if their access had been revoked'])
     assert.ok(records.includes(words), words);
   assert.ok(section(/<li><b>Testers:<\/b>([\s\S]*?)<\/li>/).includes('at once, and once more 10 to 20 minutes later'));
 });
@@ -354,7 +354,7 @@ test('the error reports’ network code is kept only through its hour, as the Le
   assert.match(LEDGER, /DELETE FROM client_error_nets WHERE hour < \?', Math\.floor\(now \/ HOUR\)\);/, 'the alarm');
   assert.match(LEDGER, /DELETE FROM client_error_nets WHERE hour < \?', hour\);/, 'each report');
   assert.match(LEDGER, /TICK = 10 \* MINUTE/);
-  assert.match(section(/<li id="app-errors">([\s\S]*?)<\/li>/), /one-way keyed code of the network \(never the address itself\) kept only until that hour is over \(at most about 70 minutes\)/);
+  assert.match(section(/<li id="app-errors">([\s\S]*?)<\/li>/), /one-way keyed code of the network \(never the address itself\)\. The code is kept only until that hour is over \(at most about 70 minutes\)\./);
   assert.doesNotMatch(PRIV, /kept for at most two hours/);
 });
 
@@ -362,6 +362,39 @@ test('Google content: attached photos and long texts outlive a deleted thread in
   const SYNC = await read('src/sync.js');
   assert.match(SYNC, /content-addressed blobs \(media, long text\), written once with R2's sha256 check, never deleted/);
   const stored = section(/<h3>How Google user data is stored<\/h3>([\s\S]*?)<\/ul>/);
-  assert.ok(stored.includes('Delete threads in the app (section 8); copies of attached photos and of long texts (over about 32 KB) stay in the owner’s private storage until the owner removes them there'), 'the copy says what deleting a thread leaves');
+  assert.ok(stored.includes('Delete threads in the app (section 8). Deleting a thread leaves copies of attached photos and of long texts (over about 32 KB). They stay in the owner’s private storage until the owner removes them there.'), 'the copy says what deleting a thread leaves');
   assert.doesNotMatch(stored, /Delete them in the app/);
+});
+
+test('the humanizer rewrite rewords the legal pages without changing what they say (v92 review fixes)', async () => {
+  // Terms §9: "as far as the law allows" covers the warranty disclaimer and both exclusions, each exclusion is limited
+  // to damages arising from your use of the service (as v91's one sentence had it), and the 12-month cap stays as it was
+  const s9 = text(/<h2>9\. Disclaimer and limitation of liability<\/h2>([\s\S]*?)<h2>/.exec(TOS)?.[1] || '');
+  for (const words of ['As far as the law allows, Atelier carries no warranty of any kind, express or implied.', 'To the same extent, we are not liable for:',
+    'indirect, incidental, special, consequential or punitive damages arising from your use of the service;', 'lost data, profits or revenue arising from your use of the service.',
+    'Your use of the service includes actions you approved in connected accounts.', 'Our total liability for any claim is limited to what you paid us for the service. It counts only payments in the 12 months before the claim. That amount may be zero.'])
+    assert.ok(s9.includes(words), `§9: ${words}`);
+  assert.equal(s9.match(/arising from your use of the service/g)?.length, 2, 'the limit sits inside each exclusion');
+  assert.doesNotMatch(s9, /Both cover anything|we are not liable for [^:]*damages\./, 'no exclusion without its limit');
+  // Read aloud: the voice is AI-generated, in the words the privacy page uses
+  assert.ok(text(TOS).includes('The voice you hear is AI-generated.') && text(PRIVACY).includes('The voice you hear is AI-generated.'));
+  assert.doesNotMatch(TOS, /No human voice is used/);
+  // disclosure to protect users or the service (as the terms say "to protect the service"), never the operator itself
+  assert.ok(text(PRIVACY).includes('We may disclose information if required by law. We may disclose it to protect the rights, safety or security of users or the service.'));
+  assert.doesNotMatch(PRIVACY, /security of users or Atelier/);
+  assert.match(TOS, /to protect the service/);
+  // Runway and xAI copies: on the owner's device and in the owner's thread, which syncs its images and videos
+  assert.match(await read('public/sync-merge.js'), /export const MEDIA_SYNC = Object\.freeze\(\{ image: true, video: true \}\);/, 'owner media stopped syncing: update the Runway and xAI items');
+  for (const label of ['Runway', 'xAI']) {
+    const item = text(new RegExp(`<li><b>${label} \\(owner only\\):</b>([\\s\\S]*?)</li>`).exec(PRIVACY)?.[1] || '');
+    assert.ok(item, label);
+    assert.doesNotMatch(item, /only on the owner’s device/, `${label}: the device does not hold the only copy`);
+    assert.ok(item.includes('on the owner’s device. It sits in the owner’s thread, which syncs to the owner’s private Cloudflare storage. Atelier’s server keeps no other copy.'), label);
+  }
+  // Video Remix: what travels with the owner's thread, with no count that the next sentence contradicts
+  const remix = text(/<li><b>Video Remix \(this device\):<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
+  assert.ok(remix.includes('None of these files is synced on its own. Only the plan, settings, new shots’ status and small preview stills travel with the owner’s thread. A finished cut under 16 MB is also added to its thread.'), remix);
+  assert.doesNotMatch(remix, /only (?:two|three|four|five|six) things/);
+  // the owner's cookie: only an expiry date and a signature
+  assert.ok(text(PRIVACY).includes('It holds only an expiry date and a signature. It is never used for tracking.'));
 });

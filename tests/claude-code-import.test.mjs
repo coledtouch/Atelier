@@ -76,13 +76,15 @@ test('app.js keys the project list on the folder name; the privacy page describe
   assert.doesNotMatch(APP, /Claude Code \(working directories\)/);
   const imported = PRIVACY.match(/<li><b>Imported history<\/b>([\s\S]*?)<\/li>/);
   assert.ok(imported, 'the Imported history item');
-  assert.match(imported[1], /the last folder name of up to 25 projects/);
-  assert.match(imported[1], /how many prompts each had/);
-  assert.match(imported[1], /never the drive, the folders above it or your home folder/);
+  // what goes to the model, named as going to the model (readClaudeCode's extra reaches analyzeCorpus)
+  assert.match(imported[1], /Claude Code imports also send the model the last folder name of up to 25 projects\. These are projects you worked in\./);
+  assert.match(imported[1], /The model also gets how many prompts each had/);
+  assert.match(imported[1], /The drive, the folders above it and your home folder are never sent\./);
+  assert.doesNotMatch(imported[1], /That’s the folder name only/);
 });
 
 test('the Import your history hint says what a Claude Code import sends besides your own messages', () => {
   const hint = INDEX.match(/<h4>Import your history<\/h4>\s*<p class="hint">([\s\S]*?)<\/p>/);
   assert.ok(hint, 'the Import your history hint');
-  assert.match(hint[1], /only your own messages \(and, for Claude Code, your project folder names and prompt counts\) are sent to an AI model/);
+  assert.match(hint[1], /Only your own messages go to an AI model for analysis\. A Claude Code import also sends your project folder names and prompt counts\./);
 });

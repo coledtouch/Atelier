@@ -18,7 +18,7 @@ import { GEMINI_BASE } from './gemini.js';
 // 1: OpenAI gpt-4o-mini-tts marin and its spoken brief. 2 (v80): Gemini 3.8 Flash TTS, Achernar, with GEMINI_STYLE.
 export const TTS_BRIEF_V = 2;
 /** The Settings "Preview" line (the client never sends preview text). */
-export const PREVIEW_TEXT = 'Hello, I’m the voice of Atelier. Whenever you’d like a rest from the screen, I’ll read your answers aloud, calmly and at your pace.';
+export const PREVIEW_TEXT = 'Hello, I’m the voice of Atelier. When you want a break from the screen, I’ll read your answers aloud.';
 /** A short hash of a preview line (FNV-1a over its UTF-16 code units, 8 hex digits). */
 export function previewId(text) {
   let h = 0x811c9dc5;

@@ -14,8 +14,8 @@
   <!-- link previews (LinkedIn, Slack, iMessage, X) -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Atelier" />
-  <meta property="og:title" content="Atelier — Come make something yours." />
-  <meta property="og:description" content="25 LinkedIn tester spots. Paid models included. Built by Cole Ciprari." />
+  <meta property="og:title" content="Atelier: Cole Ciprari’s AI studio" />
+  <meta property="og:description" content="I’m Cole Ciprari. I built Atelier for myself, and I have 25 tester spots. The paid models are on me. Sign in with LinkedIn to take one." />
   <meta property="og:url" content="https://atelier.ciprari.ai/" />
   <meta property="og:image" content="https://atelier.ciprari.ai/og/atelier-share.png" />
   <meta property="og:image:width" content="1200" />
@@ -91,9 +91,9 @@
       stalled: ['Still ', 'opening…', 'Atelier is taking longer than usual. You can keep waiting, or reload.'],
       stalledOffline: ['Still ', 'opening…', 'You’re offline, so Atelier is opening from what’s saved on this device. You can keep waiting, or reload.'],
       error: ['Atelier didn’t ', 'open.', 'Something in this version stopped it from starting. Your threads, settings and media are safe on this device.'],
-      download: ['Couldn’t finish ', 'downloading.', 'Part of Atelier didn’t arrive, most likely because the connection dropped. Your threads, settings and media are safe on this device.'],
+      download: ['Couldn’t finish ', 'downloading.', 'Part of Atelier didn’t arrive. The connection probably dropped. Your threads, settings and media are safe on this device.'],
       downloadAgain: ['Atelier didn’t ', 'open.', 'Part of Atelier didn’t arrive again. If your connection is fine, Repair downloads all of its files again. Your threads, settings and media are safe on this device.'],
-      offline: ['You’re ', 'offline.', 'Atelier couldn’t finish opening without a connection. Your threads, settings and media are safe on this device, and it will try again when you’re back online.']
+      offline: ['You’re ', 'offline.', 'Atelier needs a connection to finish opening. Your threads, settings and media are safe on this device. It will try again when you’re back online.']
     };
     var state = 'waiting', phase = 'loading', visible = 0, last = clock(), fatal = null, netAgain = false, busy = false, stallSent = false, memo = { n: 0, keys: [] }, ui = null;
     function noop() {}
@@ -288,7 +288,7 @@
       ui.title.textContent = t[0];
       ui.title.appendChild(el('em', '', t[1]));
       var again = state === 'error' && !download && Date.now() - (Number(sget(REPAIRED)) || 0) < 600000;
-      ui.body.textContent = t[2] + (again ? ' Repair already ran here. If it still won’t open, this version needs a fix: try Reload again in a little while.' : '');
+      ui.body.textContent = t[2] + (again ? ' Repair already ran here. If it still won’t open, this version needs a fix. Try Reload again later.' : '');
       ui.actions.hidden = !acts;
       ui.reload.textContent = state === 'offline' || download ? 'Try again' : 'Reload';
       ui.repair.hidden = !canRepair;
@@ -396,10 +396,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=91" />
-  <link rel="stylesheet" href="/studio.css?v=91" />
-  <link rel="stylesheet" href="/feedback.css?v=91" />
-  <link rel="stylesheet" href="/remix.css?v=91" />
+  <link rel="stylesheet" href="/app.css?v=92" />
+  <link rel="stylesheet" href="/studio.css?v=92" />
+  <link rel="stylesheet" href="/feedback.css?v=92" />
+  <link rel="stylesheet" href="/remix.css?v=92" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -437,7 +437,7 @@
     <button class="nav-new" data-trigger="newBtn" title="New thread"><span aria-hidden="true">＋</span><span class="nav-label">New thread</span></button>
     <button class="nav-item" data-trigger="threadsBtn" title="Threads"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h12M4 17h9"/></svg><span class="nav-label">Threads</span></button>
     <button class="nav-item" data-trigger="libraryBtn" title="Library"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg><span class="nav-label">Library</span></button>
-    <div class="nav-note"><span class="nav-note-mark" aria-hidden="true">✳</span><p>A little space<br />for your next <em>big idea.</em></p><span>Think. Make. Make it yours.</span></div>
+    <div class="nav-note"><span class="nav-note-mark" aria-hidden="true">✳</span><p>Six modes,<br />one <em>studio.</em></p><span>Ask, Code, Image, Video, Ideas, Build.</span></div>
     <div class="nav-bottom">
       <button class="nav-item" data-trigger="youBtn" title="Your profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span class="nav-label">Your profile</span></button>
       <button class="nav-item" data-trigger="settingsBtn" title="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg><span class="nav-label">Settings</span></button>
@@ -451,22 +451,22 @@
     <section id="welcome" class="welcome">
       <p class="eyebrow" id="dateLine"></p>
       <h1 class="greeting"><span id="greetWord">Good evening</span><span class="greet-name" id="greetName"></span>.<br /><em>What are we making?</em></h1>
-      <p class="welcome-copy">A thought, a first draft, something entirely new.<br class="mobile-break" /> Start anywhere. Make it yours.</p>
+      <p class="welcome-copy">Ask, write, make an image or build an app.<br class="mobile-break" /> Pick a mode below or start typing.</p>
       <section class="first-use-goals" id="firstUseGoals" aria-labelledby="firstUseTitle">
-        <div class="section-label"><h2 id="firstUseTitle">Start with something small</h2><span>A first draft is a good beginning</span></div>
+        <div class="section-label"><h2 id="firstUseTitle">Try one of these</h2><span>Each fills in a starter prompt</span></div>
         <div class="goal-grid">
-          <button type="button" class="goal-card" data-start-mode="ask" data-start-prompt="Help me write a clear, thoughtful first draft. Ask me what it’s for and who will read it."><span class="goal-icon" data-kind="ask" aria-hidden="true">↗</span><span><strong>Write something</strong><small>A message, a post, a fresh start</small></span><span class="goal-arrow" aria-hidden="true">→</span></button>
+          <button type="button" class="goal-card" data-start-mode="ask" data-start-prompt="Help me write a clear, thoughtful first draft. Ask me what it’s for and who will read it."><span class="goal-icon" data-kind="ask" aria-hidden="true">↗</span><span><strong>Write something</strong><small>A message, a post, an email</small></span><span class="goal-arrow" aria-hidden="true">→</span></button>
           <button type="button" class="goal-card" data-start-mode="image" data-start-prompt="A quiet sunlit creative studio, warm natural materials, editorial photography, soft shadows, no text"><span class="goal-icon" data-kind="image" aria-hidden="true">✦</span><span><strong>Create an image</strong><small>Turn an idea into a picture</small></span><span class="goal-arrow" aria-hidden="true">→</span></button>
-          <button type="button" class="goal-card" data-start-mode="build" data-start-prompt="Build a beautiful, simple habit tracker with three daily habits, tappable checkboxes, and a warm, calm design."><span class="goal-icon" data-kind="build" aria-hidden="true">＋</span><span><strong>Build an app</strong><small>Make something you can use</small></span><span class="goal-arrow" aria-hidden="true">→</span></button>
+          <button type="button" class="goal-card" data-start-mode="build" data-start-prompt="Build a beautiful, simple habit tracker with three daily habits, tappable checkboxes, and a warm, calm design."><span class="goal-icon" data-kind="build" aria-hidden="true">＋</span><span><strong>Build an app</strong><small>A small tool that runs here</small></span><span class="goal-arrow" aria-hidden="true">→</span></button>
         </div>
       </section>
       <section class="continue-making" id="continueMaking" aria-labelledby="continueTitle" hidden>
         <div class="section-label"><h2 id="continueTitle">Continue making</h2><button type="button" class="welcome-all-threads" data-trigger="threadsBtn">All threads <span aria-hidden="true">→</span></button></div>
         <div class="recent-threads" id="recentThreads"></div>
       </section>
-      <div class="section-label explore-label"><h2>Explore your studio</h2><span>Six ways to make it yours</span></div>
+      <div class="section-label explore-label"><h2>Six modes</h2><span>Pick one to switch</span></div>
       <div class="bento" id="bento"></div>
-      <p class="legal-links">Your ideas, all in one place. <a href="/privacy">Privacy</a> · <a href="/tos">Terms</a></p>
+      <p class="legal-links"><a href="/privacy">Privacy</a> · <a href="/tos">Terms</a></p>
     </section>
     <div id="syncNote" class="sync-note-bar" role="status" hidden></div>
     <ol class="stream" id="stream" aria-label="Conversation"></ol>
@@ -522,7 +522,7 @@
       <h3><em>Threads</em></h3>
       <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
-    <p class="drawer-description">Pick up where you left off.</p>
+    <p class="drawer-description">Search or reopen a past conversation.</p>
     <button type="button" class="thread-new" id="drawerNewThread"><span aria-hidden="true">＋</span> New thread</button>
     <div class="thread-search">
       <input class="search" id="threadSearch" type="search" placeholder="Search your conversations…" aria-label="Search threads" aria-describedby="threadCount" />
@@ -538,7 +538,7 @@
       <h3><em>Library</em></h3>
       <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
-    <p class="drawer-description">Everything you’ve made, in one place.</p>
+    <p class="drawer-description">The images, videos and apps you’ve made.</p>
     <div class="lib-filter" id="libFilter" role="group" aria-label="Filter library">
       <button type="button" class="chip on" data-f="all" aria-pressed="true">All<span class="n"></span></button>
       <button type="button" class="chip" data-f="image" data-kind="image" aria-pressed="false">Image<span class="n"></span></button>
@@ -557,7 +557,7 @@
     <div class="you-scroll">
       <section class="you-card">
         <label class="field"><span>Name</span><input id="meName" placeholder="What should Atelier call you?" autocomplete="given-name" /></label>
-        <label class="field"><span>Who you are <small>role, work, companies, projects, people, what matters — Atelier reads this every time</small></span>
+        <label class="field"><span>Who you are <small>role, work, companies, projects, people. Atelier reads this every time.</small></span>
           <textarea id="meBio" rows="5" placeholder="e.g. Founder of … I run … I'm building … I care about …"></textarea></label>
       </section>
 
@@ -583,14 +583,14 @@
 
       <section class="you-card">
         <h4>Import your history</h4>
-        <p class="hint">Learn your writing voice from your own messages. Files are read on this device; only your own messages (and, for Claude Code, your project folder names and prompt counts) are sent to an AI model for analysis.</p>
+        <p class="hint">Atelier learns your writing voice from your own messages. Files are read on this device. Only your own messages go to an AI model for analysis. A Claude Code import also sends your project folder names and prompt counts.</p>
         <div class="row-actions" style="margin-top:10px">
           <label class="chip file-chip">ChatGPT export<input type="file" id="impChatgpt" accept=".zip,.json" aria-label="Import ChatGPT history" /></label>
           <label class="chip file-chip">Claude export<input type="file" id="impClaude" accept=".zip,.json" aria-label="Import Claude history" /></label>
           <button type="button" class="chip" id="impCode">Claude Code sessions…</button>
           <button type="button" class="chip" id="impCodeSync" hidden>↻ Re-sync Claude Code</button>
         </div>
-        <details class="settings-details import-help"><summary>How history imports work</summary><p class="hint">Atelier reads what <i>you</i> wrote and distills who you are and how you write. Only your own messages (and, for Claude Code, your project folder names and prompt counts) are sent to an AI model for analysis. To keep your Claude chats themselves as threads, use Settings → Your data → Import Claude chats.</p></details>
+        <details class="settings-details import-help"><summary>How history imports work</summary><p class="hint">Atelier reads what you wrote and works out who you are and how you write. Only your own messages go to an AI model for analysis. A Claude Code import also sends your project folder names and prompt counts. To keep your Claude chats as threads, use Settings → Your data → Import Claude chats.</p></details>
         <p class="hint" id="impStatus"></p>
         <ul class="src-list" id="srcList"></ul>
       </section>
@@ -603,11 +603,11 @@
     <div class="sheet-body">
       <header class="sheet-head"><h2 id="studioMenuTitle"><em>Your studio</em></h2><button type="button" class="icon-btn" id="studioClose" aria-label="Close Studio menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
       <nav class="studio-menu-list" aria-label="Studio">
-        <button type="button" class="studio-menu-item studio-menu-new" data-studio-target="new"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>New thread<small>A fresh place to make something</small></span><span aria-hidden="true">→</span></button>
-        <button type="button" class="studio-menu-item" data-studio-target="threads"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h12M4 17h9"/></svg><span>Threads<small>Pick up where you left off</small></span><span aria-hidden="true">→</span></button>
+        <button type="button" class="studio-menu-item studio-menu-new" data-studio-target="new"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>New thread<small>Start a blank conversation</small></span><span aria-hidden="true">→</span></button>
+        <button type="button" class="studio-menu-item" data-studio-target="threads"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h12M4 17h9"/></svg><span>Threads<small>Your past conversations</small></span><span aria-hidden="true">→</span></button>
         <button type="button" class="studio-menu-item" data-studio-target="library"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg><span>Library<small>Your images, videos and apps</small></span><span aria-hidden="true">→</span></button>
         <button type="button" class="studio-menu-item" data-studio-target="me"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>Your profile<small>Your voice and memory</small></span><span aria-hidden="true">→</span></button>
-        <button type="button" class="studio-menu-item" data-studio-target="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg><span>Settings<small>Make the studio feel like you</small></span><span aria-hidden="true">→</span></button>
+        <button type="button" class="studio-menu-item" data-studio-target="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg><span>Settings<small>Theme, models and your data</small></span><span aria-hidden="true">→</span></button>
         <button type="button" class="studio-menu-item tester-ui" data-studio-target="feedback"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 13h5"/></svg><span>Send feedback<small>A bug, an idea, or something unclear</small></span><span aria-hidden="true">→</span></button>
       </nav>
     </div>
@@ -640,7 +640,7 @@
           <h4>Access</h4>
           <div class="owner-only">
             <label class="field">
-              <span>Studio passcode <small>Saved on this device so you can come back to your work.</small></span>
+              <span>Studio passcode <small>Saved on this device, so you stay signed in.</small></span>
               <div class="key-row">
                 <input type="password" name="passcode" id="passcodeField" autocomplete="current-password" spellcheck="false" enterkeyhint="done" />
                 <button type="button" class="chip" id="testPassBtn">Test</button>
@@ -672,10 +672,10 @@
           <button type="button" class="chip" id="diagBtn" style="margin-top:10px">Check provider keys</button>
           <button type="button" class="chip" id="kbDebugBtn" aria-pressed="false" title="Live keyboard numbers in a corner, for this session only (same as ?kbdebug=1)" style="margin-top:10px">Keyboard readout</button>
           <h4 style="margin-top:18px">Labs</h4>
-          <button type="button" class="chip" id="labsRemixBtn" aria-pressed="true" title="Attach a clip in Video mode: Gemini plans an edit, you approve any cost, Atelier cuts it on this device">Remix videos in Video mode</button>
+          <button type="button" class="chip" id="labsRemixBtn" aria-pressed="true" title="Attach a clip in Video mode. Gemini plans an edit, you approve any cost, and Atelier cuts it on this device.">Remix videos in Video mode</button>
           <div class="prov-status" id="diagOut" aria-live="polite" style="margin-top:10px"></div>
           <h4 style="margin-top:18px">Recent app errors</h4>
-          <p class="hint">Start-up failures and uncaught errors reported by any device that opened Atelier, kept 30 days: the version, error name, file and line, never what was typed. Unverified: sending one needs no passcode, so anyone could.</p>
+          <p class="hint">Start-up failures and uncaught errors from any device that opened Atelier, kept 30 days. Each holds the version, error name, file and line. It never holds what was typed. Anyone can send one without a passcode, so treat them as unverified.</p>
           <button type="button" class="chip" id="appErrorsBtn" style="margin-top:10px">Show recent app errors</button>
           <div class="app-errors" id="appErrorsOut" aria-live="polite"></div>
           </div>
@@ -685,12 +685,12 @@
         <section class="field-group owner-only">
           <h4>Connections</h4>
           <ul class="conn-list" id="connList"></ul>
-          <p class="hint">Connect your tools to work across your accounts. Atelier asks for approval before sending or changing anything.</p>
+          <p class="hint">Connect an account and Atelier can work in it. It asks you before it sends or changes anything.</p>
         </section>
 
         <section class="field-group">
           <h4>About you</h4>
-          <p class="hint" style="margin-bottom:10px">Your profile, writing voice, memory and history imports live in the <b>You</b> panel.</p>
+          <p class="hint" style="margin-bottom:10px">Your profile, writing voice, memory and history imports are in the You panel.</p>
           <button type="button" class="chip" id="openYouFromSettings">Open You panel →</button>
         </section>
 
@@ -708,7 +708,7 @@
 
         <section class="field-group ql" id="quickLaunch">
           <h4>Quick launch</h4>
-          <p class="hint ql-lead">Atelier, one gesture away. Your phone keeps its own assistant button; these put Atelier right beside it.</p>
+          <p class="hint ql-lead">Open Atelier with one gesture. Your phone keeps its own assistant button. These put Atelier next to it.</p>
           <p class="ql-label ql-phone" id="qlPhoneLabel" hidden>On your phone</p>
           <details class="ql-plat" id="qlAndroid">
             <summary>Android</summary>
@@ -720,14 +720,14 @@
               <li><b>By voice.</b> “Hey Google, open Atelier” (phone unlocked).</li>
               <li><b>Share sheet.</b> Share a link, text, photo or video and choose Atelier.</li>
             </ol>
-            <p class="hint ql-small">Holding the power button stays with your phone’s assistant — Android gives that only to native apps, like Atelier Assist below.</p>
+            <p class="hint ql-small">Holding the power button stays with your phone’s assistant. Android gives that only to native apps, like Atelier Assist below.</p>
             <div class="ql-row">
               <span class="ql-label" id="qlSendLabel">After you speak (Talk to Atelier)</span>
               <div class="seg" role="radiogroup" aria-labelledby="qlSendLabel">
                 <label><input type="radio" name="qlSend" value="review" /> <span>Review</span></label>
                 <label><input type="radio" name="qlSend" value="send" /> <span>Send</span></label>
               </div>
-              <p class="hint">Send goes about 1.5 seconds after you stop — tap Cancel or the prompt to hold it. Words added to an existing draft always wait for you.</p>
+              <p class="hint">Send goes about 1.5 seconds after you stop. Tap Cancel or the prompt to hold it. Words added to an existing draft always wait for you.</p>
             </div>
             <div class="ql-row" id="qlListenRow">
               <span class="ql-label" id="qlListenLabel">Start listening when I open Atelier</span>
@@ -735,17 +735,17 @@
                 <label><input type="radio" name="qlListen" value="off" /> <span>Off</span></label>
                 <label><input type="radio" name="qlListen" value="on" /> <span>On</span></label>
               </div>
-              <p class="hint">Starts the mic when Atelier opens fresh from its icon, back tap, side button or “Hey Google”. It never sends without you. Signing out turns it off.</p>
+              <p class="hint">Starts the mic when you open Atelier fresh. That covers its icon, back tap, side button and “Hey Google”. It never sends without you. Signing out turns it off.</p>
             </div>
             <div class="ql-row" id="qlAssist" hidden>
               <span class="ql-label">Atelier Assist</span>
-              <p class="hint">The Atelier Assist app on your side button sends what you say here, in the mode it picks. Pair it once: turn on <b>Send without a tap</b>, tap <b>Copy Assist link</b>, then in Atelier Assist tap ⋯ → <b>Paste link</b>.</p>
+              <p class="hint">The Atelier Assist app on your side button sends what you say here. It picks the mode. Pair it once. Turn on <b>Send without a tap</b> and tap <b>Copy Assist link</b>. Then in Atelier Assist, tap ⋯ → <b>Paste link</b>.</p>
               <span class="ql-label" id="qlAssistSendLabel">Send without a tap</span>
               <div class="seg" role="radiogroup" aria-labelledby="qlAssistSendLabel">
                 <label><input type="radio" name="qlAssistSend" value="off" /> <span>Off</span></label>
                 <label><input type="radio" name="qlAssistSend" value="on" /> <span>On</span></label>
               </div>
-              <p class="hint">On adds a private key to the link that only this browser and the installed app accept. The first time, Atelier asks you to confirm. Video waits 4 seconds and shows its price before it starts. Signing out turns it off.</p>
+              <p class="hint">On adds a private key to the link. Only this browser and the installed app accept it. The first time, Atelier asks you to confirm. Video waits 4 seconds and shows its price before it starts. Signing out turns it off.</p>
               <div class="row-actions ql-acts"><button type="button" class="chip" id="qlAssistCopy">Copy Assist link</button><button type="button" class="chip" id="qlAssistReset" hidden>New link</button></div>
               <input class="ql-link" id="qlAssistLink" type="text" readonly aria-label="Your Atelier Assist link" hidden />
             </div>
@@ -754,12 +754,12 @@
           </details>
           <details class="ql-plat" id="qlIos">
             <summary>iPhone</summary>
-            <p class="hint">iPhone keeps the side button for Siri, and a Shortcut can’t open the Home Screen app with your words. The <b>Ask Atelier</b> Shortcut listens, then opens Atelier in Safari with your words in the box.</p>
-            <p class="hint ql-note" id="qlIosStandalone" hidden>Set this up in Safari: open atelier.ciprari.ai in Safari, sign in there, then come back to Settings → Quick launch. Safari keeps its own sign-in.</p>
+            <p class="hint">iPhone keeps the side button for Siri. A Shortcut can’t open the Home Screen app with your words. The <b>Ask Atelier</b> Shortcut listens, then opens Atelier in Safari with your words in the box.</p>
+            <p class="hint ql-note" id="qlIosStandalone" hidden>Set this up in Safari. Open atelier.ciprari.ai in Safari, sign in, then come back to Settings → Quick launch. Safari keeps its own sign-in.</p>
             <div id="qlIosSetup">
-              <p class="hint ql-note" id="qlIosElsewhere" hidden>The link you copy here only fills the box, and you tap Send. For <b>Send without a tap</b>, copy the link on the iPhone itself, in Safari: its private key works only in the browser that copied it.</p>
+              <p class="hint ql-note" id="qlIosElsewhere" hidden>The link you copy here only fills the box, and you tap Send. For <b>Send without a tap</b>, copy the link in Safari on the iPhone. Its private key works only in the browser that copied it.</p>
               <ol class="ql-steps">
-                <li>On the iPhone, in <b>Safari</b>, sign in to Atelier.</li>
+                <li>On the iPhone, sign in to Atelier in Safari.</li>
                 <li id="qlLinkSendStep"><span class="ql-label" id="qlLinkSendLabel">Send without a tap</span>
                   <div class="seg" role="radiogroup" aria-labelledby="qlLinkSendLabel">
                     <label><input type="radio" name="qlLinkSend" value="off" /> <span>Off</span></label>
@@ -769,13 +769,13 @@
                 <li>Tap <b>Copy Shortcut link</b>.
                   <div class="row-actions ql-acts"><button type="button" class="chip" id="qlCopy">Copy Shortcut link</button><a class="chip" id="qlGet" href="#" target="_blank" rel="noopener noreferrer" hidden>Get the Shortcut</a><button type="button" class="chip" id="qlReset" hidden>New link</button></div>
                   <input class="ql-link" id="qlLink" type="text" readonly aria-label="Your Shortcut link" hidden /></li>
-                <li><span id="qlGetHint" hidden>Tap <b>Get the Shortcut</b> and paste your link when it asks. Or build it yourself: </span><span id="qlBuildHint">Build the Shortcut: </span>Shortcuts → + → name it <b>Ask Atelier</b> → add <b>Dictate Text</b> (Stop Listening: After Pause) → <b>URL Encode</b> (Dictated Text) → <b>Text</b>: paste your link, then insert <b>URL Encoded Text</b> right after <code>q=</code> → <b>Open URLs</b> (Text).</li>
+                <li><span id="qlGetHint" hidden>Tap <b>Get the Shortcut</b> and paste your link when it asks. Or build it yourself: </span><span id="qlBuildHint">Build the Shortcut: </span>Shortcuts → + → name it <b>Ask Atelier</b>. Add <b>Dictate Text</b> (Stop Listening: After Pause), then <b>URL Encode</b> (Dictated Text). Add <b>Text</b> and paste your link. Insert <b>URL Encoded Text</b> right after <code>q=</code>. Last, add <b>Open URLs</b> (Text).</li>
                 <li>Put it on a button:
                   <ul class="ql-sub">
-                    <li><b>Action button</b> (iPhone 15 Pro, iPhone 16 and later, 16e, 17e): Settings → Action Button → swipe to Shortcut → Choose a Shortcut → Ask Atelier.</li>
+                    <li><b>Action button</b> (iPhone 15 Pro, iPhone 16 and later, 16e, 17e). Settings → Action Button → swipe to Shortcut. Choose a Shortcut → Ask Atelier.</li>
                     <li><b>Back Tap:</b> Settings → Accessibility → Touch → Back Tap → Double Tap → Ask Atelier.</li>
                     <li><b>Control Center:</b> open it → + → Add a Control → Shortcut → Ask Atelier.</li>
-                    <li><b>Lock Screen:</b> touch and hold the Lock Screen → Customize → Lock Screen → remove a bottom control → + → Shortcut → Ask Atelier.</li>
+                    <li><b>Lock Screen:</b> touch and hold the Lock Screen → Customize → Lock Screen. Remove a bottom control, then + → Shortcut → Ask Atelier.</li>
                     <li><b>Siri:</b> “Hey Siri, Ask Atelier.”</li>
                   </ul></li>
               </ol>
@@ -784,7 +784,7 @@
                 <li>If the phone is locked, iPhone asks you to unlock before Safari opens.</li>
                 <li>Safari can clear a site’s data after 7 days of using Safari without visiting it. If Ask Atelier lands on sign-in, sign in again and copy a fresh link.</li>
                 <li>Safari history (synced through iCloud) can keep the links Ask Atelier opens, including your words. <b>New link</b> retires the old key.</li>
-                <li>Don’t share a Shortcut that contains your link: with Send without a tap on, it carries your private key. Each person copies their own link in Settings → Quick launch.</li>
+                <li>Don’t share a Shortcut that contains your link. With Send without a tap on, it carries your private key. Each person copies their own link in Settings → Quick launch.</li>
               </ul>
             </div>
           </details>
@@ -809,7 +809,7 @@
               <button type="button" class="chip" data-speed="1.25" aria-pressed="false">1.25×</button>
             </div>
           </div>
-          <label class="ra-auto"><input type="checkbox" id="readAuto" checked /><span><span class="ra-auto-title">Read answers to spoken requests</span><span class="hint">Ask out loud (Atelier Assist, Talk or the mic) and the answer is read aloud when it’s ready. Stop reading, typing, the mic or a new prompt stops it.</span></span></label>
+          <label class="ra-auto"><input type="checkbox" id="readAuto" checked /><span><span class="ra-auto-title">Read answers to spoken requests</span><span class="hint">When you ask out loud, Atelier reads the answer to you. That covers Atelier Assist, Talk and the mic. Stop reading, typing, the mic or a new prompt stops it.</span></span></label>
           <p class="hint" id="readCaption">AI-generated voice. To make the audio, answer text is sent to OpenAI (Google for Sulafat). Clips stay on this device until you clear it.</p>
         </section>
         <section class="field-group">
@@ -845,14 +845,14 @@
             <label class="chip file-chip" id="impClaudeChatsLabel">Import Claude chats…<input type="file" id="impClaudeChats" accept=".zip,.json,application/zip,application/json" aria-label="Import Claude chats" /></label>
             <button type="button" class="chip" id="impClaudeCancel" hidden>Cancel import</button>
           </div>
-          <details class="settings-details import-help"><summary>Where to find your Claude export</summary><p class="hint">On claude.ai, go to Settings → Privacy → Export data. The email links to several files: download <b>conversations-000.zip</b> (and any conversations-001.zip …) and choose it here, one at a time — not the manifest .json. Imported chats are stored in your account on this device and sync privately to your other devices when device sync is enabled. Importing a newer export adds only what’s new. The accounts agent can search imported chats when you ask it to.</p></details>
+          <details class="settings-details import-help"><summary>Where to find your Claude export</summary><p class="hint">On claude.ai, go to Settings → Privacy → Export data. The email links to several files. Download <b>conversations-000.zip</b> (and any conversations-001.zip …) and choose each here, one at a time. Skip the manifest .json. Imported chats are stored in your account on this device. With device sync on, they sync privately to your other devices. Importing a newer export adds only what’s new. The accounts agent can search imported chats when you ask it to.</p></details>
           <p class="hint" id="claudeImpStatus" role="status" aria-live="polite"></p>
           <div class="danger-zone"><p class="hint"><b>Irreversible</b><span id="wipeHint">Clears threads, media, app data, profile and saved sign-in on this device. Export your threads first.</span></p><button type="button" class="chip danger" id="wipeBtn">Clear this device</button></div>
         </section>
       </div>
 
       <footer class="sheet-foot">
-        <span class="hint">Your studio, your preferences.</span>
+        <span class="hint">Theme and model choices stay on this device.</span>
         <button class="btn-primary" value="save" id="saveSettings">Save</button>
       </footer>
     </form>
@@ -863,19 +863,19 @@
   <dialog class="sheet onboard" id="onboard" aria-labelledby="onboardTitle" aria-describedby="onboardLead">
     <div class="sheet-body">
       <p class="ob-brand"><span class="ob-mark" aria-hidden="true"></span>Atelier</p>
-      <h2 class="onboard-title" id="onboardTitle">Come make<br /><em>something yours.</em></h2>
-      <p class="onboard-copy" id="onboardLead">A personal AI studio for answers, code, images, video, ideas and apps.</p>
+      <h2 class="onboard-title" id="onboardTitle">Sign in to<br /><em>Atelier.</em></h2>
+      <p class="onboard-copy" id="onboardLead">I built Atelier for my own work: answers, code, images, video, ideas and small apps.</p>
       <p class="ob-note" id="signinNote" role="alert" hidden></p>
       <!-- A former tester's threads and settings on this device (app.js removeTesterData): shown only where some are left. -->
       <button type="button" class="chip ob-forget" id="testerForget" hidden>Remove my tester data from this device</button>
       <a class="li-btn tester-ui" id="liBtn" href="/api/li/start"><svg class="li-in" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zm1.78 13.02H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z"/></svg><span>Sign in with LinkedIn</span></a>
-      <p class="ob-spots tester-ui" id="spotsLine"><b>25 tester spots.</b> Paid models included.</p>
+      <p class="ob-spots tester-ui" id="spotsLine">I have 25 tester spots. The paid models are on me.</p>
       <p class="ob-spots tester-closed" id="closedLine">Tester sign-in is closed right now.</p>
       <details class="ob-owner" id="ownerEntry">
         <summary>Studio owner? Use your passcode</summary>
         <form method="dialog" class="ob-form" id="onboardForm">
           <label class="field"><span>Studio passcode</span><input type="password" name="passcode" id="onboardPass" placeholder="Enter your passcode" enterkeyhint="go" autocomplete="current-password" spellcheck="false" required /></label>
-          <label class="field"><span>First name <small>Optional — make the studio feel like you.</small></span><input name="name" placeholder="Your first name" autocomplete="given-name" maxlength="60" /></label>
+          <label class="field"><span>First name <small>Optional. Atelier greets you by it.</small></span><input name="name" placeholder="Your first name" autocomplete="given-name" maxlength="60" /></label>
           <p class="hint" id="onboardMsg" role="status"></p>
           <button class="btn-primary" id="onboardGo">Open the studio</button>
         </form>
@@ -889,7 +889,7 @@
   <dialog class="sheet sync-dialog" id="syncFirst" aria-labelledby="syncFirstTitle" aria-describedby="syncFirstBody">
     <div class="sheet-body">
       <h2 id="syncFirstTitle"><em>Sync your threads?</em></h2>
-      <p class="hint" id="syncFirstBody">This browser was also used for LinkedIn tester sign-in, so some of the threads here may not be yours. Choose what to upload. Threads from your other devices download either way.</p>
+      <p class="hint" id="syncFirstBody">This browser was also used for LinkedIn tester sign-in. Some of the threads here may not be yours. Choose what to upload. Threads from your other devices download either way.</p>
       <div class="sync-first-acts">
         <button type="button" class="btn-primary" id="syncFirstNew" autofocus>Only threads I make from now on</button>
         <button type="button" class="chip" id="syncFirstAll">Upload all threads</button>
@@ -923,6 +923,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=91" type="module"></script>
+  <script src="/app.js?v=92" type="module"></script>
 </body>
 </html>

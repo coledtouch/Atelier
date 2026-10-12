@@ -141,7 +141,7 @@ export async function upstreamError(r, what, key) {
   const msg = scrub(raw, key, 240);
   console.warn('xai', what, r.status);
   const s = r.status;
-  if ((s === 403 || s === 429) && XAI_CREDIT.test(raw)) return new XaiError(`xAI says the account is out of credits or over its spending limit — top up at console.x.ai.${msg ? ` (${msg})` : ''}`, 402, 'xai_credits');
+  if ((s === 403 || s === 429) && XAI_CREDIT.test(raw)) return new XaiError(`xAI says the account is out of credits or over its spending limit. Top up at console.x.ai.${msg ? ` (${msg})` : ''}`, 402, 'xai_credits');
   if (s === 400 || s === 422) return new XaiError(`xAI didn’t accept that request${msg ? ` — ${msg}` : '.'}`, 400, 'xai_rejected');
   if (s === 401 || s === 403) return new XaiError('xAI rejected the server’s API key (XAI_API_KEY) — run “Check provider keys” in Settings.', 403, 'xai_key');
   if (s === 404) return new XaiError('xAI no longer has that (it may have expired).', 404, 'xai_gone');

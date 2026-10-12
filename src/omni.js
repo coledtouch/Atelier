@@ -146,7 +146,7 @@ export async function upstreamError(r, what, key) {
   console.warn('omni', what, r.status, tag || '-');
   const s = r.status;
   if (s === 400 || s === 422) return new OmniError(`Gemini Omni didn’t accept that request${msg ? ` — ${msg}` : '.'}`, 400, 'omni_rejected');
-  if (s === 401 || s === 403) return new OmniError('Google refused the server’s Gemini key for Omni (GEMINI_API_KEY) — check billing and model access in AI Studio.', 403, 'omni_key');
+  if (s === 401 || s === 403) return new OmniError('Google refused the server’s Gemini key for Omni (GEMINI_API_KEY). Check billing and model access in AI Studio.', 403, 'omni_key');
   if (s === 404) return new OmniError('Google no longer has that video (interactions are kept 55 days).', 404, 'omni_gone');
   if (s === 429) return new OmniError('Gemini Omni is busy or this key is over its limit — try again in a moment.', 429, 'omni_busy', retryAfterOf(r));
   if (s >= 500) return Object.assign(new OmniError('Gemini Omni is busy right now — try again in a moment.', 503, 'omni_busy', retryAfterOf(r)), { gateway: isGatewayStatus(s) });

@@ -9,10 +9,10 @@
 //     that names a retired Veo id is read as Omni (omni.js migrateVideoId; migrateRemix rewrites it).
 //   - Plan strings are untrusted (on-screen text in the footage can steer Gemini): they are cleaned and capped here and
 //     must still be escaped wherever they are shown. No plan field ever reaches a URL, a tool or a model id.
-import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=91';
-import { quote as runwayQuote, RUNWAY_MODELS, GROK_SECONDS } from './runway.js?v=91';
-import { stripThink } from './context.js?v=91';
-import { OMNI_ID, migrateVideoId } from './omni.js?v=91';
+import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=92';
+import { quote as runwayQuote, RUNWAY_MODELS, GROK_SECONDS } from './runway.js?v=92';
+import { stripThink } from './context.js?v=92';
+import { OMNI_ID, migrateVideoId } from './omni.js?v=92';
 
 export const REMIX_V = 1;
 export const LIMITS = Object.freeze({
@@ -694,7 +694,7 @@ export function normalizePlan(p, source = {}, opts = {}, caps = {}) {
   const total = outputDuration(plan);
   const outMax = Math.min(LIMITS.outMax, D ? 2 * D : LIMITS.outMax);
   if (total > outMax + 1e-6) say('block', null, `The cut would run ${Math.round(total)} s — the most is ${Math.round(outMax)} s`);
-  if (plan.audio.mode === 'follow_cuts' && caps.mobile && total > LIMITS.mobileFollowMax) say('block', null, `Cutting the audio works up to ${LIMITS.mobileFollowMax} s on a phone — keep the soundtrack, or shorten the cut`);
+  if (plan.audio.mode === 'follow_cuts' && caps.mobile && total > LIMITS.mobileFollowMax) say('block', null, `Cutting the audio works up to ${LIMITS.mobileFollowMax} s on a phone. Keep the soundtrack, or shorten the cut`);
   return { plan, issues };
 }
 
@@ -820,7 +820,7 @@ export function fitLocked(plan, D, fit = 'adjacent', fps = 30) {
     if (c) { if (trimStart) c.src_in = r3(c.src_in + rest); else c.src_out = r3(c.src_out - rest); }
   }
   const left = outputDuration(out) - D;
-  if (Math.abs(left) > 1 / f + 1e-6) issues.push({ level: 'block', id: null, msg: `Picture is ${Math.abs(Math.round(left * 10) / 10)} s ${left > 0 ? 'longer' : 'shorter'} than the soundtrack — shorten a beat or let the audio follow the cuts` });
+  if (Math.abs(left) > 1 / f + 1e-6) issues.push({ level: 'block', id: null, msg: `Picture is ${Math.abs(Math.round(left * 10) / 10)} s ${left > 0 ? 'longer' : 'shorter'} than the soundtrack. Shorten a beat or let the audio follow the cuts` });
   if (changed.size) {
     const sec = Math.abs(Math.round((outputDuration(plan) - D) * 10) / 10);
     issues.push({ level: 'fix', id: null, msg: `${outputDuration(plan) > D ? 'Took' : 'Added'} ${sec} s ${fit === 'ending' ? 'at the ending' : 'next to the new beat'} so the picture matches the ${Math.round(D * 10) / 10} s soundtrack` });
@@ -1236,4 +1236,4 @@ export function migrateRemix(r, { keepOps = false } = {}) {
   }
   return r;
 }
-export const VEO_RETIRED = 'Google retired Veo 3.1 on the Gemini API before this shot was collected — refilm it with Gemini Omni';
+export const VEO_RETIRED = 'Google retired Veo 3.1 on the Gemini API before this shot was collected. Refilm it with Gemini Omni';

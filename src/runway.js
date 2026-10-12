@@ -471,7 +471,7 @@ async function generate(req, env, key, kind, spend) {
     if (stopped) throw new RunwayError(`${over} Atelier cancelled it straight away.`, 402, { code: 'runway_cap', estimatedCost: est });
     // The cancel failed: the task may run and bill. Hand back its id so the browser can retry the cancel (and say so).
     console.warn('runway cap cancel failed');
-    throw new RunwayError(`${over} Atelier couldn’t cancel it at once and is trying again — check at dev.runway.com that it stopped.`, 402, { code: 'runway_cap_running', id: j.id, estimatedCost: est });
+    throw new RunwayError(`${over} Atelier couldn’t cancel it at once and is trying again. Check at dev.runway.com that it stopped.`, 402, { code: 'runway_cap_running', id: j.id, estimatedCost: est });
   }
   if (hold && est) await hold.resize(est.credits * MICROS_PER_CREDIT); // Runway's own estimate replaces the quote in the record
   return json({ id: j.id, model: shaped.model, kind, estimatedCost: est, quote: quote(shaped.model, shaped.seconds, shaped.audio, shaped), pollAfterMs: POLL_MS });

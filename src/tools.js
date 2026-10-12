@@ -436,7 +436,7 @@ export async function googleTokenFor(env, wanted) {
 }
 export async function googleAccountList(env) { return (await googleAccounts(env)).map((a) => ({ email: a.email, scope: a.scope || '' })); }
 const needsScope = (acct, scope, what) => {
-  if (acct.scope && !acct.scope.includes(scope)) throw new ToolError(`${acct.email} hasn’t granted ${what} access yet — in Settings → Connections tap “+ Add account” and pick ${acct.email} again to allow it.`);
+  if (acct.scope && !acct.scope.includes(scope)) throw new ToolError(`${acct.email} hasn’t granted ${what} access yet. In Settings → Connections, tap “+ Add account” and pick ${acct.email} again to allow it.`);
 };
 async function pickAccount(env, wanted) {
   const list = await googleAccounts(env);
@@ -465,8 +465,8 @@ async function googleAccessToken(env, account) {
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const fromB64url = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)));
 // A header value goes into the message as it is (only Subject is encoded), so a line break in it would start a header
-// of its own (a hidden Bcc or Reply-To) or end the headers early. gmail_draft runs without a card, and an agent steered
-// by mail it read could pass one: To, Cc and In-Reply-To with CR, LF or NUL are refused, and In-Reply-To must be one
+// of its own (a hidden Bcc or Reply-To) or end the headers early. An agent steered by mail it read could pass one (gmail_draft
+// and gmail_send both show an approval card since v92, but a card is no place to spot a CR): To, Cc and In-Reply-To with CR, LF or NUL are refused, and In-Reply-To must be one
 // <message-id> (what gmail_read returns as messageId).
 const headerValue = (v, name) => {
   const s = String(v ?? '');
@@ -506,8 +506,8 @@ const gmail = {
     } catch (err) {
       // Google answers 400 "Precondition check failed" for accounts with no Gmail mailbox: a Google account made
       // with a non-Gmail address, or a Workspace user with Gmail switched off. Calendar/Drive still work for them.
-      if (/ 400: .*precondition check failed/i.test(err.message)) throw new ToolError(`${account.email} has no Gmail mailbox (a Google account without Gmail, or Gmail is turned off for it in Google Workspace). Its Calendar and Drive still work.`);
-      if (/ 403: .*(insufficient.*scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT)/i.test(err.message)) throw new ToolError(`${account.email} hasn’t granted Gmail access — in Settings → Connections tap “+ Add account”, pick ${account.email} again and tick every box.`);
+      if (/ 400: .*precondition check failed/i.test(err.message)) throw new ToolError(`${account.email} has no Gmail mailbox. It’s a Google account without Gmail, or Google Workspace has Gmail turned off for it. Its Calendar and Drive still work.`);
+      if (/ 403: .*(insufficient.*scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT)/i.test(err.message)) throw new ToolError(`${account.email} hasn’t granted Gmail access. In Settings → Connections, tap “+ Add account”, pick ${account.email} again and tick every box.`);
       throw err;
     }
   },
@@ -543,7 +543,7 @@ const gmail = {
       },
     },
     gmail_draft: {
-      label: 'Save Gmail draft', desc: 'Save an email as a draft in Gmail (does not send). For replies use the account the original came from, and pass threadId and in_reply_to (the original Message-ID).',
+      write: true, label: 'Save Gmail draft', desc: 'Save an email as a draft in Gmail (does not send). For replies use the account the original came from, and pass threadId and in_reply_to (the original Message-ID).',
       params: obj({ account: ACCOUNT, to: S('Recipient(s)'), cc: S('Cc (optional)'), subject: S('Subject'), body: S('Plain-text body'), threadId: S('Thread id for replies (optional)'), in_reply_to: S('Original Message-ID for replies (optional)') }, ['to', 'subject', 'body']),
       run: async (env, a) => {
         const acct = await pickAccount(env, a.account);
@@ -568,7 +568,7 @@ const gapi = async (env, acct, url, init = {}, label = 'Google') => {
     return await callJson(url, { ...init, headers: { authorization: `Bearer ${await googleAccessToken(env, acct)}`, ...(init.headers || {}), ...(init.body && !init.headers?.['content-type'] ? { 'content-type': 'application/json' } : {}) } }, `${label} (${acct.email})`);
   } catch (err) {
     console.warn('google api error', acct.email, label, err.message.slice(0, 400));
-    if (/ 403: .*(insufficient.*scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT)/i.test(err.message)) throw new ToolError(`${acct.email} hasn’t granted ${label} access — in Settings → Connections tap “+ Add account” and pick ${acct.email} again, and tick every box.`);
+    if (/ 403: .*(insufficient.*scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT)/i.test(err.message)) throw new ToolError(`${acct.email} hasn’t granted ${label} access. In Settings → Connections, tap “+ Add account”, pick ${acct.email} again and tick every box.`);
     if (/ 403: .*(has not been used|is disabled|not been enabled)/i.test(err.message)) throw new ToolError(`The ${label} API isn’t enabled in your Google Cloud project — enable it under APIs & Services → Library.`);
     throw err;
   }
@@ -1190,7 +1190,7 @@ const canva = {
           const formats = await canvaApi(env, acct, `/designs/${id}/export-formats`, {}, 'Canva').then((j) => Object.keys(j.formats || {}).filter((k) => EXPORT_FORMATS.includes(k)), () => undefined);
           const { account, ...out } = designOut(acct, d);
           return { ...out, page_count: d.page_count ?? null, design_types: d.design_types, created: unixIso(d.created_at), export_formats: formats,
-            note: 'edit_url and view_url only work for this Canva user and expire after 30 days; the thumbnail link expires after 15 minutes.' };
+            note: 'edit_url and view_url work only for this Canva user and expire after 30 days. The thumbnail link expires after 15 minutes.' };
         });
       },
     },
@@ -1233,7 +1233,7 @@ const canva = {
       run: async (env, a) => {
         const body = { title: oneLine(a.title, 255) || 'Untitled design' };
         const custom = a.width != null || a.height != null;
-        if (a.design_type && custom) throw new CanvaError('Give either design_type or width + height, not both.', 400);
+        if (a.design_type && custom) throw new CanvaError('Give either design_type or width + height. Only one of them can be set.', 400);
         if (a.design_type) {
           if (!['doc', 'whiteboard', 'presentation'].includes(a.design_type)) throw new CanvaError('design_type must be doc, whiteboard or presentation.', 400);
           body.design_type = { type: 'preset', name: a.design_type };
@@ -1377,10 +1377,10 @@ function canvaImportError(err, format) {
   if (!(err instanceof CanvaError)) return err;
   const code = String(err.code || '');
   if (code === 'license_required') {
-    return new CanvaError('This design uses premium Canva elements your plan doesn’t cover — license or remove them in Canva, then import again.', 403, { code });
+    return new CanvaError('This design uses premium Canva elements your plan doesn’t cover. License or remove them in Canva, then import again.', 403, { code });
   }
   if (code === 'approval_required') {
-    return new CanvaError('This design needs approval in Canva before it can be exported — get it approved there, then import again.', 403, { code });
+    return new CanvaError('This design needs approval in Canva before it can be exported. Get it approved there, then import again.', 403, { code });
   }
   if (/not[ _]supported|unsupported/i.test(`${code} ${err.message}`)) {
     return new CanvaError(`Canva can’t export this design as ${format === 'mp4' ? 'a video (MP4)' : 'an image (PNG)'}.`, 400, { code });

@@ -5,7 +5,7 @@
 
 // ── shared constants (src/tts.js owns the voices, the brief and the preview line; keep the ids and TTS_BRIEF_V in step) ──
 export const TTS_BRIEF_V = 2; // src/tts.js TTS_BRIEF_V: part of every cache key, so a new voice never replays old clips
-export const PREVIEW_ID = '7d6c99da'; // src/tts.js PREVIEW_ID (a hash of its PREVIEW_TEXT): part of the preview cache key
+export const PREVIEW_ID = '3a2d0763'; // src/tts.js PREVIEW_ID (a hash of its PREVIEW_TEXT): part of the preview cache key
 /**
  * Spoken length, as src/tts.js counts it (a test keeps the two identical): characters, plus extra weight for digits (3),
  * symbols read as words (2) and Chinese, Japanese or Korean characters (2). Segments are sized in these units, and a

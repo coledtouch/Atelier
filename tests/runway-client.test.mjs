@@ -468,6 +468,8 @@ test('failureOf: Runway failure codes → statuses and words app.js classifies c
   assert.match(failureOf({ failureCode: 'ASSET.INVALID' }).message, /2–30 s at 30 fps/);
   assert.match(failureOf({ failureCode: 'ASSET.INVALID' }).message, /between 1:2 and 2:1/);
   assert.match(failureOf({ failureCode: 'INTERNAL.BAD_OUTPUT.01' }).message, /without logos or text/);
+  // the cause it names: a request for a prompt in place of a scene (app.js tells the planner the same)
+  assert.match(failureOf({ failureCode: 'INTERNAL.BAD_OUTPUT.01' }).message, /Describe the scene itself\. Don’t ask Runway for a prompt\./);
   for (const code of ['THIRD_PARTY.UNAVAILABLE', 'INTERNAL', 'INPUT_PREPROCESSING.INTERNAL', null, undefined]) {
     const e = failureOf({ failureCode: code });
     assert.equal(e.status, 503, String(code));

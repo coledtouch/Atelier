@@ -56,7 +56,7 @@ export const NOTES = Object.freeze({
   // Not "Shared to Atelier": any site can make the same POST to /share as the share sheet (sw.js), so the label
   // claims no more than it can know.
   shared: 'From another app or site — check it before sending.',
-  ready: 'Ready when you are — tap Send.',
+  ready: 'Ready — tap Send.',
   tapMic: 'Tap the mic to talk.',
   listening: 'Listening — speak, then pause.',
   sending: 'Sending…',
@@ -65,21 +65,21 @@ export const NOTES = Object.freeze({
   typeOther: 'Voice isn’t available in this browser — type instead.',
   shareExpired: 'That share expired — share it again.',
   // No video size here: the 1 GB cap (SHARE_LIMITS) is untested on phones, where the share is parsed in memory first.
-  shareDropped: 'Skipped some files — a share brings in up to 4 photos (25 MB each) or one video. Attach others with the paperclip.',
+  shareDropped: 'Skipped some files. A share brings in up to 4 photos (25 MB each) or one video. Attach others with the paperclip.',
   linkCopied: 'Link copied — paste it into the Shortcut.',
   copyBelow: 'Copy the link below, then paste it into the Shortcut.',
   newLink: 'New link copied — paste it into your Shortcut. Old links only fill the box now.',
   newLinkManual: 'New link made — copy it below and paste it into your Shortcut. Old links only fill the box now.',
   confirmTitle: 'Send from your Shortcut without a tap?',
-  confirmHint: 'Prompts from your Ask Atelier Shortcut will send after a short pause, in the mode the link names (Ask unless it names another). Links without your private key only fill the box.',
+  confirmHint: 'Prompts from your Ask Atelier Shortcut send after a short pause. They go to the mode the link names, or to Ask. Links without your private key only fill the box.',
   // Atelier Assist (android/): only a link with this browser's own key gets these (planLaunch plan.via).
   assist: 'From Atelier Assist — check it before sending.',
   confirmTitleAssist: 'Send from Atelier Assist without a tap?',
-  confirmHintAssist: 'What you ask Atelier Assist on this phone will send here right away, in the mode it picked (Video waits 4 seconds so you can cancel). Links without your private key only fill the box.',
+  confirmHintAssist: 'Requests to Atelier Assist on this phone send here right away, in the mode it picked. Video waits 4 seconds so you can cancel. Links without your private key only fill the box.',
   assistOn: 'Turn on Send without a tap first, then copy the link.',
-  assistCopied: 'Assist link copied — in Atelier Assist, tap ⋯ → Paste link, then delete it from your keyboard’s clipboard history.',
+  assistCopied: 'Assist link copied. In Atelier Assist, tap ⋯ → Paste link. Then delete it from your keyboard’s clipboard history.',
   assistCopyBelow: 'Copy the link below, then in Atelier Assist tap ⋯ → Paste link. Delete it from your keyboard’s clipboard history afterwards.',
-  assistNewLink: 'New Assist link copied — paste it into Atelier Assist, then delete it from your keyboard’s clipboard history. The old one only fills the box now.',
+  assistNewLink: 'New Assist link copied. Paste it into Atelier Assist, then delete it from your keyboard’s clipboard history. The old one only fills the box now.',
 });
 // The hold's toast for a keyed launch: where it is going. (Video's, with its length and price, is app.js holdNote.)
 export const sendingNote = (mode) => (MODE_LABELS[mode] ? `Sending to ${MODE_LABELS[mode]}…` : NOTES.sending);
@@ -90,7 +90,7 @@ export const SHARE_NOTES = Object.freeze({
 });
 export const MIC_BLOCKED = Object.freeze({
   android: 'The mic is off for Atelier. Touch and hold the Atelier icon → Site settings → Microphone → Allow. If it’s still off: Android Settings → Apps → Chrome → Permissions → Microphone.',
-  ios: 'The mic is off for this site. In Safari: aA → Website Settings → Microphone → Allow (in the Home Screen app, allow it when asked), then tap the mic again.',
+  ios: 'The mic is off for this site. In Safari, tap aA → Website Settings → Microphone → Allow, then tap the mic again. In the Home Screen app, allow it when asked.',
   desktop: 'The mic is blocked for this site.',
 });
 

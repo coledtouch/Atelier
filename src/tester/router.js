@@ -59,7 +59,7 @@ const BUDGET = {
   day: 'You’ve used today’s tester allowance. It resets at midnight UTC.',
   month: 'You’ve used this month’s tester allowance.',
   pool: 'The testers’ budget for this month is used up. Access reopens next month.',
-  call: 'This request is bigger than one tester call allows — start a new thread, attach less or pick a lighter model.',
+  call: 'This request is bigger than one tester call allows. Start a new thread, attach less or pick a lighter model.',
 };
 
 // {"dayLeft","monthLeft","poolLeft"} in micro-dollars, on every metered response.
@@ -80,7 +80,7 @@ function refused(r, message) {
   if (r.scope === 'signin') return signedOut();
   const rest = r.allowance?.[r.scope] ? left(r.allowance[r.scope]) : 0;
   const text = message || (SHORT[r.scope] && rest >= 10_000
-    ? `This request needs more than the ${cents(rest)} ${SHORT[r.scope]} — pick a lighter model, a shorter clip or attach less.`
+    ? `This request needs more than the ${cents(rest)} ${SHORT[r.scope]}. Pick a lighter model, a shorter clip or attach less.`
     : BUDGET[r.scope] || BUDGET.call);
   return fail(402, 'tester_budget', text, { scope: r.scope, resetsAt: r.resetsAt ?? null }, allowanceHeader(r.allowance));
 }

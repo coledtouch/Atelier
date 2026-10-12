@@ -306,7 +306,7 @@ test('the privacy page discloses app error reports: what they hold, what they ne
   // and the extra frames, as well as failures.
   for (const s of ['app version', 'type name', 'file and line', 'never includes the error’s message', 'never linked to your sign-in', 'at most five a session',
     'more than 20 seconds', 'offline copy (its service worker)', 'looked like a dropped connection', 'up to six more places']) assert.ok(item.includes(s), s);
-  assert.match(privacy, /<li><b>App error reports:<\/b> at most 50 distinct reports are kept in Atelier’s Cloudflare storage, each until 30 days after/);
+  assert.match(privacy, /<li><b>App error reports:<\/b> at most 50 distinct reports are kept in Atelier’s Cloudflare storage\. Each stays until 30 days after/);
   assert.equal(CLIENT_ERRORS.keep, 50);
   assert.equal(CLIENT_ERRORS.days, 30);
 });
@@ -318,7 +318,7 @@ test('the Settings hint calls the list unverified, not “from your devices”',
   assert.ok(hint);
   assert.ok(!/from your devices/.test(hint));
   assert.match(hint, /any device that opened Atelier/);
-  assert.match(hint, /Unverified/);
+  assert.match(hint, /Anyone can send one without a passcode, so treat them as unverified\./);
 });
 
 test('wrangler.jsonc binds ERR_LIMIT next to the other rate limits', async () => {

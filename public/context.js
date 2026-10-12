@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=91';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=92';
 
 export const CHAT_KINDS = ['ask', 'code'];
 // Earlier turns replayed (chat answers and notes alike): every one while a thread has fewer than HISTORY_TURNS +
@@ -361,15 +361,15 @@ export const taintGates = (why, service) => Boolean(why) && !(why === 'claude' &
 // same answer: 'page' a page read, 'chats' Claude chats read, 'shared-chat' a Claude chat holding a shared or linked
 // turn). '' for anything else.
 const TAINT_NOTES = Object.freeze({
-  share: 'This thread contains something shared from another app or site, so reading your accounts waits for your OK. Start a new thread to skip this.',
-  link: 'This thread contains text that came from a link, so reading your accounts waits for your OK. Start a new thread to skip this.',
-  web: 'This thread contains web search results, and a page can try to steer the assistant, so reading your accounts waits for your OK. Start a new thread to skip this.',
-  browser: 'This thread contains a web page or someone else’s GitHub content the assistant read, which can try to steer it, so reading your accounts waits for your OK. Start a new thread to skip this.',
-  claude: 'This thread contains text from your Claude chats, which can hold pasted or web text, so reading your accounts waits for your OK. Start a new thread to skip this.',
+  share: 'This thread holds something shared from another app or site. So reading your accounts waits for your OK. Start a new thread to skip this.',
+  link: 'This thread holds text from a link. So reading your accounts waits for your OK. Start a new thread to skip this.',
+  web: 'This thread holds web search results, and a page can try to steer the assistant. So reading your accounts waits for your OK. Start a new thread to skip this.',
+  browser: 'The assistant read a web page or someone else’s GitHub content in this thread. That text can try to steer it. So reading your accounts waits for your OK. Start a new thread to skip this.',
+  claude: 'This thread holds text from your Claude chats, which can include pasted or web text. So reading your accounts waits for your OK. Start a new thread to skip this.',
   import: 'This thread was restored from a backup file, so reading your accounts waits for your OK. Start a new thread to skip this.',
-  legacy: 'This thread is older than Atelier’s check for shared text and photos, so reading your accounts waits for your OK. Start a new thread to skip this.',
-  page: 'Asked after reading a web page or someone else’s GitHub content in this answer: it can try to steer what the assistant does next, so reading your accounts now waits for your OK.',
-  chats: 'Asked after reading your Claude chats in this answer: they can hold pasted or web text, so reading your accounts now waits for your OK.',
-  'shared-chat': 'Asked after reading a Claude chat that holds something shared from another app or site, or text from a link: it can try to steer the assistant, so reading your accounts now waits for your OK.',
+  legacy: 'This thread is older than Atelier’s check for shared text and photos. So reading your accounts waits for your OK. Start a new thread to skip this.',
+  page: 'Asked after reading a web page or someone else’s GitHub content in this answer. That text can try to steer the assistant. So reading your accounts now waits for your OK.',
+  chats: 'Asked after reading your Claude chats in this answer. They can include pasted or web text. So reading your accounts now waits for your OK.',
+  'shared-chat': 'Asked after reading a Claude chat that holds a share or text from a link. That text can try to steer the assistant. So reading your accounts now waits for your OK.',
 });
 export const taintNote = (why) => (Object.hasOwn(TAINT_NOTES, why) ? TAINT_NOTES[why] : '');

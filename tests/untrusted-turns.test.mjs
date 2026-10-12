@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { followUpRoute, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, buildHistory, HISTORY_TURNS, HISTORY_BLOCK, withSent, TAINTS, MARKS_SINCE, MEDIA_MARKS_SINCE } from '../public/context.js';
 import { NOTES } from '../public/launch.js';
+import { problems } from './humanizer-lint.mjs';
 
 const APP = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
@@ -232,8 +233,9 @@ test('runChat: a link or share turn that would go to the accounts agent is answe
     await r.run();
     assert.equal(r.calls.agent, 0, 'no tools on this turn');
     assert.equal(r.calls.stream.length, 1);
-    assert.match(e.meta.note, /tools off for this turn — ask again without it to use your accounts/);
+    assert.match(e.meta.note, /accounts off this turn · ask without it to use them/);
     assert.match(e.meta.note, untrusted === 'share' ? /^shared content · / : /^text from a link · /);
+    assert.deepEqual(problems(e.meta.note), [], 'the meta line passes Cole’s humanizer (16 words at most)');
   }
   // the owner's own words: the agent, as before
   const own = { kind: 'ask', prompt: 'check my email', params: {} };
@@ -358,7 +360,7 @@ test('runAgent: once Claude has searched the web in a run, every later account t
   // The approval card says why it asks.
   const { renderSteps } = cardRig((s) => String(s));
   const card = renderSteps({ steps: [{ id: 's9', status: 'awaiting', confirm: true, afterWeb: true, service: 'gmail', label: 'Search Gmail', args: { q: 'passport number' } }] });
-  assert.match(card, /Asked after a web search: a page can try to steer what the assistant does next, so anything that reads or changes your accounts now waits for your OK\./);
+  assert.match(card, /Asked after a web search\. A web page can try to steer the assistant\. So every account read or change now waits for your OK\./);
   assert.doesNotMatch(renderSteps({ steps: [{ id: 's8', status: 'awaiting', write: true, service: 'gmail', label: 'Send', args: {} }] }), /Asked after a web search/);
 });
 
@@ -456,7 +458,7 @@ test('learnFrom: a turn marked as link or share text (or made from one) never re
   await learnFrom({ kind: 'ask', prompt: 'I live in Rome and I write mostly about architecture history' });
   assert.equal(calls.length, 1, 'the owner’s own words still teach it');
   const privacy = await readFile(new URL('../public/privacy.html', import.meta.url), 'utf8');
-  assert.match(privacy, /facts Atelier notes from your conversations \(never from text that arrived through a link or a share\)/, 'the privacy policy says so');
+  assert.match(privacy, /facts Atelier notes from your conversations\. Atelier never notes facts from text that arrived through a link or a share\./, 'the privacy policy says so');
 });
 
 test('Undo (or Redo, or pasting it back after a cut) that brings link / share text back into an emptied box brings its mark back; your own words never get it', () => {
@@ -772,11 +774,11 @@ test('taintGates / taintNote: every reason holds back every tool except Claude-o
   assert.equal(taintGates('claude', 'claude'), false, 'more Claude history after Claude history runs unasked');
   assert.equal(taintGates('claude', 'gmail'), true);
   assert.equal(taintGates('', 'gmail'), false);
-  assert.equal(taintNote('share'), 'This thread contains something shared from another app or site, so reading your accounts waits for your OK. Start a new thread to skip this.');
-  assert.equal(taintNote('link'), 'This thread contains text that came from a link, so reading your accounts waits for your OK. Start a new thread to skip this.');
+  assert.equal(taintNote('share'), 'This thread holds something shared from another app or site. So reading your accounts waits for your OK. Start a new thread to skip this.');
+  assert.equal(taintNote('link'), 'This thread holds text from a link. So reading your accounts waits for your OK. Start a new thread to skip this.');
   for (const why of ['web', 'browser', 'claude', 'import', 'legacy']) assert.match(taintNote(why), /reading your accounts waits for your OK\. Start a new thread to skip this\.$/, why);
   assert.match(taintNote('page'), /^Asked after reading a web page or someone else’s GitHub content in this answer/);
-  assert.match(taintNote('shared-chat'), /^Asked after reading a Claude chat that holds something shared from another app or site, or text from a link: .*now waits for your OK\.$/);
+  assert.match(taintNote('shared-chat'), /^Asked after reading a Claude chat that holds a share or text from a link\. .*now waits for your OK\.$/);
   assert.doesNotMatch(taintNote('shared-chat'), /Start a new thread/, 'a new thread would read the same chat: no advice that doesn’t help');
   assert.match(taintNote('chats'), /^Asked after reading your Claude chats in this answer/);
   assert.equal(taintNote(''), '');
@@ -801,10 +803,10 @@ test('runAgent: a share earlier in the thread makes “check my inbox” ask bef
   // the card, while it waits
   const { renderSteps } = cardRig();
   const card = renderSteps({ steps: [{ ...e.steps[0], status: 'awaiting' }] });
-  assert.match(card, /<p class="ac-target ac-why">This thread contains something shared from another app or site, so reading your accounts waits for your OK\. Start a new thread to skip this\.<\/p>/);
+  assert.match(card, /<p class="ac-target ac-why">This thread holds something shared from another app or site\. So reading your accounts waits for your OK\. Start a new thread to skip this\.<\/p>/);
   assert.match(card, /needs your OK/);
   const link = renderSteps({ steps: [{ id: 's', status: 'awaiting', confirm: true, taint: 'link', service: 'gmail', label: 'Search Gmail', args: {} }] });
-  assert.match(link, /text that came from a link/);
+  assert.match(link, /This thread holds text from a link\./);
   // a write in that thread still asks as a write (its own card), with no reason line
   const w = { id: 'w', kind: 'ask', prompt: 'reply to it', params: {}, createdAt: CLEAN };
   const wr = agentRig({ e: w, extra: TAINT, thread: { entries: [article, w] }, batches: [[['browser_click', { tabId: 1, element: 2, why: 'x' }]]] });
@@ -951,7 +953,7 @@ test('the approval card: one reason line — the thread’s, else the in-run sea
   assert.match(both, /something shared from another app or site/);
   assert.doesNotMatch(both, /Asked after a web search/);
   assert.match(renderSteps({ steps: [{ id: 's2', status: 'awaiting', confirm: true, taint: 'page', service: 'gmail', label: 'Search Gmail', args: {} }] }), /Asked after reading a web page or someone else’s GitHub content in this answer/);
-  assert.match(renderSteps({ steps: [{ id: 's3', status: 'awaiting', confirm: true, taint: 'web', service: 'browser', name: 'browser_tabs', label: 'List open tabs', args: {} }] }), /Lists the tabs open in your browser\.[\s\S]*This thread contains web search results/);
+  assert.match(renderSteps({ steps: [{ id: 's3', status: 'awaiting', confirm: true, taint: 'web', service: 'browser', name: 'browser_tabs', label: 'List open tabs', args: {} }] }), /Lists the tabs open in your browser\.[\s\S]*This thread holds web search results/);
   assert.match(renderSteps({ steps: [{ id: 's4', status: 'awaiting', confirm: true, taint: 'share', service: 'browser', name: 'browser_elements', label: 'See page controls', args: { tabId: 3 } }] }), /Reads the buttons and fields on one of your open tabs\./);
   assert.match(renderSteps({ steps: [{ id: 's5', status: 'awaiting', confirm: true, taint: 'share', service: 'browser', name: 'browser_show', label: 'Show a tab', args: { tabId: 3 } }] }), /Brings one of your tabs to the front\./);
   // a settled step shows no card or reason
@@ -1034,7 +1036,7 @@ test('runAgent: browser_elements is checked again after it reads (it takes the a
   // the card names the site the tab is on now
   const { renderSteps } = cardRig();
   assert.match(renderSteps({ steps: [{ id: 's1', status: 'awaiting', confirm: true, taint: 'page', moved: 'mail.google.com', service: 'browser', name: 'browser_read', label: 'Read a web page', args: { tabId: 4 } }] }),
-    /Reads one of your open tabs\. That tab now shows <b>mail\.google\.com<\/b>, not the page read before\./);
+    /Reads one of your open tabs\. That tab has changed since it was read\. It now shows <b>mail\.google\.com<\/b>\./);
   assert.equal(pageOrigin('https://Mail.Google.com/x?y'), 'https://mail.google.com');
   for (const u of ['about:blank', 'data:text/html,x', '', undefined, 'not a url']) assert.equal(pageOrigin(u), '', String(u));
 });
@@ -1202,7 +1204,7 @@ test('runChat: the Web route offers no web search in a thread holding both accou
     const r = chatRig({ e, before: [share, inbox], deltas: [{ content: 'From what’s here…' }] });
     await r.run();
     assert.equal(Boolean(r.calls.stream[0].extra?.web_search), false, JSON.stringify(params));
-    assert.match(e.meta.note, /no web search in this thread: it holds account data and outside text — start a new thread to search/);
+    assert.match(e.meta.note, /no web search here: this thread holds account data and outside text\. Start a new thread to search/);
   }
   // either one alone: web search as before (v79's Assist rule is unchanged too)
   for (const before of [[inbox], [share], []]) {
@@ -1246,8 +1248,8 @@ test('runAgent: someone else’s GitHub content counts as a page read — later 
 test('the approval card for a Claude chat holding a shared turn blames that chat, not the thread', () => {
   const { renderSteps } = cardRig();
   const card = renderSteps({ steps: [{ id: 's1', status: 'awaiting', confirm: true, taint: 'shared-chat', service: 'gmail', label: 'Search Gmail', args: {} }] });
-  assert.match(card, /Asked after reading a Claude chat that holds something shared from another app or site, or text from a link/);
-  assert.doesNotMatch(card, /This thread contains|Start a new thread/);
+  assert.match(card, /Asked after reading a Claude chat that holds a share or text from a link/);
+  assert.doesNotMatch(card, /This thread (?:contains|holds)|Start a new thread/);
 });
 
 test('Edit prompt after a photo-only share gives back your typed words unmarked; shared text stays marked', async () => {

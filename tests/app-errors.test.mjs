@@ -44,7 +44,7 @@ test('render: a list built from text nodes only; hostile values show as text', (
   assert.ok(b.textContent.includes(EVIL), 'shown literally');
   const tags = b.all().map((e) => e.tagName);
   assert.deepEqual([...new Set(tags)].sort(), ['details', 'div', 'li', 'p', 'span', 'summary', 'ul'], 'no element came from the data');
-  assert.match(b.textContent, /never what was typed/);
+  assert.match(b.textContent, /Never what was typed/);
 });
 
 test('render: empty and error states; loadAppErrors sends the owner headers and surfaces the server message', async () => {

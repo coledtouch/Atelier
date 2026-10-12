@@ -331,7 +331,7 @@ test('a file that didn’t arrive with no server error seen (a dropped connectio
   const s = p.screen();
   assert.ok(s.open && s.modal);
   assert.match(s.find('ar-title').textContent, /Couldn’t finish downloading\./);
-  assert.match(s.find('ar-body').textContent, /connection dropped.*threads, settings and media are safe/);
+  assert.match(s.find('ar-body').textContent, /connection probably dropped.*threads, settings and media are safe/);
   assert.ok(!/version/.test(s.find('ar-body').textContent), 'not blamed on the version');
   assert.equal(s.find('ar-primary').textContent, 'Try again');
   assert.ok(s.find('ar-actions').children[1].hidden && !p.shown('ar-note'), 'no Repair: the offline copy is fine');

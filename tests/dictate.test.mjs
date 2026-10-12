@@ -424,7 +424,7 @@ test('micError / micHelp: human help for each failure, per platform', () => {
   for (const m of Object.values(MIC_HELP)) assert.ok(m.length < 220 && !/undefined/.test(m));
   // iPhone outside Safari: Safari's aA menu isn't there
   const chrome = platformOf({ userAgent: UA.iphoneChrome });
-  assert.equal(micError(err('NotAllowedError'), chrome), 'Atelier can’t use the microphone. Allow it for this site in Chrome, or turn it on in Settings → Apps → Chrome → Microphone, then try again.');
+  assert.equal(micError(err('NotAllowedError'), chrome), 'Atelier can’t use the microphone. Allow it for this site in Chrome. Or turn it on in Settings → Apps → Chrome → Microphone, then try again.');
   assert.match(micHelp(platformOf({ userAgent: UA.iphoneFirefox })), /Settings → Apps → Firefox → Microphone/);
   assert.match(micHelp(platformOf({ userAgent: UA.iphoneEdge })), /in Edge/);
   assert.equal(micHelp(platformOf({ userAgent: UA.iphoneLinkedIn })), MIC_HELP.iosInApp, 'an app’s built-in browser: open it in Safari');

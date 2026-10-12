@@ -49,7 +49,7 @@ export function renderAppErrors(box, data, opts = {}) {
     }
     list.append(li);
   }
-  box.append(list, make('p', 'ae-foot', `Newest first · kept ${days} days · only the version, error name, file, line and device type; never what was typed.`));
+  box.append(list, make('p', 'ae-foot', `Newest first · kept ${days} days · version, error name, file, line and device type only. Never what was typed.`));
   return rows.length;
 }
 

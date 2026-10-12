@@ -388,9 +388,9 @@ export function failureOf(task) {
   if (/^SAFETY\./i.test(code) || /^INPUT_PREPROCESSING\.SAFETY/i.test(code)) {
     status = 400; message = 'Runway’s safety filter blocked this — try rephrasing.';
   } else if (/^ASSET\.INVALID/i.test(code)) {
-    status = 400; message = 'Runway couldn’t use that input — clips must be 2–30 s at 30 fps or less; images JPEG, PNG or WebP, between 1:2 and 2:1.';
+    status = 400; message = 'Runway couldn’t use that input. Clips must be 2–30 s at 30 fps or less. Images must be JPEG, PNG or WebP, between 1:2 and 2:1.';
   } else if (/^INTERNAL\.BAD_OUTPUT/i.test(code)) {
-    status = 400; message = 'Runway couldn’t make a clean video from that — try again without logos or text in the image, and describe the scene rather than asking for a prompt.';
+    status = 400; message = 'Runway couldn’t make a clean video from that. Try again without logos or text in the image. Describe the scene itself. Don’t ask Runway for a prompt.';
   } else {
     status = 503; message = 'Runway had a hiccup making this video — try again in a moment.';
   }
@@ -546,7 +546,7 @@ export async function waitForTask(id, { apiHeaders, signal, onStatus, immediate 
   for (;;) {
     if (!first) {
       const ms = pollDelay({ failures, retryAfter, hintMs: hint, random });
-      if (now() + ms > end) throw fail(504, 'Runway is still working on this after 20 minutes — tap Try again to keep waiting (it won’t start a new video).', { code: 'runway_slow', resumable: true });
+      if (now() + ms > end) throw fail(504, 'Runway is still working on this after 20 minutes. Tap Try again to keep waiting. It won’t start a new video.', { code: 'runway_slow', resumable: true });
       await wait(ms, signal);
     }
     first = false;

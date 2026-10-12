@@ -211,8 +211,14 @@ test('tester mode never reaches owner surfaces from the client: app.js gates the
 test('link previews no longer advertise tester spots while tester access is closed; the privacy page names both sign-in cookies', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const privacy = await readFile(new URL('../public/privacy.html', import.meta.url), 'utf8');
-  assert.match(html, /<meta property="og:title" content="Atelier — Come make something yours\." \/>/);
-  assert.match(html, /<meta property="og:description" content="25 LinkedIn tester spots\. Paid models included\. Built by Cole Ciprari\." \/>/); // tester access reopened in v90
+  // since v92 the headline says what it is, in place of the slogan; the share image (og/atelier-share.png) still carries
+  // the slogan, so its alt text keeps describing it
+  assert.match(html, /<meta property="og:title" content="Atelier: Cole Ciprari’s AI studio" \/>/);
+  assert.match(html, /<meta property="og:image:alt" content="Atelier — Come make something yours\." \/>/);
+  assert.match(html, /<h2 class="onboard-title" id="onboardTitle">Sign in to<br \/><em>Atelier\.<\/em><\/h2>/);
+  assert.doesNotMatch(html.replace(/<meta property="og:image:alt"[^>]*>/, ''), /Come make|something yours/);
+  // tester access reopened in v90; since v92 the pitch is in Cole's own words (his humanizer), still 25 spots with paid models included
+  assert.match(html, /<meta property="og:description" content="I’m Cole Ciprari\. I built Atelier for myself, and I have 25 tester spots\. The paid models are on me\. Sign in with LinkedIn to take one\." \/>/);
   assert.match(html, /<meta name="twitter:card" content="summary_large_image" \/>/);
   for (const c of ['__Host-atelier_tester', '__Host-atelier_li']) assert.ok(privacy.includes(`<code>${c}</code>`), c);
   assert.doesNotMatch(privacy, /the only cookie is/);
@@ -229,7 +235,7 @@ test('privacy page and tester welcome name every provider Auto or a fallback can
   // Testers: Auto puts GLM 5.3 first for Code/Build (Opus is demoted), so the copy must say so.
   assert.match(app, /code: \[\s*\['anthropic:claude-opus-5-5', 'Claude Opus 5\.5'\], \['zai:glm-5\.3'/);
   assert.match(row[1], /GLM 5\.3/);
-  assert.match(app, /Claude, GPT, Gemini and others \(Z\.ai, DeepSeek, Meta\) for answers, code, ideas and apps/);
+  assert.match(app, /It covers answers, code, ideas and apps on Claude, GPT, Gemini, Z\.ai, DeepSeek and Meta\./);
   assert.doesNotMatch(app, /— Claude, GPT and Gemini for answers, code, ideas and apps/);
 });
 

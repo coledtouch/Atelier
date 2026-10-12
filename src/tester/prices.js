@@ -417,7 +417,7 @@ const field = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ?
 function entryOf(model, kind) {
   const e = priceOf(model);
   if (!e) throw new PriceError('unknown_model', `No verified price for model "${model}"`);
-  if (e.kind !== kind) throw new PriceError('wrong_kind', `"${model}" is a ${e.kind} model, not ${kind}`);
+  if (e.kind !== kind) throw new PriceError('wrong_kind', `"${model}" is a ${e.kind} model; this needs a ${kind} model`);
   return e;
 }
 

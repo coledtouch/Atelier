@@ -136,7 +136,7 @@ export async function xaiVideo(body, { apiHeaders, signal, onStatus, onId, resum
     for (;;) {
       if (!first) await sleep(Math.max(XAI_TIMING.poll, failures ? Math.min(60_000, XAI_TIMING.poll * 2 ** failures) : 0), signal);
       first = false;
-      if (now() > end) throw fail(504, 'Grok is still working on this after 20 minutes — tap Try again to keep waiting (it won’t start a new video).', { code: 'xai_slow', resumable: true });
+      if (now() > end) throw fail(504, 'Grok is still working on this after 20 minutes. Tap Try again to keep waiting. It won’t start a new video.', { code: 'xai_slow', resumable: true });
       let r;
       try {
         r = await send(deps, `video/status/${encodeURIComponent(id)}`);

@@ -306,9 +306,9 @@ test('client: Delete data on each roster row asks first and posts testers/forget
   const ask = /case 'forget':\n\s+if \(!confirm\((`[^`]*`)\)\) return;/.exec(app)?.[1];
   assert.ok(ask, 'the confirm');
   const text = (off) => new Function('b', `return ${ask};`)({ dataset: { name: 'Ada', ...(off ? { off: '1' } : {}) } });
-  assert.match(text(true), /This also ends their revocation: with no record left, they can sign in again as a new tester whenever a spot is free and tester access is open\. To keep them out, leave them revoked instead\.$/);
-  assert.match(text(false), /With no record left, they can sign in again later as a new tester whenever a spot is free\.$/);
-  assert.match(text(false), /deleted now, and once more within about 20 minutes/);
+  assert.match(text(true), /This also ends their revocation\. With no record left, they can sign in again as a new tester\. That needs a free spot and open tester access\. To keep them out, leave them revoked instead\.$/);
+  assert.match(text(false), /With no record left, they can sign in again as a new tester\. That needs a free spot\.$/);
+  assert.match(text(false), /deleted now\. A second pass runs within about 20 minutes for anything a tab of theirs still sends\./);
   assert.match(app, /case 'forget':[^\n]*\n\s+if \(!confirm\(`Delete \$\{b\.dataset\.name\} and all their data on the server\?[^`]*`\)\) return;\n\s+if \(await testersPost\('forget', \{ sub \}, b, 'Deleting…'\)\)/);
   assert.match(app, /if \(S\.settings\.passcode && !S\.tester\) \{ loadSpending\(\); loadTesters\(\); \}/);
 });

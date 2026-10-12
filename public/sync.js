@@ -50,8 +50,8 @@ import {
   FORMAT, MEDIA_SYNC, MEDIA_HELD, TRANSIENT, syncId, validDate, isRev, sha256hex, utf8, utf8Length, fromBase64, base64Length, jsonClone, dehydrate,
   hydrate, mediaKinds, gateHeld, refsOf, refValue, reborn, bornOf, forkEntry, checkView, checkPulledEntry, newRecord, planPull, planPush, pushBodies,
   planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder, fullPrint, blobKind, LIMITS,
-} from './sync-merge.js?v=91';
-import { validateBackup } from './data-safety.js?v=91';
+} from './sync-merge.js?v=92';
+import { validateBackup } from './data-safety.js?v=92';
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 // The owner's choices and the engine's timing, kept together so they are easy to change.
@@ -117,10 +117,10 @@ export const COPY = Object.freeze({
   storage: 'Couldn’t save synced changes on this device — its storage may be full.',
   threadTrouble: 'Some threads couldn’t be downloaded — trying again shortly.',
   footnote: 'Threads sync privately to your studio account when sync is enabled. LinkedIn testers choose whether to enable private sync; otherwise their threads stay on this device. Settings, model choices and theme stay on each device.',
-  wipeSynced: 'Clears threads, media, app data, profile and saved sign-in on this device. Your synced threads stay on your server and download again when you sign in to the same account.',
+  wipeSynced: 'Clears threads, media, app data, profile and saved sign-in on this device. Your synced threads stay on your server. They download again when you sign in to the same account.',
   wipeConfirm: 'Clear Atelier threads, media, app data, profile and saved sign-in on this device? Your synced threads stay on your Atelier server and download again when you sign in. Connected accounts stay too. This can’t be undone on this device.',
   // …while anything is only on this device (images and videos in phase 1, threads that don't sync, unsynced changes)
-  wipeSyncedLocal: 'Clears threads, media, app data, profile and saved sign-in on this device. Export your threads first: images, videos and anything else that’s only on this device can’t be brought back. Synced threads stay on your server and download again when you sign in to the same account.',
+  wipeSyncedLocal: 'Clears threads, media, app data, profile and saved sign-in on this device. Export your threads first. Images, videos and anything else only on this device can’t be brought back. Synced threads stay on your server. They download again when you sign in to the same account.',
   wipeConfirmLocal: 'Clear Atelier threads, media, app data, profile and saved sign-in on this device? Export your threads first: what’s only on this device can’t be brought back. Your synced threads stay on your Atelier server and download again when you sign in. Connected accounts stay too.',
   navSynced: 'Threads synced across your devices', navPaused: 'Thread sync paused', navLocal: 'Threads saved on this device',
   removeSynced: 'Remove the threads that are already on your server from this browser? They stay on your server and download again when sync resumes. Threads with images, videos or changes that are only on this device stay here.',
@@ -2791,11 +2791,11 @@ export function bindUi(eng, deps, doc = globalThis.document) {
     answered = false;
     if (accountTester) {
       if (el.firstTitle) el.firstTitle.textContent = 'Sync your threads?';
-      if (el.firstBody) el.firstBody.textContent = 'Sync threads privately to this LinkedIn account? Your threads and creations will be stored in Atelier’s private storage so you can continue on another device. You can turn sync off in Settings → Your data.';
+      if (el.firstBody) el.firstBody.textContent = 'Sync threads privately to this LinkedIn account? With sync on, your threads and creations are stored in Atelier’s private storage. Then you can continue on another device. You can turn sync off in Settings → Your data.';
       if (el.firstNew) el.firstNew.textContent = 'Keep on this device';
       if (el.firstAll) el.firstAll.textContent = 'Enable private sync';
     } else {
-      if (el.firstBody) el.firstBody.textContent = `This browser was also used for LinkedIn tester sign-in, so ${n === 1 ? 'the thread here' : `some of the ${n} threads here`} may not be yours. Choose what to upload. Threads from your other devices download either way.`;
+      if (el.firstBody) el.firstBody.textContent = `This browser was also used for LinkedIn tester sign-in. ${n === 1 ? 'The thread here' : `Some of the ${n} threads here`} may not be yours. Choose what to upload. Threads from your other devices download either way.`;
       if (el.firstAll) el.firstAll.textContent = n === 1 ? 'Upload the thread' : `Upload all ${n} threads`;
     }
     if (!el.first.open) el.first.showModal();

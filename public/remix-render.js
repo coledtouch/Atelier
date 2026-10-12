@@ -11,8 +11,8 @@
 // fakes (tests/remix-render.test.mjs); the real engine is checked in the browser (scripts/remix-browser-check.mjs).
 // Memory: at most one decoded sample per active item is open (≤ 3 during a crossfade), each is closed as soon as the
 // next one replaces it, and VideoSource.add() is awaited per frame (encoder backpressure).
-import { frameAt as graphFrame, sampleTimes, keepPackets } from './remix-graph.js?v=91';
-import { composeFrame, canvasToDataUrl, makeCanvas } from './remix-draw.js?v=91';
+import { frameAt as graphFrame, sampleTimes, keepPackets } from './remix-graph.js?v=92';
+import { composeFrame, canvasToDataUrl, makeCanvas } from './remix-draw.js?v=92';
 
 export const MEDIABUNNY_URL = './vendor/mediabunny.js';
 export const H264_PROFILES = Object.freeze(['avc1.640028', 'avc1.4d0028', 'avc1.420028']); // High, Main, Baseline @ 4.0
@@ -26,9 +26,9 @@ export class RenderError extends Error {
   constructor(code, message) { super(message); this.name = 'RenderError'; this.code = code; }
 }
 export const MESSAGES = Object.freeze({
-  unsupported: 'This browser can’t assemble video — your plan and shots are saved; finish on desktop Chrome or Edge.',
-  noH264: 'This browser has no H.264 encoder at this size — your plan and shots are saved; finish on desktop Chrome or Edge.',
-  noDecode: 'Can’t cut this video in this browser — export it as MP4 (H.264) or open Atelier in Chrome.',
+  unsupported: 'This browser can’t assemble video. Your plan and shots are saved. Finish on desktop Chrome or Edge.',
+  noH264: 'This browser has no H.264 encoder at this size. Your plan and shots are saved. Finish on desktop Chrome or Edge.',
+  noDecode: 'Can’t cut this video in this browser. Export it as MP4 (H.264) or open Atelier in Chrome.',
   stalled: 'The video encoder stopped responding — tap Try again (it’s free).',
   source: 'Atelier couldn’t read the original video — attach it again.',
 });

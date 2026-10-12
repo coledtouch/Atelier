@@ -146,7 +146,7 @@ export async function omniVideo(body, { apiHeaders, signal, onStatus, onId, resu
     for (;;) {
       if (!first) await sleep(Math.max(OMNI_TIMING.poll, failures ? Math.min(60_000, OMNI_TIMING.poll * 2 ** failures) : 0), signal);
       first = false;
-      if (now() > end) throw fail(504, 'Gemini Omni is still working on this after 20 minutes — tap Try again to keep waiting (it won’t start a new video).', { code: 'omni_slow', resumable: true });
+      if (now() > end) throw fail(504, 'Gemini Omni is still working on this after 20 minutes. Tap Try again to keep waiting. It won’t start a new video.', { code: 'omni_slow', resumable: true });
       try { s = await omniStatus(deps, id); }
       catch (err) {
         if (err?.name === 'AbortError') throw err;
