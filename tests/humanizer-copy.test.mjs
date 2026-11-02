@@ -71,7 +71,7 @@ test('the app loads it like every module: imported at ?v=, precached by sw.js, s
 // Declarations whose text only the model or the code reads (prompts, tool descriptions, model notes, the price table's
 // sourcing notes), and the humanizer itself (it quotes the misses it fixes): out of the copy lint.
 const HIDDEN = {
-  'public/app.js': ['EMPTY_NUDGE', 'persona', 'ACCURACY', 'NO_FABRICATION', 'capabilities', 'dateLine', 'voiceBlock', 'SENT_AS_THEM', 'nameRules', 'SYS', 'BROWSER_TOOLS'],
+  'public/app.js': ['EMPTY_NUDGE', 'persona', 'ACCURACY', 'NO_FABRICATION', 'capabilities', 'dateLine', 'AS_GIVEN', 'voiceBlock', 'SENT_AS_THEM', 'nameRules', 'SYS', 'BROWSER_TOOLS'],
   'public/humanizer.js': ['HUMANIZER'],
   'public/remix.js': ['COMPACT', 'remixSystem', 'remixUser', 'reviseSystem', 'reviseUser', 'shotPrompt', 'CAMERA_TEXT', 'SHOT_NEGATIVE'],
   'public/video.js': ['videoParts'],
@@ -281,7 +281,7 @@ class FakeDate extends Date {
   static now() { return clock; }
 }
 const GMAIL = { type: 'function', function: { name: 'gmail_draft', description: 'Save a draft', parameters: { type: 'object', properties: { body: { type: 'string' } } } }, 'x-service': 'gmail', 'x-label': 'Save Gmail draft' };
-const PROMPT = ['ACCURACY', 'NO_FABRICATION', 'TZ', 'tzOffset', 'dateLine', 'liveBrowser', 'historyWindow', 'RUN_BROWSER', 'B_TAB', 'B_EL', 'BROWSER_TOOLS', 'agentTools', 'SENT_AS_THEM'];
+const PROMPT = ['ACCURACY', 'NO_FABRICATION', 'TZ', 'tzOffset', 'dateLine', 'liveBrowser', 'historyWindow', 'RUN_BROWSER', 'B_TAB', 'B_EL', 'BROWSER_TOOLS', 'agentTools', 'SENT_AS_THEM', 'AS_GIVEN'];
 const STREAM = ['EMPTY_NUDGE', 'shows', 'THINKING_BLOCKS', 'replayRounds', 'replayable', 'MAX_OUTPUT', 'HELPER_ROLES', 'UNLISTED_CLAUDE_ROOM', 'roomFor', 'SSE_ERRORS', 'EFFORT', 'FIRST_TOKEN_MS', 'providerOf', 'accountProblem', 'sleep', 'asksFirst', 'urlHost'];
 const FNS = ['persona', 'capabilities', 'voiceBlock', 'nameRules', 'runPrompt', 'historyFor', 'withoutThinking', 'streamChat', 'streamChatOnce', 'streamChatRaw', 'apiHeaders', 'toApiError', 'extCall', 'runChat', 'runAgent', 'runWatch'];
 const sseOf = (events) => new Response(new ReadableStream({ start(c) { for (const e of events) c.enqueue(new TextEncoder().encode(e)); c.close(); } }), { headers: { 'content-type': 'text/event-stream' } });
@@ -324,7 +324,9 @@ test('"As me" (the write role) carries the rules in its system prompt; Ask, Deep
   const asMe = await run(turn('a2', { voice: true }));
   assert.equal(r.roles.at(-1), 'write', 'the "As me" turn runs on the write role');
   assert.equal(times(asMe, HUMANIZER), 1, '"As me": the rules, once');
-  assert.match(asMe, /## Ghostwriting mode\n[\s\S]*### Their style guide\n[\s\S]*### Samples of their real writing\n[\s\S]*### Their writing rules\nEverything you write as Cole follows these rules\. Where the style guide or the samples disagree with them, the rules win\.\nWRITING RULES \(Cole's humanizer\)/);
+  assert.match(asMe, /## Ghostwriting mode\n[\s\S]*### Their style guide\n[\s\S]*### Samples of their real writing\n[\s\S]*### Their writing rules\nEverything you write as Cole follows these rules\. Where the style guide or the samples disagree with them, the rules win\. Code, commands, logs, links and quoted text stay exactly as given\. [^\n]*\nWRITING RULES \(Cole's humanizer\)/);
+  assert.ok(asMe.includes(`the rules win. ${r.v.AS_GIVEN}\n${HUMANIZER}`), 'what stays as given, right before the rules');
+  assert.equal(times(asMe, r.v.AS_GIVEN), 1);
   assert.ok(asMe.endsWith(HUMANIZER), 'last, after the samples');
   const thinkAsMe = await run(turn('a3', { voice: true, think: true }));
   assert.equal(r.roles.at(-1), 'reason');
@@ -337,6 +339,7 @@ test('"As me" (the write role) carries the rules in its system prompt; Ask, Deep
   await tr.v.runChat(e, null, tt);
   assert.match(tr.system(), /## Ghostwriting mode/, 'a tester still gets ghostwriting');
   assert.ok(!tr.system().includes('WRITING RULES'), 'but never Cole’s rules: a tester writes in their own name');
+  assert.ok(!tr.system().includes(tr.v.AS_GIVEN), 'nor what they leave as given');
 });
 
 test('the accounts agent: the rules cover the tool arguments sent under his name, never its answer to him; with "As me", once', async () => {
@@ -347,8 +350,12 @@ test('the accounts agent: the rules cover the tool arguments sent under his name
   const sys = r.system();
   assert.equal(times(sys, HUMANIZER), 1);
   assert.ok(sys.endsWith(HUMANIZER), 'the last section: everything before it is unchanged');
-  const lead = /## Text that goes out under their name\nThese tool arguments go out under the user's name: ([^\n]*)\. Write that text by the writing rules below\. The rules cover only what you put in those arguments: "everything you write" means that text\. Your own replies to the user keep your usual style\.\nWRITING RULES/.exec(sys);
+  const lead = /## Text that goes out under their name\nThese tool arguments go out under the user's name: ([^\n]*)\. Write that text by the writing rules below\. The rules cover only what you put in those arguments: "everything you write" means that text\. Your own replies to the user keep your usual style\. Code, commands, logs, links and quoted text stay exactly as given\. [^\n]*\nWRITING RULES/.exec(sys);
   assert.ok(lead, 'the scope comes right before the rules');
+  assert.ok(sys.includes(`keep your usual style. ${r.v.AS_GIVEN}\n${HUMANIZER}`), 'what stays as given, right before the rules');
+  assert.equal(times(sys, r.v.AS_GIVEN), 1);
+  // the agent's own report to him keeps its usual close
+  assert.ok(sys.includes('If the user declines, acknowledge briefly and stop. Finish with a crisp summary; include links when available.\n'));
   for (const arg of ['the subject and body of gmail_draft and gmail_send', 'the text of slack_post', 'the title and body of github_create_issue', 'the body of github_comment', 'the title and description of calendar_create', 'the title and content of drive_create_doc', 'the text of browser_type when it posts a message, comment, review or reply as them'])
     assert.ok(lead[1].includes(arg), arg);
   assert.match(sys, /call them with complete, final content — written in the user's own voice when it goes out under their name/, 'the v87 rule it extends is still there');
@@ -357,7 +364,22 @@ test('the accounts agent: the rules cover the tool arguments sent under his name
   await r.v.runAgent(a, null, t);
   const both = r.system();
   assert.equal(times(both, HUMANIZER), 1, 'never twice');
+  assert.equal(times(both, r.v.AS_GIVEN), 1, 'what stays as given, once: with the rules in voiceBlock');
   assert.match(both, /### Their writing rules\n[\s\S]*## Text that goes out under their name\n[^\n]*\. Write them by the writing rules above\.$/);
+  // review-nov02 (atelier-4): with "As me" the whole answer is his, so it closes by rule 5 (no summary ending)
+  assert.ok(both.includes('If the user declines, acknowledge briefly and stop. End with one or two plain lines on what you did, and any links.\n'));
+  assert.doesNotMatch(both, /crisp summary/);
+});
+
+// review-nov02 (atelier-3): the rules held no exception for code, logs or wording he gives word for word, and "the rules
+// win" overrode his greetings and sign-offs. AS_GIVEN, Atelier's own text (public/humanizer.js stays the canonical copy),
+// says what stays as given.
+test('what the rules leave as given: code, commands, logs, links, quotes, his own wording, an issue’s fences and lists, an email’s greeting and sign-off', () => {
+  const { v } = rig();
+  for (const part of ['Code, commands, logs, links and quoted text stay exactly as given.', 'So does any wording the user asks you to keep word for word.', 'Code fences and the lists a GitHub issue or Doc needs are not formatting tricks.', 'In an email, keep their usual greeting and sign-off.'])
+    assert.ok(v.AS_GIVEN.includes(part), part);
+  assert.deepEqual(problems(v.AS_GIVEN), [], 'it follows the rules itself');
+  assert.ok(!HUMANIZER.includes('Code fences'), 'added in Atelier, not to the canonical text');
 });
 
 test('a video follow-up "As me" carries the rules too (runWatch); without it, none', async () => {
