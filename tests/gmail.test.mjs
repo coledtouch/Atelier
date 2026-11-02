@@ -1,6 +1,7 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
+import { readFile } from 'node:fs/promises';
 
 // tools.js imports `cloudflare:workers`; stub it so the module loads in Node (see canva.test.mjs).
 registerHooks({
@@ -118,6 +119,31 @@ test('gmail_draft needs the user\u2019s approval: unapproved it saves nothing, a
   assert.equal(ok.ok, true);
   assert.equal(sent.length, 1);
   assert.match(sent[0].url, /\/drafts$/);
+});
+
+// review-nov02 (atelier-1): the approval card names the mailbox a draft or send uses, worked out in the app by
+// pickAccount's rule (public/app.js mailFrom). The two must agree, and the full address the app then sends must pick
+// exactly that mailbox, even where another address contains it.
+test('the app’s mailFrom picks the mailbox pickAccount picks, and the full address it sends picks exactly that one', async () => {
+  const APP = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const at = APP.indexOf('\nfunction mailFrom(') + 1;
+  assert.ok(at > 0, 'app.js has function mailFrom');
+  const mailFrom = new Function(`return (${APP.slice(at, APP.indexOf('\n}\n', at) + 2)});`)();
+  const LIST = ['nicole@x.com', 'cole@x.com', NOBOX];
+  const used = [];
+  globalThis.fetch = async (url, init = {}) => { used.push(new Headers(init.headers).get('authorization').replace('Bearer t-', '')); return json(200, { id: 'd1' }); };
+  const draft = (account) => runTool(env(LIST), 'gmail_draft', { to: 'bob@example.com', subject: 'Q3', body: 'Hi', ...(account === undefined ? {} : { account }) }, true);
+  for (const account of [undefined, '', 'cole@x.com', ' Cole@X.com ', 'cole', 'COEN', 'x.com', 'nobody']) {
+    const from = mailFrom(account, LIST);
+    used.length = 0;
+    const r = await draft(account);
+    assert.equal(r.ok ? r.result.account : '', from, `account ${JSON.stringify(account)}`);
+    if (!from) { assert.match(r.error, /No connected Gmail account matches/); continue; }
+    const pinned = await draft(from); // what the app sends once you approve
+    assert.equal(pinned.result.account, from);
+    assert.deepEqual(used, [from, from], 'saved with that mailbox’s token');
+  }
+  assert.equal(mailFrom('x', []), '', 'no account list: none named');
 });
 
 // v91 review (critic-github-outside-taint-gaps b): the repo went into the API path raw, and fetch resolves dot segments,

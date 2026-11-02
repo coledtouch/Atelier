@@ -296,15 +296,17 @@ function agentRig({ e, batches, approve = () => true, searches = [], extra = {},
     callTool: async (name, args, approved) => { calls.tool.push([name, args, approved]); return { ok: true, result: [] }; },
     ...extra,
   };
-  for (const name of ['asksFirst', 'githubOutside', 'urlHost']) if (!(name in extra)) vars[name] = evalIn(vars, `return (${constSource(name).replace(new RegExp(`^${name} = `), '').replace(/;$/, '')});`);
+  for (const name of ['asksFirst', 'githubOutside', 'urlHost', 'writesMail']) if (!(name in extra)) vars[name] = evalIn(vars, `return (${constSource(name).replace(new RegExp(`^${name} = `), '').replace(/;$/, '')});`);
+  for (const name of ['mailFrom', 'pinMailbox']) if (!(name in extra)) Object.assign(vars, lift(vars, name));
   const { runAgent } = lift(vars, 'runAgent');
   return { run: () => runAgent(e, null, thread || { entries: [e] }), calls };
 }
 
-// renderSteps with the app's own helpers (esc defaults to an HTML escape).
-function cardRig(esc = (s) => String(s).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`)) {
-  const vars = { esc, SERVICE_ICON: {}, LONG_FIELDS: new Set(['body']), taintNote };
-  for (const name of ['urlHost', 'BROWSER_READS']) vars[name] = evalIn(vars, `return (${constSource(name).replace(new RegExp(`^${name} = `), '').replace(/;$/, '')});`);
+// renderSteps with the app's own helpers (esc defaults to an HTML escape); gmailAccounts: the connected Gmail addresses.
+function cardRig(esc = (s) => String(s).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`), gmailAccounts = []) {
+  const vars = { esc, SERVICE_ICON: {}, LONG_FIELDS: new Set(['body']), taintNote, TOOLS: { services: { gmailAccounts } } };
+  for (const name of ['urlHost', 'BROWSER_READS', 'writesMail']) vars[name] = evalIn(vars, `return (${constSource(name).replace(new RegExp(`^${name} = `), '').replace(/;$/, '')});`);
+  Object.assign(vars, lift(vars, 'mailFrom'));
   return lift(vars, 'renderSteps');
 }
 
@@ -385,6 +387,59 @@ test('the approval card for a page load shows the address and its site, not an e
   // a click still describes its element
   const click = renderSteps({ steps: [{ id: 's3', status: 'awaiting', write: true, service: 'browser', label: 'Click', args: {}, target: null }] });
   assert.match(click, /Couldn’t read the target element/);
+});
+
+// review-nov02 (atelier-1): a Gmail draft or send card named no mailbox. With no account the Worker used the first one
+// connected; with part of an address, the first that held it. The card now names the mailbox (From), and the Worker
+// gets that full address, which it matches exactly.
+const GMAIL_WRITES = ['gmail_draft', 'gmail_send'].map((name) => ({ type: 'function', function: { name }, 'x-write': true, 'x-label': name, 'x-service': 'gmail' }));
+const MAILBOXES = ['nicole@x.com', 'cole@x.com'];
+const mailRig = (o) => agentRig({ ...o, extra: { TOOLS: { services: { gmail: true, gmailAccounts: MAILBOXES } }, agentTools: () => [...DEFS, ...GMAIL_WRITES] } });
+
+test('runAgent: a Gmail draft or send reaches the Worker with the full address of the mailbox its card names', async () => {
+  const mail = (account) => ({ ...(account === undefined ? {} : { account }), to: 'bob@example.com', subject: 'Q3', body: 'Hi' });
+  const e = { kind: 'ask', prompt: 'draft it', params: {} };
+  const r = mailRig({ e, batches: [[['gmail_draft', mail()], ['gmail_send', mail(' Cole@X.com ')], ['gmail_draft', mail('cole')], ['gmail_draft', mail('work')]]] });
+  await r.run();
+  // none named → the first account; an address in another case → that address; part of one → the first that holds it
+  // (nicole@x.com holds "cole"); one that matches nothing stays as it was, and the Worker refuses it
+  const want = [['gmail_draft', 'nicole@x.com'], ['gmail_send', 'cole@x.com'], ['gmail_draft', 'nicole@x.com'], ['gmail_draft', 'work']];
+  assert.deepEqual(r.calls.asked.map(([name, args, status]) => [name, args.account, status]), want.map((w) => [...w, 'awaiting']), 'each asked once');
+  assert.deepEqual(r.calls.tool.map(([name, args, approved]) => [name, args.account, approved]), want.map((w) => [...w, true]));
+  // other tools are left as they were
+  const g = { kind: 'ask', prompt: 'my inbox', params: {} };
+  const s = mailRig({ e: g, batches: [[['gmail_search', { q: 'x' }]]] });
+  await s.run();
+  assert.deepEqual(s.calls.tool, [['gmail_search', { q: 'x' }, false]]);
+});
+
+test('runAgent: an account changed on a Gmail card asks again, naming the mailbox it now resolves to; declined there, nothing goes', async () => {
+  const run = async (answers) => {
+    const e = { kind: 'ask', prompt: 'draft it', params: {} }, seen = [];
+    const r = mailRig({ e, batches: [[['gmail_draft', { to: 'bob@example.com', subject: 'Q3', body: 'Hi' }]]], approve: (step) => { seen.push(step.args.account); return answers.shift()(step); } });
+    await r.run();
+    return { seen, sent: r.calls.tool.map(([, args]) => args.account), status: e.steps[0].status };
+  };
+  // the card's account field, edited before Approve (the click handler writes it into step.args)
+  const edit = (account, ok = true) => (step) => { step.args.account = account; return ok; };
+  assert.deepEqual(await run([edit('Cole@X.com'), () => true]), { seen: ['nicole@x.com', 'cole@x.com'], sent: ['cole@x.com'], status: 'done' }, 'another mailbox: asked again');
+  assert.deepEqual(await run([edit('NICOLE@x.com')]), { seen: ['nicole@x.com'], sent: ['nicole@x.com'], status: 'done' }, 'the same mailbox: no second ask');
+  assert.deepEqual(await run([edit('cole@x.com'), () => false]), { seen: ['nicole@x.com', 'cole@x.com'], sent: [], status: 'declined' }, 'declined on the second card');
+  assert.deepEqual(await run([edit('nobody'), () => true]), { seen: ['nicole@x.com', 'nobody'], sent: ['nobody'], status: 'done' }, 'one that matches nothing: asked again, and the card says so');
+});
+
+test('the Gmail draft and send card names its mailbox (From); one it can’t tell says so', () => {
+  const { renderSteps } = cardRig(undefined, MAILBOXES);
+  const card = (name, args, rig = renderSteps) => rig({ steps: [{ id: 's1', status: 'awaiting', write: true, service: name.split('_')[0], name, label: name, args }] });
+  assert.match(card('gmail_draft', { account: 'cole@x.com', to: 'bob@example.com' }), /<p class="ac-target">From: <b>cole@x\.com<\/b><\/p>/);
+  assert.match(card('gmail_send', {}), /From: <b>nicole@x\.com<\/b>/, 'none named: the first account, as the Worker picks');
+  const unknown = /<p class="ac-target"><b>Couldn’t tell which Gmail account this uses — decline unless you’re sure\.<\/b><\/p>/;
+  assert.match(card('gmail_draft', { account: 'work' }), unknown);
+  assert.match(card('gmail_draft', {}, cardRig(undefined, []).renderSteps), unknown, 'no account list in the app');
+  assert.doesNotMatch(card('gmail_read', { id: 'm1', account: 'cole@x.com' }), /From:|Couldn’t tell/, 'only drafts and sends');
+  assert.doesNotMatch(card('slack_post', { text: 'hi' }), /From:|Couldn’t tell/);
+  assert.doesNotMatch(renderSteps({ steps: [{ id: 's2', status: 'done', service: 'gmail', name: 'gmail_draft', label: 'Save Gmail draft', args: { account: 'cole@x.com' } }] }), /From:/, 'only on the card that asks');
+  assert.deepEqual(problems('Couldn’t tell which Gmail account this uses — decline unless you’re sure.'), []);
 });
 
 // ── third review: md() lets no CSS escape through, replies can't stand in for the composer, marked text never becomes

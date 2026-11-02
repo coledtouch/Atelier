@@ -2655,6 +2655,23 @@ const urlHost = (u) => { try { return new URL(String(u)).host || String(u); } ca
 // (context.js readsPage; any github_search counts by name). Your own repos and notifications are your account data.
 const githubOutside = (name, args) => ['github_read', 'github_issues'].includes(name) && !(TOOLS.services?.githubAccounts || []).some((a) => typeof a?.label === 'string' && a.label.toLowerCase() === String(args?.repo || '').split('/')[0].trim().toLowerCase());
 
+// A Gmail draft or send names its mailbox on the approval card ("From"). mailFrom finds it by src/tools.js pickAccount's
+// rule, over the same list: the first connected account when none is named, else that exact address, else the first one
+// that contains it ('' when none does). pinMailbox puts the full address in the account argument, so the Worker matches
+// it exactly and uses the mailbox the card named.
+const writesMail = (name) => name === 'gmail_draft' || name === 'gmail_send';
+function mailFrom(wanted, list = TOOLS.services?.gmailAccounts || []) {
+  if (!list.length) return '';
+  if (!wanted) return list[0];
+  const w = String(wanted).toLowerCase().trim();
+  return list.find((a) => a === w) || list.find((a) => a.includes(w)) || '';
+}
+function pinMailbox(args) {
+  const from = mailFrom(args.account);
+  if (from) args.account = from;
+  return from;
+}
+
 const approvals = new Map(); // step id → resolve(boolean)
 function awaitApproval(step, signal) {
   return new Promise((resolve, reject) => {
@@ -2812,10 +2829,19 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
         } catch (err) { if (err.name === 'AbortError') throw err; return { ok: false, error: err.message }; }
       };
       let result;
+      // A Gmail draft or send: the full address of the mailbox it uses goes in its account, and the card names it.
+      let from = writesMail(step.name) ? pinMailbox(step.args) : null;
       if (step.write || step.confirm) {
         if (step.service === 'browser' && step.write) step.target = await extCall('describe', { tabId: args.tabId, element: args.element }).catch(() => null);
         step.status = 'awaiting'; repaint(e); scrollDown(true);
         if (!(await awaitApproval(step, signal))) result = declined();
+        // An account changed on that card asks again, naming the mailbox it now resolves to.
+        while (!result && from !== null) {
+          const now = pinMailbox(step.args);
+          if (now === from) break;
+          from = now; step.status = 'awaiting'; repaint(e); scrollDown(true);
+          if (!(await awaitApproval(step, signal))) result = declined();
+        }
       }
       if (!result) {
         if (step.write) step.approved = true; // from here on the action may reach the service, even if the tab goes away
@@ -2875,10 +2901,12 @@ function renderSteps(e) {
   return `<div class="steps">${e.steps.map((st) => {
     const summary = Object.entries(st.args || {}).filter(([k, v]) => v !== '' && v != null && !LONG_FIELDS.has(k)).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' · ');
     if (st.status === 'awaiting') {
+      const from = writesMail(st.name) && mailFrom(st.args?.account); // a Gmail draft or send: the mailbox it uses
       return `<div class="approve-card" data-step="${st.id}">
         <div class="ac-head"><span class="svc">${SERVICE_ICON[st.service] || '•'}</span><b>${esc(st.label)}</b><span class="ac-tag">needs your OK</span></div>
         ${st.service === 'browser' && st.confirm ? `<p class="ac-target">${st.args?.url ? `Loads <b>${esc(urlHost(st.args.url))}</b> in your browser, signed in as you — anything in the address reaches that site.<br><span>${esc(st.args.url)}</span>` : `${BROWSER_READS[st.name] || BROWSER_READS.browser_read}${st.moved ? ` That tab has changed since it was read. It now shows <b>${esc(st.moved)}</b>.` : ''}`}</p>`
-          : st.service === 'browser' ? `<p class="ac-target">${st.target && !st.target.error ? `${esc(st.target.tag)}${st.target.type ? ` (${esc(st.target.type)})` : ''} <b>“${esc(st.target.label || 'unlabeled')}”</b> on <b>${esc(st.target.page || '')}</b><br><span>${esc(st.target.url || '')}</span>` : '<b>Couldn’t read the target element — decline unless you’re sure.</b>'}</p>` : ''}
+          : st.service === 'browser' ? `<p class="ac-target">${st.target && !st.target.error ? `${esc(st.target.tag)}${st.target.type ? ` (${esc(st.target.type)})` : ''} <b>“${esc(st.target.label || 'unlabeled')}”</b> on <b>${esc(st.target.page || '')}</b><br><span>${esc(st.target.url || '')}</span>` : '<b>Couldn’t read the target element — decline unless you’re sure.</b>'}</p>`
+          : writesMail(st.name) ? `<p class="ac-target">${from ? `From: <b>${esc(from)}</b>` : '<b>Couldn’t tell which Gmail account this uses — decline unless you’re sure.</b>'}</p>` : ''}
         ${taintNote(st.taint) ? `<p class="ac-target ac-why">${esc(taintNote(st.taint))}</p>` : st.afterWeb ? '<p class="ac-target">Asked after a web search. A web page can try to steer the assistant. So every account read or change now waits for your OK.</p>' : ''}
         <div class="ac-fields">${Object.entries(st.args || {}).map(([k, v]) => `<label><span>${esc(k)}</span>${LONG_FIELDS.has(k) || String(v).length > 80
           ? `<textarea data-arg="${esc(k)}" rows="${Math.min(12, Math.max(3, String(v).split('\n').length + 1))}">${esc(v)}</textarea>`
