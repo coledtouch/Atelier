@@ -19,7 +19,7 @@ wrangler.jsonc     Worker config
 ```
 
 ## Why a proxy?
-NVIDIA's APIs don't allow browser CORS. The Worker forwards only these routes:
+NVIDIA's APIs don't allow browser CORS. The Worker forwards these NVIDIA routes:
 
 | App route | NVIDIA upstream |
 |---|---|
@@ -35,10 +35,14 @@ All provider keys live in Worker secrets. A device needs only the passcode or a 
 ```bash
 npx wrangler secret put APP_PASSCODE
 npx wrangler secret put GUARD_SECRET        # required: 32+ random characters (signs the passcode guard's clearance)
-npx wrangler secret put NVIDIA_API_KEY      # any of these four
+npx wrangler secret put NVIDIA_API_KEY      # chat models: set any of these
 npx wrangler secret put ANTHROPIC_API_KEY   # (+ ANTHROPIC_WORKSPACE_ID for org-level keys)
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put GEMINI_API_KEY
+npx wrangler secret put ZAI_API_KEY
+npx wrangler secret put DEEPSEEK_API_KEY
+npx wrangler secret put META_API_KEY
+npx wrangler secret put XAI_API_KEY         # optional: xAI (Grok) chat, images and video, owner only
 npx wrangler secret put RUNWAYML_API_SECRET # optional: Runway video, owner only (+ var RUNWAY_MAX_CREDITS as a per-video cap)
 ```
 Connected accounts use more secrets (GITHUB_TOKEN, STRIPE_API_KEY, CLOUDFLARE_API_TOKEN, RAILWAY_API_TOKEN,
@@ -262,7 +266,7 @@ The September 2026 UI pass adds desktop workspace navigation, balanced mode card
 
 Validation: 14 regression tests; syntax checks; production bundle dry run; production-dependency audit with zero reported vulnerabilities; browser checks at 320px, 390px and 1440px, in dark and paper themes. Browser checks cover draft preservation, keyboard mode selection, streamed fixture responses, thread search, settings, app preview interaction, code view, full-screen view and library persistence. Local Worker smoke checks confirm the shell loads, unauthenticated profile requests return 401, and API responses are not cached.
 
-Release verification still requires the deployed environment: real provider generation and streaming, image/video output and editing, OAuth connections, browser-extension pairing and action approval, and a service-worker upgrade on an installed PWA. The automated tests cover offline cache behavior but do not replace an installed-device check. Atelier remains a personal, shared-passcode app; this pass does not add multi-user identity or tenant isolation. No production deployment is performed by the review commands.
+Release verification still requires the deployed environment: real provider generation and streaming, image/video output and editing, OAuth connections, browser-extension pairing and action approval, and a service-worker upgrade on an installed PWA. The automated tests cover offline cache behavior but do not replace an installed-device check. Atelier remains a personal app; this pass does not add multi-user identity or tenant isolation. No production deployment is performed by the review commands.
 
 ## Using it
 - **Modes**: Alt+1…6, or slash commands: `/img`, `/vid`, `/code`, `/idea`, `/build`, `/ask`.
