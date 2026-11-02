@@ -1,7 +1,7 @@
 {
   "name": "Atelier — Personal Studio",
   "short_name": "Atelier",
-  "description": "Answers, code, images, video, ideas and apps — powered by NVIDIA build.",
+  "description": "Answers, code, images, video, ideas and apps, on models from nine providers.",
   "id": "/",
   "start_url": "/?source=pwa",
   "scope": "/",

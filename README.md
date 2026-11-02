@@ -1,7 +1,8 @@
 # Atelier — personal studio (PWA)
 
-Answers · Code · Images · Video · Ideas · App builder — all on **NVIDIA build** free endpoints,
-served from one **Cloudflare Worker**.
+Answers · Code · Images · Video · Ideas · App builder, on models from nine providers behind one Cloudflare Worker.
+The providers: Anthropic, OpenAI, Google (Gemini), xAI, Z.ai (GLM), DeepSeek, Meta, NVIDIA and Runway.
+xAI and Runway are owner-only, and Runway makes video.
 
 ```
 public/            the installable PWA (vanilla JS, no build step)
@@ -13,7 +14,7 @@ public/            the installable PWA (vanilla JS, no build step)
   sw.js            offline shell (API traffic is never cached)
   vendor/          marked, DOMPurify, highlight.js, fflate, Mediabunny: copies of the npm packages at the
                    lockfile's versions (node scripts/vendor.mjs; tests/vendor.test.mjs fails on any drift)
-src/worker.js      serves /public + proxies an allow-list of NVIDIA endpoints
+src/worker.js      serves /public and forwards allow-listed routes to each provider's own API
 wrangler.jsonc     Worker config
 ```
 
@@ -29,7 +30,8 @@ NVIDIA's APIs don't allow browser CORS. The Worker forwards only these routes:
 | `GET /api/status/<id>` | `api.nvcf.nvidia.com/v2/nvcf/pexec/status/<id>` (202 polling) |
 
 ## Access & keys
-Atelier is **passcode-only**. All provider keys live in Worker secrets; a device only needs the passcode.
+The owner signs in with the passcode. Up to 25 testers sign in with LinkedIn (see LinkedIn testers below).
+All provider keys live in Worker secrets. A device needs only the passcode or a tester sign-in.
 ```bash
 npx wrangler secret put APP_PASSCODE
 npx wrangler secret put GUARD_SECRET        # required: 32+ random characters (signs the passcode guard's clearance)
