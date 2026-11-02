@@ -435,6 +435,7 @@ test('the Gmail draft and send card names its mailbox (From); one it can’t tel
   assert.match(card('gmail_send', {}), /From: <b>nicole@x\.com<\/b>/, 'none named: the first account, as the Worker picks');
   const unknown = /<p class="ac-target"><b>Couldn’t tell which Gmail account this uses — decline unless you’re sure\.<\/b><\/p>/;
   assert.match(card('gmail_draft', { account: 'work' }), unknown);
+  assert.match(card('gmail_draft', { account: 'le@x.com' }), unknown, 'part of an address with @: the Worker takes those only whole');
   assert.match(card('gmail_draft', {}, cardRig(undefined, []).renderSteps), unknown, 'no account list in the app');
   assert.doesNotMatch(card('gmail_read', { id: 'm1', account: 'cole@x.com' }), /From:|Couldn’t tell/, 'only drafts and sends');
   assert.doesNotMatch(card('slack_post', { text: 'hi' }), /From:|Couldn’t tell/);

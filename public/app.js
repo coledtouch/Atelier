@@ -2660,15 +2660,15 @@ const urlHost = (u) => { try { return new URL(String(u)).host || String(u); } ca
 const githubOutside = (name, args) => ['github_read', 'github_issues'].includes(name) && !(TOOLS.services?.githubAccounts || []).some((a) => typeof a?.label === 'string' && a.label.toLowerCase() === String(args?.repo || '').split('/')[0].trim().toLowerCase());
 
 // A Gmail draft or send names its mailbox on the approval card ("From"). mailFrom finds it by src/tools.js pickAccount's
-// rule, over the same list: the first connected account when none is named, else that exact address, else the first one
-// that contains it ('' when none does). pinMailbox puts the full address in the account argument, so the Worker matches
-// it exactly and uses the mailbox the card named.
+// rule for these two, over the same list: the first connected account when none is named, else that exact address, else
+// (for text with no @) the first one that contains it ('' when none does). pinMailbox puts the full address in the
+// account argument. The Worker takes an address with @ only exactly, so it uses the mailbox the card named or none.
 const writesMail = (name) => name === 'gmail_draft' || name === 'gmail_send';
 function mailFrom(wanted, list = TOOLS.services?.gmailAccounts || []) {
   if (!list.length) return '';
   if (!wanted) return list[0];
   const w = String(wanted).toLowerCase().trim();
-  return list.find((a) => a === w) || list.find((a) => a.includes(w)) || '';
+  return list.find((a) => a === w) || (w.includes('@') ? '' : list.find((a) => a.includes(w))) || '';
 }
 function pinMailbox(args) {
   const from = mailFrom(args.account);

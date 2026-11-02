@@ -10,7 +10,7 @@ registerHooks({
     return next(specifier, context);
   },
 });
-const { runTool } = await import('../src/tools.js');
+const { runTool, googleTokenFor } = await import('../src/tools.js');
 
 const MAIL = 'me@gmail.com', NOBOX = 'info@coenconstruction.com';
 const kv = (accounts) => {
@@ -133,7 +133,7 @@ test('the app’s mailFrom picks the mailbox pickAccount picks, and the full add
   const used = [];
   globalThis.fetch = async (url, init = {}) => { used.push(new Headers(init.headers).get('authorization').replace('Bearer t-', '')); return json(200, { id: 'd1' }); };
   const draft = (account) => runTool(env(LIST), 'gmail_draft', { to: 'bob@example.com', subject: 'Q3', body: 'Hi', ...(account === undefined ? {} : { account }) }, true);
-  for (const account of [undefined, '', 'cole@x.com', ' Cole@X.com ', 'cole', 'COEN', 'x.com', 'nobody']) {
+  for (const account of [undefined, '', 'cole@x.com', ' Cole@X.com ', 'cole', 'COEN', 'x.com', 'le@x.com', '@x.com', 'nobody']) {
     const from = mailFrom(account, LIST);
     used.length = 0;
     const r = await draft(account);
@@ -144,6 +144,23 @@ test('the app’s mailFrom picks the mailbox pickAccount picks, and the full add
     assert.deepEqual(used, [from, from], 'saved with that mailbox’s token');
   }
   assert.equal(mailFrom('x', []), '', 'no account list: none named');
+});
+
+// review-nov02 follow-up (r1-atelier-worker-exact): the app pins the address its card names. If that mailbox is removed
+// before Approve, the draft or send fails. Before, with cole@x.com gone, it went to nicole@x.com, which holds that text.
+test('gmail_draft and gmail_send take an address with @ exactly: a removed mailbox fails, never one that holds it', async () => {
+  const used = [];
+  globalThis.fetch = async (url, init = {}) => { used.push(new Headers(init.headers).get('authorization').replace('Bearer t-', '')); return json(200, { id: 'd1' }); };
+  const left = env(['nicole@x.com']);
+  for (const tool of ['gmail_draft', 'gmail_send']) {
+    const r = await runTool(left, tool, { to: 'bob@example.com', subject: 'Q3', body: 'Hi', account: 'cole@x.com' }, true);
+    assert.equal(r.ok, false, tool);
+    assert.match(r.error, /No connected Gmail account matches "cole@x\.com"/);
+    const part = await runTool(left, tool, { to: 'bob@example.com', subject: 'Q3', body: 'Hi', account: 'cole' }, true);
+    assert.equal(part.ok && (part.result.account || part.result.from), 'nicole@x.com', `${tool}: part of a name, with no @`);
+  }
+  assert.deepEqual(used, ['nicole@x.com', 'nicole@x.com'], 'only the two with no @ reached Gmail');
+  assert.equal((await googleTokenFor(left, 'cole@x.com')).email, 'nicole@x.com', 'other callers keep matching part of an address');
 });
 
 // v91 review (critic-github-outside-taint-gaps b): the repo went into the API path raw, and fetch resolves dot segments,

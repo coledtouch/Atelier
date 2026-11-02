@@ -438,12 +438,14 @@ export async function googleAccountList(env) { return (await googleAccounts(env)
 const needsScope = (acct, scope, what) => {
   if (acct.scope && !acct.scope.includes(scope)) throw new ToolError(`${acct.email} hasn’t granted ${what} access yet. In Settings → Connections, tap “+ Add account” and pick ${acct.email} again to allow it.`);
 };
-async function pickAccount(env, wanted) {
+// exact (gmail_draft, gmail_send): an address with @ matches only itself. The app pins the address its approval card
+// names (public/app.js mailFrom), so a mailbox removed before Approve fails the step. It never goes to one that holds it.
+async function pickAccount(env, wanted, exact = false) {
   const list = await googleAccounts(env);
   if (!list.length) throw new ToolError('Gmail is not connected — use Settings → Connections → Connect Gmail.');
   if (!wanted) return list[0];
   const w = String(wanted).toLowerCase().trim();
-  const hit = list.find((a) => a.email === w) || list.find((a) => a.email.includes(w));
+  const hit = list.find((a) => a.email === w) || (exact && w.includes('@') ? undefined : list.find((a) => a.email.includes(w)));
   if (!hit) throw new ToolError(`No connected Gmail account matches "${wanted}". Connected: ${list.map((a) => a.email).join(', ')}`);
   return hit;
 }
@@ -546,7 +548,7 @@ const gmail = {
       write: true, label: 'Save Gmail draft', desc: 'Save an email as a draft in Gmail (does not send). For replies use the account the original came from, and pass threadId and in_reply_to (the original Message-ID).',
       params: obj({ account: ACCOUNT, to: S('Recipient(s)'), cc: S('Cc (optional)'), subject: S('Subject'), body: S('Plain-text body'), threadId: S('Thread id for replies (optional)'), in_reply_to: S('Original Message-ID for replies (optional)') }, ['to', 'subject', 'body']),
       run: async (env, a) => {
-        const acct = await pickAccount(env, a.account);
+        const acct = await pickAccount(env, a.account, true);
         const d = await gmail.api(env, acct, '/drafts', { method: 'POST', body: JSON.stringify({ message: { raw: rfc822({ ...a, inReplyTo: a.in_reply_to }), ...(a.threadId ? { threadId: a.threadId } : {}) } }) });
         return { account: acct.email, draftId: d.id, saved: true };
       },
@@ -555,7 +557,7 @@ const gmail = {
       write: true, label: 'Send email', desc: 'Send an email from one of the user\'s Gmail accounts. For replies use the account the original came from, and pass threadId and in_reply_to.',
       params: obj({ account: ACCOUNT, to: S('Recipient(s)'), cc: S('Cc (optional)'), subject: S('Subject'), body: S('Plain-text body'), threadId: S('Thread id for replies (optional)'), in_reply_to: S('Original Message-ID for replies (optional)') }, ['to', 'subject', 'body']),
       run: async (env, a) => {
-        const acct = await pickAccount(env, a.account);
+        const acct = await pickAccount(env, a.account, true);
         const m = await gmail.api(env, acct, '/messages/send', { method: 'POST', body: JSON.stringify({ raw: rfc822({ ...a, inReplyTo: a.in_reply_to }), ...(a.threadId ? { threadId: a.threadId } : {}) }) });
         return { sent: true, from: acct.email, id: m.id };
       },
