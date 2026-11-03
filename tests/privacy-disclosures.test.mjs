@@ -61,8 +61,11 @@ test('Cloudflare Web Analytics is disclosed whenever the CSP lets its beacon run
   assert.match(PRIVACY, /<b>At a glance:<\/b>[^<]*cookieless page-view counts/);
 });
 
-test('the legal pages carry the October 11, 2026 effective date (passcode Guard cookie, testers reopened, humanizer rewrite)', () => {
-  for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective October 11, 2026<\/p>/);
+test('the legal pages carry the November 3, 2026 effective date (v93: Runway chat videos vs Remix shots, device-local tester data removal)', () => {
+  for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective November 3, 2026<\/p>/);
+  // the date is the version: both pages say so
+  assert.ok(text(PRIVACY).includes('The effective date at the top shows the latest version.'));
+  assert.ok(text(TOS).includes('The effective date above shows the current version.'));
 });
 
 test('Google Fonts is disclosed while any page loads it: in Technical data, as a processor and in the short summary', async () => {
@@ -389,12 +392,49 @@ test('the humanizer rewrite rewords the legal pages without changing what they s
     const item = text(new RegExp(`<li><b>${label} \\(owner only\\):</b>([\\s\\S]*?)</li>`).exec(PRIVACY)?.[1] || '');
     assert.ok(item, label);
     assert.doesNotMatch(item, /only on the owner’s device/, `${label}: the device does not hold the only copy`);
-    assert.ok(item.includes('on the owner’s device. It sits in the owner’s thread, which syncs to the owner’s private Cloudflare storage. Atelier’s server keeps no other copy.'), label);
+    assert.ok(item.includes('Atelier’s server keeps no other copy.'), label);
   }
+  // (v93: the Runway item splits chat videos from Video Remix shots; see the test after this one)
+  assert.ok(text(/<li><b>xAI \(owner only\):<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '').includes('on the owner’s device. It sits in the owner’s thread, which syncs to the owner’s private Cloudflare storage.'), 'xAI');
   // Video Remix: what travels with the owner's thread, with no count that the next sentence contradicts
   const remix = text(/<li><b>Video Remix \(this device\):<\/b>([\s\S]*?)<\/li>/.exec(PRIVACY)?.[1] || '');
   assert.ok(remix.includes('None of these files is synced on its own. Only the plan, settings, new shots’ status and small preview stills travel with the owner’s thread. A finished cut under 16 MB is also added to its thread.'), remix);
   assert.doesNotMatch(remix, /only (?:two|three|four|five|six) things/);
   // the owner's cookie: only an expiry date and a signature
   assert.ok(text(PRIVACY).includes('It holds only an expiry date and a signature. It is never used for tracking.'));
+});
+
+// ── v93 review: the Runway copy and the device button say where each copy really is ──
+const body = (src, name) => new RegExp(`async function ${name}\\(e, cfg, still, signal\\) \\{([\\s\\S]*?)\\r?\\n\\}\\r?\\n`).exec(src)?.[1] || '';
+
+test('Runway copies: a chat video sits in the owner’s synced thread, a Video Remix shot stays on this device', async () => {
+  const [APP, RXAPP] = await Promise.all([read('public/app.js'), read('public/remix-app.js')]);
+  const { SHOT_MODELS } = await import('../public/remix.js');
+  // a chat video lands in the thread entry (e.media), which owner media sync uploads
+  assert.match(body(APP, 'runRunway'), /e\.media = \[\{ type: 'video', src: await blobToDataUrl\(out\.blob\) \}\];/, 'runRunway keeps the video in the thread');
+  // Video Remix films with Runway models too, and keeps each shot as an rx:shot blob in this browser's IndexedDB
+  assert.ok(SHOT_MODELS.some((m) => m.provider === 'runway'), 'Video Remix no longer films with Runway: drop the Remix sentence');
+  assert.match(RXAPP, /store\.putBlob\(rxKeys\.shot\(entryId, id\), blob/);
+  const item = section(/<li><b>Runway \(owner only\):<\/b>([\s\S]*?)<\/li>/);
+  for (const words of ['A Runway video made in a chat sits in the owner’s thread. That thread syncs to the owner’s private Cloudflare storage.',
+    'A Video Remix shot filmed with Runway stays on this device.', 'See “Video Remix (this device)” above for what syncs with its thread.'])
+    assert.ok(item.includes(words), words);
+  assert.doesNotMatch(item, /own copy on the owner’s device\. It sits in the owner’s thread/, 'not every Runway video sits in the thread');
+  const remixAt = PRIVACY.indexOf('<li><b>Video Remix (this device):</b>');
+  assert.ok(remixAt > -1 && remixAt < PRIVACY.indexOf('<li><b>Runway (owner only):</b>'), 'the item it points to sits above it');
+  // xAI direct films only in a chat (runXai → e.media); Remix's Grok shots go through Runway, so the xAI item holds
+  assert.ok(!SHOT_MODELS.some((m) => m.provider === 'xai'), 'Video Remix films with xAI directly now: scope the xAI item too');
+  assert.ok(SHOT_MODELS.filter((m) => /^grok/.test(m.runway || '')).every((m) => m.provider === 'runway'));
+  assert.match(body(APP, 'runXai'), /e\.media = \[\{ type: 'video', src: await blobToDataUrl\(out\.blob\) \}\];/, 'runXai keeps the video in the thread');
+});
+
+test('removing tester data is tied to the device it is on, as the sign-in button does it', async () => {
+  const [HTML, APP] = await Promise.all([read('public/index.html'), read('public/app.js')]);
+  assert.match(HTML, /id="testerForget" hidden>Remove my tester data from this device<\/button>/);
+  assert.match(APP, /Remove what Atelier kept on this device[^']*Nothing on the server changes\./, 'the confirm: this browser only');
+  const s10 = text(/<h2>10\. Termination<\/h2>([\s\S]*?)<h2>/.exec(TOS)?.[1] || '');
+  assert.ok(s10.includes('Each device’s sign-in screen can remove the tester data kept on that device.'), s10);
+  assert.doesNotMatch(s10, /remove tester data from a device you used/, 'one screen does not reach every device');
+  const s8 = section(/<li><b>Testers:<\/b>([\s\S]*?)<\/li>/);
+  assert.ok(s8.includes('On a device you used as a tester, the sign-in screen offers a button.') && s8.includes('kept there for testers'), s8);
 });

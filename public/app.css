@@ -1063,6 +1063,11 @@ a.chip { text-decoration: none; display: inline-flex; align-items: center; }
 .ac-fields span { font: 500 10px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
 .ac-fields input, .ac-fields textarea { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; outline: 0; font-size: 14px; resize: vertical; line-height: 1.5; }
 .ac-fields input:focus, .ac-fields textarea:focus { border-color: var(--accent); }
+/* each recipient on its own line under its box (app.js renderSteps), so none can sit past a phone's edge */
+.ac-to { margin: -4px 0 0; padding: 7px 11px; list-style: none; border-radius: 10px; background: var(--bg); border: 1px dashed var(--line-2); font-size: 13px; line-height: 1.5; color: var(--ink-2); overflow-wrap: anywhere; }
+.ac-to:empty { display: none; }
+.ac-fields label:has(+ .ac-to) textarea { field-sizing: content; } /* its box grows to fit where the browser can */
+.ac-to b { font-weight: 600; color: var(--ink); }
 .ac-acts { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
 .ac-acts .btn-primary { padding: 9px 18px; font-size: 14px; }
 

@@ -466,19 +466,21 @@ async function googleAccessToken(env, account) {
 }
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const fromB64url = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)));
-// A header value goes into the message as it is (only Subject is encoded), so a line break in it would start a header
+// A header value goes into the message unencoded (only Subject is encoded), so a line break in it would start a header
 // of its own (a hidden Bcc or Reply-To) or end the headers early. An agent steered by mail it read could pass one (gmail_draft
 // and gmail_send both show an approval card since v92, but a card is no place to spot a CR): To, Cc and In-Reply-To with CR, LF or NUL are refused, and In-Reply-To must be one
 // <message-id> (what gmail_read returns as messageId).
+// Past that check each is trimmed and each run of spaces made one space: the string the approval card showed and
+// approved (public/app.js oneSpace). A To padded with spaces once pushed its second address off a phone's card.
 const headerValue = (v, name) => {
   const s = String(v ?? '');
   if (/[\r\n\0]/.test(s)) throw new ToolError(`${name} can’t contain line breaks.`);
-  return s;
+  return s.replace(/\s+/g, ' ').trim();
 };
 const MESSAGE_ID = /^<[^<>\s]{1,995}>$/;
 function rfc822({ to, cc, subject, body, inReplyTo }) {
   const enc = (t) => `=?UTF-8?B?${btoa(String.fromCharCode(...new TextEncoder().encode(t)))}?=`;
-  to = headerValue(to, 'To'); cc = headerValue(cc, 'Cc'); inReplyTo = headerValue(inReplyTo, 'In-Reply-To').trim();
+  to = headerValue(to, 'To'); cc = headerValue(cc, 'Cc'); inReplyTo = headerValue(inReplyTo, 'In-Reply-To');
   if (inReplyTo && !MESSAGE_ID.test(inReplyTo)) throw new ToolError('in_reply_to must be the original message’s Message-ID, like <abc@mail.example>.');
   const lines = [`To: ${to}`, cc ? `Cc: ${cc}` : '', `Subject: ${enc(subject || '')}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: 8bit',
     inReplyTo ? `In-Reply-To: ${inReplyTo}` : '', inReplyTo ? `References: ${inReplyTo}` : '', '', body || ''].filter((l, i, a) => l !== '' || i === a.length - 2);

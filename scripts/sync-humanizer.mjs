@@ -7,6 +7,7 @@
 // It also compares the canonical lint (HUMANIZER_BANNED, HUMANIZER_WARN in the same file) with the port in
 // tests/humanizer-lint.mjs and reports any pattern or label that moved; those are ported by hand.
 // When the coleos-api checkout isn't on this machine it says so, changes nothing and exits 0.
+// A --from or COLEOS_WORKER path that isn't there exits 1; --from without a path exits 2.
 // A copy that changed needs a version bump before it ships (sw.js caches /humanizer.js?v=<n>).
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -89,8 +90,14 @@ export async function lintDrift(src) {
 async function main(argv) {
   const check = argv.includes('--check');
   const k = argv.indexOf('--from');
-  const from = k >= 0 ? argv[k + 1] : process.env.COLEOS_WORKER || CANONICAL;
+  const given = k >= 0 ? argv[k + 1] : process.env.COLEOS_WORKER; // a path asked for by name, never the default
+  if (k >= 0 && (!given || given.startsWith('--'))) {
+    console.error('sync-humanizer: --from needs a path.\nusage: node scripts/sync-humanizer.mjs [--check] [--from <worker.js>]');
+    return 2;
+  }
+  const from = given || CANONICAL;
   if (!existsSync(from)) {
+    if (given) { console.error(`sync-humanizer: ${from} not found`); return 1; }
     console.log(`sync-humanizer: ${from} isn't on this machine, so nothing was compared or copied.`);
     return 0;
   }

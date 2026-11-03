@@ -305,7 +305,7 @@ function agentRig({ e, batches, approve = () => true, searches = [], extra = {},
 // renderSteps with the app's own helpers (esc defaults to an HTML escape); gmailAccounts: the connected Gmail addresses.
 function cardRig(esc = (s) => String(s).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`), gmailAccounts = []) {
   const vars = { esc, SERVICE_ICON: {}, LONG_FIELDS: new Set(['body']), taintNote, TOOLS: { services: { gmailAccounts } } };
-  for (const name of ['urlHost', 'BROWSER_READS', 'writesMail']) vars[name] = evalIn(vars, `return (${constSource(name).replace(new RegExp(`^${name} = `), '').replace(/;$/, '')});`);
+  for (const name of ['urlHost', 'BROWSER_READS', 'writesMail', 'RECIPIENTS', 'oneSpace', 'recipients', 'toList']) vars[name] = evalIn(vars, `return (${constSource(name).replace(new RegExp(`^${name} = `), '').replace(/;$/, '')});`);
   Object.assign(vars, lift(vars, 'mailFrom'));
   return lift(vars, 'renderSteps');
 }

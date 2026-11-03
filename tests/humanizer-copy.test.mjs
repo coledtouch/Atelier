@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { HUMANIZER } from '../public/humanizer.js';
-import { problems, htmlText, shownStrings, literals, sentences, words, HUMANIZER_BANNED, HUMANIZER_WARN, MAX_WORDS } from './humanizer-lint.mjs';
+import { problems, htmlText, shownStrings, literals, declarations, sentences, words, HUMANIZER_BANNED, HUMANIZER_WARN, MAX_WORDS } from './humanizer-lint.mjs';
 import { CANONICAL, canonicalText, moduleSource, currentText, lintDrift, lineDiff } from '../scripts/sync-humanizer.mjs';
 import {
   buildHistory, followUpRoute, photoFollowUp, mediaTurn, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin,
@@ -78,6 +78,9 @@ const HIDDEN = {
   'src/transcribe.js': ['GEMINI_STT_PROMPT'],
   'src/tester/prices.js': ['TABLE'],
 };
+// Hidden declarations that hold shown text too: a BROWSER_TOOLS row is [name, label, write, desc, …], and the label
+// becomes the tool's x-label on approval cards and step rows. The rest of the row is for the model.
+const LABELS = { 'public/app.js': { BROWSER_TOOLS: /(?:^|\n)\s*\[\s*'\w+',\s*$/ } };
 // The only lines that may break a rule, each with its reason. Kept small: anything else gets rewritten.
 const ALLOW = [
   { file: 'privacy.html', rule: 'length', text: 'use and transfer to any other app of information received from Google APIs will adhere to the Google API Services User Data Policy',
@@ -99,8 +102,11 @@ async function copyBlocks() {
   const js = async (dir) => (await readdir(new URL(`../${dir}/`, import.meta.url))).filter((f) => f.endsWith('.js')).sort().map((f) => `${dir}/${f}`);
   const mods = [...await js('public'), ...await js('src'), ...await js('src/tester')];
   for (const f of mods) {
-    const file = f.replace(/^public\//, '');
-    for (const s of shownStrings(await read(f), { hidden: HIDDEN[f] || [], server: f.startsWith('src/') })) out.push({ file, where: `${f}:${s.line}`, text: s.text });
+    const file = f.replace(/^public\//, ''), src = await read(f);
+    for (const s of shownStrings(src, { hidden: HIDDEN[f] || [], server: f.startsWith('src/') })) out.push({ file, where: `${f}:${s.line}`, text: s.text });
+    const declOf = declarations(src);
+    for (const [decl, row] of Object.entries(LABELS[f] || {}))
+      for (const l of literals(src)) if (declOf(l.line) === decl && row.test(l.prefix)) out.push({ file, where: `${f}:${l.line} (${decl} label)`, text: l.text });
   }
   return out;
 }
@@ -113,6 +119,7 @@ test('Atelier’s own copy passes the humanizer lint: no banned word, no sentenc
     assert.ok(count(f) >= min, `${f}: ${count(f)} blocks of copy found, expected at least ${min}`);
   assert.ok(blocks.some((b) => b.file === 'src/tester/router.js' && /^This request is bigger than one tester call allows\./.test(b.text)), 'a tester’s budget error is linted');
   assert.ok(!blocks.some((b) => b.file === 'src/tools.js' && /^Save an email as a draft in Gmail/.test(b.text)), 'tool descriptions (for the model) are not');
+  assert.ok(!blocks.some((b) => b.file === 'src/tools.js' && /approval in the app\.$/.test(b.text)), 'nor a tool result for the model');
   for (const t of ['I have 25 tester spots. The paid models are on me.', 'I built Atelier for my own work: answers, code, images, video, ideas and small apps.', 'Theme and model choices stay on this device.'])
     assert.ok(blocks.some((b) => b.file === 'index.html' && b.text === t), `index.html: “${t}” is linted`);
   assert.ok(blocks.some((b) => /^I’m Cole Ciprari\. I built Atelier for myself/.test(b.text)), 'the og:description pitch is linted');
@@ -120,6 +127,19 @@ test('Atelier’s own copy passes the humanizer lint: no banned word, no sentenc
   // shown strings the first extractor skipped: a toast that says JSON, text set inside a listener, an error's fallback
   for (const [f, t] of [['app.js', 'That file isn’t valid JSON. Nothing was imported.'], ['app.js', 'The tester data that was on this device is gone.'], ['feedback.js', 'Couldn’t load this screenshot. Close and reopen to try again.']])
     assert.ok(blocks.some((b) => b.file === f && b.text === t), `${f}: “${t}” is linted`);
+  // and the v92 review's: the Worker's Response error (the passcode screen shows guard.js's), a lowercase reason a toast
+  // shows (the OAuth callback's fail()), and every browser tool's label (BROWSER_TOOLS stays hidden: its descriptions
+  // are for the model)
+  for (const [f, t] of [['src/guard.js', 'Atelier couldn’t check the passcode'], ['src/worker.js', 'sign-in link expired']])
+    assert.ok(blocks.some((b) => b.file === f && b.text.startsWith(t)), `${f}: “${t}…” is linted`);
+  // …and the round-2 rework's: copy that starts like SQL (Look up's error, a tool's label), never a passed key check's note
+  for (const [f, t] of [['src/lookup.js', 'Select a word or a short name to look up.'], ['src/tools.js', 'Create GitHub issue']])
+    assert.ok(blocks.some((b) => b.file === f && b.text === t), `${f}: “${t}” is linted`);
+  assert.ok(!blocks.some((b) => b.file === 'src/xai.js' && b.text === 'key active'), 'an ok: true check shows no message');
+  const browser = [...APP.matchAll(/^ {2}\['browser_\w+', '([^']+)',/gm)].map((m) => m[1]);
+  assert.ok(browser.length >= 7 && browser.includes('Click in your browser'), `BROWSER_TOOLS labels: ${browser.join(', ')}`);
+  for (const t of browser) assert.ok(blocks.some((b) => b.where.endsWith('(BROWSER_TOOLS label)') && b.text === t), `the browser label “${t}” is linted`);
+  assert.ok(!blocks.some((b) => b.file === 'app.js' && /^Click an element on a page\./.test(b.text)), 'its descriptions are not');
   const used = new Set(), fails = [];
   for (const b of blocks) for (const p of problems(b.text)) {
     const a = allowed(b.file, p);
@@ -215,14 +235,43 @@ const tools = { gmail_send: { label: 'Send email', desc: 'Send an email from one
   run: async () => { throw new ToolError('Gmail isn’t connected. Connect it in Settings.'); } } };
 const q = 'SELECT name FROM testers WHERE sub = ?';`;
   assert.deepEqual(shownStrings(worker, { server: true }).map((s) => s.text), ['Send email', 'Gmail isn’t connected. Connect it in Settings.']);
+  // its usual error shape counts too: the error in new Response(JSON.stringify({ error })), and a Response's text body.
+  // A code, a model id and a provider request's content don't.
+  const errors = shownStrings(`const down = () => new Response(JSON.stringify({ error: 'A seamless thing broke.', code: 'guard_down' }), { status: 503 });
+const unpaired = () => new Response('Browser not paired — open Atelier to pair it.', { status: 401 });
+const ping = JSON.stringify({ model: 'glm-4.7-flash', messages: [{ role: 'user', content: 'Say hi to them.' }] });`, { server: true }).map((s) => s.text);
+  assert.deepEqual(errors, ['A seamless thing broke.', 'Browser not paired — open Atelier to pair it.']);
+  assert.deepEqual(problems(errors[0]).map((p) => p.rule), ['banned']);
+  // …lowercase and unpunctuated too, the way most of the Worker's errors read, and through its json() helper
+  const lower = shownStrings(`const a = () => new Response(JSON.stringify({ error: 'seamless sync failed', code: 'guard_down' }), { status: 500 });
+const b = () => json({ error: 'seamless sync failed' }, 500);
+const c = () => new Response('seamless sync failed', { status: 500 });`, { server: true }).map((s) => s.text);
+  assert.deepEqual(lower, ['seamless sync failed', 'seamless sync failed', 'seamless sync failed']);
+  assert.deepEqual(problems(lower[0]).map((p) => p.rule), ['banned']);
   // the tokenizer keeps strings, templates and regex literals apart, and knows the call each literal sits in; a ${…}
-  // reads as the longest string in it, or X
+  // reads as the string in it with the most words (a call's argument too: esc(err.message || 'Couldn’t load.')), or X
   const lits = literals('a = b / 2; toast(`x ${f("y")} z ${n}`); c = /"/.test(d) ? "q" : `w`;');
   assert.deepEqual(lits.map((l) => [l.text, l.calls.at(-1) ?? '']), [['y', 'f'], ['x y z X', 'toast'], ['q', ''], ['w', '']]);
   assert.equal(lits[1].shape, 'x X z X');
+  assert.equal(lits[0].outer, lits[1], 'the template whose ${…} holds it');
+  assert.equal(lits[0].branch, false, '…as a call’s argument, not as its value');
+  // a '+' chain is one literal, after its operands' literals (as a template comes after its ${…}'s), each other operand
+  // read as a ${…} is (a call's argument in it too, a group as its string with the most words), and what comes before
+  // the first piece is one operand (n + m may be a sum)
+  assert.deepEqual(literals("a = 'x ' + n + ' y'; b = n + ' items'; c = 'k ' + f('z') + 'w'; d = ['p' + 'q', 'r'];\ne = 'one ' +\n  'two';").map((l) => l.text), ['x X y', 'X items', 'z', 'k zw', 'pq', 'r', 'one two']);
+  assert.deepEqual(literals("f = 'a ' + b + (c ? ' d e' : '') + '.'; g = n + m + ' items';").map((l) => l.text), [' d e', '', 'a X d e.', 'X items']);
+  // never a comparand, an array's item, an index or an object's key or value; a lookup's values are what it reads as
+  const reads = (src) => literals(src).at(-1).text;
+  assert.equal(reads("t = `${e.code === 'quota hit now' ? 'Quota hit' : 'Failed'}, try later`;"), 'Quota hit, try later');
+  assert.equal(reads("t = 'Mode: ' + (['sync mode on', 'b'].includes(m) ? 'on' : 'off');"), 'Mode: off');
+  assert.equal(reads("t = `Mode: ${labels['sync mode on']}`;"), 'Mode: X');
+  assert.equal(reads("t = `${fmt(d, { hour: 'numeric two' })} · back`;"), 'X · back');
+  assert.equal(reads("t = `${{ day: 'Used up today', pool: 'Tester budget used up' }[out]} · back`;"), 'Tester budget used up · back');
+  assert.equal(reads("t = 'Failed: ' + ({ 'quota hit now': 'quota' })[code];"), 'Failed: quota');
+  assert.equal(reads("t = 'Mode: ' + ['sync mode on', 'off'][i];"), 'Mode: sync mode on');
 });
 
-test('the extractor reads what a person sees: a toast or error whatever its words, text set in a callback, String.replace’s text, a ${…} at its longest', () => {
+test('the extractor reads what a person sees: a toast or error whatever its words, text set in a callback, String.replace’s text, a ${…} or a + chain as one sentence', () => {
   const got = (src, o) => shownStrings(src, o).map((s) => s.text);
   // FOR_MODEL words skip a prompt, never a toast, an error or an element's text
   assert.deepEqual(got(`function a() {
@@ -231,6 +280,23 @@ test('the extractor reads what a person sees: a toast or error whatever its word
   el.textContent = 'Saved for the user on this device.';
   const p = 'You are a helper. Return ONLY JSON.';
 }`), ['Exported a JSON file of every thread.', 'You are signed out. Sign in again.', 'Saved for the user on this device.']);
+  // …nor copy held in a variable first ("JSON" alone is no prompt), put in by a DOM method, or in a ${…} of a template
+  // an element shows. A prompt that says what to answer with stays out.
+  assert.deepEqual(got(`const done = 'Exported a JSON file of every thread.'; toast(done);
+box.insertAdjacentHTML('beforeend', '<p class="hint">You are offline. Atelier syncs when you reconnect.</p>');
+note.append('You are signed out of Gmail.');
+el.innerHTML = \`<p>\${on ? 'You are signed in on this device.' : 'Sign in to sync.'}</p>\`;
+const fix = [{ role: 'system', content: 'You fix JSON syntax only. Return only the corrected JSON object.' }];`), ['Exported a JSON file of every thread.', 'You are offline. Atelier syncs when you reconnect.', 'You are signed out of Gmail.', 'You are signed in on this device.', 'Sign in to sync.', 'You are signed in on this device.']);
+  // what a toast, an error or an element shows as written counts lowercase and unpunctuated; a one-token code, or a
+  // call's argument in the value set, doesn't
+  assert.deepEqual(got("toast('saved with a seamless sync'); throw new Error('sign-in link expired — start again'); el.title = 'is-on'; fail('bad_state'); el.title = fmt('two words', n);"), ['saved with a seamless sync', 'sign-in link expired — start again']);
+  assert.deepEqual(problems('saved with a seamless sync').map((p) => p.rule), ['banned']);
+  // in a shown template's tag, a title's value counts that way; a class list doesn't
+  assert.deepEqual(got('el.innerHTML = `<div class="${on ? \'chip enhanced\' : \'chip\'}" title="${on ? \'turn it off\' : \'turn it on\'}">Go</div>`;'), ['turn it off', 'turn it on', 'Go', 'turn it off']);
+  // a '+' chain is one sentence: each piece passes, the whole doesn't
+  const chain = got("toast('Your export is done and every thread you saved is now in ' + n + ' files on this device.');");
+  assert.deepEqual(chain, ['Your export is done and every thread you saved is now in X files on this device.']);
+  assert.deepEqual(chain.flatMap(problems).map((p) => [p.rule, p.words]), [['length', 17]]);
   // a hidden call hides its direct arguments, never the text inside a callback it is handed
   assert.deepEqual(got(`$('#go').addEventListener('click', () => { $('#q').textContent = 'The tester data here is gone.'; });
 btn.addEventListener('click', () => (note.textContent = ok ? 'Mic works.' : 'No microphone found.'), { once: true });
@@ -239,8 +305,11 @@ completeChat({ messages: [{ role: 'system', content: 'Write a short title for th
 fetch('/api/x', { method: 'POST', body: JSON.stringify({ text: 'Not shown here.' }) });`), ['The tester data here is gone.', 'Mic works.', 'No microphone found.']);
   // String.replace: the pattern is code, the text put in is copy
   assert.deepEqual(got(`note.textContent = base.replace(STAY, 'stay on this device. You can remove them below.');`), ['stay on this device. You can remove them below.']);
-  // a ${…} reads as its longest branch: the sentences v91's copy hid behind one "X" (Canva's export note, the Photos
-  // Picker error) would fail now
+  // a ${…} reads as its branch with the most words, even when it has fewer characters
+  const branch = got("el.textContent = `Your threads and notes now sync to ${on ? 'this phone and any other phone or tab you sign in on' : 'Atelier’s private, encrypted, owner-only cloud storage bucket'} from today.`;");
+  assert.ok(branch.includes('Your threads and notes now sync to this phone and any other phone or tab you sign in on from today.'), branch.join('\n'));
+  assert.deepEqual(branch.flatMap(problems).map((p) => [p.rule, p.words]), [['length', 21]]);
+  // the sentences v91's copy hid behind one "X" (Canva's export note, the Photos Picker error) fail now
   const canva = got('box.innerHTML = `<p class="cvc-note">${f.length ? `Canva exports this design as ${esc(f.join(\', \'))} only` : \'Canva has no image or video export for this design\'} — open it in Canva to download it.</p>`;');
   assert.ok(canva.includes('Canva has no image or video export for this design — open it in Canva to download it.'), canva.join('\n'));
   assert.deepEqual(canva.flatMap(problems).map((p) => [p.rule, p.words]), [['length', 17]]);
@@ -250,6 +319,140 @@ fetch('/api/x', { method: 'POST', body: JSON.stringify({ text: 'Not shown here.'
   assert.deepEqual(got("const n = on ? `${link ? 'text from a link' : 'shared content'} · accounts off this turn` : '';"), ['text from a link · accounts off this turn']);
   // markup inside a ${…} stays X: an element is a line of its own, linted as its own literal
   assert.deepEqual(got('el.innerHTML = `<p><b>Plan</b>${a ? `<span>Chat · ${a}</span>` : \'\'}<span>Auto picks a model for each request.</span></p>`;'), ['Chat · X', 'Plan X Auto picks a model for each request.']);
+  // a '+' chain's X never lands in markup: a tag after rows.join('') is still read as a tag (its aria-label, not its
+  // attributes), and markup added after an inline element adds no word to its sentence
+  assert.deepEqual(got("el.innerHTML = rows.join('') + `<input type=\"range\" min=\"0\" max=\"1\" step=\"0.1\" aria-label=\"Volume\" name=\"vol\" form=\"rx\" />`;"), ['Volume']);
+  const sixteen = 'One two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen.';
+  const inline = got(`el.innerHTML = \`<span class="opt-note">${sixteen}</span>\` + (on ? '<button class="chip">Remix</button>' : '');`);
+  assert.deepEqual(inline, ['Remix', sixteen]);
+  assert.deepEqual(inline.flatMap(problems), []);
+  // …nor does an operand that is only an entity: '&nbsp;' reads as it decodes, a space
+  assert.deepEqual(got("el.innerHTML = '<span>Removed every thread from this device and from each phone, tab or laptop you own</span>' + (on ? '&nbsp;' : '');"), ['Removed every thread from this device and from each phone, tab or laptop you own']);
+  // …but a value beside or between inline tags is a word, as in its template form (`<b>${name}</b> was removed…`)
+  const lengths = (src) => got(src).flatMap(problems).map((p) => [p.rule, p.words]);
+  assert.deepEqual(got("toast('<b>' + name + '</b> was removed from this device and from every other phone, tab or laptop you use today.');"), ['X was removed from this device and from every other phone, tab or laptop you use today.']);
+  assert.deepEqual(lengths("toast('<b>' + name + '</b> was removed from this device and from every other phone, tab or laptop you use today.');"), [['length', 17]]);
+  assert.deepEqual(lengths("el.innerHTML = n + '<span> threads were removed from this device and from every phone, tab or laptop that you own.</span>';"), [['length', 17]]);
+  assert.deepEqual(got("toast('<b>Error:</b> ' + msg); toast('Open Settings > ' + tab);"), ['Error: X', 'Open Settings > X']);
+  assert.deepEqual(got("el.innerHTML = '<span>Saved ' + n + ' threads</span>'; toast('You have ' + n + ' <b>new</b> messages.');"), ['Saved X threads', 'You have X new messages.']);
+  // …and so is an inline element that wraps a value, in an operand of its own: it is a value, not markup of its own
+  for (const wrap of ["(bold ? '<b>' + n + '</b>' : n)", "(url ? '<a href=\"' + url + '\">' + n + '</a>' : n)", '(bold ? `<b>${n}</b>` : n)'])
+    assert.deepEqual(lengths(`el.innerHTML = '<p>' + ${wrap} + ' threads were removed from this device and from every phone, tab or laptop that you own.</p>';`), [['length', 17]], wrap);
+  assert.ok(got("toast('Removed ' + (name ? `<b>${esc(name)}</b>` : '') + ' from this device and from every other phone, tab or laptop you use today.');").includes('Removed X from this device and from every other phone, tab or laptop you use today.'));
+  // markup of its own reads alike in a chain and a ${…}: an inline element with text as X, a block or an empty one (a
+  // <br>, an icon) as a space
+  const tap = ["toast('Tap ' + (on ? '<b>Send</b>' : '') + ' to go from this device and from every other phone, tab or laptop you use today.');", "toast(`Tap ${on ? '<b>Send</b>' : ''} to go from this device and from every other phone, tab or laptop you use today.`);"];
+  assert.deepEqual(tap.map(lengths), [[['length', 18]], [['length', 18]]]);
+  const open = sixteen.slice(0, -1);
+  for (const src of [`el.innerHTML = \`<span>${open}</span>\` + (on ? '<button class="chip">Remix</button>' : '');`, `el.innerHTML = \`<span>${open}</span>\${on ? '<button class="chip">Remix</button>' : ''}\`;`])
+    assert.deepEqual(got(src), ['Remix', open], src);
+  assert.deepEqual(lengths(`el.innerHTML = \`<span>${open}</span>\` + (on ? '<b>Remix</b>' : '');`), [['length', 17]], 'an inline one joins the sentence');
+  assert.deepEqual(got("el.innerHTML = '<p>Line one is here' + (wrap ? '<br>' : ' ') + 'and line two</p>'; el.innerHTML = '<li>' + (x ? '<i class=\"ic\"></i>' : '') + 'Saved here</li>';"), ['Line one is here and line two', 'Saved here']);
+  // a ternary in a group reads as its branch with the most words, and its branches are shown as written: the chain and
+  // its template form read alike
+  const synced = got("toast('Synced ' + (on ? 'with a seamless link' : 'here') + '.');");
+  assert.deepEqual(synced, ['with a seamless link', 'Synced with a seamless link.']);
+  assert.deepEqual(synced, got("toast(`Synced ${on ? 'with a seamless link' : 'here'}.`);"));
+  assert.deepEqual(synced.flatMap(problems).map((p) => p.rule), ['banned', 'banned']);
+  assert.deepEqual(lengths("toast('Your threads now sync to ' + (on ? 'this phone and any other phone or tab you sign in on' : 'here') + ' from today.');"), [['length', 19]]);
+  // …never a comparand, an array's item or an index in it, nor one in a sink's argument or a value set
+  assert.deepEqual(got("toast('Mode: ' + (mode === 'seamless sync mode' ? 'on' : 'off'));"), ['Mode: off']);
+  assert.deepEqual(got("toast('Mode: ' + (['seamless sync mode', 'other mode'].includes(mode) ? 'on' : 'off'));"), ['Mode: off']);
+  assert.deepEqual(got("toast(`${e.code === 'seamless quota hit' ? 'Quota hit' : 'Failed'}, try later`);"), ['Quota hit', 'Failed', 'Quota hit, try later']);
+  assert.deepEqual(got("toast(x === 'seamless mode' ? 'on' : 'off'); el.textContent = mode === 'seamless mode' ? 'on' : 'off'; el.title = ['seamless mode', 'x y'].includes(m) ? 'On now' : 'Off now';"), ['On now', 'Off now']);
+  // shown as written, a #channel, an @handle or a .folder counts: no mark up front makes it code
+  const marks = got("toast(`#${channel} now syncs seamlessly`); toast(`@${handle} was added to the seamless list`); el.title = '#general syncs with a seamless link'; el.textContent = '.atelier folder is missing a seamless key';");
+  assert.deepEqual(marks, ['#X now syncs seamlessly', '@X was added to the seamless list', '#general syncs with a seamless link', '.atelier folder is missing a seamless key']);
+  assert.ok(marks.every((t) => problems(t).some((p) => p.rule === 'banned')));
+  // a template or chain held in a variable that FOR_MODEL skips: its branches are read on their own (a toast may show it)
+  for (const src of ["const m = `You are offline. ${q ? 'Seamless sync resumes when you reconnect.' : 'Reconnect.'}`; toast(m);", "const m = 'You are offline. ' + (q ? 'Seamless sync resumes when you reconnect.' : 'Reconnect.'); toast(m);"])
+    assert.deepEqual(got(src), ['Seamless sync resumes when you reconnect.', 'Reconnect.'], src);
+  // a log's text never counts, new Error(…) in one included; a callback handed to one is a statement of its own
+  assert.deepEqual(got("console.warn(new Error('seamless sync failed here')); console.log('x', fmt('Seamless sync failed.')); trace('sync', () => { toast('saved with a seamless sync'); });"), ['saved with a seamless sync']);
+});
+
+test('the Worker’s errors: an error, message or detail value as the app shows it, never a log’s, a comparand’s or a tool result’s for the model', () => {
+  const got = (src) => shownStrings(src, { server: true }).map((s) => s.text);
+  const banned = (texts) => texts.filter((t) => problems(t).some((p) => p.rule === 'banned'));
+  // the key is read from the object, not the line: every branch of the value counts, whatever its commas, calls or ${…}
+  const values = got(`const a = () => json({ error: on ? \`\${svc} is switched off\` : 'seamless sync failed' });
+const b = () => json({ error: cond ? 'gone, try again' : 'seamless sync failed' });
+const c = () => json({ error: scrub(err.message, key) || 'seamless sync failed' });
+const d = () => json({ error: \`couldn't \${on ? 'save the whole file now' : 'seamless sync broke'}\` });`);
+  assert.deepEqual(values, ['X is switched off', 'seamless sync failed', 'gone, try again', 'seamless sync failed', 'seamless sync failed', 'save the whole file now', 'seamless sync broke', "couldn't save the whole file now"]);
+  assert.deepEqual(banned(values), ['seamless sync failed', 'seamless sync failed', 'seamless sync failed', 'seamless sync broke']);
+  // a response body is shown whatever it says: FOR_MODEL's words don't hide it
+  const bodies = got(`const e = () => json({ error: 'You are signed out. Sign in again for a seamless sync.' });
+const f = () => new Response('You are not paired. Pair this browser for a seamless link.');`);
+  assert.deepEqual(bodies, ['You are signed out. Sign in again for a seamless sync.', 'You are not paired. Pair this browser for a seamless link.']);
+  assert.equal(banned(bodies).length, 2);
+  // …nor through a helper the module defines like json() (lookup.js's reply)
+  assert.deepEqual(got(`const reply = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers });
+function out() { return reply({ error: 'You are signed out. Sign in again for a seamless sync.' }, 401); }`), ['You are signed out. Sign in again for a seamless sync.']);
+  // SQL is its keywords in capitals: an error or a body that starts "delete", "update", "Select" or "with" is copy
+  const sqlish = got(`function a() { return json({ error: 'delete failed, seamless storage is gone' }, 500); }
+function b() { return json({ error: 'update the app first for a seamless sync' }, 426); }
+function c() { return json({ error: 'Select a model first. Seamless mode needs one.' }, 400); }
+function d() { return new Response('with no passcode set the seamless lock is off', { status: 403 }); }
+const q = 'SELECT name FROM testers WHERE sub = ?';`);
+  assert.deepEqual(sqlish, ['delete failed, seamless storage is gone', 'update the app first for a seamless sync', 'Select a model first. Seamless mode needs one.', 'with no passcode set the seamless lock is off']);
+  assert.equal(banned(sqlish).length, 4);
+  // a text body that is code (CSS) isn't copy
+  assert.deepEqual(got(`function css() { return new Response('body { margin: 0; font: 16px system-ui; background: #111; color: #eee } a { color: #8cf; text-decoration: none } .card { padding: 12px; border-radius: 8px }', { headers: { 'content-type': 'text/css' } }); }`), []);
+  // no value: a comment's "error:", a comparand (an array .includes() checks too), a log (console.error included)
+  assert.deepEqual(got(`function g() { // on failure, error: shows below
+  const mode = 'seamless mode on'; return mode; }
+const h = () => json({ error: e.code === 'seamless quota hit' ? 'Quota hit.' : 'Failed.' });
+const k = () => json({ error: ['seamless quota hit', 'rate hit'].includes(code) ? 'Slow down.' : 'Failed.' });
+console.log(JSON.stringify({ error: 'seamless sync failed' }));
+console.error(JSON.stringify({ error: 'seamless sync failed' }));
+console.warn('sync:', describe({ error: 'seamless sync failed' }));`), ['Quota hit.', 'Failed.', 'Slow down.', 'Failed.']);
+  // a returned object can be a tool's result for the model (src/tools.js), so FOR_MODEL still applies to it; a check
+  // that passed shows no message (app.js shows v.message only when !v.ok), one that failed does
+  assert.deepEqual(got(`function run() { if (t.write && approved !== true) return { ok: false, error: 'This action needs the user\\'s approval in the app.' }; }
+function check() { if (bad) return { ok: false, status: 401, message: 'key revoked today' }; return { ok: true, status: 200, message: 'key active' }; }`), ['key revoked today']);
+  // …and the branches of one stay out with it, in a template or a '+' chain
+  assert.deepEqual(got(`function run(t) { return { ok: false, error: \`\${t.write ? 'the write tool you called needs an approval step in the app before it can run against a connected service' : 'this tool is blocked'}. Ask the user to approve it.\` }; }
+function deny(t) { return { ok: false, error: \`You are not allowed to run this \${t.write ? 'seamless write tool' : 'tool'} yet.\` }; }
+function down() { return { ok: false, error: 'You are offline: ' + (net ? 'the seamless relay is down' : 'no network') }; }`), []);
+  // a request's own body is never shown: a commit message under fetch, a model's input, an object built first, what KV
+  // stores. A message or detail needs an ok: or an error: beside it to be an error's.
+  assert.deepEqual(got(`async function put() { await fetch(api, { method: 'PUT', body: JSON.stringify({ message: 'atelier backup with a seamless sync from the worker', content: b64, sha }) }); }
+const body = JSON.stringify({ model: 'command-r', message: 'write a short title for this chat in five words or fewer and nothing else at all please now', stream: false });
+const commit = { message: 'atelier backup with a seamless sync from the worker' }; fetch(u, { body: JSON.stringify(commit) });
+const refused = { error: 'seamless upload refused' }; await env.KV.put(key, JSON.stringify({ error: 'seamless cache entry' }));
+const failed = { error: true, message: 'seamless upload failed' }, done = { ok, message: 'seamless upload done' };`), ['seamless upload refused', 'seamless upload failed', 'seamless upload done']);
+  // an error's message nests under error: in a frame sent, a returned object or a stream's JSON line; a data: one doesn't
+  const nested = got(`function s() { send({ error: { message: err.message || 'stream failed, seamless retry is off' } }); }
+function f() { return { ok: false, error: { message: 'seamless sync failed', code: 'x' } }; }
+function t() { const frame = JSON.stringify({ error: { message: 'seamless stream broke' } }); ctrl.enqueue(enc.encode(frame)); }
+const n = () => json({ error: on ? { message: 'seamless sync went down' } : null });
+const m = () => json({ data: { message: 'seamless sync is fine' } });`);
+  assert.deepEqual(nested, ['stream failed, seamless retry is off', 'seamless sync failed', 'seamless stream broke', 'seamless sync went down']);
+  assert.equal(banned(nested).length, 4);
+  // a comparand in a value, a template's or a '+' chain's, is never read as it; a lookup's value is, never its key
+  assert.deepEqual(got(`const h = () => json({ error: (e.code === 'seamless quota hit' ? 'Quota hit' : 'Failed') + ', try later' });
+const k = () => json({ error: \`\${e.code === 'seamless quota hit' ? 'Quota hit' : 'Failed'}, try later\` });
+const l = () => json({ error: 'Failed: ' + ({ 'seamless quota hit': 'quota' })[code] });`), ['Quota hit', 'Failed', 'Quota hit, try later', 'Quota hit', 'Failed', 'Quota hit, try later', 'Failed: quota']);
+  // a tool result is for the model when FOR_MODEL's words sit in a branch only, or the template's are around one
+  assert.deepEqual(got(`async function run(w) { return { ok: false, error: 'blocked: ' + (w ? 'the seamless write tool needs the user to approve it' : 'no') }; }
+async function run2(w) { return { ok: false, error: \`blocked: \${w ? 'the seamless write tool needs the user to approve it' : 'no'}\` }; }
+function run3(w) { return { ok: false, error: \`Ask the user: \${w ? 'Seamless write needs approval.' : 'No.'}\` }; }`), []);
+  // a body with a ;, a {…} or an @ up front is still copy; CSS is not
+  const marks = got(`json({ error: 'upload failed: timeout; seamless retry is off' }); json({ error: 'seamless mode needs {voice, text}' }); new Response('@atelier relay is seamless now');`);
+  assert.deepEqual(marks, ['upload failed: timeout; seamless retry is off', 'seamless mode needs {voice, text}', '@atelier relay is seamless now']);
+  assert.equal(banned(marks).length, 3);
+  // a helper is json() whatever it hands on: Response.json(data), JSON.stringify(d, null, 2), a bare param
+  for (const helper of ['const reply = (data, status = 200) => Response.json(data, { status });', 'const reply = (d, s = 200) => new Response(JSON.stringify(d, null, 2), { status: s });', 'const reply = d => new Response(JSON.stringify(d));', 'function reply(d, s) { return Response.json(d, { status: s }); }'])
+    assert.deepEqual(got(`${helper}\nfunction out() { return reply({ message: 'seamless sync failed' }, 500); }`), ['seamless sync failed'], helper);
+  // console.error logs an Error it's handed; a stream's c.error(…) errors the stream, which the app shows
+  assert.deepEqual(got(`console.error('sync', new Error('seamless sync failed here')); console.warn(new Error('seamless sync broke here'));
+function t(c) { c.error(new Error('seamless output over the cap')); }`), ['seamless output over the cap']);
+  // a tool's desc is for the model wherever it sits: the first key, its own line, a template's branch
+  assert.deepEqual(got(`const tools = { x: { desc: 'Send an email from one of the connected accounts as a reply when asked to by them later on today and tomorrow.' } };
+const more = { x: {
+  desc: 'Send an email from one of the connected accounts as a reply when asked to by them later on today and tomorrow.' } };
+const tpl = { x: { desc: \`Send \${on ? 'it from one of the connected accounts as a reply when they ask today or tomorrow' : ''}.\` } };`), []);
 });
 
 // ── 2. the rules in the system prompt, only for writing in Cole's name ──

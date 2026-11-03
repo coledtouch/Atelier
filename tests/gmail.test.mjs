@@ -104,6 +104,43 @@ test('gmail_draft and gmail_send refuse a line break in To, Cc or In-Reply-To (n
   assert.doesNotMatch(msg, /^(Bcc|Reply-To):/m);
 });
 
+// review-nov03: the approval card showed a short To or Cc in a one-line box, and a phone clipped it, so 40 spaces hid
+// the second address while Gmail got both. The card now lists every address; the header holds the string it showed:
+// trimmed, each run of spaces one space (public/app.js oneSpace, the same rule).
+test('gmail_draft and gmail_send write To and Cc as the approval card shows them: trimmed, each run of spaces one space; line breaks are still refused', async () => {
+  const sent = mailSink();
+  const pad = ' '.repeat(40), odd = '\t 　  ';
+  for (const tool of ['gmail_draft', 'gmail_send']) {
+    const r = await runTool(env([MAIL]), tool, { to: `  a@x.com${pad},b@y.com `, cc: `Alex Johnson${odd}<alex.johnson@companyname.com>,${pad}archive@evil.io`, subject: 'Q3', body: 'Hi  there', account: MAIL }, true);
+    assert.equal(r.ok, true, tool);
+  }
+  assert.equal(sent.length, 2);
+  for (const { raw } of sent) {
+    const msg = decode(raw);
+    assert.match(msg, /^To: a@x\.com ,b@y\.com\r\nCc: Alex Johnson <alex\.johnson@companyname\.com>, archive@evil\.io\r\nSubject: /);
+    assert.match(msg, /\r\n\r\nHi {2}there$/, 'the body keeps its spaces');
+  }
+  // the padding never hides a line break: CR, LF and NUL are refused before anything is collapsed
+  const CR = String.fromCharCode(13), LF = String.fromCharCode(10);
+  for (const args of [{ to: `a@x.com${pad}${CR}${LF}Bcc: e@evil.io` }, { to: 'a@x.com', cc: `b@y.com${pad}${LF}Reply-To: e@evil.io` }, { to: `a@x.com${pad}${String.fromCharCode(0)}` }]) {
+    const r = await runTool(env([MAIL]), 'gmail_send', { subject: 'Q3', body: 'Hi', account: MAIL, ...args }, true);
+    assert.equal(r.ok, false, JSON.stringify(args));
+    assert.match(r.error, /can’t contain line breaks/);
+  }
+  assert.equal(sent.length, 2, 'nothing more reached Gmail');
+});
+
+test('the app’s oneSpace (what the approval card shows and approves) is the string the To header holds', async () => {
+  const APP = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const at = APP.indexOf('\nconst oneSpace = ') + 1;
+  assert.ok(at > 0, 'app.js has const oneSpace');
+  const oneSpace = new Function(`return (${APP.slice(at, APP.indexOf('\n', at)).replace(/^const oneSpace = /, '').replace(/;$/, '')});`)();
+  const sent = mailSink();
+  const inputs = [`alex@company.com${' '.repeat(40)},evil@attacker.io`, ' Alex Johnson <alex.johnson@companyname.com>,  archive@evil.io ', '\ta@x.com  b@y.com　', 'bob@example.com'];
+  for (const to of inputs) await runTool(env([MAIL]), 'gmail_draft', { to, subject: 'Q3', body: 'Hi', account: MAIL }, true);
+  assert.deepEqual(sent.map(({ raw }) => /^To: (.*)\r\n/.exec(decode(raw))[1]), inputs.map(oneSpace));
+});
+
 // v92 (Cole, 2026-10-11): saving a Gmail draft shows an approval card like sending does. Unapproved, nothing reaches
 // Gmail; the tool list marks it write so the app asks.
 test('gmail_draft needs the user\u2019s approval: unapproved it saves nothing, approved it saves the draft', async () => {
