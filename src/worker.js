@@ -842,7 +842,7 @@ async function handleApi(req, env, url) {
   // composer's mic (src/transcribe.js: OpenAI, Gemini as the fallback; testers never get here)
   if (path === 'transcribe' && req.method === 'POST') return passOk(req, env) ? handleTranscribe(req, env) : missingKey(req, env, 'openai');
 
-  // /api/x/<provider>/<path> → allow-listed image / video endpoints for OpenAI and Gemini
+  // /api/x/<provider>/<path> → allow-listed image endpoints for OpenAI, Gemini and Meta
   const x = path.match(/^x\/(openai|gemini|meta)\/(.+)$/);
   if (x) return handlePassthrough(req, env, x[1], x[2], url.search);
 
