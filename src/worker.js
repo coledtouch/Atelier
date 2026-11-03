@@ -1,6 +1,6 @@
 // Atelier — Cloudflare Worker
 // Serves the PWA (static assets) and proxies a strict allow-list of AI provider endpoints:
-// NVIDIA build, Anthropic (via the official SDK), OpenAI and Google Gemini.
+// Anthropic (via the official SDK), OpenAI, Google Gemini, xAI, Z.ai, DeepSeek, Meta, NVIDIA build and Runway.
 // Provider APIs don't allow browser CORS (and keys stay server-side), so every call goes through /api/*.
 import { claudeChat } from './anthropic.js';
 import { hasVideoPart, geminiNativeChat, handleVideoApi, VIDEO_NEEDS_GEMINI } from './gemini.js';

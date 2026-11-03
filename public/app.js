@@ -1,8 +1,9 @@
 /* Atelier — personal studio PWA. Vanilla JS, no build step.
-   All model calls go to /api/* on our Worker, which forwards to NVIDIA build, Anthropic, OpenAI or Gemini. */
+   All model calls go to /api/* on our Worker. It forwards each one to its provider's own API (nine providers). */
 
 // ───────────────────────── catalog ─────────────────────────
-// Chat models. IDs prefixed anthropic: / openai: / gemini: go to those providers; bare IDs are NVIDIA build.
+// Chat models. IDs prefixed anthropic: / openai: / gemini: / zai: / deepseek: / meta: / xai: go to those providers;
+// bare IDs are NVIDIA build.
 // Lists are in preference order: "Auto" uses the first model whose provider has a key, and the rest
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
