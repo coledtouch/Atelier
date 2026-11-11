@@ -8,30 +8,30 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=101';
-import * as Sync from './sync.js?v=101';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=101';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=101';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=101';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=101';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=101';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=101';
-import { initLookup } from './lookup.js?v=101';
-import { createRemix } from './remix-app.js?v=101';
-import { sendMode, looksLikeQuestion } from './remix.js?v=101';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=101';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=101';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=101';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=101';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=101';
-import * as ClaudeImport from './claude-import.js?v=101';
-import { createFeedback } from './feedback.js?v=101';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=101';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=101';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=101';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=101';
-import { HUMANIZER } from './humanizer.js?v=101';
-import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=101';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=102';
+import * as Sync from './sync.js?v=102';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=102';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=102';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=102';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=102';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=102';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=102';
+import { initLookup } from './lookup.js?v=102';
+import { createRemix } from './remix-app.js?v=102';
+import { sendMode, looksLikeQuestion } from './remix.js?v=102';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=102';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=102';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=102';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=102';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=102';
+import * as ClaudeImport from './claude-import.js?v=102';
+import { createFeedback } from './feedback.js?v=102';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=102';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=102';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=102';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=102';
+import { HUMANIZER } from './humanizer.js?v=102';
+import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=102';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -647,7 +647,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '101';
+const APP_BUILD = '102';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -4688,6 +4688,10 @@ async function sortIntoSpaces(threads) {
   spacesBusy = false;
   if (showing()) renderThreads(true); // the "Sorting…" heading goes
 }
+// Headings in the Threads list fold: tap one to hide its threads (its count stays). Kept per device and account, one
+// entry per order and heading ('space:Personal', 'recent:Earlier'), so folding Personal in By group leaves Today alone.
+const shutGroups = new Set(LS.get(workspaceKey('threadGroupsShut'), []).filter((k) => typeof k === 'string'));
+const groupKey = (label) => `${threadSort}:${label}`;
 let threadsSeq = 0; // newest renderThreads() call wins (search typing fires many)
 async function renderThreads(fromSorter = false) {
   const seq = ++threadsSeq;
@@ -4707,10 +4711,13 @@ async function renderThreads(fromSorter = false) {
   const byDate = threadSort === 'recent' || threadSort === 'oldest'; // date headings only mean something in date order
   if (threadSort === 'space' && fromSorter !== true) sortIntoSpaces(all); // not awaited: the list shows now and fills in
   const group = (at, t) => (threadSort === 'space' ? labelOf(GROUPS, spaceOf(threadSpaces, t.id)) || (spacesBusy ? 'Sorting…' : 'Not sorted yet') : !byDate ? THREAD_SORTS[threadSort] : at >= today ? 'Today' : at >= today - day ? 'Yesterday' : at >= today - 6 * day ? 'This week' : 'Earlier');
+  const groupOf = (t) => (pinnedThreads.has(t.id) ? 'Pinned' : group(ClaudeImport.listAt(t), t));
+  const sizes = new Map(); for (const t of all) { const g = groupOf(t); sizes.set(g, (sizes.get(g) || 0) + 1); }
   let last = '', h = '';
   for (const t of all) {
-    const at = ClaudeImport.listAt(t), fromClaude = ClaudeImport.isClaudeThread(t), pinned = pinnedThreads.has(t.id), g = pinned ? 'Pinned' : group(at, t);
-    if (g !== last) { h += `<li class="thread-group">${g}</li>`; last = g; }
+    const at = ClaudeImport.listAt(t), fromClaude = ClaudeImport.isClaudeThread(t), pinned = pinnedThreads.has(t.id), g = groupOf(t), shut = shutGroups.has(groupKey(g));
+    if (g !== last) { h += `<li class="thread-group"><button type="button" class="thread-group-btn" data-group="${esc(g)}" aria-expanded="${!shut}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg><span>${esc(g)}</span><span class="thread-group-n">${sizes.get(g)}</span></button></li>`; last = g; }
+    if (shut) continue;
     const kinds = [...new Set(t.entries.map((e) => e.kind))].slice(0, 6);
     h += `<li class="thread ${S.thread?.id === t.id ? 'on' : ''}" data-id="${esc(t.id)}"><button class="thread-open" aria-current="${S.thread?.id === t.id ? 'true' : 'false'}">
       <span class="thread-dots">${kinds.map((k) => `<i style="--accent:var(--c-${k})"></i>`).join('')}${remix?.activeThreads().has(t.id) ? '<i class="rx-live" style="--accent:var(--c-video)" title="Filming"></i>' : ''}</span>
@@ -4771,6 +4778,12 @@ $('#threadSpace').addEventListener('click', (ev) => {
 });
 $('#threadMenuDelete').onclick = () => deleteSavedThread(menuThreadId).catch((err) => { $('#threadMenuError').textContent = netText(err); });
 $('#threadList').addEventListener('click', async (ev) => {
+  const fold = ev.target.closest('[data-group]');
+  if (fold) {
+    const g = fold.dataset.group, k = groupKey(g); shutGroups.has(k) ? shutGroups.delete(k) : shutGroups.add(k);
+    LS.set(workspaceKey('threadGroupsShut'), [...shutGroups]); await renderThreads(true); // true: folding never starts the sorter
+    $$('[data-group]', $('#threadList')).find((b) => b.dataset.group === g)?.focus({ preventScroll: true }); return;
+  }
   const pin = ev.target.closest('[data-pin]');
   if (pin) {
     const id = pin.dataset.pin; pinnedThreads.has(id) ? pinnedThreads.delete(id) : pinnedThreads.add(id);
