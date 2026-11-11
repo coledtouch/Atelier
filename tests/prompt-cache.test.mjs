@@ -59,7 +59,7 @@ class FakeDate extends Date {
 }
 // persona / capabilities / SYS, and runPrompt / agentTools (what a thread turn's prompt and tool list state for its run),
 // with stubs for the app's state.
-const PROMPT_CONSTS = ['ACCURACY', 'NO_FABRICATION', 'TZ', 'tzOffset', 'dateLine', 'liveBrowser', 'historyWindow', 'RUN_BROWSER', 'B_TAB', 'B_EL', 'BROWSER_TOOLS', 'agentTools'];
+const PROMPT_CONSTS = ['ACCURACY', 'NO_FABRICATION', 'TZ', 'tzOffset', 'dateLine', 'liveBrowser', 'historyWindow', 'RUN_BROWSER', 'B_TAB', 'B_EL', 'BROWSER_TOOLS', 'MESSAGES_TOOLS', 'agentTools'];
 function promptRig({ memory = [], tester = null, vars: more = {} } = {}) {
   const vars = {
     Date: FakeDate, S: { settings: { name: 'Cole', about: '' }, tester }, ME: { bio: 'Builds Atelier.', learned: '', memory },
@@ -177,7 +177,7 @@ test('the browser’s reachability is held for the run: a relay flip between fol
   const r1 = v.runPrompt(turn(0), t);
   const s1 = v.SYS.code(r1), tools1 = v.agentTools(r1.browser).map((x) => x.function.name);
   assert.match(s1, /Connected right now: [^.]*their computer’s browser \(remotely\)/);
-  assert.equal(tools1.length, 8, 'gmail_search + the 7 browser tools');
+  assert.equal(tools1.length, 12, 'gmail_search + the 8 browser tools + the 3 Messages tools');
   v.REMOTE.online = false;
   const r2 = v.runPrompt(turn(1), t);
   assert.equal(r2.browser, 'remote');

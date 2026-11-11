@@ -65,7 +65,7 @@ function loadBackground({ manifest = SOURCE_MANIFEST, pages = {}, storage = {}, 
   const on = () => { const fns = []; return { fns, addListener: (f) => fns.push(f), removeListener: (f) => { const i = fns.indexOf(f); if (i >= 0) fns.splice(i, 1); } }; };
   const h = {
     events: { message: on(), connect: on(), removed: on(), startup: on(), installed: on(), alarm: on(), updated: on() },
-    windows: [], removedWindows: [], injected: [], sockets: [], storage: { ...storage }, session: structuredClone(session), pages,
+    windows: [], removedWindows: [], injected: [], sockets: [], storage: { ...storage }, session: structuredClone(session), pages, cdp: [], native: [], os: 'win', nativeMissing: false, nativeReply: null,
   };
   class FakeInput {}
   Object.defineProperty(FakeInput.prototype, 'value', { set(v) { this.typedValue = v; }, get() { return this.typedValue; } });
@@ -88,6 +88,13 @@ function loadBackground({ manifest = SOURCE_MANIFEST, pages = {}, storage = {}, 
       getManifest: () => structuredClone(manifest),
       getURL: (p) => `chrome-extension://${EXT_ID}/${p}`,
       onStartup: h.events.startup, onInstalled: h.events.installed, onMessage: h.events.message, onConnect: h.events.connect,
+      // The Atelier Messages helper on a Mac (native messaging), recorded in h.native.
+      sendNativeMessage: async (host, msg) => {
+        h.native.push([host, structuredClone(msg)]);
+        if (h.nativeMissing) throw new Error('Specified native messaging host not found.');
+        return h.nativeReply ? h.nativeReply(msg) : { ok: true, result: { op: msg.op } };
+      },
+      getPlatformInfo: async () => ({ os: h.os }),
     },
     alarms: { create() {}, onAlarm: h.events.alarm },
     storage: {
@@ -113,9 +120,16 @@ function loadBackground({ manifest = SOURCE_MANIFEST, pages = {}, storage = {}, 
         const page = pages[target.tabId];
         if (page.hold) await page.hold; // a page that isn't answering (e.g. showing a dialog box)
         ctx.document = page.document;
+        ctx.window = page.window;
         ctx.location = { href: page.url };
         return [{ result: func(...args) }];
       },
+    },
+    // chrome.debugger (1.4.0 sign-in): every call is recorded in h.cdp; a page's onCdp plays Chrome's password manager.
+    debugger: {
+      attach: async (t, v) => { if (pages[t.tabId]?.noDebug) throw new Error('Another debugger is already attached'); h.cdp.push(['attach', t.tabId, v]); },
+      detach: async (t) => { h.cdp.push(['detach', t.tabId]); },
+      sendCommand: async (t, method, params) => { h.cdp.push([method, structuredClone(params)]); pages[t.tabId]?.onCdp?.(method, params); return {}; },
     },
     windows: {
       create: windowsCreate || (async (opts) => { const w = { id: 500 + h.windows.length, focused: true, ...opts }; h.windows.push(w); return w; }),
@@ -1041,8 +1055,8 @@ test('confirm page: the tick is sent only with an Allow, and the page carries th
   assert.match(js, /port\.postMessage\(\{ answer: choice, \.\.\.\(always \? \{ always: true \} : \{\}\) \}\)/);
 });
 
-test('manifest: version 1.3.4, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
-  assert.equal(SOURCE_MANIFEST.version, '1.3.4');
+test('manifest: version 1.4.0, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
+  assert.equal(SOURCE_MANIFEST.version, '1.4.0');
   assert.ok(SOURCE_MANIFEST.description.length <= 132);
   assert.ok(Number(SOURCE_MANIFEST.minimum_chrome_version) >= 116);
 });
@@ -1055,8 +1069,8 @@ test('the app asks for the extension build it ships: MIN_EXT is the manifest ver
   const min = /const MIN_EXT = '([\d.]+)';/.exec(APP)?.[1];
   assert.equal(min, SOURCE_MANIFEST.version, 'public/app.js MIN_EXT = extension/manifest.json version');
   const olderExt = new Function(`const MIN_EXT = '${min}'; return ${/\nconst olderExt = ([^\n]+);\n/.exec(APP)[1]};`)();
-  for (const v of ['1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
-  for (const v of [min, '1.3.10', '1.4.0', '2.0.0']) assert.equal(olderExt(v), false, v);
+  for (const v of ['1.3.10', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
+  for (const v of [min, '1.4.1', '1.10.0', '2.0.0']) assert.equal(olderExt(v), false, v);
   assert.match(APP, /if \(olderExt\(d\.version\)\) setTimeout\(\(\) => toast\(`Atelier Browser has an update \(v\$\{MIN_EXT\}\)/);
 });
 
@@ -1069,7 +1083,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
   const prod = packExtension();
   const files = unzipSync(prod.zip);
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  assert.equal(manifest.version, '1.3.4');
+  assert.equal(manifest.version, '1.4.0');
   assert.deepEqual(manifest.content_scripts.map((c) => c.matches), [['https://atelier.ciprari.ai/*']]);
   assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
   assert.ok(!/localhost|127\.0\.0\.1/.test(strFromU8(files['manifest.json'])));
@@ -1078,7 +1092,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
 
   const dev = packExtension({ dev: true });
   assert.deepEqual(dev.manifest.content_scripts[0].matches, ['https://atelier.ciprari.ai/*', 'http://localhost:8787/*']);
-  assert.equal(dev.manifest.version, '1.3.4');
+  assert.equal(dev.manifest.version, '1.4.0');
   assert.deepEqual(SOURCE_MANIFEST.content_scripts[0].matches, dev.manifest.content_scripts[0].matches, 'the source keeps localhost for Load unpacked');
 });
 
@@ -1104,4 +1118,205 @@ test('the pack script knows it was started from the command line, also through a
 test('productionManifest refuses a manifest that would still reach a local host', () => {
   assert.throws(() => productionManifest({ ...SOURCE_MANIFEST, externally_connectable: { matches: ['http://localhost:8787/*'] } }), /local host/);
   assert.throws(() => productionManifest({ ...SOURCE_MANIFEST, content_scripts: [{ matches: ['http://localhost:8787/*'], js: ['bridge.js'] }] }), /no content script/);
+});
+
+// ── 1.4.0: sign in with the password Chrome already saved ──
+// A sign-in page. fill: 'click' (Chrome filled on load; the first real click releases it), 'pick' (Chrome fills only
+// once its list is picked with ArrowDown + Enter), 'never' (Chrome has nothing saved for this site).
+function loginPage({ fill = 'click', user = true, submit = true, password = true } = {}) {
+  const form = {};
+  const box = (top, h = 20) => () => ({ left: 10, top, width: h ? 100 : 0, height: h });
+  const mk = (tag, attrs, rect) => { const el = fakeEl({ tag, attrs }); el.getBoundingClientRect = rect; el.form = form; return el; };
+  const hidden = mk('INPUT', { type: 'hidden', name: 'csrf' }, box(0, 0));
+  const userEl = mk('INPUT', { type: 'email', name: 'email', 'aria-label': 'Email' }, box(100));
+  const pw = mk('INPUT', { type: 'password', name: 'password', 'aria-label': 'Password' }, box(140));
+  const btn = mk('BUTTON', { type: 'submit' }, box(180));
+  btn.innerText = 'Log in';
+  const inputs = [hidden, ...(user ? [userEl] : []), ...(password ? [pw] : [])];
+  const buttons = submit ? [btn] : [];
+  const all = [...inputs, ...buttons];
+  form.querySelectorAll = (sel) => (sel === 'button, input[type=submit]' ? buttons : []);
+  const listeners = [];
+  const page = { title: 'Login · Permits', url: 'https://permits.example.gov/login', elements: {}, userEl, pw, btn, listeners, submitted: 0, enters: [] };
+  page.window = {
+    addEventListener: (type, f) => listeners.push(f),
+    removeEventListener: (type, f) => { const i = listeners.indexOf(f); if (i >= 0) listeners.splice(i, 1); },
+  };
+  page.document = {
+    title: page.title,
+    querySelector(sel) {
+      const m = /^\[data-atelier-(login|i|c)="([^"]+)"\]$/.exec(sel);
+      return m ? all.find((el) => el.attrs[`data-atelier-${m[1]}`] === m[2]) ?? null : null;
+    },
+    querySelectorAll(sel) {
+      if (sel === 'input') return inputs;
+      if (sel === 'button, input[type=submit]') return buttons;
+      if (sel === '[data-atelier-login]') return all.filter((el) => 'data-atelier-login' in el.attrs);
+      if (sel === '[data-atelier-c]') return all.filter((el) => 'data-atelier-c' in el.attrs);
+      return [];
+    },
+    getElementById: () => null,
+  };
+  let listed = false;
+  page.onCdp = (method, p) => {
+    const up = method === 'Input.dispatchMouseEvent' && p.type === 'mouseReleased';
+    const key = method === 'Input.dispatchKeyEvent' && p.type === 'rawKeyDown' ? p.key : '';
+    if (up && p.y === 110 && fill === 'click') pw.value = 'hunter2';
+    if (key === 'ArrowDown' && fill === 'pick') listed = true;
+    if (key === 'Enter') {
+      // With Chrome's list showing, Chrome takes the Enter; otherwise the page gets it, unless the guard holds it.
+      if (listed) pw.value = 'hunter2';
+      else page.enters.push({ guarded: listeners.length > 0 });
+      listed = false;
+    }
+    if (up && p.y === 190) page.submitted++;
+  };
+  return page;
+}
+const mouseAt = (h) => h.cdp.filter(([m, p]) => m === 'Input.dispatchMouseEvent' && p.type === 'mouseReleased').map(([, p]) => [p.x, p.y]);
+const keysSent = (h) => h.cdp.filter(([m, p]) => m === 'Input.dispatchKeyEvent' && p.type === 'rawKeyDown').map(([, p]) => p.key);
+function signinRig(opts, storage = { noAsk: true }) {
+  const page = loginPage(opts);
+  const h = loadBackground({ pages: { 7: page }, storage });
+  h.run('TIMING.fill = 0');
+  return { h, page };
+}
+
+test('sign-in: a real click releases what Chrome filled, then Log in is clicked; the password never leaves the page', async () => {
+  const { h, page } = signinRig({ fill: 'click' });
+  const r = await h.local('signin', { tabId: 7 });
+  assert.ok(r.ok, r.error);
+  assert.equal(r.result.signedIn, 'submitted');
+  assert.doesNotMatch(JSON.stringify(r), /hunter2/);
+  assert.deepEqual(h.cdp[0], ['attach', 7, '1.3']);
+  assert.deepEqual(mouseAt(h), [[60, 110], [60, 190]], 'the email field, then Log in');
+  assert.deepEqual(keysSent(h), [], 'nothing typed, no list picked');
+  assert.equal(page.submitted, 1);
+  assert.deepEqual(h.cdp.at(-1), ['detach', 7]);
+  assert.ok(!h.cdp.some(([m]) => m === 'Input.insertText'), 'never inserts text');
+});
+
+test('sign-in: when Chrome only lists the saved login, ArrowDown + Enter picks it, with the Enter guard on meanwhile', async () => {
+  const { h, page } = signinRig({ fill: 'pick' });
+  const r = await h.local('signin', { tabId: 7 });
+  assert.ok(r.ok, r.error);
+  assert.deepEqual(keysSent(h), ['ArrowDown', 'Enter']);
+  assert.equal(page.submitted, 1);
+  assert.equal(page.listeners.length, 0, 'the guard is removed');
+  assert.deepEqual(page.enters, [], 'Chrome took the Enter');
+});
+
+test('sign-in: with nothing saved, nothing is submitted, the stray Enter is held from the page, and the debugger lets go', async () => {
+  const { h, page } = signinRig({ fill: 'never' });
+  const r = await h.local('signin', { tabId: 7 });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /didn’t fill a saved password/);
+  assert.equal(page.submitted, 0);
+  assert.deepEqual(page.enters, [{ guarded: true }], 'the page saw no unguarded Enter');
+  assert.equal(page.listeners.length, 0);
+  assert.deepEqual(h.cdp.at(-1), ['detach', 7]);
+});
+
+test('sign-in: no submit button → Enter in the filled password field; no password field → refused before anything runs', async () => {
+  const one = signinRig({ fill: 'click', submit: false });
+  const r = await one.h.local('signin', { tabId: 7 });
+  assert.ok(r.ok, r.error);
+  assert.equal(one.page.pw.focused, true);
+  assert.deepEqual(keysSent(one.h), ['Enter']);
+  const none = signinRig({ password: false });
+  const r2 = await none.h.local('signin', { tabId: 7 });
+  assert.match(r2.error, /No sign-in form/);
+  assert.deepEqual(none.h.cdp, []);
+  assert.equal(none.h.windows.length, 0);
+});
+
+test('sign-in asks first in the extension’s own window, naming the password field; a Deny leaves the tab alone', async () => {
+  const { h } = signinRig({ fill: 'click' }, {});
+  const reply = h.local('signin', { tabId: 7 });
+  await until(() => h.windows.length === 1, 'the confirmation window');
+  const page = confirmPage(h);
+  assert.equal(page.info.action, 'signin');
+  assert.equal(page.info.element.label, 'Password');
+  assert.equal(page.info.page.url, 'https://permits.example.gov/login');
+  page.send({ answer: 'deny' });
+  const r = await reply;
+  assert.match(r.error, /declined this sign-in/);
+  assert.deepEqual(h.cdp, []);
+});
+
+test('sign-in: the relay can ask for it; the manifest asks for debugger; the window says Atelier never sees the password', () => {
+  const h = loadBackground();
+  assert.ok(h.run('REMOTE_COMMANDS').includes('signin'));
+  assert.ok(SOURCE_MANIFEST.permissions.includes('debugger'));
+  assert.match(CONFIRM_JS, /Allow Atelier to sign in\?/);
+  assert.match(CONFIRM_JS, /Atelier never sees it\./);
+});
+
+// ── 1.4.0: Messages on a Mac, through the Atelier Messages helper ──
+test('messages: reads go straight to the helper with their limits clamped; an unknown op and a missing chat are refused', async () => {
+  const h = loadBackground();
+  assert.ok((await h.local('messages', { op: 'recent', limit: 900 })).ok);
+  assert.ok((await h.local('messages', { op: 'read', chat: 'iMessage;-;+16175550142', limit: 0 })).ok);
+  assert.deepEqual(h.native, [['ai.ciprari.atelier.messages', { op: 'recent', limit: 50 }], ['ai.ciprari.atelier.messages', { op: 'read', chat: 'iMessage;-;+16175550142', limit: 1 }]]);
+  assert.match((await h.local('messages', { op: 'read' })).error, /Pass chat/);
+  assert.match((await h.local('messages', { op: 'delete' })).error, /Unknown Messages action/);
+  assert.equal(h.native.length, 2);
+});
+
+test('messages: a send needs the owner’s OK in Atelier, then this computer’s Allow, before the helper is called', async () => {
+  const h = loadBackground();
+  assert.match((await h.local('messages', { op: 'send', to: '+16175550142', text: 'On my way' })).error, /needs the user’s approval/);
+  assert.equal(h.native.length, 0);
+  const reply = h.local('messages', { op: 'send', to: '+16175550142', text: 'On my way' }, APP, { approved: true });
+  await until(() => h.windows.length === 1, 'the confirmation window');
+  const page = confirmPage(h);
+  assert.equal(page.info.action, 'sms');
+  assert.equal(page.info.element.label, '+16175550142');
+  assert.equal(page.info.text, 'On my way');
+  page.send({ answer: 'allow' });
+  const r = await reply;
+  assert.ok(r.ok, r.error);
+  assert.deepEqual(h.native, [['ai.ciprari.atelier.messages', { op: 'send', to: '+16175550142', text: 'On my way' }]]);
+});
+
+test('messages: a Deny sends nothing; with "Don’t ask again" an approved send runs with no window; a blank or long text is refused', async () => {
+  const h = loadBackground();
+  const reply = h.local('messages', { op: 'send', to: '+16175550142', text: 'hi' }, APP, { approved: true });
+  await until(() => h.windows.length === 1, 'the confirmation window');
+  confirmPage(h).send({ answer: 'deny' });
+  assert.match((await reply).error, /declined this text message.*nothing was sent/);
+  assert.equal(h.native.length, 0);
+  const quiet = loadBackground({ storage: { noAsk: true } });
+  assert.ok((await quiet.local('messages', { op: 'send', to: 'pat@example.com', text: 'hi' }, APP, { approved: true })).ok);
+  assert.equal(quiet.windows.length, 0);
+  assert.equal(quiet.native.length, 1);
+  assert.match((await quiet.local('messages', { op: 'send', to: 'pat@example.com', text: '  ' }, APP, { approved: true })).error, /Pass to/);
+  assert.match((await quiet.local('messages', { op: 'send', to: 'pat@example.com', text: 'x'.repeat(2001) }, APP, { approved: true })).error, /over 2000/);
+  assert.equal(quiet.native.length, 1);
+});
+
+test('messages: no helper → how to set it up; a helper error passes through; status names the id and the helper on a Mac only', async () => {
+  const h = loadBackground();
+  h.nativeMissing = true;
+  assert.match((await h.local('messages', { op: 'recent' })).error, /Set up Messages/);
+  h.nativeMissing = false;
+  h.nativeReply = () => ({ ok: false, error: 'Chrome can’t read Messages yet. Give Google Chrome Full Disk Access.' });
+  assert.match((await h.local('messages', { op: 'recent' })).error, /Full Disk Access/);
+  h.nativeReply = null;
+  const pc = (await h.local('status', {})).result;
+  assert.equal(pc.mac, false); assert.equal(pc.messages, false); assert.equal(pc.id, EXT_ID);
+  const before = h.native.length;
+  assert.equal(h.native.length, before, 'no helper call off a Mac');
+  h.os = 'mac';
+  const mac = (await h.local('status', {})).result;
+  assert.equal(mac.mac, true); assert.equal(mac.messages, true);
+  assert.deepEqual(h.native.at(-1), ['ai.ciprari.atelier.messages', { op: 'ping' }]);
+});
+
+test('messages: the relay may carry it; the manifest asks for nativeMessaging; the window says what is sent', () => {
+  const h = loadBackground();
+  assert.ok(h.run('REMOTE_COMMANDS').includes('messages'));
+  assert.ok(SOURCE_MANIFEST.permissions.includes('nativeMessaging'));
+  assert.match(CONFIRM_JS, /Allow Atelier to send a text\?/);
+  assert.match(CONFIRM_JS, /if \(typing \|\| texting\) \{/);
 });
