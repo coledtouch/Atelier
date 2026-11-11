@@ -8,30 +8,30 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=103';
-import * as Sync from './sync.js?v=103';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=103';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=103';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=103';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=103';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=103';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=103';
-import { initLookup } from './lookup.js?v=103';
-import { createRemix } from './remix-app.js?v=103';
-import { sendMode, looksLikeQuestion } from './remix.js?v=103';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=103';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=103';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=103';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=103';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=103';
-import * as ClaudeImport from './claude-import.js?v=103';
-import { createFeedback } from './feedback.js?v=103';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=103';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=103';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=103';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=103';
-import { HUMANIZER } from './humanizer.js?v=103';
-import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=103';
+import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=104';
+import * as Sync from './sync.js?v=104';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=104';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=104';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=104';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=104';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=104';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=104';
+import { initLookup } from './lookup.js?v=104';
+import { createRemix } from './remix-app.js?v=104';
+import { sendMode, looksLikeQuestion } from './remix.js?v=104';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=104';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=104';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=104';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=104';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=104';
+import * as ClaudeImport from './claude-import.js?v=104';
+import { createFeedback } from './feedback.js?v=104';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=104';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=104';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=104';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=104';
+import { HUMANIZER } from './humanizer.js?v=104';
+import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=104';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -640,7 +640,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '103';
+const APP_BUILD = '104';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -2667,6 +2667,8 @@ async function runClaudeTool(name, args) {
 }
 // Reads that wait for the user's OK like a write: they load an address the model chose in the user's logged-in browser,
 // so the address itself could carry data out. Reading a tab that's already open (browser_read with tabId) doesn't.
+// Settings → Connections → Browser: the owner chose to let Atelier open and read pages without a card (this device).
+const browserUnasked = () => S.settings.browserUnasked === true && Boolean(S.settings.passcode);
 const asksFirst = (name, args) => name === 'browser_open' || (name === 'browser_read' && Boolean(args?.url));
 const urlHost = (u) => { try { return new URL(String(u)).host || String(u); } catch { return String(u); } };
 // A GitHub read of a repo none of your connected accounts owns (the owner part of owner/name isn't one of their logins)
@@ -2832,7 +2834,10 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
       const held = step.write ? '' : taintGates(taint, step.service) ? taint : '';
       const why = step.write ? '' : chatMark && worseTaint(held, chatMark) !== held ? 'shared-chat'
         : held || ((pageRead || titlesRead) && known === undefined ? 'page' : chatsRead && step.service !== 'claude' ? 'chats' : '');
-      if (!step.write && (e.untrusted || why || searched > 0 || asksFirst(step.name, args))) step.confirm = true;
+      // The owner's standing OK for looks in the browser (context.js browseUnasked): no card, and the relay is told it is
+      // approved. Clicks and typing are writes and still ask; so does every account tool after a page was read.
+      if (browseUnasked(step, { on: browserUnasked(), untrusted: Boolean(e.untrusted) })) step.auto = true;
+      else if (!step.write && (e.untrusted || why || searched > 0 || asksFirst(step.name, args))) step.confirm = true;
       if (searched > 0) step.afterWeb = true;
       if (why) step.taint = why;
       e.steps.push(step);
@@ -2843,7 +2848,7 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
         step.status = 'running'; repaint(e);
         try {
           return step.service === 'browser'
-            ? { ok: true, result: await extCall(step.name.replace('browser_', ''), step.args, 60000, step.write || step.confirm === true) }
+            ? { ok: true, result: await extCall(step.name.replace('browser_', ''), step.args, 60000, step.write || step.confirm === true || step.auto === true) }
             : step.service === 'claude' && ClaudeImport.TOOL_NAMES.has(step.name) ? await runClaudeTool(step.name, step.args)
             : await callTool(step.name, step.args, step.write);
         } catch (err) { if (err.name === 'AbortError') throw err; return { ok: false, error: err.message }; }
@@ -2868,7 +2873,7 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
         result = await exec();
         // An unasked look at a tab (known) that found it on another site: what came back never reaches the model, and the
         // look waits for the OK like any other read ('page'; the card names the site it found).
-        const away = result.ok && !step.confirm && known !== undefined && step.name !== 'browser_show' ? await movedTo(step.name, args.tabId, result.result, known) : '';
+        const away = result.ok && !step.confirm && !step.auto && known !== undefined && step.name !== 'browser_show' ? await movedTo(step.name, args.tabId, result.result, known) : '';
         if (away) {
           Object.assign(step, { confirm: true, taint: 'page', moved: away, status: 'awaiting' }); repaint(e); scrollDown(true);
           result = (await awaitApproval(step, signal)) ? await exec() : declined();
@@ -5806,7 +5811,7 @@ async function renderConnections() {
   if (seq !== connSeq) return;
   const browserState = EXT.ready ? `extension v${esc(EXT.version)} here${REMOTE.online ? ' · reachable from your other devices' : ' · pairing…'}`
     : REMOTE.online ? 'your computer’s browser is online' : 'offline — turn on your computer and open Chrome';
-  const rows = [connRow({ on: browserAvailable(), name: 'Browser', state: EXT.ready ? 'This browser' : REMOTE.online ? 'Online' : 'Offline', detail: browserState, action: EXT.ready || REMOTE.online ? '' : '<a class="chip" href="/atelier-browser.zip" download>Get extension</a>' })];
+  const rows = [connRow({ on: browserAvailable(), name: 'Browser', state: EXT.ready ? 'This browser' : REMOTE.online ? 'Online' : 'Offline', detail: browserState, action: `<span class="conn-acts"><a class="chip" href="/atelier-browser.zip" download>Get extension</a>${S.settings.passcode ? `<button type="button" class="chip${browserUnasked() ? ' on' : ''}" data-browser-unasked aria-pressed="${browserUnasked()}" title="Open and read pages in your browser without an approval card. Clicks and typing still ask.">Open pages unasked</button>` : ''}</span>` })];
   const rw = rwRow();
   rows.push(connRow({ key: 'runway', on: rw.on, name: 'Runway', state: esc(rw.state), detail: esc(rwBack ? rw.detail : 'checking credits…'), action: `<a class="chip" href="${RUNWAY_PORTAL}" target="_blank" rel="noopener">Developer portal</a>` }));
   for (const [k, name, how] of CONNECTORS) {
@@ -5837,6 +5842,14 @@ async function renderConnections() {
   drawn = true;
 }
 $('#connList').addEventListener('click', async (ev) => {
+  const un = ev.target.closest('[data-browser-unasked]');
+  if (un) {
+    const on = !browserUnasked();
+    if (on && !confirm('Atelier will open and read pages in your signed-in browser without asking first.\n\nA page it reads can try to steer it. It could then open another address and carry what it read with it.\n\nClicks, typing and anything in your accounts still ask. Turn this on?')) return;
+    S.settings.browserUnasked = on; saveSettings();
+    un.classList.toggle('on', on); un.setAttribute('aria-pressed', String(on));
+    return toast(on ? 'Atelier now opens and reads pages without asking' : 'Atelier asks before it opens a page again');
+  }
   const b = ev.target.closest('[data-conn]');
   if (!b) return;
   if (b.dataset.conn === 'gmail-on') {
