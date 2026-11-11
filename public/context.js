@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=103';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=104';
 
 export const CHAT_KINDS = ['ask', 'code'];
 // Earlier turns replayed (chat answers and notes alike): every one while a thread has fewer than HISTORY_TURNS +
@@ -373,3 +373,11 @@ const TAINT_NOTES = Object.freeze({
   'shared-chat': 'Asked after reading a Claude chat that holds a share or text from a link. That text can try to steer the assistant. So reading your accounts now waits for your OK.',
 });
 export const taintNote = (why) => (Object.hasOwn(TAINT_NOTES, why) ? TAINT_NOTES[why] : '');
+
+// Settings → Connections → Browser → "Open pages unasked" (owner, per device): a look in the owner's browser runs without
+// an approval card. That covers opening a page, reading one (open tab or by address), listing tabs and page controls,
+// and bringing a tab forward. It never covers a click or typing (a write), any tool outside the browser, or a turn
+// that began from a link or a share (untrusted): those ask as before. What a page says still counts as outside text,
+// so account tools keep waiting for the OK after one is read.
+export const browseUnasked = (step, { on = false, untrusted = false } = {}) =>
+  on === true && !untrusted && step?.service === 'browser' && step.write !== true;
