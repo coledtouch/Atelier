@@ -2,6 +2,9 @@
 // bridge.js) or from Atelier on another device (through the server relay).
 // Every click and every typing action first waits for the user's own OK in a window this extension opens itself
 // (confirm.html), whatever Atelier already approved, so a hijacked page or relay can never drive the browser silently.
+// Since 1.3.4 that window has "Don't ask again on this computer": ticked with an Allow, later clicks and typing here run
+// without the window (storage.local noAsk). Only that window can turn it on (no page and no relay command can); the
+// Atelier tab on this computer can turn asking back on (askAgain). Password and payment fields are refused either way.
 // Opening a page, and reading one by its address, run only with Atelier's own approval flag (the owner OK'd that step in
 // the app): the address the model chose loads signed in as the user, so it could carry data out. The server's relay
 // checks the same flag first (src/relay.js relayNeedsApproval); this is the last check.
@@ -251,8 +254,24 @@ async function popupWindow(url) {
   return chrome.windows.create(base);
 }
 
+// true once the user ticked "Don't ask again on this computer" in the confirmation window.
+async function asksNothing() {
+  try { return (await chrome.storage.local.get(['noAsk'])).noAsk === true; } catch { return false; }
+}
 async function confirmFirst(action, { tabId, element, text, submit }, via) {
   const path = via === 'remote' ? 'remote' : 'local';
+  // The user's standing OK on this computer: no window, no cooldown. The element is still found and marked, the page
+  // is still checked again before the action, and a password or payment field is still refused.
+  if (await asksNothing()) {
+    const token = crypto.randomUUID();
+    const [tab, target] = await withTimeout(Promise.all([
+      chrome.tabs.get(tabId),
+      inPage(tabId, pageElement, [element, 'describe', { token }]),
+    ]), TIMING.read, NOT_RESPONDING);
+    if (!target) throw new Error('Element not found — call browser_elements again (the page may have changed).');
+    if (action === 'type' && target.sensitive) throw new Error(REFUSED_FIELD);
+    return { url: tab.url, expect: { tag: target.tag, type: target.type, label: target.label }, token };
+  }
   const lane = (await cooldowns())[path];
   const wait = lane.until - Date.now();
   if (wait > 0) throw new Error(`A click or typing request on this computer was just declined or left unanswered, so Atelier Browser won’t ask again for ${Math.ceil(wait / 1000)} s and nothing was done. Check with the user before trying again.`);
@@ -317,7 +336,10 @@ chrome.runtime.onConnect.addListener((port) => {
       return;
     }
     if (!req || req.port !== port) return; // pings land here too: they only keep this worker awake
-    if (m?.answer === 'allow' || m?.answer === 'deny') req.answer(m.answer);
+    if (m?.answer !== 'allow' && m?.answer !== 'deny') return;
+    // "Don't ask again on this computer", ticked beside an Allow in this extension's own window: the only way it turns on.
+    if (m.answer === 'allow' && m.always === true) { try { chrome.storage.local.set({ noAsk: true }).catch(() => {}); } catch {} }
+    req.answer(m.answer);
   });
   port.onDisconnect.addListener(() => { if (asking?.port === port) asking.answer('closed'); });
 });
@@ -466,7 +488,12 @@ COMMANDS.pair = async ({ token, origin }) => {
 };
 COMMANDS.status = async () => {
   const { relayToken, relayOrigin } = await chrome.storage.local.get(['relayToken', 'relayOrigin']);
-  return { paired: Boolean(relayToken), origin: relayOrigin || null, connected: ws?.readyState === WebSocket.OPEN };
+  return { paired: Boolean(relayToken), origin: relayOrigin || null, connected: ws?.readyState === WebSocket.OPEN, asks: !(await asksNothing()) };
+};
+// Local-only: the Atelier tab on this computer turns the confirmation window back on. Nothing here can turn it off.
+COMMANDS.askAgain = async () => {
+  await chrome.storage.local.set({ noAsk: false });
+  return { asks: true };
 };
 
 // Reconnect whenever the service worker wakes: browser start, install/update, and a 1-minute alarm.

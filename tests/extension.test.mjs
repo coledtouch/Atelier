@@ -981,8 +981,68 @@ test('confirm.html: no inline script (MV3 extension pages forbid it), and the pa
 });
 
 // ── packing ──
-test('manifest: version 1.3.3, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
-  assert.equal(SOURCE_MANIFEST.version, '1.3.3');
+// ── 1.3.4: "Don't ask again on this computer" ──
+test('Allow with "Don’t ask again" ticked: that click runs, and later clicks and typing run with no window, locally and through the relay', async () => {
+  const pages = { 7: repoPage() }, h = loadBackground({ pages });
+  const first = h.local('click', { tabId: 7, element: 3 });
+  await until(() => h.windows.length === 1, 'the confirmation window');
+  confirmPage(h).send({ answer: 'allow', always: true });
+  assert.ok(!(await first).error, 'the click that was allowed runs');
+  assert.equal(h.storage.noAsk, true);
+  assert.equal(clicks(h).length, 1);
+
+  const again = await h.local('click', { tabId: 7, element: 3 });
+  assert.ok(!again.error); assert.equal(h.windows.length, 1, 'no second window'); assert.equal(clicks(h).length, 2);
+  const typed = await h.local('type', { tabId: 7, element: 4, text: 'hello', submit: false });
+  assert.ok(!typed.error); assert.equal(h.windows.length, 1); assert.equal(typings(h).length, 1);
+  assert.equal((await h.local('status', {})).result.asks, false);
+});
+
+test('with asking off, a password or payment field is still refused, a missing element still errors, and a changed page is still not clicked', async () => {
+  const pages = { 7: repoPage() }, h = loadBackground({ pages, storage: { noAsk: true } });
+  for (const element of [5, 6]) {
+    const r = await h.local('type', { tabId: 7, element, text: 'x' });
+    assert.match(r.error, /password|payment|sign-in|refus/i, `field ${element}`);
+  }
+  assert.equal(typings(h).length, 0); assert.equal(h.windows.length, 0);
+  assert.match((await h.local('click', { tabId: 7, element: 99 })).error, /Element not found/);
+  assert.equal(clicks(h).length, 0);
+});
+
+test('only an Allow from the extension’s own window turns asking off: a Deny with the tick, a page, and the relay cannot', async () => {
+  const pages = { 7: repoPage() }, h = loadBackground({ pages });
+  const p = h.local('click', { tabId: 7, element: 3 });
+  await until(() => h.windows.length === 1, 'the confirmation window');
+  confirmPage(h).send({ answer: 'deny', always: true });
+  assert.ok((await p).error); assert.notEqual(h.storage.noAsk, true);
+  // No command sets it: the page and the relay only have the commands below, and none of them writes noAsk = true.
+  for (const cmd of ['noAsk', 'setNoAsk', 'always', 'allowAlways']) assert.ok((await h.local(cmd, { on: true })).error, cmd);
+  assert.notEqual(h.storage.noAsk, true);
+  assert.ok(!h.run('REMOTE_COMMANDS').includes('askAgain'), 'the relay cannot reach askAgain either');
+  assert.equal((await h.local('status', {})).result.asks, true);
+});
+
+test('askAgain, from the Atelier tab on this computer, brings the window back', async () => {
+  const pages = { 7: repoPage() }, h = loadBackground({ pages, storage: { noAsk: true } });
+  assert.deepEqual((await h.local('askAgain', {})).result, { asks: true });
+  assert.equal(h.storage.noAsk, false);
+  const p = h.local('click', { tabId: 7, element: 3 });
+  await until(() => h.windows.length === 1, 'the confirmation window is back');
+  confirmPage(h).send({ answer: 'deny' });
+  assert.ok((await p).error);
+});
+
+test('confirm page: the tick is sent only with an Allow, and the page carries the checkbox', () => {
+  const html = readFileSync(new URL('../extension/confirm.html', import.meta.url), 'utf8');
+  assert.match(html, /<input type="checkbox" id="always" \/>/);
+  assert.match(html, /Don’t ask again on this computer\./);
+  const js = readFileSync(new URL('../extension/confirm.js', import.meta.url), 'utf8');
+  assert.match(js, /const always = choice === 'allow' && \$\('always'\)\?\.checked === true;/);
+  assert.match(js, /port\.postMessage\(\{ answer: choice, \.\.\.\(always \? \{ always: true \} : \{\}\) \}\)/);
+});
+
+test('manifest: version 1.3.4, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
+  assert.equal(SOURCE_MANIFEST.version, '1.3.4');
   assert.ok(SOURCE_MANIFEST.description.length <= 132);
   assert.ok(Number(SOURCE_MANIFEST.minimum_chrome_version) >= 116);
 });
@@ -995,7 +1055,7 @@ test('the app asks for the extension build it ships: MIN_EXT is the manifest ver
   const min = /const MIN_EXT = '([\d.]+)';/.exec(APP)?.[1];
   assert.equal(min, SOURCE_MANIFEST.version, 'public/app.js MIN_EXT = extension/manifest.json version');
   const olderExt = new Function(`const MIN_EXT = '${min}'; return ${/\nconst olderExt = ([^\n]+);\n/.exec(APP)[1]};`)();
-  for (const v of ['1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
+  for (const v of ['1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
   for (const v of [min, '1.3.10', '1.4.0', '2.0.0']) assert.equal(olderExt(v), false, v);
   assert.match(APP, /if \(olderExt\(d\.version\)\) setTimeout\(\(\) => toast\(`Atelier Browser has an update \(v\$\{MIN_EXT\}\)/);
 });
@@ -1009,7 +1069,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
   const prod = packExtension();
   const files = unzipSync(prod.zip);
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  assert.equal(manifest.version, '1.3.3');
+  assert.equal(manifest.version, '1.3.4');
   assert.deepEqual(manifest.content_scripts.map((c) => c.matches), [['https://atelier.ciprari.ai/*']]);
   assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
   assert.ok(!/localhost|127\.0\.0\.1/.test(strFromU8(files['manifest.json'])));
@@ -1018,7 +1078,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
 
   const dev = packExtension({ dev: true });
   assert.deepEqual(dev.manifest.content_scripts[0].matches, ['https://atelier.ciprari.ai/*', 'http://localhost:8787/*']);
-  assert.equal(dev.manifest.version, '1.3.3');
+  assert.equal(dev.manifest.version, '1.3.4');
   assert.deepEqual(SOURCE_MANIFEST.content_scripts[0].matches, dev.manifest.content_scripts[0].matches, 'the source keeps localhost for Load unpacked');
 });
 
