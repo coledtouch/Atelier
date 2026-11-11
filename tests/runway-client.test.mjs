@@ -1,6 +1,8 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+// The Worker sends a Seedance still as the first frame (v110): with no position Seedance takes it as a loose reference.
+const sent = (b) => (b?.model === 'seedance2_5' && typeof b.promptImage === 'string' ? { ...b, promptImage: [{ uri: b.promptImage, position: 'first' }] } : b);
 
 // public/runway.js — pure helpers, plus the task runner against a mocked /api/runway/* (no network, no real Runway).
 const R = await import('../public/runway.js');
@@ -107,7 +109,7 @@ test('Grok Imagine on Runway: requests the Worker accepts, the still as is, and 
   for (const [input, want] of cases) {
     const r = buildRequest(input);
     assert.deepEqual({ kind: r.kind, body: r.body }, want, JSON.stringify(input).slice(0, 80));
-    assert.deepEqual(S.shapeRequest(r.kind, r.body).body, r.body, 'the Worker sends it as built');
+    assert.deepEqual(S.shapeRequest(r.kind, r.body).body, sent(r.body), 'the Worker sends it as built');
   }
   assert.equal(buildRequest({ model: 'grok_imagine_1_5_lite', prompt: 'x'.repeat(3000), secs: 6 }).body.promptText.length, 2500, 'Grok takes 2,500 characters');
   assert.throws(() => buildRequest({ model: 'grok_imagine_1_5', prompt: '' }), (e) => e.status === 400 && /Describe the video/.test(e.message));
@@ -134,7 +136,7 @@ test('Seedance 2.5 on Runway: requests the Worker accepts, 16:9 / 9:16 at 720p, 
   for (const [input, want] of cases) {
     const r = buildRequest(input);
     assert.deepEqual({ kind: r.kind, body: r.body }, want, JSON.stringify(input).slice(0, 80));
-    assert.deepEqual(S.shapeRequest(r.kind, r.body).body, r.body, 'the Worker sends it as built');
+    assert.deepEqual(S.shapeRequest(r.kind, r.body).body, sent(r.body), 'the Worker sends it as built');
     assert.equal(r.resolution, S.shapeRequest(r.kind, r.body).resolution);
   }
   assert.equal(buildRequest({ model: 'seedance2_5', prompt: 'x'.repeat(16000), secs: 6 }).body.promptText.length, 15000, 'Seedance takes 15,000 characters');
@@ -292,7 +294,7 @@ test('Seedance 2.5: a still outside Runway’s 0.4–4 is centre-cut into it bef
       assert.ok(cut.w / cut.h >= 0.4 && cut.w / cut.h <= 4 && Math.max(cut.w, cut.h) <= 2048, `${cut.w}×${cut.h}`);
       const r = buildRequest({ model: 'seedance2_5', prompt: 'x', still: cut.src, stillSize: { w: cut.w, h: cut.h }, ratio: cut.ratio, aspect, secs: 6 });
       assert.equal(r.body.ratio, ratio, `${w}×${h} ${aspect}`);
-      assert.deepEqual(S.shapeRequest(r.kind, r.body).body, r.body);
+      assert.deepEqual(S.shapeRequest(r.kind, r.body).body, sent(r.body));
     }
     size = [1600, 900]; cuts.length = 0;
     assert.deepEqual(await cropStill(PNG, 'seedance2_5'), { src: PNG, ratio: null, w: 1600, h: 900 });

@@ -8,30 +8,30 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=108';
-import * as Sync from './sync.js?v=108';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=108';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=108';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=108';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=108';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=108';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=108';
-import { initLookup } from './lookup.js?v=108';
-import { createRemix } from './remix-app.js?v=108';
-import { sendMode, looksLikeQuestion } from './remix.js?v=108';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=108';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=108';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=108';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=108';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=108';
-import * as ClaudeImport from './claude-import.js?v=108';
-import { createFeedback } from './feedback.js?v=108';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=108';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=108';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=108';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=108';
-import { HUMANIZER } from './humanizer.js?v=108';
-import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=108';
+import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=110';
+import * as Sync from './sync.js?v=110';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=110';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=110';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=110';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=110';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=110';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=110';
+import { initLookup } from './lookup.js?v=110';
+import { createRemix } from './remix-app.js?v=110';
+import { sendMode, looksLikeQuestion } from './remix.js?v=110';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=110';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=110';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=110';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=110';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=110';
+import * as ClaudeImport from './claude-import.js?v=110';
+import { createFeedback } from './feedback.js?v=110';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=110';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=110';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=110';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=110';
+import { HUMANIZER } from './humanizer.js?v=110';
+import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=110';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -640,7 +640,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '108';
+const APP_BUILD = '110';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -1276,6 +1276,9 @@ Rules:
 When asked to change an existing app, return the FULL updated file, and keep its localStorage keys and data format (or migrate the old format) so what the user saved still loads.`,
   enhanceImage: () => `You rewrite short ideas into rich prompts for a text-to-image model. Describe subject, setting, composition, lighting, lens/medium and mood in one flowing paragraph under 70 words. Output only the final prompt wrapped in <prompt></prompt> tags — no drafts, notes or reasoning.`,
   enhanceVideo: () => `You rewrite a scene idea into a prompt for a text-to-video model generating a 4-second shot. Describe the subject, setting, camera movement, lighting and the motion that happens, in one flowing paragraph under 70 words. Output only the final prompt wrapped in <prompt></prompt> tags — no drafts, notes or reasoning.`,
+  // Image → video: the rewriter never sees the picture, so it must not describe what is in it (v110: a Chihuahua
+  // came back as a golden retriever on a porch). The model takes the look from the still; the prompt adds motion.
+  enhanceStill: () => `You rewrite a request to animate a photo into a prompt for an image-to-video model. The photo is the first frame. You cannot see it. Never name a breed, species, color, person, place or object that the request doesn't name. Call the subject what the request calls it, like "the dog". Describe only the motion, the camera movement and the mood, under 50 words. Output only the final prompt wrapped in <prompt></prompt> tags.`,
   title: () => `Summarize the user's request as a 2-5 word title. Output only the title wrapped in <title></title> tags.`,
   plan: () => `Split the user's request into the separate deliverables it asks for.
 Kinds: "ask" (a written answer, explanation, caption, email, plan…), "image" (a picture to generate), "video" (a short video clip to generate), "code" (code to write), "ideas" (a list of ideas), "build" (an interactive web app).
@@ -2992,7 +2995,7 @@ async function enhance(e, kind, signal) {
   try {
     const raw = await completeChat({
       model: modelFor('fast'), role: 'fast', signal, temperature: 0.8, max_tokens: 1200, extra: noThink,
-      messages: [{ role: 'system', content: SYS[kind === 'video' ? 'enhanceVideo' : 'enhanceImage']() }, { role: 'user', content: e.prompt }],
+      messages: [{ role: 'system', content: SYS[kind === 'video' ? (e.images?.length ? 'enhanceStill' : 'enhanceVideo') : 'enhanceImage']() }, { role: 'user', content: e.prompt }],
     });
     const p = helperAnswer(raw, 'prompt', 110);
     if (p.length > 10) { e.enhanced = p; return p; }

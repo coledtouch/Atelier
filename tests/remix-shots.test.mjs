@@ -1,5 +1,7 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+// The Worker sends a Seedance still as the first frame (v110): with no position Seedance takes it as a loose reference.
+const sent = (b) => (b?.model === 'seedance2_5' && typeof b.promptImage === 'string' ? { ...b, promptImage: [{ uri: b.promptImage, position: 'first' }] } : b);
 
 // public/remix-shots.js — filming remix inserts with Gemini Omni (/api/omni/*, through public/omni.js) and Runway
 // (/api/runway/*), against mocked responses only. The money rule under test: only a definitive answer is ever retried
@@ -249,7 +251,7 @@ test('Grok Imagine on Runway: a 16:9 / 9:16 frame as is; a still → auto_720p (
     assert.equal(text.runway.kind, 'text_to_video');
     if (id.endsWith('lite')) assert.deepEqual([still.runway.body.ratio, text.runway.body.ratio], ['auto_720p', '720:1280']);
     else assert.deepEqual([still.runway.body.ratio, still.runway.body.resolution, text.runway.body.ratio], [undefined, '720p', '9:16']);
-    for (const r of [still, text]) assert.deepEqual(W.shapeRequest(r.runway.kind, r.runway.body).body, r.runway.body, 'the Worker sends it as built');
+    for (const r of [still, text]) assert.deepEqual(W.shapeRequest(r.runway.kind, r.runway.body).body, sent(r.runway.body), 'the Worker sends it as built');
   }
 });
 
@@ -263,7 +265,7 @@ test('Seedance 2.5 on Runway: a 16:9 / 9:16 frame as is; still or text, any whol
   const text = S.shotRequest({ prompt: 'p', camera: 'static', seconds: 7 }, { model: id, seconds: 7, out: { w: 1920, h: 1080 } });
   assert.deepEqual([still.runway.kind, still.runway.body.model, still.runway.body.ratio, still.runway.body.duration], ['image_to_video', 'seedance2_5', '720:1280', 5]);
   assert.deepEqual([text.runway.kind, text.runway.body.ratio, text.runway.body.duration], ['text_to_video', '1280:720', 7]);
-  for (const r of [still, text]) assert.deepEqual(W.shapeRequest(r.runway.kind, r.runway.body).body, r.runway.body, 'the Worker sends it as built');
+  for (const r of [still, text]) assert.deepEqual(W.shapeRequest(r.runway.kind, r.runway.body).body, sent(r.runway.body), 'the Worker sends it as built');
 });
 
 // ── Runway (owner only) through public/runway.js, so the mock stands in for the global fetch ──
