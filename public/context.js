@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=105';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=106';
 
 export const CHAT_KINDS = ['ask', 'code'];
 // Earlier turns replayed (chat answers and notes alike): every one while a thread has fewer than HISTORY_TURNS +
@@ -391,3 +391,20 @@ export const readUnasked = (step, { on = false, untrusted = false } = {}) =>
 // off; a web address the model chose (browser_open, browser_read by address) is the way out. With all three at once the
 // step asks, whatever the settings say. Web search, the other way out, is already withdrawn once account data is read.
 export const leavesWithData = ({ wayOut = false, outside = false, data = false } = {}) => Boolean(wayOut && outside && data);
+
+// A thread the accounts agent is already working in: the turn before this one (the latest Ask or Code entry) was the
+// agent's. A follow-up with no account or browser word in it ("yes, do that", "open the first one") then stays with the
+// tools. Before v106 it went to a plain chat model, which answered as if it had no Gmail or browser at all.
+// prior: the thread's entries before this turn.
+export function agentThread(prior) {
+  for (let i = (prior?.length || 0) - 1; i >= 0; i--) {
+    const x = prior[i];
+    if (x?.kind === 'ask' || x?.kind === 'code') return Array.isArray(x.steps) || /accounts agent/.test(x.meta?.note || '');
+  }
+  return false;
+}
+
+// Settings → Connections → Approvals → "Approve everything" (owner, per device): every step the agent takes runs with no
+// approval card, writes included (send, post, pay, change, click, type), and the way-out stop is off too. The owner asked
+// for this knowing a page or an email can steer the assistant. One thing stays: a turn that began from a link or a share.
+export const approvesAll = ({ on = false, untrusted = false } = {}) => on === true && !untrusted;

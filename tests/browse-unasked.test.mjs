@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { browseUnasked, readUnasked, leavesWithData } from '../public/context.js';
+import { browseUnasked, readUnasked, leavesWithData, approvesAll } from '../public/context.js';
 
 // v104: Settings → Connections → Browser → "Open pages unasked". Looks in the owner's browser run without a card.
 test('only a look in the browser, with the setting on, on a turn that did not start from outside text', () => {
@@ -18,7 +18,7 @@ test('only a look in the browser, with the setting on, on a turn that did not st
 test('app.js: the setting is the owner\'s, the step is sent as approved, and the tab-moved re-ask is skipped only for it', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /const browserUnasked = \(\) => S\.settings\.browserUnasked === true && Boolean\(S\.settings\.passcode\);/);
-  assert.match(app, /if \(!leaving && \(browseUnasked\(step, \{ \.\.\.standing, on: browserUnasked\(\) \}\) \|\| readUnasked\(step, \{ \.\.\.standing, on: accountsUnasked\(\) \}\)\)\) step\.auto = true;\s+else if \(!step\.write && \(e\.untrusted \|\| why \|\| searched > 0 \|\| asksFirst\(step\.name, args\)\)\) step\.confirm = true;/);
+  assert.match(app, /if \(approvesAll\(\{ \.\.\.standing, on: approveAll\(\) \}\) \|\| \(!leaving && \(browseUnasked\(step, \{ \.\.\.standing, on: browserUnasked\(\) \}\) \|\| readUnasked\(step, \{ \.\.\.standing, on: accountsUnasked\(\) \}\)\)\)\) step\.auto = true;\s+else if \(!step\.write && \(e\.untrusted \|\| why \|\| searched > 0 \|\| asksFirst\(step\.name, args\)\)\) step\.confirm = true;/);
   assert.match(app, /step\.write \|\| step\.confirm === true \|\| step\.auto === true\)/, 'the relay and the extension get approved: true');
   assert.match(app, /!step\.confirm && !step\.auto && known !== undefined/);
   assert.match(app, /if \(on && !confirm\('Atelier will open and read pages in your signed-in browser without asking first\./, 'turning it on asks once, with the risk');
@@ -50,4 +50,21 @@ test('app.js: the way-out check reads the run and the thread; the account settin
   assert.match(app, /const accountsUnasked = \(\) => S\.settings\.accountsUnasked === true && Boolean\(S\.settings\.passcode\);/);
   assert.match(app, /if \(on && !confirm\('Atelier will read your connected accounts without asking first/);
   assert.doesNotMatch(app, /DEFAULT_SETTINGS = \{[^}]*accountsUnasked/s);
+});
+
+// v106: Settings → Connections → Approvals → "Approve everything": no card for any step, writes included.
+test('Approve everything is on only by a real true, and never for a turn that began from a link or a share', () => {
+  assert.equal(approvesAll({ on: true, untrusted: false }), true);
+  assert.equal(approvesAll({ on: true, untrusted: true }), false);
+  for (const off of [false, undefined, null, 'true', 1]) assert.equal(approvesAll({ on: off }), false);
+  assert.equal(approvesAll(), false);
+});
+
+test('app.js: an approved-everything step skips the card, writes included; the setting is the owner\'s, off by default, and asks once', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const approveAll = \(\) => S\.settings\.approveAll === true && Boolean\(S\.settings\.passcode\);/);
+  assert.match(app, /if \(\(step\.write \|\| step\.confirm\) && !step\.auto\) \{/);
+  assert.match(app, /if \(step\.write\) step\.approved = true;/, 'a write is still marked approved before it runs');
+  assert.match(app, /if \(on && !confirm\('Atelier will act without asking first: send email, post, change settings, move money, click and type\./);
+  assert.doesNotMatch(app, /DEFAULT_SETTINGS = \{[^}]*approveAll/s);
 });

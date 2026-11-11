@@ -8,30 +8,30 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=105';
-import * as Sync from './sync.js?v=105';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=105';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=105';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=105';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=105';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=105';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=105';
-import { initLookup } from './lookup.js?v=105';
-import { createRemix } from './remix-app.js?v=105';
-import { sendMode, looksLikeQuestion } from './remix.js?v=105';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=105';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=105';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=105';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=105';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=105';
-import * as ClaudeImport from './claude-import.js?v=105';
-import { createFeedback } from './feedback.js?v=105';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=105';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=105';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=105';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=105';
-import { HUMANIZER } from './humanizer.js?v=105';
-import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=105';
+import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=106';
+import * as Sync from './sync.js?v=106';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=106';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=106';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=106';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=106';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=106';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=106';
+import { initLookup } from './lookup.js?v=106';
+import { createRemix } from './remix-app.js?v=106';
+import { sendMode, looksLikeQuestion } from './remix.js?v=106';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=106';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=106';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=106';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=106';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=106';
+import * as ClaudeImport from './claude-import.js?v=106';
+import { createFeedback } from './feedback.js?v=106';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=106';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=106';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=106';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=106';
+import { HUMANIZER } from './humanizer.js?v=106';
+import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=106';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -640,7 +640,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '105';
+const APP_BUILD = '106';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -2381,7 +2381,7 @@ async function runChat(e, signal, thread = S.thread) {
   // answered as plain chat, and the meta line says how to use the tools on purpose. Routing reads the browser as the
   // run's system prompt states it (runPrompt), so a request the prompt says the browser can take reaches the tools.
   const run = runPrompt(e, thread);
-  const agent = !hasImg && wantsAgent(e, run.browser);
+  const agent = !hasImg && wantsAgent(e, run.browser, prior);
   const toolsOff = agent && e.untrusted ? `${e.untrusted === 'link' ? 'text from a link' : 'shared content'} · accounts off this turn · ask without it to use them` : '';
   const route = followUpRoute({ hasImg, ctx: ctx?.kind, agent: agent && !e.untrusted, web: wantWeb, webToggle: wantWeb && Boolean(e.params?.web),
     about: ABOUT_MEDIA.test(e.prompt), asksWeb: ASKS_WEB.test(e.prompt) });
@@ -2651,7 +2651,8 @@ function refreshClaudeCount() {
 // browser: whether to offer the browser tools — a thread turn passes its run's (runPrompt), so the tool list (the front
 // of the agent's cached prefix) never flips with the relay status mid-run; the settings screens read it live.
 const agentTools = (browser = liveBrowser()) => (S.tester ? [] : [...TOOLS.list, ...(browser ? BROWSER_TOOLS : []), ...(claudeChats ? ClaudeImport.CLAUDE_TOOLS : [])]);
-const wantsAgent = (e, browser = liveBrowser()) => e.params?.accountAccess !== 'off' && agentTools(browser).length > 0 && (e.params?.tools || AGENT_HINT.test(e.prompt) || (Boolean(browser) && BROWSER_HINT.test(e.prompt)) || (claudeChats > 0 && CLAUDE_HINT.test(e.prompt)));
+// prior: the thread's entries before this turn. A follow-up in a thread the agent is working in stays with it (agentThread).
+const wantsAgent = (e, browser = liveBrowser(), prior = []) => e.params?.accountAccess !== 'off' && agentTools(browser).length > 0 && (e.params?.tools || agentThread(prior) || AGENT_HINT.test(e.prompt) || (Boolean(browser) && BROWSER_HINT.test(e.prompt)) || (claudeChats > 0 && CLAUDE_HINT.test(e.prompt)));
 // claude_history_search / claude_history_read over this device's imported chats (the open one as it is on screen).
 async function runClaudeTool(name, args) {
   if (S.tester) return { ok: false, error: 'Not available.' };
@@ -2671,6 +2672,8 @@ async function runClaudeTool(name, args) {
 const browserUnasked = () => S.settings.browserUnasked === true && Boolean(S.settings.passcode);
 // Settings → Connections → Approvals: the owner chose to let Atelier read his connected accounts without a card.
 const accountsUnasked = () => S.settings.accountsUnasked === true && Boolean(S.settings.passcode);
+// Settings → Connections → Approvals: the owner chose to let Atelier act with no approval at all, writes included.
+const approveAll = () => S.settings.approveAll === true && Boolean(S.settings.passcode);
 const asksFirst = (name, args) => name === 'browser_open' || (name === 'browser_read' && Boolean(args?.url));
 const urlHost = (u) => { try { return new URL(String(u)).host || String(u); } catch { return String(u); } };
 // A GitHub read of a repo none of your connected accounts owns (the owner part of owner/name isn't one of their logins)
@@ -2844,7 +2847,8 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
       // (leavesWithData): that is the way data could leave, and it keeps its card whatever the settings say.
       const leaving = leavesWithData({ wayOut: asksFirst(step.name, args), outside: Boolean(taint || pageRead || titlesRead || chatsRead || searched > 0), data: accountRead || dataBefore });
       const standing = { untrusted: Boolean(e.untrusted) };
-      if (!leaving && (browseUnasked(step, { ...standing, on: browserUnasked() }) || readUnasked(step, { ...standing, on: accountsUnasked() }))) step.auto = true;
+      // "Approve everything" (approvesAll) covers every step, writes and the way-out stop included.
+      if (approvesAll({ ...standing, on: approveAll() }) || (!leaving && (browseUnasked(step, { ...standing, on: browserUnasked() }) || readUnasked(step, { ...standing, on: accountsUnasked() })))) step.auto = true;
       else if (!step.write && (e.untrusted || why || searched > 0 || asksFirst(step.name, args))) step.confirm = true;
       if (searched > 0) step.afterWeb = true;
       if (why) step.taint = why;
@@ -2864,7 +2868,7 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
       let result;
       // A Gmail draft or send: the full address of the mailbox it uses goes in its account, and the card names it.
       let from = writesMail(step.name) ? pinMailbox(step.args) : null;
-      if (step.write || step.confirm) {
+      if ((step.write || step.confirm) && !step.auto) { // step.auto: the owner's standing OK, so no card
         if (step.service === 'browser' && step.write) step.target = await extCall('describe', { tabId: args.tabId, element: args.element }).catch(() => null);
         step.status = 'awaiting'; repaint(e); scrollDown(true);
         if (!(await awaitApproval(step, signal))) result = declined();
@@ -5821,7 +5825,7 @@ async function renderConnections() {
     : REMOTE.online ? 'your computer’s browser is online' : 'offline — turn on your computer and open Chrome';
   const rows = [];
   // The owner's standing approvals for reads (this device). Writes are never covered.
-  if (S.settings.passcode) rows.push(connRow({ key: 'approvals', on: true, name: 'Approvals', state: 'Writes always ask', detail: 'Sending, posting, clicking and typing always ask. After a web page or a search, account reads ask too. Turn that off here.', action: `<button type="button" class="chip${accountsUnasked() ? ' on' : ''}" data-accounts-unasked aria-pressed="${accountsUnasked()}" title="Read your connected accounts without an approval card. Sending and changing things still ask.">Read accounts unasked</button>` }));
+  if (S.settings.passcode) rows.push(connRow({ key: 'approvals', on: true, name: 'Approvals', state: approveAll() ? 'Nothing asks' : 'Writes ask', detail: approveAll() ? 'Atelier sends, posts, pays, clicks and types without asking first.' : 'Sending, posting, clicking and typing ask. After a web page or a search, account reads ask too. Change either here.', action: `<span class="conn-acts"><button type="button" class="chip${approveAll() ? ' on' : ''}" data-approve-all aria-pressed="${approveAll()}" title="Run every step without an approval card: sending, posting, payments, clicks and typing.">Approve everything</button><button type="button" class="chip${accountsUnasked() ? ' on' : ''}" data-accounts-unasked aria-pressed="${accountsUnasked()}" title="Read your connected accounts without an approval card. Sending and changing things still ask.">Read accounts unasked</button></span>` }));
   rows.push(connRow({ on: browserAvailable(), name: 'Browser', state: EXT.ready ? 'This browser' : REMOTE.online ? 'Online' : 'Offline', detail: browserState, action: `<span class="conn-acts"><a class="chip" href="/atelier-browser.zip" download>Get extension</a>${S.settings.passcode ? `<button type="button" class="chip${browserUnasked() ? ' on' : ''}" data-browser-unasked aria-pressed="${browserUnasked()}" title="Open and read pages in your browser without an approval card. Clicks and typing still ask.">Open pages unasked</button>` : ''}</span>` }));
   const rw = rwRow();
   rows.push(connRow({ key: 'runway', on: rw.on, name: 'Runway', state: esc(rw.state), detail: esc(rwBack ? rw.detail : 'checking credits…'), action: `<a class="chip" href="${RUNWAY_PORTAL}" target="_blank" rel="noopener">Developer portal</a>` }));
@@ -5860,6 +5864,14 @@ $('#connList').addEventListener('click', async (ev) => {
     S.settings.browserUnasked = on; saveSettings();
     un.classList.toggle('on', on); un.setAttribute('aria-pressed', String(on));
     return toast(on ? 'Atelier now opens and reads pages without asking' : 'Atelier asks before it opens a page again');
+  }
+  const all = ev.target.closest('[data-approve-all]');
+  if (all) {
+    const on = !approveAll();
+    if (on && !confirm('Atelier will act without asking first: send email, post, change settings, move money, click and type.\n\nA web page or an email it reads can try to steer it. With this on, nothing checks that before it acts as you.\n\nYou can turn it off here at any time. Turn this on?')) return;
+    S.settings.approveAll = on; saveSettings();
+    toast(on ? 'Atelier now acts without asking' : 'Atelier asks before it sends, posts or clicks again');
+    return renderConnections();
   }
   const ac = ev.target.closest('[data-accounts-unasked]');
   if (ac) {
