@@ -140,6 +140,12 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
 #composer.options-open > .options:empty { display: none; }
 .composer-context { padding: 0 16px 9px; }
 .composer-context:has(.context-chips:empty) { display: none; }
+/* Folded composer (app.js syncCompact): a small screen with a thread open keeps only the prompt row, so the conversation
+   has the screen. The mode button (current mode's icon, in its colour) opens the rest; so does tapping the prompt. */
+.composer-mode { display: none; color: var(--accent); }
+#composer.compact > :is(.modes, .composer-controls, .composer-context, .options) { display: none; }
+#composer.compact .composer-mode { display: grid; }
+#composer.compact .composer-row { padding-block: 6px; }
 .context-chips { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .context-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; max-width: 100%; padding: 3px 8px; border: 1px solid var(--line); border-radius: 99px; color: var(--ink-2); font: 400 10px/1.35 var(--sans); overflow-wrap: anywhere; }
 .context-chip svg { flex: none; width: 12px; height: 12px; }
