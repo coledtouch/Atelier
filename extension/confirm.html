@@ -31,6 +31,8 @@
     .typed pre { margin: 0; padding: 10px 12px; max-height: 120px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--warn-bg); border-radius: 8px; font: 13px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; }
     .typed p { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
     .note { margin: 0; font-size: 12px; color: var(--muted); }
+    .always { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--muted); cursor: pointer; }
+    .always input { margin: 2px 0 0; }
     /* Sticky, so Deny and Allow stay in view while a tall request opens at its top. */
     .foot { margin-top: auto; display: flex; align-items: center; gap: 10px; position: sticky; bottom: 0; padding: 8px 0; background: var(--bg); }
     .timer { flex: 1; font-size: 12px; color: var(--muted); }
@@ -58,6 +60,7 @@
       <p id="more" hidden></p>
     </section>
     <p class="note">Only allow this if you asked Atelier to do it. Nothing happens unless you choose Allow.</p>
+    <label class="always"><input type="checkbox" id="always" /><span>Don’t ask again on this computer. Atelier then clicks and types here without this window. Turn it back on in Atelier’s Settings, under Connections.</span></label>
     <div class="foot">
       <span class="timer" id="timer"></span>
       <button type="button" id="deny">Deny</button>

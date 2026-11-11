@@ -89,7 +89,9 @@ function finish(message) {
 function answer(choice) {
   if (done) return;
   if (!info) { window.close(); return; } // nothing shown yet: closing the window refuses
-  try { port.postMessage({ answer: choice }); } catch {}
+  // "Don't ask again on this computer" counts only with an Allow.
+  const always = choice === 'allow' && $('always')?.checked === true;
+  try { port.postMessage({ answer: choice, ...(always ? { always: true } : {}) }); } catch {}
   finish(choice === 'allow' ? 'Allowed.' : 'Denied.');
 }
 
