@@ -259,7 +259,12 @@ test('one network gets at most 3 new unverified reports an hour (kept only as a 
   const nets = L.shim.db.prepare('SELECT net FROM client_error_nets').all().map((r) => r.net);
   assert.ok(nets.length >= 2 && nets.every((n) => /^[0-9a-f]{32}$/.test(n)), 'a keyed hash, never the address');
   assert.ok(!JSON.stringify(L.shim.db.prepare('SELECT * FROM client_error_nets').all()).includes('203.0.113.7'));
-  assert.ok(!L.shim.db.prepare("SELECT v FROM config WHERE k = 'err_net_key'").get().v.includes('203'), 'its key is random');
+  // The key is 32 random bytes as hex, and another Ledger draws its own. (Not "has no 203 in it": about 1 random key in 67 does.)
+  const netKey = (ledger) => ledger.shim.db.prepare("SELECT v FROM config WHERE k = 'err_net_key'").get().v;
+  assert.match(netKey(L), /^[0-9a-f]{64}$/, 'its key is random');
+  const other = makeEnv({ testers: false, ERR_LIMIT: limiter() });
+  await post(other.env, REPORT({ line: 10 }));
+  assert.notEqual(netKey(other.L), netKey(L), 'each Ledger has its own key');
   assert.equal((await L.ledger.roster()).config.err_net_key, undefined, 'the key never leaves the Ledger');
   // Only the current hour's counts are kept (v91 review: the previous hour's row was never read, and with the 10-minute
   // alarm it outlived the privacy page's "at most two hours"): they stay through their hour, and the first alarm or
