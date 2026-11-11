@@ -648,7 +648,7 @@ test('platform classes: iOS Home Screen, iOS Safari, the Android TWA (and after 
 
 test('sw.js caching is unaffected: it never answers /sw.js (the repair probe) or /api/client-error, and activate still drops only old atelier-v caches', async () => {
   const handlers = {}, fetched = [], deleted = [];
-  vm.runInNewContext(SW, { URL, Response, location: { origin: ORIGIN },
+  vm.runInNewContext(SW, { URL, Response, setTimeout, location: { origin: ORIGIN },
     self: { addEventListener: (n, fn) => { handlers[n] = fn; }, clients: { claim: async () => {} }, skipWaiting: async () => {} },
     caches: { open: async () => ({ match: async () => new Response('cached'), put: async () => {}, addAll: async () => {} }), keys: async () => ['atelier-v1', 'atelier-share', 'other'], delete: async (k) => deleted.push(k) },
     fetch: async (r) => { fetched.push(r); return new Response('network'); } });

@@ -6,7 +6,7 @@
 // One step does all three:  node scripts/bump-version.mjs <n>
 //   (the same by hand: sed -i -E "s/atelier-v[0-9]+'/atelier-v<n>'/" public/sw.js && sed -i -E "s/\?v=[0-9]+/?v=<n>/g" public/index.html public/*.js)
 // tests/service-worker.test.mjs fails if they disagree or a module the app loads isn't precached at its ?v= URL.
-const VERSION = 'atelier-v97';
+const VERSION = 'atelier-v98';
 const V = VERSION.slice('atelier-v'.length);
 // Modules are listed at the exact ?v=<n> URLs they are imported by (PATHS drops the query for the fetch guard below).
 // No '/index.html': the live site answers it with a redirect to '/' (see install below), and '/' is the same page.
@@ -80,6 +80,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('atelier-v') && k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
+const NAV_WAIT_MS = 4000; // how long a page load waits for the network before the cached shell answers
 self.addEventListener('fetch', e => {
   const req = e.request, url = new URL(req.url);
   // The target is /share on this origin; the page that started the navigation may be any site (see takeShare above).
@@ -93,6 +94,12 @@ self.addEventListener('fetch', e => {
   const fresh = navigation || req.destination === 'manifest' || url.pathname === '/manifest.webmanifest';
   const key = navigation ? (url.pathname === '/index.html' ? '/' : url.pathname) : req; // '/' is precached without a redirect
   const network = fetch(req).then(async response => {
+    // A page is read whole here before anything answers with it. Streamed straight through, a connection that stalled
+    // after the headers left the app on a blank screen that never finished loading (seen on a phone relaunch, v97).
+    // Redirects (opaqueredirect) and bodiless statuses pass through untouched.
+    if (navigation && !['opaque', 'opaqueredirect', 'error'].includes(response.type) && response.body && ![204, 205, 304].includes(response.status)) {
+      response = new Response(await response.arrayBuffer(), { status: response.status, statusText: response.statusText, headers: response.headers });
+    }
     if (response.ok || response.type === 'opaque') {
       const cache = await caches.open(VERSION);
       await cache.put(key, response.clone()).catch(() => {});
@@ -103,7 +110,12 @@ self.addEventListener('fetch', e => {
   e.waitUntil(network.then(() => {}));
   e.respondWith((async () => {
     const cache = await caches.open(VERSION);
-    if (fresh) return await network || await cache.match(key) || Response.error();
+    if (fresh) {
+      // A page waits NAV_WAIT_MS for the network, then opens from the cached shell; the fetch carries on and refreshes
+      // the cache for the next launch. With nothing cached there is only the network to wait for.
+      const first = navigation ? await Promise.race([network, new Promise(r => setTimeout(r, NAV_WAIT_MS, null))]) : await network;
+      return first || await cache.match(key) || await network || Response.error();
+    }
     return await cache.match(key) || await network || Response.error();
   })());
 });

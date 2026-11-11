@@ -6,13 +6,13 @@ const source = await readFile(new URL('../public/sw.js', import.meta.url), 'utf8
 const VERSION = source.match(/const VERSION = '([^']+)'/)[1]; // bumped on every deploy
 // Cached on first use, never at install (the Video Remix engine and Mediabunny): read from the source like VERSION.
 const LAZY = JSON.parse(source.match(/const LAZY = (\[[^\]]*\]);/)[1].replace(/'/g, '"'));
-function setup({ offline = false, hit = new Response('cached'), keys = [] } = {}) {
+function setup({ offline = false, hit = new Response('cached'), keys = [], net = null, timers = setTimeout } = {}) {
   const handlers = {}, deleted = [], fetched = [], cached = [], waited = [];
   const cache = { match: async () => hit, put: async (key, response) => cached.push(key), addAll: async list => cached.push(...list), keys: async () => [...new Set(cached)] };
-  vm.runInNewContext(source, { URL, Response, location: { origin: 'https://atelier.test' },
+  vm.runInNewContext(source, { URL, Response, setTimeout: timers, location: { origin: 'https://atelier.test' },
     self: { addEventListener: (name, fn) => handlers[name] = fn, clients: { claim: async () => {} }, skipWaiting: async () => {} },
     caches: { open: async () => cache, keys: async () => keys, delete: async k => deleted.push(k) },
-    fetch: async req => { fetched.push(req); if (offline) throw new Error('offline'); return new Response('network'); },
+    fetch: async req => { fetched.push(req); if (offline) throw new Error('offline'); return net ? net(req) : new Response('network'); },
   });
   const dispatch = (path, opts = {}) => {
     let response;
@@ -33,6 +33,30 @@ test('offline navigation uses cached legal page and uncached assets fail predict
 });
 test('online navigation prefers the current server response', async () => {
   const s = setup(); assert.equal(await (await s.dispatch('/', {mode:'navigate'})).text(), 'network'); assert.ok(s.cached.includes('/'));
+});
+// v98: a relaunch on a phone sat on a blank screen for minutes: the page's headers had arrived and its body never did.
+// A page now waits NAV_WAIT_MS for the whole response, then opens from the cached shell.
+test('a page load that the network never answers opens from the cached shell after the wait; other files are untouched', async () => {
+  const waits = [];
+  const s = setup({ net: () => new Promise(() => {}), timers: (fn, ms, ...a) => { waits.push(ms); queueMicrotask(() => fn(...a)); } });
+  assert.equal(await (await s.dispatch('/', { mode: 'navigate' })).text(), 'cached');
+  assert.deepEqual(waits, [Number(source.match(/const NAV_WAIT_MS = (\d+)/)[1])]);
+  const files = setup({ timers: (fn, ms, ...a) => { waits.push(ms); queueMicrotask(() => fn(...a)); } }); // a fresh cached Response: a body reads once
+  assert.equal(await (await files.dispatch('/app.js')).text(), 'cached'); assert.equal(waits.length, 1, 'only pages are timed');
+});
+test('a page whose body stalls after the headers never reaches the app half-open: the cached shell answers', async () => {
+  const stalled = () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('<!doctype html>')); } })); // never closes
+  const s = setup({ net: stalled, timers: (fn, ms, ...a) => queueMicrotask(() => fn(...a)) });
+  assert.equal(await (await s.dispatch('/', { mode: 'navigate' })).text(), 'cached');
+  assert.ok(!s.cached.includes('/'), 'a half-read page is never cached');
+});
+test('a page that arrives in time is passed on whole with its status and headers; a redirect goes through untouched', async () => {
+  const s = setup({ net: () => new Response('fresh', { status: 200, headers: { 'content-security-policy': "default-src 'self'" } }) });
+  const r = await s.dispatch('/', { mode: 'navigate' });
+  assert.equal(await r.text(), 'fresh'); assert.equal(r.headers.get('content-security-policy'), "default-src 'self'"); assert.ok(s.cached.includes('/'));
+  const redirect = Response.redirect('https://atelier.test/privacy', 302);
+  const t = setup({ net: () => redirect });
+  assert.equal(await t.dispatch('/privacy', { mode: 'navigate' }), redirect);
 });
 test('index.html asks for exactly the versioned shell files the worker precaches', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
@@ -124,7 +148,7 @@ function cacheRig({ upstream, offline = false }) {
     addAll: async (list) => { for (const u of list) { const r = upstream(u.split('?')[0]); store.set(u, { body: await r.text(), redirected: r.redirected }); } },
     keys: async () => [...store.keys()],
   };
-  vm.runInNewContext(source, { URL, Response, location: { origin: 'https://atelier.test' },
+  vm.runInNewContext(source, { URL, Response, setTimeout, location: { origin: 'https://atelier.test' },
     self: { addEventListener: (name, fn) => handlers[name] = fn, clients: { claim: async () => {} }, skipWaiting: async () => {} },
     caches: { open: async () => cache, keys: async () => [], delete: async () => {} },
     fetch: async (req) => { if (offline) throw new Error('offline'); return upstream(new URL(req.url).pathname); },
