@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=104';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=105';
 
 export const CHAT_KINDS = ['ask', 'code'];
 // Earlier turns replayed (chat answers and notes alike): every one while a thread has fewer than HISTORY_TURNS +
@@ -381,3 +381,13 @@ export const taintNote = (why) => (Object.hasOwn(TAINT_NOTES, why) ? TAINT_NOTES
 // so account tools keep waiting for the OK after one is read.
 export const browseUnasked = (step, { on = false, untrusted = false } = {}) =>
   on === true && !untrusted && step?.service === 'browser' && step.write !== true;
+
+// Settings → Connections → Approvals → "Read accounts unasked" (owner, per device): a read in a connected account
+// (Gmail, Slack, GitHub, Claude history…) runs without an approval card, even after a page or a web search put outside
+// text in the context. Never a write, never a browser step (browseUnasked covers those), never a link or share turn.
+export const readUnasked = (step, { on = false, untrusted = false } = {}) =>
+  on === true && !untrusted && Boolean(step?.service) && step.service !== 'browser' && step.write !== true;
+// The one stop both settings keep. Outside text can try to steer the assistant, and account data is what it could carry
+// off; a web address the model chose (browser_open, browser_read by address) is the way out. With all three at once the
+// step asks, whatever the settings say. Web search, the other way out, is already withdrawn once account data is read.
+export const leavesWithData = ({ wayOut = false, outside = false, data = false } = {}) => Boolean(wayOut && outside && data);
