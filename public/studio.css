@@ -140,7 +140,7 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
 #composer.options-open > .options:empty { display: none; }
 .composer-context { padding: 0 16px 9px; }
 .composer-context:has(.context-chips:empty) { display: none; }
-/* Folded composer (app.js syncCompact): a small screen with a thread open keeps only the prompt row, so the conversation
+/* Folded composer (app.js syncCompact): a small screen (home or thread) keeps only the prompt row, so the conversation
    has the screen. The mode button (current mode's icon, in its colour) opens the rest; so does tapping the prompt. */
 .composer-mode { display: none; color: var(--accent); }
 #composer.compact > :is(.modes, .composer-controls, .composer-context, .options) { display: none; }
