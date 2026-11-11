@@ -8,29 +8,29 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=94';
-import * as Sync from './sync.js?v=94';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=94';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=94';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=94';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=94';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=94';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=94';
-import { initLookup } from './lookup.js?v=94';
-import { createRemix } from './remix-app.js?v=94';
-import { sendMode, looksLikeQuestion } from './remix.js?v=94';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=94';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=94';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=94';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=94';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=94';
-import * as ClaudeImport from './claude-import.js?v=94';
-import { createFeedback } from './feedback.js?v=94';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=94';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=94';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=94';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=94';
-import { HUMANIZER } from './humanizer.js?v=94';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=95';
+import * as Sync from './sync.js?v=95';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=95';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=95';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=95';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=95';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=95';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=95';
+import { initLookup } from './lookup.js?v=95';
+import { createRemix } from './remix-app.js?v=95';
+import { sendMode, looksLikeQuestion } from './remix.js?v=95';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=95';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=95';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=95';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=95';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=95';
+import * as ClaudeImport from './claude-import.js?v=95';
+import { createFeedback } from './feedback.js?v=95';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=95';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=95';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=95';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=95';
+import { HUMANIZER } from './humanizer.js?v=95';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -195,20 +195,20 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 // them (md() also drops id and name, and nothing here looks them up by id again).
 const input = $('#input'), composerSrc = $('#composerSrc');
 const COARSE = matchMedia('(pointer: coarse)'); // touch-first device: don't pop the keyboard, don't rely on hover
-// Small screens with a thread open: the composer folds to its prompt row (mode button, attach, prompt, mic, send) so the
+// Small screens, home and thread alike: the composer folds to its prompt row (mode button, attach, prompt, mic, send) so the
 // conversation keeps the screen. The mode tabs, controls, context chips and options strip come back when the prompt is
 // tapped or focused, or from the mode button; touching or scrolling the conversation, or sending, folds it again.
-// The home screen and wider windows always show the whole composer. CSS: #composer.compact in studio.css.
+// Wider windows always show the whole composer. CSS: #composer.compact in studio.css.
 const COMPACT = matchMedia('(max-width: 640px), (max-height: 500px)');
 let composerOpen = false;
 function syncCompact() {
-  const on = COMPACT.matches && $('#welcome').classList.contains('gone') && !composerOpen;
+  const on = COMPACT.matches && !composerOpen;
   $('#composer').classList.toggle('compact', on);
   $('#composerModeBtn').setAttribute('aria-expanded', String(!on));
 }
 function setComposerOpen(on) { if (composerOpen !== Boolean(on)) { composerOpen = Boolean(on); syncCompact(); } }
 COMPACT.addEventListener('change', syncCompact);
-new MutationObserver(syncCompact).observe($('#welcome'), { attributes: true, attributeFilter: ['class'] }); // .gone: a thread is showing (set in several places)
+syncCompact(); // folded from the first paint on a small screen, home included
 input.addEventListener('focus', () => setComposerOpen(true));
 input.addEventListener('click', () => setComposerOpen(true)); // already focused, folded by a scroll: a tap brings the rows back
 $('#composerModeBtn').onclick = () => { setComposerOpen(true); $('.mode[aria-selected="true"]')?.focus({ preventScroll: true }); }; // the button hides once open: focus goes to its tab (no keyboard pop)
@@ -648,7 +648,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '94';
+const APP_BUILD = '95';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -4520,13 +4520,11 @@ function setOptionsOpen(on) {
   optionsOpen = Boolean(on); LS.set('composerOptionsOpen', optionsOpen);
   $('#composer').classList.toggle('options-open', optionsOpen);
   $('#optionsToggle').setAttribute('aria-expanded', String(optionsOpen));
-  $('#optionsToggle span').textContent = optionsOpen ? 'Less' : 'Options';
   syncDock();
 }
 $('#optionsToggle').onclick = () => setOptionsOpen(!optionsOpen);
 $('#composer').classList.toggle('options-open', optionsOpen);
 $('#optionsToggle').setAttribute('aria-expanded', String(optionsOpen));
-$('#optionsToggle span').textContent = optionsOpen ? 'Less' : 'Options';
 function renderComposerControls() {
   const box = $('#essentialOptions'); if (!box) return;
   const advanced = $('#options'), model = $('[data-opt="model"]', advanced);

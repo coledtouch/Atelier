@@ -60,7 +60,7 @@
 .legacy-list input { flex: none; accent-color: var(--accent); }
 @media (max-width: 600px) {
   .composer-controls { flex-wrap: wrap; }
-  .essential-options { flex-basis: calc(100% - 190px); } /* Options (94px) + Context (77px) + gaps stay on the same line */
+  .essential-options { flex-basis: calc(100% - 196px); } /* Options (95px) + Context (79px) + gaps stay on the same line */
   .essential-options .opt { max-width: 116px; font-size: 10px; }
   .essential-options:has(.essential-note) { flex-basis: 100%; }
   .context-dialog .sheet-foot { flex-wrap: wrap; }
