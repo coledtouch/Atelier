@@ -67,6 +67,13 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
 .thread-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 0 4px; }
 .thread-count { margin: 0; color: var(--ink-3); font-size: 12px; min-height: 18px; }
 .thread-sort { --opt-h: 30px; }
+/* A heading in the Threads list is a button that folds its group (app.js shutGroups): chevron, name, count. */
+.thread-group:has(.thread-group-btn) { padding: 0; }
+.thread-group-btn { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 14px 10px 8px; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; border-radius: 8px; }
+.thread-group-btn:hover { color: var(--ink-2); }
+.thread-group-btn svg { flex: none; width: 12px; height: 12px; transition: transform .2s; }
+.thread-group-btn[aria-expanded='false'] svg { transform: rotate(-90deg); }
+.thread-group-n { margin-left: auto; letter-spacing: 0.04em; }
 .thread-space { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
 .thread-space > span { flex-basis: 100%; color: var(--ink-2); font: 500 12px/1.4 var(--sans); }
 .thread-space .chip { min-height: 36px; padding: 0 14px; border-radius: 99px; }
