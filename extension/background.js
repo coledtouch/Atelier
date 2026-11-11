@@ -30,7 +30,7 @@ const MAX_SHOWN_TEXT = 2000; // characters of the text to type shown in the conf
 // confirm: how long a click/type request may wait, from its arrival to the user's answer. Atelier gives a command on
 // this computer 60 s in all, so this leaves room for the action itself. settle: pause after a click or a submit so the
 // page can react. read: the longest wait for a page to answer the extension (a page showing a dialog box never does).
-const TIMING = { confirm: 45_000, settle: 1200, read: 10_000 };
+const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700 };
 // After a click or typing request is declined, closed or left unanswered, further ones from the same path (this
 // browser's Atelier tab, or another device through the relay) are refused without a window for a while: 30 s, doubling
 // with each refusal in a row (at most 10 min); an Allow resets it. A hijacked page can't keep stealing the focus.
@@ -231,8 +231,8 @@ const isConfirmPage = (sender) => sender?.id === chrome.runtime.id && String(sen
 const withoutHash = (url) => String(url || '').split('#')[0];
 
 function refusal(action, answer) {
-  const what = action === 'type' ? 'typing' : 'click';
-  const nothing = action === 'type' ? 'nothing was typed' : 'nothing was clicked';
+  const what = action === 'type' ? 'typing' : action === 'signin' ? 'sign-in' : action === 'sms' ? 'text message' : 'click';
+  const nothing = action === 'type' ? 'nothing was typed' : action === 'signin' ? 'nothing was signed in' : action === 'sms' ? 'nothing was sent' : 'nothing was clicked';
   if (answer === 'timeout') return `No one answered the Atelier Browser confirmation on the computer within ${Math.round(TIMING.confirm / 1000)} seconds, so ${nothing}.`;
   if (answer === 'failed') return `The Atelier Browser confirmation window couldn’t be shown, so ${nothing}.`;
   return `The user declined this ${what} in the Atelier Browser confirmation window, so ${nothing}.`;
@@ -258,16 +258,21 @@ async function popupWindow(url) {
 async function asksNothing() {
   try { return (await chrome.storage.local.get(['noAsk'])).noAsk === true; } catch { return false; }
 }
-async function confirmFirst(action, { tabId, element, text, submit }, via) {
+// What the window shows: the element read from the page, or for a text message (sms) who it goes to.
+function looksAt(action, { tabId, element, to }, token) {
+  if (action === 'sms') return Promise.resolve([{ url: '', title: 'Messages' }, { tag: 'message', type: '', label: String(to || '').slice(0, 200) }]);
+  return withTimeout(Promise.all([
+    chrome.tabs.get(tabId),
+    inPage(tabId, pageElement, [element, 'describe', { token }]),
+  ]), TIMING.read, NOT_RESPONDING);
+}
+async function confirmFirst(action, { tabId, element, text, submit, to }, via) {
   const path = via === 'remote' ? 'remote' : 'local';
   // The user's standing OK on this computer: no window, no cooldown. The element is still found and marked, the page
   // is still checked again before the action, and a password or payment field is still refused.
   if (await asksNothing()) {
     const token = crypto.randomUUID();
-    const [tab, target] = await withTimeout(Promise.all([
-      chrome.tabs.get(tabId),
-      inPage(tabId, pageElement, [element, 'describe', { token }]),
-    ]), TIMING.read, NOT_RESPONDING);
+    const [tab, target] = await looksAt(action, { tabId, element, to }, token);
     if (!target) throw new Error('Element not found — call browser_elements again (the page may have changed).');
     if (action === 'type' && target.sensitive) throw new Error(REFUSED_FIELD);
     return { url: tab.url, expect: { tag: target.tag, type: target.type, label: target.label }, token };
@@ -281,10 +286,7 @@ async function confirmFirst(action, { tabId, element, text, submit }, via) {
   try {
     // Bounded: a page showing a dialog box never answers, and this request holds the one-at-a-time lock meanwhile.
     // A description that arrives too late is dropped, so no window ever opens for a request already given up on.
-    const [tab, target] = await withTimeout(Promise.all([
-      chrome.tabs.get(tabId),
-      inPage(tabId, pageElement, [element, 'describe', { token: req.id }]),
-    ]), TIMING.read, NOT_RESPONDING);
+    const [tab, target] = await looksAt(action, { tabId, element, to }, req.id);
     if (!target) throw new Error('Element not found — call browser_elements again (the page may have changed).');
     if (action === 'type' && target.sensitive) throw new Error(REFUSED_FIELD);
     const typed = String(text ?? '');
@@ -292,7 +294,7 @@ async function confirmFirst(action, { tabId, element, text, submit }, via) {
       action, via: path, submit: action === 'type' && Boolean(submit),
       element: { tag: target.tag, type: target.type, label: target.label, ...(target.href ? { href: target.href } : {}), ...(target.near ? { near: target.near } : {}) },
       page: { title: tab.title || target.page || '', url: tab.url || target.url || '' },
-      ...(action === 'type' ? { text: typed.slice(0, MAX_SHOWN_TEXT), more: Math.max(0, typed.length - MAX_SHOWN_TEXT) } : {}),
+      ...(action === 'type' || action === 'sms' ? { text: typed.slice(0, MAX_SHOWN_TEXT), more: Math.max(0, typed.length - MAX_SHOWN_TEXT) } : {}),
       expiresAt,
     };
     const answer = new Promise((resolve) => { req.answer = resolve; });
@@ -344,6 +346,78 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onDisconnect.addListener(() => { if (asking?.port === port) asking.answer('closed'); });
 });
 chrome.windows.onRemoved.addListener((windowId) => { if (asking && asking.windowId === windowId) asking.answer('closed'); });
+
+// ── sign in with the password Chrome already saved (1.4.0) ──
+// Atelier never sees, types or reads a password. The extension makes real clicks through chrome.debugger (Chrome shows
+// its "started debugging" bar meanwhile), so Chrome's own password manager fills the form it already knows. Chrome only
+// offers a saved password on the site it was saved for, so a look-alike page gets nothing. The page script reports
+// whether the password field is filled, never what is in it. If nothing fills, nothing is submitted.
+const NO_LOGIN_FORM = 'No sign-in form with a password field on that tab. Open the sign-in page first.';
+const NO_SAVED = 'Chrome didn’t fill a saved password on this page, so nothing was submitted. Ask the user to sign in, or to save the password in Chrome first.';
+function pageLogin(op, which) {
+  const q = (k) => document.querySelector(`[data-atelier-login="${k}"]`);
+  const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  if (op === 'find') {
+    document.querySelectorAll('[data-atelier-login]').forEach((e) => e.removeAttribute('data-atelier-login'));
+    const inputs = [...document.querySelectorAll('input')].filter(shown);
+    const kind = (el) => String(el.getAttribute('type') || '').toLowerCase();
+    const pw = inputs.find((el) => kind(el) === 'password' && !/new-password/i.test(el.getAttribute('autocomplete') || ''));
+    if (!pw) return { error: 'none' };
+    const scope = pw.form ? inputs.filter((el) => el.form === pw.form) : inputs;
+    const user = scope.slice(0, scope.indexOf(pw)).filter((el) => /^(text|email|tel|)$/.test(kind(el))).at(-1) || null;
+    const buttons = [...(pw.form || document).querySelectorAll('button, input[type=submit]')].filter(shown);
+    const words = (b) => String(b.innerText || b.value || b.getAttribute('aria-label') || '');
+    const submit = (pw.form && buttons.find((b) => b.form === pw.form && /^(submit|)$/.test(kind(b))))
+      || buttons.find((b) => /sign.?in|log.?in|continue|submit/i.test(words(b))) || null;
+    pw.setAttribute('data-atelier-login', 'pw');
+    pw.setAttribute('data-atelier-i', 'signin'); // the confirmation describes this field
+    if (user) user.setAttribute('data-atelier-login', 'user');
+    if (submit) submit.setAttribute('data-atelier-login', 'submit');
+    return { user: Boolean(user), submit: Boolean(submit) };
+  }
+  if (op === 'at') {
+    const el = q(which);
+    if (!el) return null;
+    el.scrollIntoView({ block: 'center' });
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null;
+  }
+  if (op === 'filled') return { filled: String(q('pw')?.value || '').length > 0 };
+  // While the extension picks from Chrome's own list, an Enter that reaches the page (no list showing) must not send
+  // the form with an empty password. Chrome's list takes its Enter before the page ever sees it.
+  if (op === 'guard' || op === 'unguard') {
+    const KEY = '__atelierLoginGuard';
+    if (op === 'guard' && !window[KEY]) {
+      window[KEY] = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); ev.stopImmediatePropagation(); } };
+      window.addEventListener('keydown', window[KEY], true);
+    }
+    if (op === 'unguard' && window[KEY]) { window.removeEventListener('keydown', window[KEY], true); window[KEY] = null; }
+    return true;
+  }
+  if (op === 'focusPw') { q('pw')?.focus(); return true; }
+  return null;
+}
+
+// ── Messages on a Mac (1.4.0) ──
+// The Atelier Messages helper (public/mac/atelier-messages-host.js, set up by public/mac/install-messages.sh) is a
+// native-messaging host: it reads ~/Library/Messages/chat.db read-only and sends through Messages.app. Reading
+// needs nothing more than any read here; sending needs the owner's OK in Atelier and asks in this window like a click.
+const MESSAGES_HOST = 'ai.ciprari.atelier.messages';
+const NO_MESSAGES = 'Messages isn’t set up on this computer. On the Mac, open Atelier Settings → Connections → Set up Messages.';
+const SEND_NEEDS_APPROVAL = 'Sending a text needs the user’s approval in Atelier first, so nothing was sent.';
+const MAX_SMS = 2000;
+const clampInt = (v, lo, hi, dflt) => { const n = Math.floor(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt; };
+async function messagesHost(msg) {
+  let r;
+  try {
+    r = await withTimeout(chrome.runtime.sendNativeMessage(MESSAGES_HOST, msg), 30_000, 'The Messages helper on this computer didn’t answer.');
+  } catch (err) {
+    if (/native messaging host|not found|forbidden|not allowed/i.test(err?.message || '')) throw new Error(NO_MESSAGES);
+    throw err;
+  }
+  if (!r || r.ok !== true) throw new Error(String(r?.error || 'The Messages helper failed.').slice(0, 400));
+  return r.result;
+}
 
 // ── commands ── (ctx.via: 'local' for the Atelier tab in this browser, 'remote' for the relay; ctx.approved: the
 // owner approved this step in Atelier)
@@ -406,6 +480,76 @@ const COMMANDS = {
     if (submit) { await sleep(TIMING.settle); await waitForLoad(tabId, 8000); }
     const t = await chrome.tabs.get(tabId);
     return { ...res, now: { title: t.title, url: t.url } };
+  },
+  // Sign in with the password Chrome saved for this site (see pageLogin). Asks like a click, unless the user ticked
+  // "Don't ask again on this computer".
+  async signin(args, ctx = {}) {
+    const tabId = Number(args?.tabId);
+    if (!Number.isInteger(tabId) || tabId < 0) throw new Error('tabId is required.');
+    const form = await withTimeout(inPage(tabId, pageLogin, ['find']), TIMING.read, NOT_RESPONDING);
+    if (!form || form.error) throw new Error(NO_LOGIN_FORM);
+    const ok = await confirmFirst('signin', { tabId, element: 'signin' }, ctx.via);
+    await samePage(tabId, ok.url);
+    const target = { tabId };
+    try { await chrome.debugger.attach(target, '1.3'); } catch (err) {
+      throw new Error(`Atelier Browser couldn’t take control of that tab (${err?.message || err}). Ask the user to sign in.`);
+    }
+    try {
+      const cdp = (method, params) => chrome.debugger.sendCommand(target, method, params);
+      const click = async (pt) => {
+        await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y });
+        await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+        await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+      };
+      const key = async (k, vk) => {
+        await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: vk });
+        await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: vk });
+      };
+      const filled = async () => (await inPage(tabId, pageLogin, ['filled']))?.filled === true;
+      const first = await inPage(tabId, pageLogin, ['at', form.user ? 'user' : 'pw']);
+      if (!first) throw new Error(NO_LOGIN_FORM);
+      // A real click releases what Chrome filled when the page loaded; if it didn't fill, it shows its list here.
+      await click(first);
+      await sleep(TIMING.fill);
+      if (!(await filled())) {
+        await inPage(tabId, pageLogin, ['guard']);
+        try {
+          await key('ArrowDown', 40);
+          await sleep(250);
+          await key('Enter', 13);
+          await sleep(TIMING.fill);
+        } finally { await inPage(tabId, pageLogin, ['unguard']).catch(() => {}); }
+      }
+      if (!(await filled())) throw new Error(NO_SAVED);
+      const sub = form.submit ? await inPage(tabId, pageLogin, ['at', 'submit']) : null;
+      if (sub) await click(sub);
+      else { await inPage(tabId, pageLogin, ['focusPw']); await key('Enter', 13); }
+    } finally {
+      await Promise.resolve(chrome.debugger.detach(target)).catch(() => {});
+    }
+    await sleep(TIMING.settle);
+    await waitForLoad(tabId, 8000);
+    const t = await chrome.tabs.get(tabId);
+    return { signedIn: 'submitted', note: 'Chrome filled the password it had saved. Atelier never saw it.', now: { title: t.title, url: t.url } };
+  },
+  // Messages on this Mac: op recent / read / send (see messagesHost).
+  async messages(args = {}, ctx = {}) {
+    const op = String(args.op || '');
+    if (op === 'recent') return messagesHost({ op, limit: clampInt(args.limit, 1, 50, 20) });
+    if (op === 'read') {
+      const chat = String(args.chat || '').trim().slice(0, 200);
+      if (!chat) throw new Error('Pass chat: a chat id from messages_recent, or a phone number or email.');
+      return messagesHost({ op, chat, limit: clampInt(args.limit, 1, 100, 30) });
+    }
+    if (op === 'send') {
+      if (ctx.approved !== true) throw new Error(SEND_NEEDS_APPROVAL);
+      const to = String(args.to || '').trim().slice(0, 200), text = String(args.text ?? '');
+      if (!to || !text.trim()) throw new Error('Pass to (a chat id, phone number or email) and text.');
+      if (text.length > MAX_SMS) throw new Error(`That text is over ${MAX_SMS} characters.`);
+      await confirmFirst('sms', { to, text }, ctx.via);
+      return messagesHost({ op, to, text });
+    }
+    throw new Error('Unknown Messages action.');
   },
   async show({ tabId }) {
     const t = await chrome.tabs.update(tabId, { active: true });
@@ -473,7 +617,7 @@ function scheduleReconnect() {
   setTimeout(connectRelay, 1000 * 2 ** retry); // 2s … 64s
 }
 // Commands the server may send (pairing/status are local-only).
-const REMOTE_COMMANDS = ['tabs', 'read', 'open', 'elements', 'describe', 'click', 'type', 'show'];
+const REMOTE_COMMANDS = ['tabs', 'read', 'open', 'elements', 'describe', 'click', 'type', 'signin', 'messages', 'show'];
 
 // Local-only: pairing handed over by the Atelier page on this computer.
 COMMANDS.pair = async ({ token, origin }) => {
@@ -488,7 +632,11 @@ COMMANDS.pair = async ({ token, origin }) => {
 };
 COMMANDS.status = async () => {
   const { relayToken, relayOrigin } = await chrome.storage.local.get(['relayToken', 'relayOrigin']);
-  return { paired: Boolean(relayToken), origin: relayOrigin || null, connected: ws?.readyState === WebSocket.OPEN, asks: !(await asksNothing()) };
+  // On a Mac: this extension's id (the Messages setup command needs it) and whether the Messages helper answers.
+  let mac = false;
+  try { mac = (await chrome.runtime.getPlatformInfo()).os === 'mac'; } catch {}
+  const messages = mac ? await messagesHost({ op: 'ping' }).then(() => true, () => false) : false;
+  return { paired: Boolean(relayToken), origin: relayOrigin || null, connected: ws?.readyState === WebSocket.OPEN, asks: !(await asksNothing()), id: chrome.runtime.id, mac, messages };
 };
 // Local-only: the Atelier tab on this computer turns the confirmation window back on. Nothing here can turn it off.
 COMMANDS.askAgain = async () => {

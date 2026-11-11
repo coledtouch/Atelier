@@ -13,7 +13,8 @@ const COMMAND_TIMEOUT_MS = 90_000;
 // checks this, the Relay below checks it again before anything reaches the browser, and the extension
 // (extension/background.js) checks open and read once more.
 export function relayNeedsApproval(cmd, args) {
-  if (cmd === 'click' || cmd === 'type' || cmd === 'open') return true;
+  if (cmd === 'click' || cmd === 'type' || cmd === 'signin' || cmd === 'open') return true;
+  if (cmd === 'messages') return args?.op === 'send';
   return cmd === 'read' && Boolean(args?.url);
 }
 

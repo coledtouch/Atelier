@@ -20,14 +20,16 @@ const port = chrome.runtime.connect({ name: 'atelier-confirm' });
 
 function render(i) {
   info = i;
-  const typing = i.action === 'type';
+  const typing = i.action === 'type', signing = i.action === 'signin', texting = i.action === 'sms';
   const el = i.element || {}, page = i.page || {};
-  document.title = `${typing ? 'Allow typing?' : 'Allow click?'} — Atelier Browser`;
-  $('title').textContent = typing ? (i.submit ? 'Allow Atelier to type and submit?' : 'Allow Atelier to type?') : 'Allow Atelier to click?';
+  document.title = `${typing ? 'Allow typing?' : signing ? 'Allow sign-in?' : texting ? 'Allow sending a text?' : 'Allow click?'} — Atelier Browser`;
+  $('title').textContent = typing ? (i.submit ? 'Allow Atelier to type and submit?' : 'Allow Atelier to type?') : signing ? 'Allow Atelier to sign in?' : texting ? 'Allow Atelier to send a text?' : 'Allow Atelier to click?';
   $('via').textContent = VIA[i.via] || 'Atelier is asking.';
-  $('action').textContent = typing ? (i.submit ? 'Type the text below, then submit it' : 'Type the text below') : 'Click';
+  $('action').textContent = typing ? (i.submit ? 'Type the text below, then submit it' : 'Type the text below')
+    : signing ? 'Sign in with the password Chrome saved for this site. Atelier never sees it.'
+    : texting ? 'Send the text below from Messages on this Mac, to:' : 'Click';
   $('label').textContent = el.label ? `“${el.label}”` : '(no label)';
-  $('kind').textContent = `${el.tag || 'element'}${el.type ? ` · ${el.type}` : ''}`;
+  $('kind').textContent = texting ? 'Messages' : `${el.tag || 'element'}${el.type ? ` · ${el.type}` : ''}`;
   $('kind').hidden = false;
   let host = '';
   try { host = new URL(page.url).host; } catch {}
@@ -39,7 +41,7 @@ function render(i) {
   $('near').textContent = el.near ? `In: “${el.near}”` : '';
   $('href').hidden = !el.href;
   $('href').textContent = el.href ? `Link to ${el.href}` : '';
-  if (typing) {
+  if (typing || texting) {
     $('typed').hidden = false;
     $('text').textContent = i.text || '(nothing: the field is cleared)';
     if (i.more > 0) { $('more').hidden = false; $('more').textContent = `…and ${i.more} more characters.`; }

