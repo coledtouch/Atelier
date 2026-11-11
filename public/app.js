@@ -4520,13 +4520,11 @@ function setOptionsOpen(on) {
   optionsOpen = Boolean(on); LS.set('composerOptionsOpen', optionsOpen);
   $('#composer').classList.toggle('options-open', optionsOpen);
   $('#optionsToggle').setAttribute('aria-expanded', String(optionsOpen));
-  $('#optionsToggle span').textContent = optionsOpen ? 'Less' : 'Options';
   syncDock();
 }
 $('#optionsToggle').onclick = () => setOptionsOpen(!optionsOpen);
 $('#composer').classList.toggle('options-open', optionsOpen);
 $('#optionsToggle').setAttribute('aria-expanded', String(optionsOpen));
-$('#optionsToggle span').textContent = optionsOpen ? 'Less' : 'Options';
 function renderComposerControls() {
   const box = $('#essentialOptions'); if (!box) return;
   const advanced = $('#options'), model = $('[data-opt="model"]', advanced);

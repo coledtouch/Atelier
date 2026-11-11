@@ -129,16 +129,30 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
 .thread-tools > button:hover, .thread-tools > button[aria-pressed='true'] { color: var(--accent); background: var(--surface-2); }
 .thread-group.thread-pinned { font: 500 10px/1.5 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin: 18px 8px 6px; }
 .composer-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 8px; }
-.composer-control { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 9px; border-radius: 9px; color: var(--ink-2); font: 500 11px/1 var(--sans); }
+/* Options and Context: the button keeps its full tap height (40 to 44px on phones); the pill drawn behind it (::before)
+   stays 32px, the height of the chips beside it, so an open Options never fills the row. */
+.composer-control { position: relative; isolation: isolate; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 10px; color: var(--ink-2); font: 500 11px/1 var(--sans); }
+.composer-control::before { content: ''; position: absolute; z-index: -1; inset: 50% 0 auto; height: 32px; translate: 0 -50%; border: 1px solid transparent; border-radius: 99px; transition: background .2s, border-color .2s; }
 .composer-control svg { width: 14px; height: 14px; }
-.composer-control:hover { background: var(--surface-2); color: var(--ink); }
-.composer-control[aria-expanded='true'] { background: var(--surface-2); color: var(--accent); }
-.control-chevron { font-size: 14px; transition: transform .2s; }
+.composer-control:hover { color: var(--ink); }
+.composer-control:hover::before { background: var(--surface-2); }
+.composer-control[aria-expanded='true'] { color: var(--accent); }
+.composer-control[aria-expanded='true']::before { background: color-mix(in srgb, var(--accent) 10%, transparent); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.composer-control svg.control-chevron { width: 12px; height: 12px; margin-left: -2px; transition: transform .2s; }
 .composer-control[aria-expanded='true'] .control-chevron { transform: rotate(180deg); }
 #composer > .options { display: none; }
 #composer.options-open > .options { display: flex; border-top: 1px solid var(--line); padding-top: 10px; }
 #composer.options-open > .options:empty { display: none; }
-.composer-context { padding: 0 16px 9px; }
+.composer-context { padding: 0 16px 9px; }
+/* Phones (upright): the options menu is a panel right under its button. Chips wrap, so nothing runs off the edge, and the
+   model gets a full line. The context chips step aside while it is open (Context still opens the full list). */
+@media (max-width: 640px) and (min-height: 501px) {
+  #composer.options-open > .options { flex-wrap: wrap; gap: 8px; margin: 2px 10px 10px; padding: 10px; overflow: visible; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); -webkit-mask-image: none; mask-image: none; }
+  #composer.options-open > .options > .opt:has([data-opt='model']) { flex: 1 1 100%; }
+  #composer.options-open > .options > .opt:has([data-opt='model']) .opt-val { flex: 1; max-width: none; }
+  #composer.options-open > .options > .opt-sep { display: none; } /* a divider at the start of a wrapped line reads as a stray mark */
+  #composer.options-open > .composer-context { display: none; }
+}
 .composer-context:has(.context-chips:empty) { display: none; }
 /* Folded composer (app.js syncCompact): a small screen (home or thread) keeps only the prompt row, so the conversation
    has the screen. The mode button (current mode's icon, in its colour) opens the rest; so does tapping the prompt. */
