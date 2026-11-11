@@ -345,7 +345,9 @@ function shapeGrok(kind, input, spec, body) {
 // reference (images, video or audio). → {model, kind, body, seconds, audio, resolution, still}.
 function shapeSeedance(kind, input, spec, body) {
   const { model } = body;
-  if (kind === 'image_to_video') body.promptImage = dataOrRunwayUri(input.promptImage, 'The image');
+  // The still is the clip's first frame. Seedance takes an image with no position as a loose reference instead:
+  // v110, a photo of a Chihuahua on a blanket came back as a lookalike dog on a porch.
+  if (kind === 'image_to_video') body.promptImage = [{ uri: dataOrRunwayUri(input.promptImage, 'The image'), position: 'first' }];
   if (input.resolution != null) throw bad(`Runway ${model} takes no resolution field — pick a ratio of that size.`);
   const ratios = spec.kinds[kind];
   const ratio = input.ratio == null ? '1280:720' : input.ratio;

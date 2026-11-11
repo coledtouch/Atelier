@@ -617,7 +617,7 @@ test('the system prompt that holds the rules stays byte-identical from turn to t
 test('Ideas, Build, the helpers and titles never get the rules; only voiceBlock and nameRules hold them, and only "As me" and the agent call those', () => {
   const r = rig();
   const sys = r.v.SYS;
-  const prompts = { ask: sys.ask(), code: sys.code(), web: sys.web(), ideas: sys.ideas(6, 'bold'), build: sys.build('editorial'), enhanceImage: sys.enhanceImage(), enhanceVideo: sys.enhanceVideo(), title: sys.title(), plan: sys.plan(), learn: sys.learn(['Builds Atelier']), profile: sys.profile('ChatGPT', ''), styleOnly: sys.styleOnly() };
+  const prompts = { ask: sys.ask(), code: sys.code(), web: sys.web(), ideas: sys.ideas(6, 'bold'), build: sys.build('editorial'), enhanceImage: sys.enhanceImage(), enhanceVideo: sys.enhanceVideo(), enhanceStill: sys.enhanceStill(), title: sys.title(), plan: sys.plan(), learn: sys.learn(['Builds Atelier']), profile: sys.profile('ChatGPT', ''), styleOnly: sys.styleOnly() };
   for (const [k, p] of Object.entries(prompts)) {
     assert.ok(p.length > 40, k);
     assert.ok(!p.includes('WRITING RULES') && !p.includes("Cole's humanizer"), `${k}: no rules`);

@@ -186,7 +186,8 @@ test('generate: Seedance 2.5 (Runway 2026-08-07) — the schema’s fields only,
   // image → video: the still, the prompt optional, 1080p portrait, 30 s
   const r2 = await rw('runway/generate/image_to_video', { method: 'POST', body: { model: 'seedance2_5', promptImage: PNG, ratio: '1080:1920', duration: 30, audio: false } });
   assert.equal(calls[1].url, `${RUNWAY_BASE}/image_to_video`);
-  assert.deepEqual(calls[1].json, { model: 'seedance2_5', promptImage: PNG, ratio: '1080:1920', duration: 30, audio: false });
+  // The still goes as the first frame: with no position Seedance treats it as a loose reference (v110).
+  assert.deepEqual(calls[1].json, { model: 'seedance2_5', promptImage: [{ uri: PNG, position: 'first' }], ratio: '1080:1920', duration: 30, audio: false });
   assert.deepEqual((await read(r2)).quote, { credits: 2040, usd: 20.4 }, '68 credits a second at 1080p; no audio discount');
   // defaults: 1280:720, 6 s, Runway's own audio default (not sent)
   await rw('runway/generate/text_to_video', { method: 'POST', body: { model: 'seedance2_5', promptText: 'x' } });
