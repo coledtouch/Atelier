@@ -1,7 +1,7 @@
-import { validVideo } from './video.js?v=102';
-import { validRemix, recoverRemix } from './remix.js?v=102';
-import { SPOKEN_FROM } from './readaloud.js?v=102';
-import { TAINTS } from './context.js?v=102';
+import { validVideo } from './video.js?v=103';
+import { validRemix, recoverRemix } from './remix.js?v=103';
+import { SPOKEN_FROM } from './readaloud.js?v=103';
+import { TAINTS } from './context.js?v=103';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -155,4 +155,26 @@ export function openOldDb(open, ms, onLate) {
       r.onblocked = () => {};
     } catch { finish(null); }
   });
+}
+
+// One IndexedDB transaction on one store: fn(objectStore) issues the requests, and the promise settles when the
+// transaction does. → the request fn returned (its result), or whatever else fn returned.
+// A write whose requests are all issued inside fn is committed at once (commit()), without waiting for this page to
+// hear each request succeed. A page that is frozen right after (phone locked, app sent to the background) then can't sit
+// on the store's lock and starve another copy of Atelier: in v102 a hidden copy held 'threads' and the open one showed
+// "0 saved threads". A write that decides its requests in a callback passes late = true and calls commitNow(store) there.
+export function storeTx(db, store, mode, fn, late = false) {
+  return new Promise((res, rej) => {
+    const t = db.transaction(store, mode);
+    const out = fn(t.objectStore(store));
+    t.oncomplete = () => res(out && typeof out === 'object' && 'readyState' in out ? out.result : out);
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error || new Error('Storage transaction was interrupted'));
+    if (mode === 'readwrite' && !late) commitNow(t);
+  });
+}
+/** Commit a transaction (or an object store's transaction) now. A browser without commit(), or one already done, is left alone. */
+export function commitNow(target) {
+  const t = target?.transaction || target;
+  try { t?.commit?.(); } catch {}
 }

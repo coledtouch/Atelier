@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { normalizeMe, allowedIds } from '../public/tester.js';
+import { storeTx, commitNow } from '../public/data-safety.js';
 const APP = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
 const SYNC = await readFile(new URL('../public/sync.js', import.meta.url), 'utf8');
 function between(text, start, end) {
@@ -28,7 +29,7 @@ function lifecycle({ passcode = '', tester = null, storedValues, lsValues, crypt
   const events = [], opened = [], pending = [], values = storedValues || new Map(), timers = new Map(), settings = lsValues || new Map(), listeners = {};
   const S = { settings: { passcode, name: tester?.name || '', lookup: '' }, tester, thread: { id: 'current', entries: [{ id: 'entry', text: 'Saved reply' }] } };
   if (!lsValues) { settings.set('settings', structuredClone(S.settings)); settings.set('tester', structuredClone(tester)); }
-  class Request { constructor(result) { this.result = result; } }
+  class Request { constructor(result) { this.result = result; this.readyState = 'done'; } } // readyState: how storeTx tells a request from a plain value
   const indexedDB = {
     open(name) {
       opened.push(name);
@@ -59,7 +60,7 @@ function lifecycle({ passcode = '', tester = null, storedValues, lsValues, crypt
   };
   const node = { hidden: true, open: false, contains: () => false, classList: { contains: () => false } };
   const deps = {
-    S, indexedDB, IDBRequest: Request, IDBKeyRange: { bound: () => ({}) }, crypto: cryptoOverride || globalThis.crypto, appStore,
+    S, indexedDB, storeTx, commitNow, IDBRequest: Request, IDBKeyRange: { bound: () => ({}) }, crypto: cryptoOverride || globalThis.crypto, appStore,
     Sync: { wrapDb: (db) => db, suspend: () => events.push('suspend-sync') },
     stopAll: () => events.push('stop-runs'), toast: () => {},
     setTimeout: (fn) => { const id = timers.size + 1; timers.set(id, fn); return id; }, clearTimeout: (id) => { timers.delete(id); events.push('cancel-persist'); },
@@ -290,7 +291,7 @@ test('“Remove my tester data from this device”: every tester database, kv ro
   assert.deepEqual(await probe({ names: ['atelier-guest', 'atelier-kv', 'atelier-data', 'atelier-appdata', 'atelier-sync'] }), [false, false], 'the owner’s and the guest’s are not tester data');
   assert.deepEqual(await probe({ kv: 'throws' }), [false, false], 'a browser that can’t list databases and a kv read that fails: nothing offered');
   assert.deepEqual(await probe({ names: ['atelier-account-abc'], workspace: 'owner' }), [false, false], 'never on a signed-in page');
-  assert.match(APP_SRC, /kvClearTesters: \(\) => tx\('readwrite', \(s\) => \{ const q = s\.getAllKeys\(\); q\.onsuccess = \(\) => \{ for \(const k of q\.result \|\| \[\]\) if \(typeof k === 'string' && k\.startsWith\(`\$\{KV_SCOPE\}tester:`\)\) s\.delete\(k\); \}; \}, 'kv'\),/);
+  assert.match(APP_SRC, /kvClearTesters: \(\) => tx\('readwrite', \(s\) => \{ const q = s\.getAllKeys\(\); q\.onsuccess = \(\) => \{ for \(const k of q\.result \|\| \[\]\) if \(typeof k === 'string' && k\.startsWith\(`\$\{KV_SCOPE\}tester:`\)\) s\.delete\(k\); commitNow\(s\); \}; \}, 'kv', true\),/);
   const html = (await import('node:fs/promises')).readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   assert.match(await html, /<button type="button" class="chip ob-forget" id="testerForget" hidden>Remove my tester data from this device<\/button>/);
 });

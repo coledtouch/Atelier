@@ -8,30 +8,30 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=102';
-import * as Sync from './sync.js?v=102';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=102';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=102';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=102';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=102';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=102';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=102';
-import { initLookup } from './lookup.js?v=102';
-import { createRemix } from './remix-app.js?v=102';
-import { sendMode, looksLikeQuestion } from './remix.js?v=102';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=102';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=102';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=102';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=102';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=102';
-import * as ClaudeImport from './claude-import.js?v=102';
-import { createFeedback } from './feedback.js?v=102';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=102';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=102';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=102';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=102';
-import { HUMANIZER } from './humanizer.js?v=102';
-import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=102';
+import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=103';
+import * as Sync from './sync.js?v=103';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=103';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=103';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=103';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=103';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=103';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=103';
+import { initLookup } from './lookup.js?v=103';
+import { createRemix } from './remix-app.js?v=103';
+import { sendMode, looksLikeQuestion } from './remix.js?v=103';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=103';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=103';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=103';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=103';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=103';
+import * as ClaudeImport from './claude-import.js?v=103';
+import { createFeedback } from './feedback.js?v=103';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=103';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=103';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=103';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=103';
+import { HUMANIZER } from './humanizer.js?v=103';
+import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=103';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -476,21 +476,14 @@ const rawDB = (() => {
   const kvName = (k) => (workspace === 'owner' ? k : k.slice(kvKey('').length));
   // "atelier-data" is new: tabs running older versions can hold or block the old "atelier" database,
   // so threads live here and are copied over from the old one when it's free (see migrateOldThreads).
-  const tx = async (mode, fn, store = 'threads') => {
+  const tx = async (mode, fn, store = 'threads', late = false) => { // late: fn issues requests in a callback and commits there (storeTx)
     if (workspace === 'owner' && store === 'threads' && mode === 'readwrite') {
       // Never blocks the save: a corrupt or closed marker stays closed (never recaptured); any other failure closes it.
       try { await freezeLegacy(); }
       catch (err) { if (!LEGACY_CLOSED.has(err?.code)) unguarded(); }
     }
     const db = await (store === 'kv' ? openDb('atelier-kv', 'kv') : openDb(threadDbName, 'threads', 'id'));
-    return new Promise((res, rej) => {
-      const t = db.transaction(store, mode);
-      const out = fn(t.objectStore(store));
-      // A request resolves to its result — including undefined for a missing key.
-      t.oncomplete = () => res(out instanceof IDBRequest ? out.result : out);
-      t.onerror = () => rej(t.error);
-      t.onabort = () => rej(t.error || new Error('Storage transaction was interrupted'));
-    });
+    return storeTx(db, store, mode, fn, late); // a request resolves to its result, including undefined for a missing key
   };
   return {
     freezeLegacy,
@@ -507,7 +500,7 @@ const rawDB = (() => {
     keys: () => tx('readonly', (s) => s.getAllKeys()),
     range: (lo, hi) => tx('readonly', (s) => s.getAll(IDBKeyRange.bound(lo, hi))), // threads whose ids sort from lo to hi
     // One readwrite transaction: fn(current) → a thread to put, null to delete it, undefined to leave it (sync merges).
-    update: (id, fn) => tx('readwrite', (s) => { const q = s.get(id); q.onsuccess = () => { const next = fn(q.result); if (next === null) s.delete(id); else if (next) s.put(next); }; return q; }),
+    update: (id, fn) => tx('readwrite', (s) => { const q = s.get(id); q.onsuccess = () => { const next = fn(q.result); if (next === null) s.delete(id); else if (next) s.put(next); commitNow(s); }; return q; }, 'threads', true),
     clear: () => tx('readwrite', (s) => s.clear()),
     kvGet: (k) => tx('readonly', (s) => s.get(kvKey(k)), 'kv'),
     kvSet: (k, v) => tx('readwrite', (s) => s.put(v, kvKey(k)), 'kv'),
@@ -515,9 +508,9 @@ const rawDB = (() => {
     kvKeys: () => tx('readonly', (s) => s.getAllKeys(), 'kv').then((keys) => (keys || []).filter(kvMine).map(kvName)),
     // This workspace's keys only (one transaction): a tester's Clear this device never touches the owner's rx:* drafts,
     // Claude Code folder or passcode backup, nor another account's.
-    kvClear: () => tx('readwrite', (s) => { const q = s.getAllKeys(); q.onsuccess = () => { for (const k of q.result || []) if (kvMine(k)) s.delete(k); }; }, 'kv'),
+    kvClear: () => tx('readwrite', (s) => { const q = s.getAllKeys(); q.onsuccess = () => { for (const k of q.result || []) if (kvMine(k)) s.delete(k); commitNow(s); }; }, 'kv', true),
     // Every tester account's kv rows on this device (the sign-in screen's "Remove my tester data"), never another's.
-    kvClearTesters: () => tx('readwrite', (s) => { const q = s.getAllKeys(); q.onsuccess = () => { for (const k of q.result || []) if (typeof k === 'string' && k.startsWith(`${KV_SCOPE}tester:`)) s.delete(k); }; }, 'kv'),
+    kvClearTesters: () => tx('readwrite', (s) => { const q = s.getAllKeys(); q.onsuccess = () => { for (const k of q.result || []) if (typeof k === 'string' && k.startsWith(`${KV_SCOPE}tester:`)) s.delete(k); commitNow(s); }; }, 'kv', true),
     kvHasTesters: () => tx('readonly', (s) => s.getAllKeys(), 'kv').then((keys) => (keys || []).some((k) => typeof k === 'string' && k.startsWith(`${KV_SCOPE}tester:`))),
     // The owner's passcode backup (restored at boot after the browser dropped localStorage) is the owner's own key in
     // every workspace: written by an owner sign-in, read only by a signed-out page (boot), never cleared by another account.
@@ -647,7 +640,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '102';
+const APP_BUILD = '103';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -4638,11 +4631,15 @@ $('#libraryBtn').onclick = () => openDrawer('libraryDrawer');
 
 // All saved threads plus the one on screen (even if it hasn't reached storage yet). Never hangs.
 async function allThreads() {
-  const saved = await Promise.race([DB.all().catch(() => []), sleep(2500).then(() => null)]);
+  const reading = DB.all().catch(() => []);
+  const saved = await Promise.race([reading, sleep(2500).then(() => null)]);
   if (saved === null) toast('Storage is busy — close other Atelier tabs if this persists', { error: true });
   const list = [...(saved || [])];
   if (S.thread?.entries.length && !list.some((t) => t.id === S.thread.id)) list.push(S.thread);
-  return list.map((t) => (t.id === S.thread?.id ? S.thread : t)).map((t) => [ClaudeImport.listAt(t), t]).sort((a, b) => b[0] - a[0]).map(([, t]) => t);
+  const out = list.map((t) => (t.id === S.thread?.id ? S.thread : t)).map((t) => [ClaudeImport.listAt(t), t]).sort((a, b) => b[0] - a[0]).map(([, t]) => t);
+  // Another copy of Atelier holds the store: the list is short, not empty. `late` settles when the read gets through.
+  if (saved === null) { out.busy = true; out.late = reading; }
+  return out;
 }
 
 // The Threads list's order (the Sort menu, kept per device): newest or oldest by last activity, by title, or by length.
@@ -4698,14 +4695,18 @@ async function renderThreads(fromSorter = false) {
   const q = $('#threadSearch').value.trim().toLowerCase();
   let all = await allThreads();
   if (seq !== threadsSeq) return;
+  const storeBusy = all.busy === true; // the saved threads haven't been read yet: never say there are none
+  if (storeBusy) all.late.then(() => { if (seq === threadsSeq && !$('#threadsDrawer').hidden) renderThreads(); });
   $('#clearThreadSearch').hidden = !q;
   if (q) all = all.filter((t) => [t.title, ...t.entries.flatMap((e) => [e.prompt, e.text, e.app?.title,
     ...(e.ideas || []).flatMap((idea) => [idea.title, idea.pitch])])].join(' ').toLowerCase().includes(q));
   all = sortThreads(all, threadSort);
   all = [...all.filter((t) => pinnedThreads.has(t.id)), ...all.filter((t) => !pinnedThreads.has(t.id))];
   $('#threadSort').value = threadSort; $('#threadSortVal').textContent = THREAD_SORTS[threadSort];
-  $('#threadCount').textContent = q ? `${all.length} ${all.length === 1 ? 'matching thread' : 'matching threads'}` : `${all.length} saved ${all.length === 1 ? 'thread' : 'threads'}`;
+  $('#threadCount').textContent = storeBusy ? 'Loading your threads…' : q ? `${all.length} ${all.length === 1 ? 'matching thread' : 'matching threads'}` : `${all.length} saved ${all.length === 1 ? 'thread' : 'threads'}`;
   const list = $('#threadList');
+  const busyNote = storeBusy ? '<li class="empty-note" role="status"><strong>Your threads are still loading</strong>Another copy of Atelier is using storage. They show here when it is free.</li>' : '';
+  if (storeBusy && !all.length) { list.innerHTML = busyNote; return; }
   if (!all.length) { list.innerHTML = `<li class="empty-note"><strong>${q ? 'No matching threads' : 'No threads yet'}</strong>${q ? 'Try another word or clear your search.' : 'Send a prompt and the conversation shows up here.'}</li>`; return; }
   const day = 864e5, today = new Date().setHours(0, 0, 0, 0);
   const byDate = threadSort === 'recent' || threadSort === 'oldest'; // date headings only mean something in date order
@@ -4724,7 +4725,7 @@ async function renderThreads(fromSorter = false) {
       <span class="thread-body"><span class="thread-title">${esc(t.title || 'Untitled')}</span><span class="thread-sub">${fromClaude ? '<span class="thread-tag">from Claude</span>' : ''}${t.entries.length} ${t.entries.length === 1 ? 'entry' : 'entries'} · ${new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric', ...(new Date(at).getFullYear() !== new Date().getFullYear() && { year: 'numeric' }) })}${esc(Sync.badge(t))}</span></span></button>
       <span class="thread-tools"><button type="button" class="icon-btn${pinned ? ' thread-pinned' : ''}" data-pin="${esc(t.id)}" aria-pressed="${pinned}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${esc(t.title || 'untitled thread')}"><svg viewBox="0 0 24 24"><path d="m8 3 8 0-1 6 3 4H6l3-4zM12 13v8"/></svg></button><button type="button" class="icon-btn" data-thread-menu="${esc(t.id)}" aria-label="Options for ${esc(t.title || 'untitled thread')}"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span></li>`;
   }
-  list.innerHTML = h;
+  list.innerHTML = busyNote + h; // the open thread can show while the rest are still being read
 }
 $('#threadSearch').addEventListener('input', renderThreads);
 $('#threadSort').addEventListener('change', (ev) => { if (!Object.hasOwn(THREAD_SORTS, ev.target.value)) return; threadSort = ev.target.value; LS.set('threadSort', threadSort); $('#threadList').scrollTop = 0; renderThreads(); });
