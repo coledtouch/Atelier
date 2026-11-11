@@ -16,7 +16,7 @@ function boot(keys = []) {
     async keys() { return [...store.keys()]; },
     async has(n) { return store.has(n); },
   };
-  vm.runInNewContext(source, { URL, Response, Headers, File, Blob, crypto, location: { origin: 'https://atelier.test' }, caches,
+  vm.runInNewContext(source, { URL, Response, Headers, File, Blob, crypto, setTimeout, location: { origin: 'https://atelier.test' }, caches,
     self: { addEventListener: (n, f) => { handlers[n] = f; }, clients: { claim: async () => {} }, skipWaiting: async () => {} },
     fetch: async () => new Response('network') });
   const form = (fields = {}, media = []) => ({ get: (k) => fields[k] ?? null, getAll: (k) => (k === 'media' ? media : []) });
