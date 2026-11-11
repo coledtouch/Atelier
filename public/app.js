@@ -8,30 +8,30 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=100';
-import * as Sync from './sync.js?v=100';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=100';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=100';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=100';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=100';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=100';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=100';
-import { initLookup } from './lookup.js?v=100';
-import { createRemix } from './remix-app.js?v=100';
-import { sendMode, looksLikeQuestion } from './remix.js?v=100';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=100';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=100';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=100';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=100';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=100';
-import * as ClaudeImport from './claude-import.js?v=100';
-import { createFeedback } from './feedback.js?v=100';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=100';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=100';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=100';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=100';
-import { HUMANIZER } from './humanizer.js?v=100';
-import { SPACES, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=100';
+import { prepareImport, recoverThread, openOldDb } from './data-safety.js?v=101';
+import * as Sync from './sync.js?v=101';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=101';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=101';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=101';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=101';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=101';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=101';
+import { initLookup } from './lookup.js?v=101';
+import { createRemix } from './remix-app.js?v=101';
+import { sendMode, looksLikeQuestion } from './remix.js?v=101';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=101';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=101';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=101';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=101';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=101';
+import * as ClaudeImport from './claude-import.js?v=101';
+import { createFeedback } from './feedback.js?v=101';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=101';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=101';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=101';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=101';
+import { HUMANIZER } from './humanizer.js?v=101';
+import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=101';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -647,7 +647,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '100';
+const APP_BUILD = '101';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -4647,20 +4647,25 @@ async function allThreads() {
 
 // The Threads list's order (the Sort menu, kept per device): newest or oldest by last activity, by title, or by length.
 // Pinned threads stay on top in every order, sorted the same way among themselves.
-const THREAD_SORTS = { recent: 'Newest first', oldest: 'Oldest first', title: 'Title, A to Z', entries: 'Longest first', space: 'Work and Personal' };
+const THREAD_SORTS = { recent: 'Newest first', oldest: 'Oldest first', title: 'Title, A to Z', entries: 'Longest first', space: 'By group' };
 let threadSort = Object.hasOwn(THREAD_SORTS, LS.get('threadSort', 'recent')) ? LS.get('threadSort', 'recent') : 'recent';
 function sortThreads(list, how) { // list arrives newest first (allThreads); Array.sort is stable, so ties stay newest first
   if (how === 'oldest') return [...list].reverse();
   if (how === 'title') return [...list].sort((a, b) => (a.title || 'Untitled').localeCompare(b.title || 'Untitled', undefined, { numeric: true, sensitivity: 'base' }));
   if (how === 'entries') return [...list].sort((a, b) => b.entries.length - a.entries.length);
-  if (how === 'space') return bySpace(list, threadSpaces);
+  if (how === 'space') return bySpace(list, threadSpaces, GROUPS);
   return list;
 }
-// Work or Personal for each thread (thread-spaces.js): kept on this device for this account, like pins. The fast helper
-// model sorts the threads that have no group yet, a batch at a time, and only while the "Work and Personal" order is
+// A group for each thread (thread-spaces.js): kept on this device for this account, like pins. The owner's studio has
+// his groups (Personal, his two companies, other work, his applications); other accounts have Work and Personal. The fast
+// helper model sorts the threads that have no group yet, a batch at a time, and only while the "By group" order is
 // showing, so nothing is sent or spent until that order is picked. A group chosen in the thread's menu is never changed.
-const threadSpaces = cleanSpaces(LS.get(workspaceKey('threadSpaces'), {}));
-const saveSpaces = () => LS.set(workspaceKey('threadSpaces'), threadSpaces);
+// The set's id is in the storage key: v100's Work/Personal answers (key 'threadSpaces') are not read and are removed.
+const GROUPS = groupsFor(workspace);
+const SPACES_KEY = workspaceKey(`threadGroups.${GROUPS.id}`);
+const threadSpaces = cleanSpaces(LS.get(SPACES_KEY, {}), GROUPS);
+const saveSpaces = () => LS.set(SPACES_KEY, threadSpaces);
+try { localStorage.removeItem('atelier.' + workspaceKey('threadSpaces')); } catch {}
 const forgetSpace = (id) => { if (threadSpaces[id]) { Reflect.deleteProperty(threadSpaces, id); saveSpaces(); } };
 let spacesBusy = false, spacesFailedAt = 0;
 async function sortIntoSpaces(threads) {
@@ -4672,8 +4677,8 @@ async function sortIntoSpaces(threads) {
   try {
     for (let i = 0; i < todo.length && showing(); i += SPACE_BATCH) {
       const batch = todo.slice(i, i + SPACE_BATCH);
-      const raw = await completeChat({ model: modelFor('fast'), role: 'fast', max_tokens: 700, temperature: 0, extra: noThink, messages: spaceRequest(batch, ME.bio) });
-      const got = parseSpaces(raw, batch.length);
+      const raw = await completeChat({ model: modelFor('fast'), role: 'fast', max_tokens: 700, temperature: 0, extra: noThink, messages: spaceRequest(batch, GROUPS, ME.bio) });
+      const got = parseSpaces(raw, batch.length, GROUPS);
       if (!got.some(Boolean)) throw new Error('no groups in the answer');
       got.forEach((s, k) => { if (s && !spaceOf(threadSpaces, batch[k].id)) threadSpaces[batch[k].id] = s; });
       saveSpaces();
@@ -4701,7 +4706,7 @@ async function renderThreads(fromSorter = false) {
   const day = 864e5, today = new Date().setHours(0, 0, 0, 0);
   const byDate = threadSort === 'recent' || threadSort === 'oldest'; // date headings only mean something in date order
   if (threadSort === 'space' && fromSorter !== true) sortIntoSpaces(all); // not awaited: the list shows now and fills in
-  const group = (at, t) => (threadSort === 'space' ? SPACES[spaceOf(threadSpaces, t.id)] || (spacesBusy ? 'Sorting…' : 'Not sorted yet') : !byDate ? THREAD_SORTS[threadSort] : at >= today ? 'Today' : at >= today - day ? 'Yesterday' : at >= today - 6 * day ? 'This week' : 'Earlier');
+  const group = (at, t) => (threadSort === 'space' ? labelOf(GROUPS, spaceOf(threadSpaces, t.id)) || (spacesBusy ? 'Sorting…' : 'Not sorted yet') : !byDate ? THREAD_SORTS[threadSort] : at >= today ? 'Today' : at >= today - day ? 'Yesterday' : at >= today - 6 * day ? 'This week' : 'Earlier');
   let last = '', h = '';
   for (const t of all) {
     const at = ClaudeImport.listAt(t), fromClaude = ClaudeImport.isClaudeThread(t), pinned = pinnedThreads.has(t.id), g = pinned ? 'Pinned' : group(at, t);
@@ -4722,7 +4727,7 @@ $('#clearThreadSearch').onclick = () => {
   renderThreads();
 };
 $('#drawerNewThread').onclick = () => { closeDrawers(false); startFresh(); };
-document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog" id="threadMenuDialog" aria-labelledby="threadMenuTitle"><form class="sheet-body" id="threadMenuForm"><div class="sheet-head"><h2 id="threadMenuTitle">Your <em>thread</em></h2><button type="button" class="icon-btn" data-thread-close aria-label="Close thread options">${ICON.x}</button></div><div class="thread-edit-body"><label class="field"><span>Thread name</span><input id="threadName" maxlength="120" required autocomplete="off" /></label><p class="hint">Renaming keeps all of your conversation. Pins are saved for this account on this device.</p><div class="thread-space" id="threadSpace" role="group" aria-label="Group"><span>Group, for the Work and Personal order</span><button type="button" class="chip" data-space="">Automatic</button><button type="button" class="chip" data-space="work">Work</button><button type="button" class="chip" data-space="personal">Personal</button></div><p class="hint bad" id="threadMenuError" role="alert"></p></div><div class="sheet-foot"><button type="button" class="chip danger" id="threadMenuDelete">Delete thread</button><button type="submit" class="btn-primary">Save name</button></div></form></dialog>`);
+document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog" id="threadMenuDialog" aria-labelledby="threadMenuTitle"><form class="sheet-body" id="threadMenuForm"><div class="sheet-head"><h2 id="threadMenuTitle">Your <em>thread</em></h2><button type="button" class="icon-btn" data-thread-close aria-label="Close thread options">${ICON.x}</button></div><div class="thread-edit-body"><label class="field"><span>Thread name</span><input id="threadName" maxlength="120" required autocomplete="off" /></label><p class="hint">Renaming keeps all of your conversation. Pins are saved for this account on this device.</p><div class="thread-space" id="threadSpace" role="group" aria-label="Group"><span>Group, for the By group order</span><button type="button" class="chip" data-space="">Automatic</button>${GROUPS.groups.map((g) => `<button type="button" class="chip" data-space="${g.key}" title="${esc(g.label)}">${esc(g.short)}</button>`).join('')}</div><p class="hint bad" id="threadMenuError" role="alert"></p></div><div class="sheet-foot"><button type="button" class="chip danger" id="threadMenuDelete">Delete thread</button><button type="submit" class="btn-primary">Save name</button></div></form></dialog>`);
 let menuThreadId = null;
 $('#threadMenuDialog [data-thread-close]').onclick = () => $('#threadMenuDialog').close();
 $('#threadMenuForm').addEventListener('submit', async (ev) => {
