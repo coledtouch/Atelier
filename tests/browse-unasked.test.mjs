@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { browseUnasked, readUnasked, leavesWithData, approvesAll } from '../public/context.js';
+import { browseUnasked, readUnasked, leavesWithData, approvesAll, standingOn, approvalsToSeed, APPROVAL_KEYS } from '../public/context.js';
 
 // v104: Settings → Connections → Browser → "Open pages unasked". Looks in the owner's browser run without a card.
 test('only a look in the browser, with the setting on, on a turn that did not start from outside text', () => {
@@ -17,7 +17,7 @@ test('only a look in the browser, with the setting on, on a turn that did not st
 
 test('app.js: the setting is the owner\'s, the step is sent as approved, and the tab-moved re-ask is skipped only for it', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(app, /const browserUnasked = \(\) => S\.settings\.browserUnasked === true && Boolean\(S\.settings\.passcode\);/);
+  assert.match(app, /const browserUnasked = \(\) => approvalOn\('browserUnasked'\);/);
   assert.match(app, /if \(approvesAll\(\{ \.\.\.standing, on: approveAll\(\) \}\) \|\| \(!leaving && \(browseUnasked\(step, \{ \.\.\.standing, on: browserUnasked\(\) \}\) \|\| readUnasked\(step, \{ \.\.\.standing, on: accountsUnasked\(\) \}\)\)\)\) step\.auto = true;\s+else if \(!step\.write && \(e\.untrusted \|\| why \|\| searched > 0 \|\| asksFirst\(step\.name, args\)\)\) step\.confirm = true;/);
   assert.match(app, /step\.write \|\| step\.confirm === true \|\| step\.auto === true\)/, 'the relay and the extension get approved: true');
   assert.match(app, /!step\.confirm && !step\.auto && known !== undefined/);
@@ -47,7 +47,7 @@ test('app.js: the way-out check reads the run and the thread; the account settin
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /const leaving = leavesWithData\(\{ wayOut: asksFirst\(step\.name, args\), outside: Boolean\(taint \|\| pageRead \|\| titlesRead \|\| chatsRead \|\| searched > 0\), data: accountRead \|\| dataBefore \}\);/);
   assert.match(app, /const dataBefore = \(thread\?\.entries \|\| \[\]\)\.some\(\(x\) => x !== e && x\.steps\?\.some\(\(st\) => st\.status === 'done' && st\.service !== 'browser'\)\);/);
-  assert.match(app, /const accountsUnasked = \(\) => S\.settings\.accountsUnasked === true && Boolean\(S\.settings\.passcode\);/);
+  assert.match(app, /const accountsUnasked = \(\) => approvalOn\('accountsUnasked'\);/);
   assert.match(app, /if \(on && !confirm\('Atelier will read your connected accounts without asking first/);
   assert.doesNotMatch(app, /DEFAULT_SETTINGS = \{[^}]*accountsUnasked/s);
 });
@@ -62,9 +62,37 @@ test('Approve everything is on only by a real true, and never for a turn that be
 
 test('app.js: an approved-everything step skips the card, writes included; the setting is the owner\'s, off by default, and asks once', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(app, /const approveAll = \(\) => S\.settings\.approveAll === true && Boolean\(S\.settings\.passcode\);/);
+  assert.match(app, /const approveAll = \(\) => approvalOn\('approveAll'\);/);
   assert.match(app, /if \(\(step\.write \|\| step\.confirm\) && !step\.auto\) \{/);
   assert.match(app, /if \(step\.write\) step\.approved = true;/, 'a write is still marked approved before it runs');
   assert.match(app, /if \(on && !confirm\('Atelier will act without asking first: send email, post, change settings, move money, click and type\./);
   assert.doesNotMatch(app, /DEFAULT_SETTINGS = \{[^}]*approveAll/s);
+});
+
+// v108: the approval switches follow the owner's account (synced profile), not one device.
+test('a synced true or false wins; with none synced, this device\'s old setting counts', () => {
+  assert.equal(standingOn(true, false), true);
+  assert.equal(standingOn(false, true), false, 'turning it off on another device sticks here');
+  assert.equal(standingOn(undefined, true), true);
+  for (const local of [false, undefined, 'true', 1]) assert.equal(standingOn(undefined, local), false);
+  assert.equal(standingOn('true', false), false, 'only a real boolean in the profile counts');
+});
+
+test('a switch only this device has on is copied up once; one the profile already holds is left alone', () => {
+  assert.deepEqual(APPROVAL_KEYS, ['approveAll', 'browserUnasked', 'accountsUnasked']);
+  assert.deepEqual(approvalsToSeed(undefined, { approveAll: true, browserUnasked: false }), { approveAll: true });
+  assert.deepEqual(approvalsToSeed({ approveAll: false }, { approveAll: true }), {}, 'an off from another device is not undone');
+  assert.deepEqual(approvalsToSeed({ approveAll: true }, { approveAll: true, accountsUnasked: true }), { accountsUnasked: true });
+  assert.deepEqual(approvalsToSeed(null, null), {});
+});
+
+test('app.js: the switches read the profile, write both places, and seed after a pull', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const approvalOn = \(key\) => Boolean\(S\.settings\.passcode\) && standingOn\(ME\?\.approvals\?\.\[key\], S\.settings\[key\]\);/);
+  assert.match(app, /ME\.approvals = \{ \.\.\.\(ME\.approvals \|\| \{\}\), \[key\]: on \}; saveMe\(\);/);
+  for (const k of ['browserUnasked', 'approveAll', 'accountsUnasked']) {
+    assert.match(app, new RegExp(`setApproval\\('${k}', on\\);`));
+    assert.doesNotMatch(app, new RegExp(`S\\.settings\\.${k} = on;`), k);
+  }
+  assert.match(app, /pushMe\(\);\s+seedApprovals\(\);\s+setSync\('synced', true\);/);
 });

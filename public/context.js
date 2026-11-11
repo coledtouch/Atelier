@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=107';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=108';
 
 export const CHAT_KINDS = ['ask', 'code'];
 // Earlier turns replayed (chat answers and notes alike): every one while a thread has fewer than HISTORY_TURNS +
@@ -408,3 +408,16 @@ export function agentThread(prior) {
 // approval card, writes included (send, post, pay, change, click, type), and the way-out stop is off too. The owner asked
 // for this knowing a page or an email can steer the assistant. One thing stays: a turn that began from a link or a share.
 export const approvesAll = ({ on = false, untrusted = false } = {}) => on === true && !untrusted;
+
+// v108: the three approval switches follow the owner's account. They ride in the synced "You" profile (ME.approvals),
+// so turning one on or off on any signed-in device covers them all. A switch the profile has never held falls back to
+// this device's own old setting. A true or false in the profile always wins, so turning one off sticks everywhere.
+export const APPROVAL_KEYS = ['approveAll', 'browserUnasked', 'accountsUnasked'];
+export const standingOn = (synced, local) => (typeof synced === 'boolean' ? synced : local === true);
+// Switches this device has on that the profile has never held: copied up once, so an older device's choice spreads.
+export const approvalsToSeed = (synced, local) => {
+  const have = synced && typeof synced === 'object' ? synced : {};
+  const out = {};
+  for (const k of APPROVAL_KEYS) if (typeof have[k] !== 'boolean' && local?.[k] === true) out[k] = true;
+  return out;
+};
