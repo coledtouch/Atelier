@@ -119,3 +119,11 @@ test('app: the Messages row is built with the other rows, after the extension st
   assert.match(app, /const cmd = `curl -fsSL \$\{location\.origin\}\/mac\/install-messages\.sh \| sh -s \$\{id\}`;/);
   assert.match(app, /if \(!\/\^\[a-p\]\{32\}\$\/\.test\(id\)\) return toast/);
 });
+
+test('app: asking for texts reaches the agent while a browser is connected, typos included', () => {
+  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const hint = new Function(`return ${/\nconst MESSAGES_HINT = (\/[^\n]+\/i);/.exec(app)[1]};`)();
+  for (const p of ['read my most recent sm,s', 'read my sms', "check my sm's", 'any new texts?', 'what did Scott text me', 'show my txts', 'my iMessages', 'S M S from mom']) assert.ok(hint.test(p), p);
+  for (const p of ['write a poem about summer', 'small steps', 'the smiths', 'is mom ok', 'some numbers']) assert.ok(!hint.test(p), p);
+  assert.match(app, /\(Boolean\(browser\) && \(BROWSER_HINT\.test\(e\.prompt\) \|\| MESSAGES_HINT\.test\(e\.prompt\)\)\)/);
+});
