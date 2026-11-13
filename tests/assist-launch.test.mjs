@@ -335,3 +335,10 @@ test('v128: with Approve everything on, the owner’s agent may search the web o
   assert.match(src, /const offerWeb = web && \(openWeb \|\| !accountRead\);/, 'search stays on after an account read only when open');
   assert.match(src, /Search only for what the user asked about, never for anything found in their accounts\.\$\{openWeb \? '' : ' Do any web searching first\. Once you use an account tool, web search is off for this answer\.'\}/, 'the rule about what to search for stays either way');
 });
+
+// v129: asked about an FAA ground stop, the agent said it couldn't see live news and asked whether to open a page. With
+// web search on offer it searches first, without asking, and opens a browser page only when the search doesn't answer.
+test('v129: for anything current the agent searches first and never asks whether to look it up', () => {
+  const src = fnSource('runAgent');
+  assert.match(src, /When the question is about something current or changing \(news, an outage, a delay, a status, a price, a score, a schedule\), search first, then answer from what you found\. Never ask whether to look it up, and never say you can't see live information: search\. Search before you open a page in the browser; open one only when the search doesn't answer it\. Search only for what the user asked about, never for anything found in their accounts\./);
+});
