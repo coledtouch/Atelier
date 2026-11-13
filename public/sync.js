@@ -341,6 +341,9 @@ const testerMarked = (t) => Array.isArray(t?.entries) && t.entries.some((e) => e
 // ends in that order, so it never drifts from what the other devices show.
 // A thread's flow as one comparable string (none and an invalid one alike: an invalid flow never syncs).
 const flowKey = (t) => canonical(validFlow(t?.flow) ? t.flow : null);
+const NO_FLOW = canonical(null);
+// A flow a push would send: a valid one the record doesn't hold. (A missing or invalid one is never sent: planPush.)
+export const flowUnsent = (t, rec) => flowKey(t) !== NO_FLOW && flowKey(t) !== canonical(rec?.flow ?? null);
 
 export function patchInPlace(target, source, ids = [], removed = [], { title = false, flow = false, prints = null, keep = (e) => e.pending, exact = false, sorted = false } = {}) {
   const info = { replaced: [], added: [], removed: [], skipped: [], closed: false };
@@ -1970,7 +1973,7 @@ export function createSync(deps = {}) {
     if (!plan.entries.length) return null;
     const ids = new Set(plan.entries.map((e) => e.id));
     return {
-      createdAt: plan.createdAt, title: typeof t.title === 'string' ? t.title : '', titlePush: plan.title,
+      createdAt: plan.createdAt, title: typeof t.title === 'string' ? t.title : '', titlePush: plan.title, flowPush: plan.flow,
       bases: Object.fromEntries(plan.entries.map((e) => [e.id, e.base])), entries: t.entries.filter((e) => ids.has(e.id)).map((e) => jsonClone(e)),
     };
   }
@@ -2004,7 +2007,8 @@ export function createSync(deps = {}) {
     const plan = await planPush({ thread, record: keepRec, locked: new Set(), media, hashOf: hasher(id) });
     plan.gate = false;
     plan.title = d.keep.titlePush && typeof d.keep.titlePush.v === 'string' && isRev(d.keep.titlePush.base) ? d.keep.titlePush : null; // only a title this device hadn't synced
-    const answers = plan.entries.length || plan.title ? await send(plan) : [];
+    plan.flow = d.keep.flowPush && validFlow(d.keep.flowPush.v) && isRev(d.keep.flowPush.base) ? d.keep.flowPush : null; // likewise a flow
+    const answers = plan.entries.length || plan.title || plan.flow ? await send(plan) : [];
     const forks = [];
     for (const res of answers) {
       for (const eid of [...(res.conflicts || []).map((s) => s.id), ...(res.dropped || [])]) {
@@ -2014,7 +2018,7 @@ export function createSync(deps = {}) {
     }
     if (forks.length) {
       const fplan = await planPush({ thread: { ...thread, entries: forks }, record: null, locked: new Set(), media, hashOf: hasher(id) });
-      fplan.title = null;
+      fplan.title = null; fplan.flow = null;
       fplan.born = born;
       if (fplan.entries.length) await send(fplan);
     }
@@ -2083,7 +2087,7 @@ export function createSync(deps = {}) {
   // Cheap signs a synced thread may hold something the server lacks: written since this device last checked it, or an
   // entry, title or flow its record doesn't know. (The hashed plan then decides; the daily scan checks everything.)
   const maybeChanged = (t, rec) => !Number.isFinite(rec.at) || t.updatedAt > rec.at || (typeof t.title === 'string' && t.title !== rec.title)
-    || (rec.flow === undefined ? t.flow != null : flowKey(t) !== canonical(rec.flow ?? null))
+    || flowUnsent(t, rec)
     || t.entries.some((e) => e && !Object.prototype.hasOwnProperty.call(rec.e || {}, e.id) && !gateHeld(mediaKinds(e), media));
   function scheduleScan(quick = false) {
     if (T.scan || stopped) return;

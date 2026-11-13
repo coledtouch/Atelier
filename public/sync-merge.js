@@ -771,8 +771,10 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
   if (!local) flow = rFlow ?? undefined;
   else if (flowNews && rFlow !== null && !sameFlow(rFlow, local.flow)) flow = rFlow;
   if (flowNews) { rec.flow = rFlow; rec.flowRev = rFlowRev; }
-  // what planPush would send: an invalid local flow sends nothing, so it counts as the record's
-  const finalFlow = flow !== undefined ? flow : local?.flow != null && !validFlow(local.flow) ? rec.flow : flowCopy(local?.flow);
+  // A local copy that lost its flow (the app never clears one) takes the synced one back.
+  if (local && !removeThread && flow === undefined && local.flow == null && rec.flow != null) flow = flowCopy(rec.flow);
+  // what planPush would send: a missing or invalid local flow sends nothing, so it counts as the record's
+  const finalFlow = flow !== undefined ? flow : flowCopy(local?.flow) ?? rec.flow;
   if (!removeThread && rec.flow !== undefined && !sameFlow(finalFlow, rec.flow)) push = true;
   rec.etag = remote.etag ?? rec.etag; rec.rev = remote.rev; rec.born = bornOf(remote) || rec.born || 0;
   if (removeThread) rec.deleted = { at: remote.deletedAt };
@@ -807,7 +809,7 @@ export async function planPush({ thread, record: rec0 = null, locked = null, med
   // Everything decided about an entry comes from one synchronous look at it: its flags here, its content in hashOf
   // (dehydrate copies the entry before its first await). A retry starting while this plan awaits can't make the
   // snapshot of an interrupted copy look like an ordinary edit. (A custom hashOf must snapshot synchronously too.)
-  const title0 = thread.title, flow0 = flowCopy(thread.flow), flowBad = thread.flow != null && flow0 === null;
+  const title0 = thread.title, flow0 = flowCopy(thread.flow);
   for (const e of [...(thread.entries || [])]) {
     present.add(e?.id);
     if (!record(e) || !syncId(e.id) || !validDate(e.createdAt)) { out.held.push({ id: e?.id, reason: 'bad_shape' }); continue; }
@@ -841,9 +843,9 @@ export async function planPush({ thread, record: rec0 = null, locked = null, med
   for (const id of Object.keys(base.e)) if (!present.has(id)) out.refetch = true; // known but missing here: a full pull re-adds it
   const title = typeof title0 === 'string' ? title0.slice(0, LIMITS.title) : '';
   if ((base.title == null || base.lost ? title !== '' : title !== base.title) && (out.entries.length || base.rev > 0)) out.title = { v: title, base: base.lost ? 0 : base.titleRev || 0 };
-  // flow: like the title. Never synced (record.flow undefined): only a set one. An invalid local flow sends nothing (a
-  // null would clear the server's flow on every device).
-  if (!flowBad && (base.flow === undefined || base.lost ? flow0 !== null : !sameFlow(flow0, base.flow)) && (out.entries.length || base.rev > 0)) out.flow = { v: flow0, base: base.lost ? 0 : isRev(base.flowRev) ? base.flowRev : 0 };
+  // flow: like the title, but only a set one ever goes up. The app never clears a flow, so a missing or invalid one here
+  // was lost (a stale tab's save, say): a null sent up would clear the server's flow on every device.
+  if (flow0 !== null && (base.flow === undefined || base.lost || !sameFlow(flow0, base.flow)) && (out.entries.length || base.rev > 0)) out.flow = { v: flow0, base: base.lost ? 0 : isRev(base.flowRev) ? base.flowRev : 0 };
   out.blobs = [...blobs.values()];
   out.dirty = out.entries.length > 0 || out.title !== null || out.flow !== null;
   return out;
@@ -943,7 +945,8 @@ export async function planPushResult({ thread, record: rec0 = null, sent = {}, t
   let newFlow; // undefined = no change
   if (record(res.flow) && (res.flow.v === null || validFlow(res.flow.v)) && isRev(res.flow.rev)) {
     const unchanged = thread && (flow ? sameFlow(thread.flow, flow.v) : base.flow === undefined || sameFlow(thread.flow, base.flow));
-    if (unchanged && !sameFlow(thread.flow, res.flow.v) && res.flow.v !== null) newFlow = flowCopy(res.flow.v);
+    const lostHere = Boolean(thread) && thread.flow == null; // the app never clears a flow: this copy lost it
+    if ((unchanged || lostHere) && !sameFlow(thread.flow, res.flow.v) && res.flow.v !== null) newFlow = flowCopy(res.flow.v);
     rec.flow = flowCopy(res.flow.v); rec.flowRev = res.flow.rev;
   }
   if (res.prevRev !== base.rev || restarted) pull = true; // a delta pull since base.rev (a full one for a new lineage) picks up both writes

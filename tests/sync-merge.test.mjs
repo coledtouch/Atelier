@@ -1323,6 +1323,29 @@ test('an invalid local flow is never sent, so it never clears the server’s', a
   assert.equal(plan.push, false);
 });
 
+test('a local copy that lost its flow never clears the server’s, and takes it back', async () => {
+  const synced = { ...newRecord(), rev: 4, title: 'Thread t1', titleRev: 1, flow: KID, flowRev: 2 };
+  for (const extra of [{}, { flow: null }]) {
+    const quiet = await planPush({ thread: thread('t1', [], extra), record: synced });
+    assert.deepEqual([quiet.flow, quiet.dirty], [null, false], JSON.stringify(extra));
+    const plan = await planPush({ thread: thread('t1', [ask('e1', 1)], extra), record: synced });
+    assert.deepEqual([plan.flow, plan.dirty], [null, true], JSON.stringify(extra)); // the entry still goes up, without a flow
+    assert.equal('flow' in pushBodies(plan)[0], false);
+  }
+  // a pull, even one with no flow news, puts the synced flow back
+  const doc = applyPush(await docOf('t1', [ask('e1', 1)]), flowBody({ v: KID, base: 0 }), NOW).doc;
+  const rec = { ...(await recordFor(doc)), flow: KID, flowRev: doc.flowRev };
+  const local = thread('t1', [ask('e1', 1)], { title: '' });
+  const plan = await planPull({ local, record: rec, remote: viewOf(doc), uid });
+  assert.deepEqual([plan.flow, plan.push], [KID, false]);
+  const r = applyPlan(local, plan, await hydrateAll(plan));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.thread.flow, KID);
+  // a server null (a tombstone) is never re-adopted from the record
+  const gone = await planPull({ local: thread('t1', [ask('e1', 1)], { title: '' }), record: { ...rec, flow: null }, remote: viewOf(doc), uid });
+  assert.equal(gone.flow, undefined);
+});
+
 test('a record from before flows: a pull of an old document neither pushes nor touches the thread', async () => {
   const doc = await docOf('t1', [ask('e1', 1)], { title: { v: 'Thread t1', base: 0 } });
   delete doc.flow; delete doc.flowRev;
