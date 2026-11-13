@@ -7,7 +7,7 @@
 // It needs two macOS permissions, both asked of Google Chrome (the app that starts it): Full Disk Access to read
 // chat.db, and Automation → Messages to send.
 
-const HOST_VERSION = '1.0.7';
+const HOST_VERSION = '1.0.8';
 const LIMITS = { recent: 50, read: 100, text: 2000, chat: 200 };
 const APPLE_EPOCH_MS = 978307200000; // 2001-01-01, where Messages counts its dates from
 
@@ -202,6 +202,9 @@ const RETRIED = 'iMessage couldn’t deliver it, so it went again as a carrier t
 // The errors a person can fix, in words that say how.
 function friendlyError(raw) {
   const s = String(raw || '');
+  // Already in these words (1.0.8, v124): query() words its error, and the reply to Chrome worded it again. The second
+  // pass matched its own text, so "macOS said:" repeated the helper's sentence and what macOS said was cut off.
+  if (/^(Atelier’s helper can’t read Messages yet\.|Chrome can’t control Messages yet\.)/.test(s)) return s;
   if (/authorization denied|unable to open database|operation not permitted|not authorized to access/i.test(s)) {
     // 1.0.7 (v123): macOS checks the helper's own program (/usr/bin/osascript), not Chrome: the owner's Chrome had
     // Full Disk Access and reading was still refused. What macOS said goes along, so the next refusal explains itself.

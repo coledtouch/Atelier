@@ -98,7 +98,7 @@ test('helper: the errors a person can fix say how; anything else passes through,
   assert.match(H.friendlyError('execution error: Not authorized to send Apple events to Messages. (-1743)'), /Automation/);
   assert.equal(H.friendlyError('x'.repeat(900)).length, 300);
   assert.equal(H.friendlyError(''), 'The Messages helper failed.');
-  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.7' });
+  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.8' });
   assert.throws(() => H.handle({ op: 'delete' }), /Unknown Messages action/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: '  ' }), /Pass to and text/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: 'x'.repeat(2001) }), /over 2000/);
@@ -385,4 +385,16 @@ test('helper 1.0.7: a number that last refused iMessage gets a text message; SMS
 test('installer 1.0.7: reading texts needs Full Disk Access for osascript, and says how to add it', () => {
   assert.match(INSTALL, /\nTwo macOS permissions are left:\n {2}1\. Reading texts: System Settings → Privacy & Security → Full Disk Access → turn on osascript and Google Chrome\.\n {5}To add osascript, run: {2}open -R \/usr\/bin\/osascript {3}and drag the selected file into that list\.\n/);
   assert.doesNotMatch(INSTALL, /\r/);
+});
+
+// v124 (helper 1.0.8): the owner's error read 'macOS said: Atelier’s helper can’t read Message': the helper's own words,
+// worded twice, with what macOS said cut off.
+test('helper 1.0.8: an error worded once stays as it is, so what macOS said reaches the user', () => {
+  const raw = 'Error: unable to open database "/Users/cole/Library/Messages/chat.db": authorization denied';
+  const once = H.friendlyError(raw);
+  assert.match(once, /macOS said: Error: unable to open database .*authorization denied$/);
+  assert.equal(H.friendlyError(once), once, 'the reply to Chrome words it again: no change');
+  assert.ok(once.length <= 400, 'inside what the extension passes on');
+  const auto = H.friendlyError('execution error: Not authorized to send Apple events to Messages. (-1743)');
+  assert.equal(H.friendlyError(auto), auto);
 });
