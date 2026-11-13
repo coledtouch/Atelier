@@ -59,7 +59,7 @@ class FakeDate extends Date {
 }
 // persona / capabilities / SYS, and runPrompt / agentTools (what a thread turn's prompt and tool list state for its run),
 // with stubs for the app's state.
-const PROMPT_CONSTS = ['ACCURACY', 'NO_FABRICATION', 'TZ', 'tzOffset', 'dateLine', 'liveBrowser', 'historyWindow', 'RUN_BROWSER', 'B_TAB', 'B_EL', 'BROWSER_TOOLS', 'MESSAGES_TOOLS', 'agentTools'];
+const PROMPT_CONSTS = ['ACCURACY', 'NO_FABRICATION', 'flowLine', 'TZ', 'tzOffset', 'dateLine', 'liveBrowser', 'historyWindow', 'RUN_BROWSER', 'B_TAB', 'B_EL', 'BROWSER_TOOLS', 'MESSAGES_TOOLS', 'agentTools'];
 function promptRig({ memory = [], tester = null, vars: more = {} } = {}) {
   const vars = {
     Date: FakeDate, S: { settings: { name: 'Cole', about: '' }, tester }, ME: { bio: 'Builds Atelier.', learned: '', memory },

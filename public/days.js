@@ -76,3 +76,27 @@ export function flowHint(kind, set) {
 
 /** How a kind of flow behaves by default. Kinds not named here are { mode: 'ask' }. */
 export const KIND_DEFAULTS = Object.freeze({ linkedin: Object.freeze({ mode: 'ask', ask: Object.freeze({ voice: true }) }) });
+
+const isObj = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+function overlay(a, b) {
+  for (const k in b) {
+    if (isObj(b[k]) && isObj(a[k])) overlay(a[k], b[k]);
+    else if (b[k] !== undefined) a[k] = b[k];
+  }
+  return a;
+}
+/**
+ * The composer choices a flow opens with, as { opts, mode }: its own (thread.opts, kept on this device only), else its
+ * kind's defaults over the global ones, else the global ones. `base` is a fresh copy of the global choices (changed and
+ * returned); `clean` tidies saved choices (app.js migrateOpts). Never shares an object with the thread or KIND_DEFAULTS.
+ */
+export function flowOpts(t, base, baseMode, clean = (o) => o) {
+  if (isObj(t?.opts)) {
+    const { mode, ...own } = structuredClone(t.opts);
+    return { opts: overlay(base, clean(own)), mode: typeof mode === 'string' && mode ? mode : baseMode };
+  }
+  const kind = t?.flow?.kind;
+  if (!kind) return { opts: base, mode: baseMode };
+  const { mode = 'ask', ...defaults } = structuredClone(KIND_DEFAULTS[kind] || {});
+  return { opts: overlay(base, defaults), mode };
+}

@@ -13,7 +13,7 @@ const V = VERSION.slice('atelier-v'.length);
 const SHELL = ['/', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`,
   `/data-safety.js?v=${V}`, `/sync.js?v=${V}`, `/sync-merge.js?v=${V}`, `/video.js?v=${V}`, `/runway.js?v=${V}`, `/omni.js?v=${V}`, `/xai.js?v=${V}`, `/spend.js?v=${V}`, `/tester.js?v=${V}`, `/context.js?v=${V}`, `/usage.js?v=${V}`, `/launch.js?v=${V}`, `/lookup.js?v=${V}`, `/readaloud.js?v=${V}`, `/dictate.js?v=${V}`, `/viewport.js?v=${V}`, `/builds.js?v=${V}`, `/appdata.js?v=${V}`, `/claude-import.js?v=${V}`, `/claude-worker.js?v=${V}`,
   `/remix.js?v=${V}`, `/remix-cuts.js?v=${V}`, `/remix-shots.js?v=${V}`, `/remix-graph.js?v=${V}`, `/remix-store.js?v=${V}`, `/remix-draw.js?v=${V}`, `/remix-app.js?v=${V}`, `/remix.css?v=${V}`,
-  `/feedback.js?v=${V}`, `/feedback.css?v=${V}`, `/app-errors.js?v=${V}`, `/humanizer.js?v=${V}`, `/thread-spaces.js?v=${V}`, `/files.js?v=${V}`, `/files-legacy.js?v=${V}`,
+  `/feedback.js?v=${V}`, `/feedback.css?v=${V}`, `/app-errors.js?v=${V}`, `/humanizer.js?v=${V}`, `/thread-spaces.js?v=${V}`, `/days.js?v=${V}`, `/files.js?v=${V}`, `/files-legacy.js?v=${V}`,
   '/manifest.webmanifest', '/vendor/marked.js', '/vendor/purify.js', '/vendor/highlight.js',
   '/vendor/fflate.js', '/icons/atelier-v2-32.png', '/icons/atelier-v2-180.png', '/icons/atelier-v2-192.png', '/icons/atelier-v2-512.png', '/icons/atelier-v2-maskable-512.png', '/icons/atelier-mark-96.png',
   '/privacy', '/tos', '/legal.css'];

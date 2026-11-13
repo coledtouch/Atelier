@@ -33,6 +33,7 @@ import { renderAppErrors, loadAppErrors } from './app-errors.js?v=131';
 import { HUMANIZER } from './humanizer.js?v=131';
 import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=131';
 import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=131';
+import { kindOf, cleanFlow, flowHint, flowOpts } from './days.js?v=131';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -247,15 +248,23 @@ const S = {
   video: null, // the composer's video (session-only: File, blob: URL, clip upload) — see attachVideo
   tester: null, // a LinkedIn tester (GET /api/tester/me, see setTester); null for the owner and signed-out visitors
   settings: mergeDeep(structuredClone(DEFAULT_SETTINGS), migrateSettings(LS.get('settings', {}))),
-  opts: mergeDeep({
+  opts: globalOpts(),
+};
+// The composer's last choices (LS 'opts'): what a new flow, or a thread with no choices of its own, starts from.
+function globalOpts() {
+  return mergeDeep({
     ask: { model: '', think: false, voice: false, web: false },
     code: { model: '' },
     image: { model: '', aspect: '1:1', count: 1, enhance: true },
     video: { model: '', aspect: '16:9', secs: 4, enhance: true },
     ideas: { count: 6, flavor: 'Practical' },
     build: { model: '', style: 'Refined', refine: true },
-  }, (({ video, image, ...rest }) => ({ ...rest, ...(video?.secs && !/cosmos|motion/.test(video.model || '') ? { video } : {}), ...(image && !image.model?.includes?.('/') ? { image } : {}) }))(migrateOpts(LS.get('opts', {})))),
-};
+  }, cleanOpts(LS.get('opts', {})));
+}
+// Saved choices (global or a flow's), tidied: retired models moved on, and a video or image pin an older build saved left out.
+function cleanOpts(o) {
+  return (({ video, image, ...rest }) => ({ ...rest, ...(video?.secs && !/cosmos|motion/.test(video.model || '') ? { video } : {}), ...(image && !image.model?.includes?.('/') ? { image } : {}) }))(migrateOpts(o));
+}
 // Saved pins of retired models → their successors: a Veo 3.1 video pin → Gemini Omni (public/omni.js), the deprecated
 // Nano Banana 2 (gemini-3.1-flash-image) → Nano Banana 2.1. Threads keep their old ids; the lookups below migrate them.
 function migrateImageId(id) { return id === 'gemini:gemini-3.1-flash-image' ? 'gemini:gemini-nano-banana-2.1' : id; }
@@ -363,7 +372,7 @@ function mergeDeep(a, b) {
   return a;
 }
 const saveSettings = () => LS.set('settings', S.settings);
-const saveOpts = () => LS.set('opts', S.opts);
+const saveOpts = () => { LS.set('opts', S.opts); saveFlowOpts(); }; // the global last choice, and the open flow's own
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const sleep = (ms, signal) => new Promise((res, rej) => {
   const t = setTimeout(res, ms);
@@ -619,8 +628,40 @@ function threadsArrived() {
 // Settings → Your data: "Bring over older conversations" shows only while the old database still needs bringing over.
 function syncMigrateBtn() { const b = $('#migrateBtn'); if (b) b.hidden = !migrationPending(); }
 
-function newThread() {
-  return { id: uid(), title: '', createdAt: Date.now(), updatedAt: Date.now(), entries: [] };
+// flow: { kind, color? } (days.js cleanFlow), synced like the title. A thread without one is as before.
+function newThread(flow = null) {
+  const t = { id: uid(), title: '', createdAt: Date.now(), updatedAt: Date.now(), entries: [] };
+  const f = cleanFlow(flow);
+  if (f) t.flow = f;
+  return t;
+}
+// Each flow keeps its own composer choices: thread.opts, the shape of S.opts plus mode. They stay on this device (sync
+// carries only the title, the flow and the entries). A flow with none opens with its kind's defaults over the last
+// global choices (LS 'opts' and 'mode'); a thread with no kind and no choices opens with the global ones, as before.
+function openFlowOpts(thread) {
+  const { opts, mode } = flowOpts(thread, globalOpts(), LS.get('mode', S.mode), cleanOpts);
+  S.opts = opts;
+  if (MODES[mode] && mode !== S.mode) setMode(mode, { load: true }); // the callers draw the options after this
+}
+// A composer change (saveOpts, setMode) saves into the open flow. keepTime: changing a chip in last week's flow doesn't
+// move it to the top of the list.
+function saveFlowOpts() {
+  const t = S.thread;
+  if (!t) return;
+  t.opts = { ...structuredClone(S.opts), mode: S.mode };
+  persist(false, { keepTime: true });
+}
+// A flow's kind, chosen or confirmed. One with no choices of its own yet starts from the kind's defaults.
+function setFlow(thread, kind) {
+  const flow = cleanFlow({ kind });
+  if (!thread || !flow) return;
+  thread.flow = flow;
+  if (thread === S.thread) { if (!thread.opts) openFlowOpts(thread); persist(); }
+  else DB.put(thread).catch(storageError);
+  renderFlowTabs();
+}
+// The Today page's flow tabs: drawn again when a flow's kind changes. Nothing draws them yet.
+function renderFlowTabs() {
 }
 // flush: a save made on the way out of a thread (opening another, New, leaving the app), in case a change is still
 // waiting. It writes as any save does, but it only stamps the thread "now" when something was waiting (persistDue) or
@@ -628,7 +669,7 @@ function newThread() {
 // under Today, gave it a Continue tile, and the resume-if-recent rule measured when the app was last hidden.
 let persistTimer;
 let persistDue = null; // the thread whose save is waiting: a flag for any thread stamped the next one flushed
-function persist(now = false, { flush = false } = {}) {
+function persist(now = false, { flush = false, keepTime = false } = {}) {
   clearTimeout(persistTimer);
   const thread = S.thread;
   // → the save's promise (settled either way), or undefined when there was nothing to save; persist(true) returns it.
@@ -636,14 +677,14 @@ function persist(now = false, { flush = false } = {}) {
     const due = persistDue === thread;
     if (due) persistDue = null;
     if (!thread?.entries.length || accountReloading) return;
-    const changed = !flush || due || liveThreads.get(thread.id) === thread;
+    const changed = (!flush && !keepTime) || due || liveThreads.get(thread.id) === thread;
     if (changed || !Number.isFinite(thread.updatedAt)) thread.updatedAt = Date.now();
     const saved = DB.put(thread).catch(storageError);
-    if (thread === S.thread) LS.set(workspaceKey('lastThread'), thread.id);
+    if (thread === S.thread) LS.set(workspaceKey('lastFlow'), thread.id);
     return saved;
   };
   if (now) return go();
-  persistDue = thread;
+  if (!keepTime) persistDue = thread;
   persistTimer = setTimeout(go, 400);
 }
 function storageError(err) { console.error(err); toast('Couldn’t save your work on this device. Export a backup from Settings before closing.', { error: true }); }
@@ -1286,19 +1327,21 @@ function needsBrains(prompt) {
 }
 
 // ask / code / web take the turn's runPrompt() (persona above): the same text for every request of a run and block.
+// flowLine: the flow's kind, after the static part, so each flow's prefix stays the same and a thread with none is unchanged.
+const flowLine = (o) => (o?.flow ? `${o.flow}\n` : '');
 const SYS = {
   ask: (o) => `${persona(o)}
 Be direct, warm and precise. Lead with the answer, then the useful detail. Use Markdown: short paragraphs, headings only when they help, bullet lists for steps/options, tables for comparisons. Never pad.
 ${ACCURACY}
-${dateLine()}`,
+${flowLine(o)}${dateLine()}`,
   code: (o) => `${persona(o)}
 You are an elite software engineer and pair-programmer. Give complete, runnable code in fenced blocks with the correct language tag — no placeholders or "rest of code here". Explain briefly before and key decisions after. Prefer modern, idiomatic, secure solutions. When fixing bugs, name the root cause first. When a single-file web demo would help, provide it as one \`\`\`html block. Only use APIs and flags you're sure exist; flag anything version-dependent.
-${dateLine()}`,
+${flowLine(o)}${dateLine()}`,
   web: (o) => `${persona(o)}
 Be direct, warm and precise. Lead with the answer, then the useful detail, in Markdown.
 You have live web search. Search before answering anything time-sensitive or that you aren't certain of, prefer primary and recent sources, and cite them inline as Markdown links. If sources disagree, say so.
 ${ACCURACY}
-${dateLine()}`,
+${flowLine(o)}${dateLine()}`,
   ideas: (n, flavor) => `${persona()}
 You generate sharp, specific, non-obvious ideas. Flavor: ${flavor}. Return ONLY JSON, no prose, no code fences:
 {"ideas":[{"title":"3-7 word title","pitch":"2 sentences, concrete and vivid","first_step":"the very first action to take","tags":["2-3 short tags"]}]}
@@ -2255,6 +2298,7 @@ async function submit(textArg, modeArg, extra = {}) {
   }
 
   if (!S.thread) S.thread = newThread();
+  if (!S.thread.opts) saveFlowOpts(); // the flow keeps the choices its first turn here was sent with
   // The turn's files, cut to the one budget they share. A file with no room left goes as a name only: the chip said so
   // before Send (renderAttachments), the sent turn says so, and so does this toast (v114: it used to be silent).
   const fitted = docs.length ? fitFiles(docs, fileBudget()) : [], out = fitted.filter((f, i) => leftOut(f) && docs[i].text);
@@ -2441,9 +2485,10 @@ const fileBudget = () => (S.tester ? { total: TESTER_HISTORY.filesRoom, bytes: t
 // tools from the first time it is seen in the run; a call that finds the computer gone gets the relay's error).
 const RUN_BROWSER = new Map();
 const liveBrowser = () => (S.tester ? '' : EXT.ready ? 'local' : REMOTE.online ? 'remote' : '');
+// flow: one line naming the flow's kind ('' with none), so the agent leans to the right account. Fixed per flow.
 function runPrompt(e, thread = S.thread) {
   const all = thread?.entries || [], at = all.indexOf(e), prior = at < 0 ? all : all.slice(0, at), now = Date.now();
-  return { anchor: memoryAnchor(prior, e, now, historyWindow()), browser: heldForRun(RUN_BROWSER, thread?.id || '', runStart(prior, e, now), liveBrowser()) };
+  return { anchor: memoryAnchor(prior, e, now, historyWindow()), browser: heldForRun(RUN_BROWSER, thread?.id || '', runStart(prior, e, now), liveBrowser()), flow: thread ? flowHint(kindOf(thread, threadSpaces), GROUPS) : '' };
 }
 const outputLabel = (id) => ((IMAGE_MODELS.find((m) => m.id === id) || VIDEO_MODELS.find((m) => m.id === id))?.label || modelLabel(id)).split(' · ')[0];
 // Models that read images: every Claude / GPT / Gemini model, the rest of the Vision and Video lists, and whatever the
@@ -3640,6 +3685,7 @@ stream.addEventListener('click', async (ev) => {
       { const was = entryTaint(e); if (was) e.ranTaint = worseTaint(e.ranTaint, was); }
       Object.assign(e, { text: '', think: '', media: [], ideas: null, app: null, error: null, errorKind: null, cut: null, steps: null, enhanced: null, budget: null });
       if (e.params?.seed) delete e.params.seed;
+      e.at = Date.now(); // redone now: the entry belongs to today (days.js entryTime)
       rearmRetry(e); // a spoken request this device sent, tried again, reads its new answer too
       for (const key of libThumbs.keys()) if (key.includes(`:${e.id}:`)) libThumbs.delete(key); // new media, same entry id: drop stale Library thumbs/posters
       return run(e);
@@ -3822,7 +3868,8 @@ MODE_KEYS.forEach((k) => {
   modesNav.append(b);
 });
 
-function setMode(k) {
+// load: a flow's saved mode coming back (openFlowOpts), not a choice: nothing is saved.
+function setMode(k, { load = false } = {}) {
   if (!MODES[k]) return;
   S.mode = k;
   document.body.dataset.mode = k;
@@ -3831,7 +3878,7 @@ function setMode(k) {
   $('#promptPanel').setAttribute('aria-label', `${MODES[k].label} prompt`);
   input.placeholder = MODES[k].ph;
   const fold = $('#composerModeBtn'); fold.innerHTML = MODE_ICON[k]; fold.setAttribute('aria-label', `${MODES[k].label} mode. Show modes and options`); fold.title = 'Modes and options';
-  LS.set('mode', k);
+  if (!load) { LS.set('mode', k); saveFlowOpts(); }
   moveInk();
   renderOptions();
   renderAttachments();
@@ -5048,8 +5095,8 @@ async function openThread(id) {
   const t = liveThreads.get(id) || recoverThread(await DB.get(id));
   if (!t || accountReloading) return toast('That thread is no longer on this device. Refresh the list.', { error: true });
   if (t.id !== S.thread?.id) stopReading({ disarm: true });
-  S.thread = t; renderThread(); closeDrawers(); renderOptions();
-  LS.set(workspaceKey('lastThread'), t.id);
+  S.thread = t; openFlowOpts(t); renderThread(); closeDrawers(); renderOptions();
+  LS.set(workspaceKey('lastFlow'), t.id);
   requestAnimationFrame(() => scrollDown(true, true));
 }
 $('#recentThreads').addEventListener('click', (ev) => { const b = ev.target.closest('[data-recent-thread]'); if (b) openThread(b.dataset.recentThread).catch(storageError); });
@@ -6260,7 +6307,7 @@ $('#migrateBtn').onclick = async (ev) => {
 // own (keys scoped to it, and the shared preferences and session keys that hold no owner data), never the owner's
 // migration flags, sign-in markers, profile cache or navigation keys, another account's scoped keys, settings that now
 // hold an owner passcode (signed in from another tab), or the older-thread boundary flag (it protects the owner's rows).
-const OWNER_LS_KEEP = new Set(['migratedV3', 'migrateToastAt', 'owner', 'signedIn', 'me', 'meBase', 'lastThread', 'pinnedThreads', 'threadGroupsShut']);
+const OWNER_LS_KEEP = new Set(['migratedV3', 'migrateToastAt', 'owner', 'signedIn', 'me', 'meBase', 'lastThread', 'lastFlow', 'pinnedThreads', 'threadGroupsShut']);
 function wipesKey(k) {
   if (!k.startsWith('atelier.') || k === 'atelier.sharedHistoryUnguarded') return false;
   if (workspace === 'owner') return true;
@@ -7622,11 +7669,12 @@ function startFresh() {
   persist(true, { flush: true });
   stopReading({ disarm: true });
   S.thread = null;
+  openFlowOpts(null);
   $('#activityStatus').textContent = '';
   renderThread();
   renderWelcome();
   renderOptions();
-  LS.set(workspaceKey('lastThread'), null);
+  LS.set(workspaceKey('lastFlow'), null);
   input.placeholder = MODES[S.mode].ph;
   stage.scrollTo({ top: 0, behavior: 'instant' });
   input.focus({ preventScroll: true });
@@ -7972,10 +8020,11 @@ window.atelierBoot?.started();
   await Promise.race([migrateOldThreads().catch(() => false), sleep(2000)]);
 
   // resume the last thread if it was recent (6h) — never let a slow/blocked IndexedDB stall startup
-  const lastId = LS.get(workspaceKey('lastThread'), null);
+  // lastFlow (v132); a device updated from an older build has only lastThread, read until lastFlow is first written.
+  const lastId = lsHas(workspaceKey('lastFlow')) ? LS.get(workspaceKey('lastFlow'), null) : LS.get(workspaceKey('lastThread'), null);
   if (lastId && !shared) {
     const t = await Promise.race([DB.get(lastId).catch(() => null), sleep(1500).then(() => null)]);
-    if (t && Date.now() - t.updatedAt < 6 * 36e5) { S.thread = recoverThread(t); renderThread(); renderOptions(); requestAnimationFrame(() => scrollDown(true, true)); }
+    if (t && Date.now() - t.updatedAt < 6 * 36e5) { S.thread = recoverThread(t); openFlowOpts(S.thread); renderThread(); renderOptions(); requestAnimationFrame(() => scrollDown(true, true)); }
   }
   remix.boot().catch((err) => console.warn('[atelier] remix resume', err)); // reads rx:ops once, resumes polling, prunes rx:*
   // Build app data of threads no longer on this device (in Recently deleted, deleted on another device): kept 30 days from
