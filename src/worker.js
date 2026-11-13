@@ -86,6 +86,8 @@ const CHAT_UPSTREAM = {
 };
 
 const PASS_HEADERS = ['content-type', 'content-length', 'nvcf-reqid', 'nvcf-status', 'nvcf-percent-complete', 'retry-after'];
+// Google's placeholder thought signature for a tool call Gemini did not write (ai.google.dev/gemini-api/docs/thought-signatures).
+export const GEMINI_FOREIGN_CALL = 'skip_thought_signature_validator';
 // Same value as public/_headers, and as the live header: the ciprari.ai zone's edge HSTS setting (12 months, no
 // includeSubDomains, no preload; it adds nosniff too) overrides the origin's at Cloudflare's edge, so the code says what
 // production serves.
@@ -225,6 +227,17 @@ function shapeChatBody(provider, body) {
   // Gemini's tool-call signatures (extra_content) go back to Gemini only: a run that falls back to another model
   // replays Gemini's calls without them (v115).
   if (provider !== 'gemini') b.messages = b.messages.map((m) => (Array.isArray(m.tool_calls) ? { ...m, tool_calls: m.tool_calls.map((c) => { if (!c || typeof c !== 'object') return c; const { extra_content, ...rest } = c; return rest; }) } : m));
+  // The other way (v118): a run that falls back TO Gemini (Claude busy) replays tool calls another model made, with no
+  // signature, and Gemini refused the round with 400 ("Function call is missing a thought_signature"). Google's documented
+  // placeholder for calls it did not write goes on the first call of each such turn (Gemini signs only the first of
+  // parallel calls).
+  else b.messages = b.messages.map((m) => {
+    if (m?.role !== 'assistant' || !Array.isArray(m.tool_calls) || !m.tool_calls.length) return m;
+    if (m.tool_calls.some((c) => c?.extra_content?.google?.thought_signature)) return m;
+    const [first, ...rest] = m.tool_calls;
+    if (!first || typeof first !== 'object') return m;
+    return { ...m, tool_calls: [{ ...first, extra_content: { ...(first.extra_content || {}), google: { ...(first.extra_content?.google || {}), thought_signature: GEMINI_FOREIGN_CALL } } }, ...rest] };
+  });
   if (provider !== 'nvidia') {
     delete b.chat_template_kwargs;
     delete b.top_p;
