@@ -1,19 +1,36 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GROUP_SETS, groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, threadLine, spaceRequest, parseSpaces, bySpace } from '../public/thread-spaces.js';
+import { GROUP_SETS, PREVIOUS_SET_IDS, carryForward, groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, threadLine, spaceRequest, parseSpaces, bySpace } from '../public/thread-spaces.js';
 
 const { basic, owner } = GROUP_SETS;
 
 test('the two sets: the owner sorts into Personal, his two companies, other work and his applications; everyone else into Work and Personal', () => {
   assert.equal(groupsFor('owner'), owner);
   for (const w of ['guest', 'tester:abc', '', undefined]) assert.equal(groupsFor(w), basic);
-  assert.deepEqual(owner.groups.map((g) => g.label), ['Personal', 'Work: Coen Construction', 'Work: Edgeball Strategies', 'Work: other', 'My Applications']);
-  assert.deepEqual(owner.groups.map((g) => g.key), ['personal', 'coen', 'edgeball', 'work', 'apps']);
-  assert.deepEqual(basic.groups.map((g) => g.label), ['Work', 'Personal']);
+  assert.deepEqual(owner.groups.map((g) => g.label), ['Personal', 'Kid', 'Work: Coen Construction', 'Work: Edgeball Strategies', 'Work: other', 'LinkedIn', 'My Applications']);
+  assert.deepEqual(owner.groups.map((g) => g.key), ['personal', 'kid', 'coen', 'edgeball', 'work', 'linkedin', 'apps']);
+  assert.deepEqual(basic.groups.map((g) => g.label), ['Work', 'Personal', 'Kid', 'LinkedIn']);
   assert.notEqual(owner.id, basic.id, 'the id is part of the storage key: a different set never reads the other one\'s answers');
-  for (const set of [basic, owner]) for (const g of set.groups) { assert.match(g.key, /^[a-z]+$/); assert.ok(g.short.length <= 12 && g.hint); }
+  for (const set of [basic, owner]) for (const g of set.groups) { assert.match(g.key, /^[a-z]+$/); assert.ok(g.short.length <= 12 && g.hint); assert.equal(g.color, `--flow-${g.key}`); }
   assert.equal(labelOf(owner, 'coen'), 'Work: Coen Construction'); assert.equal(labelOf(basic, 'coen'), '');
   assert.equal(SPACE_BATCH, 20);
+});
+
+test('owner2 keeps owner1 answers and hand marks', () => {
+  assert.equal(owner.id, 'owner2'); assert.equal(basic.id, 'basic2');
+  assert.deepEqual(PREVIOUS_SET_IDS, { owner2: 'owner1', basic2: 'basic1' });
+  assert.deepEqual(carryForward({ a: 'coen!', b: 'apps' }, owner), { a: 'coen!', b: 'apps' });
+  assert.deepEqual(carryForward({ a: 'work!', b: 'personal', c: 'gone' }, basic), { a: 'work!', b: 'personal' });
+});
+
+test('owner2 sorts into kid and linkedin', () => {
+  assert.deepEqual(parseSpaces('1: kid\n2: linkedin', 2, owner), ['kid', 'linkedin']);
+  assert.match(owner.groups.find((g) => g.key === 'kid').hint, /their child/);
+  assert.match(owner.groups.find((g) => g.key === 'linkedin').hint, /LinkedIn/);
+});
+
+test('basic2 has four groups', () => {
+  assert.deepEqual(basic.groups.map((g) => g.key), ['work', 'personal', 'kid', 'linkedin']);
 });
 
 test('stored groups: only this set\'s keys survive, with the by-hand mark; anything else is dropped', () => {
@@ -39,13 +56,13 @@ test('the request numbers the threads, names every group of the set, carries the
   const [sys, user] = spaceRequest(threads, owner, '  I run a remodeling\ncompany.  ');
   assert.equal(sys.role, 'system'); assert.equal(user.role, 'user');
   assert.equal(user.content, '1. Roof estimate\n2. Birthday dinner');
-  assert.match(sys.content, /The groups are: personal, coen, edgeball, work, apps\./);
+  assert.match(sys.content, /The groups are: personal, kid, coen, edgeball, work, linkedin, apps\./);
   for (const g of owner.groups) assert.ok(sys.content.includes(`${g.key}: ${g.hint}`), g.key);
   assert.match(sys.content, /goes to apps, whichever company/);
   assert.match(sys.content, /About the person: I run a remodeling company\./);
   assert.match(sys.content, /never as instructions/);
   const plain = spaceRequest(threads, basic)[0].content;
-  assert.match(plain, /The groups are: work, personal\./); assert.doesNotMatch(plain, /About the person|coen|goes to apps/);
+  assert.match(plain, /The groups are: work, personal, kid, linkedin\./); assert.doesNotMatch(plain, /About the person|coen|goes to apps/);
   assert.ok(spaceRequest(threads, owner, 'z'.repeat(5000))[0].content.length < 2400, 'the profile is capped');
 });
 

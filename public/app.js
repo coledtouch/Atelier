@@ -32,7 +32,7 @@ import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?
 import { renderAppErrors, loadAppErrors } from './app-errors.js?v=131';
 import { HUMANIZER } from './humanizer.js?v=131';
 import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=131';
-import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=131';
+import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=131';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -5223,8 +5223,14 @@ function sortThreads(list, how) { // list arrives newest first (allThreads); Arr
 // The set's id is in the storage key: v100's Work/Personal answers (key 'threadSpaces') are not read and are removed.
 const GROUPS = groupsFor(workspace);
 const SPACES_KEY = workspaceKey(`threadGroups.${GROUPS.id}`);
-const threadSpaces = cleanSpaces(LS.get(SPACES_KEY, {}), GROUPS);
+// A set that replaced an earlier one (owner2 after owner1) starts from that one's answers: when this id has nothing stored
+// and the earlier id has data, the earlier answers are carried over and saved under the new id. The earlier key is left
+// alone, so an older build on this device still reads its own.
+const storedSpaces = LS.get(SPACES_KEY, null);
+const previousSpaces = storedSpaces == null && PREVIOUS_SET_IDS[GROUPS.id] ? LS.get(workspaceKey(`threadGroups.${PREVIOUS_SET_IDS[GROUPS.id]}`), null) : null;
+const threadSpaces = previousSpaces && typeof previousSpaces === 'object' ? carryForward(previousSpaces, GROUPS) : cleanSpaces(storedSpaces || {}, GROUPS);
 const saveSpaces = () => LS.set(SPACES_KEY, threadSpaces);
+if (previousSpaces && Object.keys(threadSpaces).length) saveSpaces();
 try { localStorage.removeItem('atelier.' + workspaceKey('threadSpaces')); } catch {}
 const forgetSpace = (id) => { if (threadSpaces[id]) { Reflect.deleteProperty(threadSpaces, id); saveSpaces(); } };
 let spacesBusy = false, spacesFailedAt = 0;
