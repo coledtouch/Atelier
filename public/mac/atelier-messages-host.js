@@ -7,7 +7,7 @@
 // It needs two macOS permissions, both asked of Google Chrome (the app that starts it): Full Disk Access to read
 // chat.db, and Automation → Messages to send.
 
-const HOST_VERSION = '1.0.4';
+const HOST_VERSION = '1.0.5';
 const LIMITS = { recent: 50, read: 100, text: 2000, chat: 200 };
 const APPLE_EPOCH_MS = 978307200000; // 2001-01-01, where Messages counts its dates from
 
@@ -143,6 +143,11 @@ const SMS_SCRIPT = [
   'end run',
 ];
 const smsArgs = (text, number) => [...SMS_SCRIPT.flatMap((line) => ['-e', line]), '--', String(text), String(number)];
+// The same through the iPhone's RCS account (1.0.5, v121). On the owner's Mac the texts to an Android number that got
+// through were "Text Message • RCS"; every plain SMS one ended "Not Delivered". A Mac whose Messages has no RCS account
+// fails this script at once, and the SMS one is tried.
+const rcsArgs = (text, number) => [...SMS_SCRIPT.map((line) => line.replace('service type = SMS', 'service type = RCS')).flatMap((line) => ['-e', line]), '--', String(text), String(number)];
+const CARRIER_ARGS = { SMS: smsArgs, RCS: rcsArgs };
 // Messages takes a send at once and delivers it in the background. An iMessage to a number that isn't on iMessage
 // fails seconds later ("Not Delivered"), and osascript never hears of it, so the helper said sent and the SMS try never
 // ran. chat.db records the outcome: the helper now waits for it (1.0.2, v115).
@@ -173,11 +178,11 @@ function phoneOf(to, dest) {
 }
 const NO_SMS = 'Messages couldn’t deliver this over iMessage, and this Mac can’t send it as SMS. Sending SMS from a Mac needs an iPhone with Text Message Forwarding on.';
 const NOT_DELIVERED = 'Messages couldn’t deliver this over iMessage. Check the address in Messages on this Mac.';
-const SMS_FAILED = 'Messages couldn’t send this as SMS. On your iPhone, turn on Text Message Forwarding for this Mac.';
+const SMS_FAILED = 'Messages couldn’t send this as a text (RCS or SMS). On your iPhone, turn on Text Message Forwarding for this Mac.';
 const SMS_SERVICE = /^(SMS|RCS)$/i;
 const SMS_CHAT = /^(SMS|RCS);-;/i;
 const NO_HISTORY = 'Atelier couldn’t read this Mac’s texts, so it sent iMessage without checking. If it shows Not Delivered, give Google Chrome Full Disk Access, then quit and reopen Chrome.';
-const RETRIED = 'iMessage couldn’t deliver it, so it went again as SMS.';
+const RETRIED = 'iMessage couldn’t deliver it, so it went again as a carrier text.';
 // The errors a person can fix, in words that say how.
 function friendlyError(raw) {
   const s = String(raw || '');
@@ -230,27 +235,38 @@ function handle(msg) {
     // A phone number or an email goes to the conversation it already has, when chat.db can say which. That lookup is
     // best effort (1.0.1, v114): without Full Disk Access it failed and took every send with it, though sending only
     // needs Automation. The text then goes to the address as given, as it does when no conversation matches.
-    let dest = to, service = '', history = 'none';
+    // A carrier text (green), by the services in order: the next one is tried when Messages refuses the script (no such
+    // account) or chat.db shows the send failed. watches: seconds to look for each try's outcome. Null: none got out.
+    const carrier = (order, watches) => {
+      for (let i = 0; i < order.length; i++) {
+        const since = appleNs(Date.now() - 1000);
+        const s = run('/usr/bin/osascript', CARRIER_ARGS[order[i]](text, number));
+        if (s.code !== 0) { if (/-1743|Apple events/i.test(s.err || s.out)) throw new Error(friendlyError(s.err || s.out)); continue; }
+        const o = outcome(number, since, watches[i] ?? 0);
+        if (o !== 'failed') return { via: order[i], delivery: o === 'sent' ? 'confirmed' : 'unconfirmed' };
+      }
+      return null;
+    };
+    let dest = to, service = '', history = 'none', number = '';
     const phone = phoneOf(to, to);
     if (!to.includes(';') || phone) {
       try {
         const row = query(chatForSql(phone || to))[0] || {};
         if (!to.includes(';')) dest = row.chat || to;
         service = String(row.service || '');
-        history = SMS_SERVICE.test(service) ? 'SMS' : service ? 'iMessage' : 'none';
+        history = SMS_SERVICE.test(service) ? service.toUpperCase() : service ? 'iMessage' : 'none';
       } catch { history = 'unreadable'; /* chat.db can't be read */ }
     }
-    const number = phoneOf(to, dest);
+    number = phoneOf(to, dest);
     // SMS straight away, never an iMessage try first, when (1.0.4, v117) the owner asked for SMS (an SMS or RCS chat id:
     // "SMS;-;+15085550142"), or (1.0.3, v116) the last text with this number that got through was SMS. Messages would
     // otherwise try iMessage, which fails later as "Not Delivered", and catching that in time is not a sure thing.
-    if (number && (SMS_CHAT.test(to) || history === 'SMS')) {
-      const since = appleNs(Date.now() - 1000);
-      const s = run('/usr/bin/osascript', smsArgs(text, number));
-      if (s.code !== 0) throw new Error(/-1743|Apple events/i.test(s.err || s.out) ? friendlyError(s.err || s.out) : SMS_FAILED);
-      const o = outcome(number, since, WATCH.first);
-      if (o === 'failed') throw new Error(SMS_FAILED);
-      return { sent: true, to: number, via: 'SMS', history, delivery: o === 'sent' ? 'confirmed' : 'unconfirmed' };
+    // 1.0.5 (v121): by the service that last worked. With no carrier history RCS goes first: it is what reached the
+    // owner's Android number, and plain SMS did not.
+    if (number && (SMS_CHAT.test(to) || history === 'SMS' || history === 'RCS')) {
+      const got = carrier(history === 'SMS' ? ['SMS', 'RCS'] : ['RCS', 'SMS'], [WATCH.first, WATCH.again]);
+      if (!got) throw new Error(SMS_FAILED);
+      return { sent: true, to: number, via: got.via, history, delivery: got.delivery };
     }
     const since = appleNs(Date.now() - 2000);
     const r = run('/usr/bin/osascript', sendArgs(text, dest));
@@ -265,12 +281,9 @@ function handle(msg) {
     }
     // iMessage could not deliver it: the same text to the same number, once, as SMS (what the script always meant to do).
     if (!number) throw new Error(NOT_DELIVERED);
-    const again = appleNs(Date.now() - 1000);
-    const s = run('/usr/bin/osascript', smsArgs(text, number));
-    if (s.code !== 0) throw new Error(NO_SMS);
-    const o2 = outcome(number, again, WATCH.again);
-    if (o2 === 'failed') throw new Error(NO_SMS);
-    return { sent: true, to: number, via: 'SMS', history, delivery: o2 === 'sent' ? 'confirmed' : 'unconfirmed', note: RETRIED };
+    const got = carrier(['RCS', 'SMS'], [WATCH.again, 0]);
+    if (!got) throw new Error(NO_SMS);
+    return { sent: true, to: number, via: got.via, history, delivery: got.delivery, note: RETRIED };
   }
   throw new Error('Unknown Messages action.');
 }
