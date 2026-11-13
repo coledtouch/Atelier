@@ -5,7 +5,7 @@
 //     written. Started through a linked folder they differed: the script did nothing, said nothing and exited 0.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, mkdtempSync, symlinkSync, rmdirSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, symlinkSync, rmdirSync, rmSync, unlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,7 +43,9 @@ test('pipeline #2: bump-version and sync-humanizer do their work when started th
     const sync = run(join(link, 'sync-humanizer.mjs'), '--check', '--from', join(dir, 'no-such-worker.js'));
     assert.equal(sync.status, 1, sync.stdout + sync.stderr);
   } finally {
-    rmdirSync(link); // the link itself, never what it points at (a plain rmdir cannot remove a folder with files in it)
+    // The link itself, never what it points at: a junction goes with rmdir (which cannot remove a folder with files in it),
+    // a symlink (Linux, macOS) with unlink.
+    if (process.platform === 'win32') rmdirSync(link); else unlinkSync(link);
     rmSync(dir, { recursive: true, force: true });
   }
   for (const f of ['scripts/bump-version.mjs', 'scripts/sync-humanizer.mjs']) assert.match(read(f), /try \{ return real\(process\.argv\[1\]\) === real\(fileURLToPath\(import\.meta\.url\)\); \} catch \{ return false; \}/, f);
