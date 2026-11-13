@@ -98,7 +98,7 @@ test('helper: the errors a person can fix say how; anything else passes through,
   assert.match(H.friendlyError('execution error: Not authorized to send Apple events to Messages. (-1743)'), /Automation/);
   assert.equal(H.friendlyError('x'.repeat(900)).length, 300);
   assert.equal(H.friendlyError(''), 'The Messages helper failed.');
-  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.5' });
+  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.6' });
   assert.throws(() => H.handle({ op: 'delete' }), /Unknown Messages action/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: '  ' }), /Pass to and text/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: 'x'.repeat(2001) }), /over 2000/);
@@ -270,7 +270,8 @@ test('helper 1.0.3: a carrier text that fails says how to fix it; iMessage numbe
   assert.equal(noFwd.handle({ op: 'send', to: '+15086885824', text: 'x' }).threw, 'Messages couldn’t send this as a text (RCS or SMS). On your iPhone, turn on Text Message Forwarding for this Mac.');
   assert.deepEqual(kinds(noFwd), ['SMS', 'RCS'], 'each tried once');
   const failed = deliveryRig({ lookup: '[{"chat":"SMS;-;+15086885824","service":"SMS"}]', results: [FAILED, FAILED] });
-  assert.match(failed.handle({ op: 'send', to: '+15086885824', text: 'x' }).threw, /couldn’t send this as a text/);
+  assert.match(failed.handle({ op: 'send', to: '+15086885824', text: 'x' }).threw, /^Messages couldn’t send this text \(error 22\)\./);
+  assert.deepEqual(kinds(failed), ['SMS'], 'a send Messages took and then failed is not sent again');
   // The last text that got through was iMessage: iMessage first, as before.
   const blue = deliveryRig({ lookup: '[{"chat":"iMessage;-;+16175550142","service":"iMessage"}]', results: [OK] });
   assert.deepEqual(blue.handle({ op: 'send', to: '+16175550142', text: 'x' }), { sent: true, to: 'iMessage;-;+16175550142' });
@@ -311,20 +312,17 @@ test('helper 1.0.4: the answer says what the helper saw, and says how to fix a s
   assert.match(pending.calls[0][1].at(-1), /IFNULL\(m\.item_type, 0\) = 0 AND \(m\.is_from_me = 0/);
 });
 
-test('helper 1.0.5: a number whose last text that got through was RCS gets RCS; a failed try moves to the other service', () => {
+test('helper 1.0.5: a number whose last text that got through was RCS gets RCS; a Mac with no RCS account uses SMS', () => {
   const rig = deliveryRig({ lookup: '[{"chat":"any;-;+15086885824","service":"RCS"}]', results: [OK] });
   assert.deepEqual(rig.full({ op: 'send', to: '508-688-5824', text: 'Test message from my Mac.' }), { sent: true, to: '5086885824', via: 'RCS', history: 'RCS', delivery: 'confirmed' });
   assert.deepEqual(kinds(rig), ['RCS']);
   const sent = rig.calls.find(([tool]) => tool === 'osascript')[1];
   assert.ok(sent.includes('send t to participant dest of (1st account whose service type = RCS)'));
   assert.deepEqual(sent.slice(-3), ['--', 'Test message from my Mac.', '5086885824'], 'the text and the number are arguments, never part of the script');
-  // RCS fails in chat.db: SMS is tried, once.
-  const back = deliveryRig({ lookup: '[{"chat":"any;-;+15086885824","service":"RCS"}]', results: [FAILED, OK] });
+  // Messages has no RCS account: nothing was sent by that script, so SMS goes, once.
+  const back = deliveryRig({ lookup: '[{"chat":"any;-;+15086885824","service":"RCS"}]', results: [OK], rcs: false });
   assert.equal(back.full({ op: 'send', to: '+15086885824', text: 'x' }).via, 'SMS');
   assert.deepEqual(kinds(back), ['RCS', 'SMS']);
-  // SMS history, and SMS fails: RCS is tried.
-  const other = deliveryRig({ lookup: '[{"chat":"SMS;-;+15086885824","service":"SMS"}]', results: [FAILED, OK] });
-  assert.equal(other.full({ op: 'send', to: '+15086885824', text: 'x' }).via, 'RCS');
   // Messages refused the script for want of Automation: that is said, and nothing else is tried.
   const refused = hostRig((tool) => (tool === 'osascript' ? { code: 1, err: 'execution error: Not authorized to send Apple events to Messages. (-1743)' } : { out: '[{"chat":"x","service":"RCS"}]' }));
   assert.match(refused.handle({ op: 'send', to: '+15086885824', text: 'x' }).threw, /^Chrome can’t control Messages yet\./);
@@ -336,4 +334,25 @@ test('app: the agent is told how to send SMS, to pass on the helper’s note, an
   const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /To send as SMS \(the user asks for SMS, or the person uses Android\), set to "SMS;-;" plus the number with its country code, like SMS;-;\+15085550142\. Pass on any note in the send result\. Never send the same text again unless the user asks\./);
   assert.match(app, /For SMS: SMS;-; plus the number, like SMS;-;\+15085550142' \}/);
+});
+
+// v122 (helper 1.0.6): chat.db on the owner's Mac showed every failed carrier text with error 4 and never sent, one typed
+// by hand in Messages included, and five sends in twelve seconds: a failed try was sent again by the other service.
+test('helper 1.0.6: a carrier text that Messages took and failed is final, and the answer names Messages’ error', () => {
+  const TIMEOUT = { error: 4, sent: 0 };
+  for (const service of ['RCS', 'SMS']) {
+    const rig = deliveryRig({ lookup: `[{"chat":"any;-;+15086885824","service":"${service}"}]`, results: [TIMEOUT, OK] });
+    assert.equal(rig.handle({ op: 'send', to: '+15086885824', text: 'x' }).threw, 'Messages couldn’t send this text (error 4). The iPhone didn’t take it from this Mac in time. Check that the iPhone is on and unlocked, wait a few minutes, then send once. Don’t send it again unless the user asks.');
+    assert.deepEqual(kinds(rig), [service], 'one request, one text');
+  }
+  const forced = deliveryRig({ results: [TIMEOUT, OK] });
+  assert.match(forced.handle({ op: 'send', to: 'SMS;-;+15086885824', text: 'x' }).threw, /\(error 4\)/);
+  assert.deepEqual(kinds(forced), ['RCS']);
+  // Another code: no guess at the cause.
+  const other = deliveryRig({ lookup: '[{"chat":"x","service":"SMS"}]', results: [{ error: 39, sent: 0 }] });
+  assert.equal(other.handle({ op: 'send', to: '+15086885824', text: 'x' }).threw, 'Messages couldn’t send this text (error 39). Look at that conversation in Messages on this Mac. Don’t send it again unless the user asks.');
+  // An iMessage that fails still gets its one carrier try (1.0.2); that try failing is final too.
+  const blue = deliveryRig({ results: [FAILED, TIMEOUT] });
+  assert.match(blue.handle({ op: 'send', to: '+15086885824', text: 'x' }).threw, /\(error 4\)/);
+  assert.deepEqual(kinds(blue), ['any', 'RCS']);
 });

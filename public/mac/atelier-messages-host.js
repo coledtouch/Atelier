@@ -7,7 +7,7 @@
 // It needs two macOS permissions, both asked of Google Chrome (the app that starts it): Full Disk Access to read
 // chat.db, and Automation → Messages to send.
 
-const HOST_VERSION = '1.0.5';
+const HOST_VERSION = '1.0.6';
 const LIMITS = { recent: 50, read: 100, text: 2000, chat: 200 };
 const APPLE_EPOCH_MS = 978307200000; // 2001-01-01, where Messages counts its dates from
 
@@ -158,12 +158,18 @@ const outcomeSql = (chat, since) => `SELECT m.error AS error, m.is_sent AS sent 
 JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
 WHERE m.is_from_me = 1 AND m.date >= ${since} AND (${chatMatch(chat)}) ORDER BY m.date DESC LIMIT 1;`;
 // 'sent', 'failed', or 'unknown' (chat.db can't be read, or nothing settled in time).
+// The code Messages gave the last send that failed (chat.db message.error), for the failure's own words (1.0.6, v122).
+let lastError = 0;
+// On the owner's Mac every failed carrier text carried error 4 and was never sent, a text typed by hand included: the
+// iPhone did not take it from the Mac in time. The helper then sent the same text again by the other service, and five
+// went out in twelve seconds. A send that Messages took and then failed is now final: one request, one text.
+const sendFailed = (code) => `Messages couldn’t send this text (error ${code}). ${code === 4 ? 'The iPhone didn’t take it from this Mac in time. Check that the iPhone is on and unlocked, wait a few minutes, then send once.' : 'Look at that conversation in Messages on this Mac.'} Don’t send it again unless the user asks.`;
 function outcome(chat, since, tries) {
   for (let i = 0; i < tries; i++) {
     delay(WATCH.every);
     let row;
     try { row = query(outcomeSql(chat, since))[0]; } catch { return 'unknown'; }
-    if (row && Number(row.error)) return 'failed';
+    if (row && Number(row.error)) { lastError = Number(row.error); return 'failed'; }
     if (row && Number(row.sent) === 1) return 'sent';
   }
   return 'unknown';
@@ -235,15 +241,16 @@ function handle(msg) {
     // A phone number or an email goes to the conversation it already has, when chat.db can say which. That lookup is
     // best effort (1.0.1, v114): without Full Disk Access it failed and took every send with it, though sending only
     // needs Automation. The text then goes to the address as given, as it does when no conversation matches.
-    // A carrier text (green), by the services in order: the next one is tried when Messages refuses the script (no such
-    // account) or chat.db shows the send failed. watches: seconds to look for each try's outcome. Null: none got out.
+    // A carrier text (green), by the services in order: the next one is tried only when Messages refuses the script (no
+    // such account), so nothing was sent. A send it took and then failed is final (1.0.6, v122). Null: no account took it.
     const carrier = (order, watches) => {
       for (let i = 0; i < order.length; i++) {
         const since = appleNs(Date.now() - 1000);
         const s = run('/usr/bin/osascript', CARRIER_ARGS[order[i]](text, number));
         if (s.code !== 0) { if (/-1743|Apple events/i.test(s.err || s.out)) throw new Error(friendlyError(s.err || s.out)); continue; }
         const o = outcome(number, since, watches[i] ?? 0);
-        if (o !== 'failed') return { via: order[i], delivery: o === 'sent' ? 'confirmed' : 'unconfirmed' };
+        if (o === 'failed') throw new Error(sendFailed(lastError));
+        return { via: order[i], delivery: o === 'sent' ? 'confirmed' : 'unconfirmed' };
       }
       return null;
     };
