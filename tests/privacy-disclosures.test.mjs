@@ -317,10 +317,10 @@ test('the Runway row names Seedance and the Aleph clip upload (privacy-runway-ro
 test('Anthropic’s web search is disclosed with the rule that keeps it apart from account reads (privacy-web-search-undisclosed)', async () => {
   const [ANTH, APP, ROUTER] = await Promise.all([read('src/anthropic.js'), read('public/app.js'), read('src/tester/router.js')]);
   assert.match(ANTH, /type: 'web_search_20260209', name: 'web_search'/);
-  assert.match(APP, /const offerWeb = web && !accountRead;/, 'the agent withdraws search after the first account read');
+  assert.match(APP, /const offerWeb = web && \(openWeb \|\| !accountRead\);/, 'the agent withdraws search after the first account read');
   assert.match(ROUTER, /if \(p\.webUses\) body\.web_search = true;/, 'testers can search too');
   const row = section(/<tr><td>Anthropic \(Claude\), OpenAI, Google \(Gemini, Gemini Omni video\) and NVIDIA<\/td><td>([\s\S]*?)<\/td><\/tr>/);
-  for (const words of ['Anthropic’s web search tool', 'for the owner and testers alike', 'search terms Claude writes from your question and the conversation', 'its search provider', 'only before it reads anything from them', 'switched off for the rest of that answer', 'both account data and outside text'])
+  for (const words of ['Anthropic’s web search tool', 'for the owner and testers alike', 'search terms Claude writes from your question and the conversation', 'its search provider', 'only before it reads anything from them', 'switched off for the rest of that answer', 'both account data and outside text', 'The owner can lift these limits for their own use, with the Approve everything switch', 'Testers can’t'])
     assert.ok(row.includes(words), words);
   assert.doesNotMatch(row, /never run in the same answer/, 'they can: search first, then the accounts');
 });
