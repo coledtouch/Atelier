@@ -222,6 +222,9 @@ function shapeChatBody(provider, body) {
   delete b.cache; delete b.cache_key; delete b.cache_tail; delete b.cache_turn;
   // Claude-only replay data never goes to other providers.
   b.messages = b.messages.map(({ anthropic_content, ...m }) => m);
+  // Gemini's tool-call signatures (extra_content) go back to Gemini only: a run that falls back to another model
+  // replays Gemini's calls without them (v115).
+  if (provider !== 'gemini') b.messages = b.messages.map((m) => (Array.isArray(m.tool_calls) ? { ...m, tool_calls: m.tool_calls.map((c) => { if (!c || typeof c !== 'object') return c; const { extra_content, ...rest } = c; return rest; }) } : m));
   if (provider !== 'nvidia') {
     delete b.chat_template_kwargs;
     delete b.top_p;
