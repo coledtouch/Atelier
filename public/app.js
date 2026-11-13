@@ -8,31 +8,31 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=129';
-import * as Sync from './sync.js?v=129';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=129';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=129';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=129';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY, mergeProfile, factsInUse, FACTS_IN_PROMPT } from './context.js?v=129';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=129';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=129';
-import { initLookup } from './lookup.js?v=129';
-import { createRemix } from './remix-app.js?v=129';
-import { sendMode, looksLikeQuestion } from './remix.js?v=129';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=129';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=129';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=129';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=129';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=129';
-import * as ClaudeImport from './claude-import.js?v=129';
-import { createFeedback } from './feedback.js?v=129';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=129';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=129';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=129';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=129';
-import { HUMANIZER } from './humanizer.js?v=129';
-import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=129';
-import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=129';
+import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=130';
+import * as Sync from './sync.js?v=130';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=130';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=130';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=130';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY, mergeProfile, factsInUse, FACTS_IN_PROMPT } from './context.js?v=130';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=130';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=130';
+import { initLookup } from './lookup.js?v=130';
+import { createRemix } from './remix-app.js?v=130';
+import { sendMode, looksLikeQuestion } from './remix.js?v=130';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=130';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=130';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=130';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=130';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=130';
+import * as ClaudeImport from './claude-import.js?v=130';
+import { createFeedback } from './feedback.js?v=130';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=130';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=130';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=130';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=130';
+import { HUMANIZER } from './humanizer.js?v=130';
+import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=130';
+import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=130';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -652,7 +652,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '129';
+const APP_BUILD = '130';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -2680,6 +2680,8 @@ async function refreshRemote(force = false) {
   return REMOTE.online;
 }
 const browserAvailable = () => !S.tester && (EXT.ready || REMOTE.online);
+// The kind of computer this browser runs on, as the relay keeps one connection for each (src/relay.js DEVICES).
+const deviceKind = () => { const p = `${navigator.userAgentData?.platform || ''} ${navigator.platform || ''} ${navigator.userAgent || ''}`; return /mac/i.test(p) && !/iphone|ipad/i.test(p) ? 'mac' : /win/i.test(p) ? 'win' : /linux|cros|android/i.test(p) ? 'linux' : 'other'; };
 
 // Runs a browser command here (extension in this browser) or on the user's computer (relay). approved: the owner OK'd
 // this step in the app (an approval card): click and type need it, and so do opening a page and reading one by its
@@ -2690,7 +2692,11 @@ async function extCall(cmd, args = {}, timeout = 60000, approved = false) {
     ? 'Saved-password sign-in needs Atelier Browser 1.4.0. Get it in Settings → Connections.' : msg);
   // A reloaded or updated extension leaves this tab talking to a dead copy (v114): every command failed until the
   // tab was reloaded. Drop the local link so the relay path is tried next, and say what fixes it here.
-  if (EXT.ready) return extLocal(cmd, args, timeout, approved).catch((err) => {
+  // Texts go through Messages on a Mac (v130). The extension in this browser, on a PC, has no Messages: with the
+  // extension installed on his PC too, the owner's request for his texts stopped here with "Messages isn't set up on this
+  // computer". From any other kind of computer a Messages command goes to the relay, which hands it to the Mac.
+  const here = EXT.ready && !(cmd === 'messages' && deviceKind() !== 'mac');
+  if (here) return extLocal(cmd, args, timeout, approved).catch((err) => {
     if (/context invalidated/i.test(err?.message || '')) {
       EXT.ready = false; REMOTE.checked = 0; renderOptions();
       toast('Atelier Browser was reloaded. Reload this tab to reconnect it.', { ms: 10000 });
@@ -2720,7 +2726,7 @@ async function autoPair() {
     if (st?.paired && st.origin === location.origin) {
       for (let i = 0; i < 6; i++) { await sleep(3000); const again = await extLocal('status', {}, 5000).catch(() => null); if (again?.connected) return; }
     }
-    const r = await fetch('/api/relay/pair', { method: 'POST', headers: apiHeaders() });
+    const r = await fetch('/api/relay/pair', { method: 'POST', headers: apiHeaders(), body: JSON.stringify({ device: deviceKind() }) });
     if (!r.ok) return;
     const { token } = await r.json();
     await extLocal('pair', { token }, 10000);
