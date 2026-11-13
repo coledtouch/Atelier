@@ -1055,8 +1055,8 @@ test('confirm page: the tick is sent only with an Allow, and the page carries th
   assert.match(js, /port\.postMessage\(\{ answer: choice, \.\.\.\(always \? \{ always: true \} : \{\}\) \}\)/);
 });
 
-test('manifest: version 1.4.4, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
-  assert.equal(SOURCE_MANIFEST.version, '1.4.4');
+test('manifest: version 1.4.5, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
+  assert.equal(SOURCE_MANIFEST.version, '1.4.5');
   assert.ok(SOURCE_MANIFEST.description.length <= 132);
   assert.ok(Number(SOURCE_MANIFEST.minimum_chrome_version) >= 116);
 });
@@ -1069,8 +1069,8 @@ test('the app asks for the extension build it ships: MIN_EXT is the manifest ver
   const min = /const MIN_EXT = '([\d.]+)';/.exec(APP)?.[1];
   assert.equal(min, SOURCE_MANIFEST.version, 'public/app.js MIN_EXT = extension/manifest.json version');
   const olderExt = new Function(`const MIN_EXT = '${min}'; return ${/\nconst olderExt = ([^\n]+);\n/.exec(APP)[1]};`)();
-  for (const v of ['1.4.3', '1.4.2', '1.4.0', '1.3.10', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
-  for (const v of [min, '1.4.4', '1.10.0', '2.0.0']) assert.equal(olderExt(v), false, v);
+  for (const v of ['1.4.4', '1.4.3', '1.4.2', '1.4.0', '1.3.10', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
+  for (const v of [min, '1.4.5', '1.10.0', '2.0.0']) assert.equal(olderExt(v), false, v);
   assert.match(APP, /if \(olderExt\(d\.version\)\) setTimeout\(\(\) => toast\(`Atelier Browser has an update \(v\$\{MIN_EXT\}\)/);
 });
 
@@ -1083,7 +1083,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
   const prod = packExtension();
   const files = unzipSync(prod.zip);
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  assert.equal(manifest.version, '1.4.4');
+  assert.equal(manifest.version, '1.4.5');
   assert.deepEqual(manifest.content_scripts.map((c) => c.matches), [['https://atelier.ciprari.ai/*']]);
   assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
   assert.ok(!/localhost|127\.0\.0\.1/.test(strFromU8(files['manifest.json'])));
@@ -1092,7 +1092,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
 
   const dev = packExtension({ dev: true });
   assert.deepEqual(dev.manifest.content_scripts[0].matches, ['https://atelier.ciprari.ai/*', 'http://localhost:8787/*']);
-  assert.equal(dev.manifest.version, '1.4.4');
+  assert.equal(dev.manifest.version, '1.4.5');
   assert.deepEqual(SOURCE_MANIFEST.content_scripts[0].matches, dev.manifest.content_scripts[0].matches, 'the source keeps localhost for Load unpacked');
 });
 
@@ -1622,8 +1622,14 @@ test('confirm page: the box names everything it covers, and a text message is he
   assert.equal(typing.els.typedTitle.textContent, 'Text to type');
 });
 
-// ── 1.4.2 (v119): the agent opened the sign-in page in a background tab, where Chrome shows no saved passwords, so the
-// sign-in said none was saved. With two saved logins for the site, it also took Chrome's first without saying so.
+// ── 1.4.2 to 1.4.5 (v119 to v126): signing in on the owner's Mac ──
+// 1.4.2: the agent opened the sign-in page in a background tab, where Chrome shows no saved passwords.
+// 1.4.3: Chrome showed its list of two saved logins and the ArrowDown + Enter never picked one. The keys carry the
+//   Mac's own key codes too, and the sign-in waits for the user to click their login.
+// 1.4.4: the first click waits for Chrome's debugging bar, which moves the page and closes the list.
+// 1.4.5: an account named was typed into the field (1.4.2 to 1.4.4). That closed Chrome's list or cut it down to a name
+//   the model had guessed ("bkenny" for a login saved under a full address), and the address the owner then picked was
+//   refused as another account. Nothing is typed now: Chrome's list opens for the user's own click, and the user picks.
 test('sign-in 1.4.2: the tab comes to the front before any click', async () => {
   const { h } = signinRig({ fill: 'pick' });
   const r = await h.local('signin', { tabId: 7 });
@@ -1632,43 +1638,6 @@ test('sign-in 1.4.2: the tab comes to the front before any click', async () => {
   assert.match(BACKGROUND.replace(/\r/g, ''), /await chrome\.windows\.update\(front\.windowId, \{ focused: true \}\);\n    \} catch \{[^}]*\}\n    await sleep\(TIMING\.front\);\n    const target = \{ tabId \};/, 'its window focused, then a moment, then the clicks');
 });
 
-test('sign-in 1.4.2: a named account is typed, picked from Chrome’s list and reported; the password never leaves the page', async () => {
-  const saved = ['coen@example.com', 'bk@example.com'];
-  const { h, page } = signinRig({ fill: 'click', saved });
-  const r = await h.local('signin', { tabId: 7, account: 'bk@example.com' });
-  assert.ok(r.ok, r.error);
-  assert.equal(r.result.account, 'bk@example.com');
-  assert.equal(page.userEl.value, 'bk@example.com');
-  assert.equal(page.pw.value, 'pw-of-bk@example.com', 'that account’s password, not the one Chrome filled first');
-  assert.deepEqual(h.cdp.filter(([m]) => m === 'Input.insertText').map(([, p]) => p.text), ['bk@example.com']);
-  assert.deepEqual(keysSent(h), ['ArrowDown', 'Enter']);
-  assert.equal(page.submitted, 1);
-  assert.doesNotMatch(JSON.stringify(r), /pw-of/);
-  // No account named: Chrome's first, and the answer says which.
-  const first = signinRig({ fill: 'click', saved });
-  const r2 = await first.h.local('signin', { tabId: 7 });
-  assert.equal(r2.result.account, 'coen@example.com');
-  assert.ok(!first.h.cdp.some(([m]) => m === 'Input.insertText'));
-});
-
-test('sign-in 1.4.2: an account Chrome has no login for submits nothing', async () => {
-  const { h, page } = signinRig({ fill: 'click', saved: ['coen@example.com'] });
-  const r = await h.local('signin', { tabId: 7, account: 'someone@else.com' });
-  assert.equal(r.ok, false);
-  assert.match(r.error, /^Chrome didn’t fill the password for that account, so nothing was submitted\./);
-  assert.equal(page.submitted, 0);
-  assert.equal(page.pw.value, '', 'the password Chrome filled first is cleared, never sent under another name');
-  assert.deepEqual(h.cdp.at(-1), ['detach', 7]);
-});
-
-test('app 1.4.2: browser_signin takes an account, and the app asks for extension 1.4.3 (v120)', () => {
-  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(app, /The result names the account it used\.', \{ tabId: B_TAB, account: \{ type: 'string'/);
-  assert.match(app, /const MIN_EXT = '1\.4\.4';/);
-});
-
-// ── 1.4.3 (v120): on the owner's Mac, Chrome showed its list of two saved logins, and the ArrowDown + Enter never picked
-// one. The keys now carry the Mac's own key codes too, and the sign-in waits for the user to click their login.
 test('sign-in 1.4.3: on a Mac the keys carry the Mac key codes', async () => {
   const { h } = signinRig({ fill: 'pick' });
   h.os = 'mac';
@@ -1692,46 +1661,72 @@ test('sign-in 1.4.3: when the keys pick nothing, the user’s own click in Chrom
   assert.deepEqual(page.enters.map((e) => e.guarded), [true], 'the page’s Enter was held while waiting');
   assert.equal(page.listeners.length, 0, 'and the guard is off afterwards');
   assert.doesNotMatch(JSON.stringify(r), /picked-by-hand/);
-  // Nobody clicks: nothing is sent, and the answer says the user can pick on the next try.
+  // Nobody clicks: nothing is sent, and the answer says what the user does on the next try.
   const none = signinRig({ fill: 'never' });
   const r2 = await none.h.local('signin', { tabId: 7 });
-  assert.match(r2.error, /If Chrome lists saved logins there, the user can click theirs on the next try\./);
+  assert.match(r2.error, /Ask the user to click the user name field on that tab during the next try, and pick their login from Chrome’s list\./);
   assert.equal(none.page.submitted, 0);
 });
 
-test('app 1.4.3: a sign-in step gets 90 s, and its card tells the user to click their login', () => {
-  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(app, /step\.name === 'browser_signin' \? 90000 : 60000/);
-  assert.match(app, /If Chrome shows its list of saved logins on that tab, click yours\./);
-  assert.match(BACKGROUND, /pick: 20_000, poll: 500, /, '20 s for the click, well inside the app’s 90 s');
-});
-
-// ── 1.4.4 (v121): with an account named, the name was typed and no password followed: typing closes Chrome's list, so
-// there was nothing for the keys or the user to pick. The answer then said Chrome had no login for it, which was wrong.
-test('sign-in 1.4.4: after the account is typed the field is clicked again, so Chrome’s list is open for the pick', async () => {
-  const { h, page } = signinRig({ fill: 'never', saved: ['coen@example.com', 'bk@example.com'] });
-  const r = await h.local('signin', { tabId: 7, account: 'bk@example.com' });
-  assert.ok(r.ok, r.error);
-  assert.equal(r.result.account, 'bk@example.com');
-  assert.deepEqual(mouseAt(h), [[60, 110], [60, 110], [60, 190]], 'the user name field, the same field again after typing, then Log in');
-  const order = h.cdp.map(([m, p]) => (m === 'Input.insertText' ? 'type' : m === 'Input.dispatchMouseEvent' && p.type === 'mouseReleased' ? 'click' : m === 'Input.dispatchKeyEvent' && p.type === 'rawKeyDown' ? p.key : '')).filter(Boolean);
-  assert.deepEqual(order, ['click', 'type', 'click', 'ArrowDown', 'Enter', 'click']);
-  assert.equal(page.submitted, 1);
-});
-
-test('sign-in 1.4.4: the first click waits for Chrome’s debugging bar; a pick that fills nothing never claims no login is saved', async () => {
+test('sign-in 1.4.4: the first click waits for Chrome’s debugging bar', () => {
   const src = BACKGROUND.replace(/\r/g, '');
   assert.match(src, /await sleep\(TIMING\.bar\);\n      const first = await inPage\(tabId, pageLogin, \['at', form\.user \? 'user' : 'pw'\]\);/);
-  assert.match(src, /bar: 900 \};/);
-  const none = signinRig({ fill: 'never', saved: ['coen@example.com'] });
-  const r = await none.h.local('signin', { tabId: 7, account: 'someone@else.com' });
-  assert.equal(r.error, 'Chrome didn’t fill the password for that account, so nothing was submitted. If Chrome lists saved logins on that tab, the user can click theirs on the next try. Otherwise ask the user to sign in.');
-  assert.doesNotMatch(r.error, /no saved password/);
-  // The user clicks another login in the list than the one asked for: nothing goes, and the answer says why.
-  const other = signinRig({ fill: 'never', saved: ['coen@example.com'] });
+  assert.match(src, /pick: 30_000, poll: 500, bar: 900 \};/, '30 s for the user’s click, inside the app’s 90 s');
+});
+
+test('sign-in 1.4.5: nothing is ever typed into the form; with an account named the keys stay off and the user picks', async () => {
+  assert.doesNotMatch(BACKGROUND, /Input\.insertText/, 'no typing into a sign-in form');
+  const saved = ['coen@example.com', 'bkenny@example.com'];
+  // The model guessed "bkenny". Chrome fills nothing by itself; the user clicks bkenny@example.com in Chrome's list.
+  const { h, page } = signinRig({ fill: 'never', saved });
+  h.run('TIMING.pick = 5000; TIMING.poll = 5');
+  setTimeout(() => { page.userEl.value = 'bkenny@example.com'; page.pw.value = 'pw'; }, 40);
+  const r = await h.local('signin', { tabId: 7, account: 'bkenny' });
+  assert.ok(r.ok, r.error);
+  assert.equal(r.result.account, 'bkenny@example.com', 'the full address is the account asked for');
+  assert.deepEqual(keysSent(h), [], 'no ArrowDown + Enter: they would take Chrome’s first row');
+  assert.equal(page.submitted, 1);
+  // The user picks another login than the one named: their pick stands, and the answer says which.
+  const other = signinRig({ fill: 'never', saved });
   other.h.run('TIMING.pick = 5000; TIMING.poll = 5');
-  setTimeout(() => { other.page.userEl.value = 'coen@example.com'; other.page.pw.value = 'x'; }, 40);
-  const r2 = await other.h.local('signin', { tabId: 7, account: 'bk@example.com' });
-  assert.match(r2.error, /^Chrome filled a different account than the one asked for, so nothing was submitted\./);
-  assert.equal(other.page.submitted, 0);
+  setTimeout(() => { other.page.userEl.value = 'coen@example.com'; other.page.pw.value = 'pw'; }, 40);
+  const r2 = await other.h.local('signin', { tabId: 7, account: 'bkenny' });
+  assert.equal(r2.result.account, 'coen@example.com');
+  assert.equal(other.page.submitted, 1);
+});
+
+test('sign-in 1.4.5: what Chrome filled by itself stays only when it is the account asked for', async () => {
+  const saved = ['coen@example.com', 'bkenny@example.com'];
+  // Chrome's own fill is the account asked for: straight on, by full address or by the part before "@".
+  for (const account of ['coen@example.com', 'COEN']) {
+    const { h, page } = signinRig({ fill: 'click', saved });
+    const r = await h.local('signin', { tabId: 7, account });
+    assert.equal(r.result?.account, 'coen@example.com', account);
+    assert.deepEqual(mouseAt(h), [[60, 110], [60, 190]], 'the field, then Log in');
+    assert.equal(page.submitted, 1);
+  }
+  // Chrome filled coen@, bkenny was asked for: both fields emptied, the field clicked again, and the user picks.
+  const { h, page } = signinRig({ fill: 'click', saved });
+  h.run('TIMING.pick = 5000; TIMING.poll = 5');
+  let cleared = null;
+  setTimeout(() => { cleared = [page.userEl.value, page.pw.value]; page.userEl.value = 'bkenny@example.com'; page.pw.value = 'pw-b'; }, 60);
+  const r = await h.local('signin', { tabId: 7, account: 'bkenny@example.com' });
+  assert.deepEqual(cleared, ['', ''], 'the other account’s password never stays in the form');
+  assert.equal(r.result.account, 'bkenny@example.com');
+  assert.deepEqual(mouseAt(h), [[60, 110], [60, 110], [60, 190]], 'the field, the field again to open the list, then Log in');
+  assert.equal(page.pw.value, 'pw-b');
+  // Nobody picks: nothing is sent.
+  const none = signinRig({ fill: 'click', saved });
+  const r2 = await none.h.local('signin', { tabId: 7, account: 'bkenny@example.com' });
+  assert.equal(r2.ok, false);
+  assert.equal(none.page.submitted, 0);
+  assert.equal(none.page.pw.value, '');
+});
+
+test('app 1.4.5: browser_signin’s account is the user’s own word, a sign-in step gets 90 s, and the card says to pick', () => {
+  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /account: \{ type: 'string', description: 'The saved user name or email the user asked for, in their own words\. Never guess one: leave it out, and the user picks from Chrome’s list\.' \}/);
+  assert.match(app, /const MIN_EXT = '1\.4\.5';/);
+  assert.match(app, /step\.name === 'browser_signin' \? 90000 : 60000/);
+  assert.match(app, /If Chrome doesn’t fill it, click the user name field on that tab and pick your login\./);
 });

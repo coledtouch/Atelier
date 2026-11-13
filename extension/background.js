@@ -36,7 +36,7 @@ const MAX_SHOWN_TEXT = 2000; // characters of the text to type shown in the conf
 // lets a page loaded for a read draw itself.
 // front: the pause after a sign-in tab comes forward. pick: how long a sign-in waits for the user to click their login in
 // Chrome's list when the keys didn't pick it, looking every poll (1.4.3, v120).
-const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800, front: 400, pick: 20_000, poll: 500, bar: 900 };
+const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800, front: 400, pick: 30_000, poll: 500, bar: 900 };
 // After a click or typing request is declined, closed or left unanswered, further ones from the same path (this
 // browser's Atelier tab, or another device through the relay) are refused without a window for a while: 30 s, doubling
 // with each refusal in a row (at most 10 min); an Allow resets it. A hijacked page can't keep stealing the focus.
@@ -362,13 +362,10 @@ chrome.windows.onRemoved.addListener((windowId) => { if (asking && asking.window
 // Since 1.4.1 (v114) it also reports whether that field is still on the page afterwards, so a form that never went
 // anywhere is not called submitted.
 const NO_LOGIN_FORM = 'No sign-in form with a password field on that tab. Open the sign-in page first.';
-const NO_SAVED = 'Chrome didn’t fill a saved password on this page, so nothing was submitted. If Chrome lists saved logins there, the user can click theirs on the next try. Otherwise ask the user to sign in, or to save the password in Chrome first.';
+const NO_SAVED = 'Chrome didn’t fill a saved password on this page, so nothing was submitted. Ask the user to click the user name field on that tab during the next try, and pick their login from Chrome’s list. If Chrome lists none, ask the user to sign in, or to save the password in Chrome first.';
 const NO_SIGNIN_BUTTON = 'Atelier Browser couldn’t tell which button signs in on that page, so nothing was submitted. Ask the user to sign in.';
 const SIGNIN_UNKNOWN = 'The tab stopped answering while the sign-in form was being sent. It isn’t known whether it went through. Look at that tab before trying again.';
 const FILLED = 'Chrome filled the password it had saved. Atelier never saw it.';
-const NO_SUCH_ACCOUNT = 'Chrome filled a different account than the one asked for, so nothing was submitted. Ask the user which account to use.';
-// Nothing filled after the account was typed. That is not proof Chrome has no login for it (1.4.4, v121: it said so).
-const NOT_PICKED = 'Chrome didn’t fill the password for that account, so nothing was submitted. If Chrome lists saved logins on that tab, the user can click theirs on the next try. Otherwise ask the user to sign in.';
 function pageLogin(op, which) {
   const q = (k) => document.querySelector(`[data-atelier-login="${k}"]`);
   const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
@@ -600,34 +597,36 @@ const COMMANDS = {
       // on a sign-up form Chrome offers a new password there, and the same keys accept it. A real Chrome must settle it.)
       await click(first);
       await sleep(TIMING.fill);
-      // An account named: empty both fields and type it, so Chrome's list holds that account's login alone; then pick it.
-      // The password Chrome filled on load may be another account's, so it never stays (1.4.2, v119).
-      const pick = Boolean(account && form.user);
-      if (pick) {
+      // An account named is a preference, never typed (1.4.5, v126). 1.4.2 to 1.4.4 typed it into the field: on the
+      // owner's Mac that closed Chrome's list or cut it down to a name the model had guessed ("bkenny" for a login saved
+      // under a full address), and the address he then picked was refused as another account. Chrome's list opens for
+      // the user's own click, so the user picks. What Chrome filled by itself stays only when it is the account asked
+      // for: the same name, or the part of it before "@".
+      const whoIs = async () => String((await inPage(tabId, pageLogin, ['who']))?.who || '');
+      const asked = (who) => { const a = account.toLowerCase(), w = who.toLowerCase(); return w === a || w.split('@')[0] === a.split('@')[0]; };
+      const prefer = Boolean(account && form.user);
+      if (prefer && (await filled()) && !asked(await whoIs())) {
         await inPage(tabId, pageLogin, ['clear']);
-        await cdp('Input.insertText', { text: account });
-        await sleep(TIMING.fill);
-        // Typing closes Chrome's list: the name sat in the field and no password followed. A second click on the field
-        // opens the list again, now holding only the logins that match what was typed (1.4.4, v121).
         const again = await inPage(tabId, pageLogin, ['at', 'user']);
         if (again) { await click(again); await sleep(TIMING.fill); }
       }
-      if (pick || !(await filled())) {
+      if (!(await filled())) {
         await inPage(tabId, pageLogin, ['guard']);
         try {
-          await key('ArrowDown', 40);
-          await sleep(250);
-          await key('Enter', 13);
-          await sleep(TIMING.fill);
-          // Still empty: Chrome's list may be showing and not taking the keys. The user can click their login in it; the
-          // form is sent once Chrome fills it, within TIMING.pick (1.4.3, v120). The Enter guard stays on meanwhile.
+          // The keys take the first row of Chrome's list, so they go only when no account was named.
+          if (!prefer) {
+            await key('ArrowDown', 40);
+            await sleep(250);
+            await key('Enter', 13);
+            await sleep(TIMING.fill);
+          }
+          // Still empty: the user clicks the user name field and their login in Chrome's list; the form is sent once
+          // Chrome fills it, within TIMING.pick (1.4.3, v120). The Enter guard stays on meanwhile.
           for (let waited = 0; waited < TIMING.pick && !(await filled()); waited += TIMING.poll) await sleep(TIMING.poll);
         } finally { await inPage(tabId, pageLogin, ['unguard']).catch(() => {}); }
       }
-      if (!(await filled())) throw new Error(pick ? NOT_PICKED : NO_SAVED);
-      const who = String((await inPage(tabId, pageLogin, ['who']))?.who || '');
-      if (pick && who.toLowerCase() !== account.toLowerCase()) throw new Error(NO_SUCH_ACCOUNT);
-      used = who;
+      if (!(await filled())) throw new Error(NO_SAVED);
+      used = await whoIs();
       const sub = form.submit ? await inPage(tabId, pageLogin, ['at', 'submit']) : null;
       if (sub) await sent(click(sub));
       else if (form.enter === false) throw new Error(NO_SIGNIN_BUTTON); // the button found went away, and Enter would press another
