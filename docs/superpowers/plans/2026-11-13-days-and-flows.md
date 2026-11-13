@@ -50,7 +50,7 @@
   - `stepDay(days: string[], day, dir: -1 | 1) → string | null`, nearest day with entries
   - `kindOf(thread, guesses) → string` = `thread.flow?.kind` else `spaceOf(guesses, thread.id)` else `''`
   - `cleanFlow(v) → { kind, color? } | null` (kind string ≤ 24 of `[a-z0-9-]`, color ≤ 16)
-  - `flowHint(kind, set) → string`: `` (label from the set; `''` for unknown)
+  - `flowHint(kind, set) → string`: "This flow is about <group label>." (label from the set; `''` for an unknown kind)
   - `KIND_DEFAULTS: { linkedin: { mode: 'ask', ask: { voice: true } } }`, others `{ mode: 'ask' }`
 
 - [ ] **Step 1: Write failing tests** in `tests/days.test.mjs`. Run with `TZ=America/New_York`-independent fixtures built from `new Date(y, m, d, h, min).getTime()`:
