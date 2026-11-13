@@ -1709,7 +1709,16 @@ test('sign-in 1.4.5: what Chrome filled by itself stays only when it is the acco
   const { h, page } = signinRig({ fill: 'click', saved });
   h.run('TIMING.pick = 5000; TIMING.poll = 5');
   let cleared = null;
-  setTimeout(() => { cleared = [page.userEl.value, page.pw.value]; page.userEl.value = 'bkenny@example.com'; page.pw.value = 'pw-b'; }, 60);
+  // The user picks once the field has been clicked the second time (the click that reopens Chrome's list). Tied to
+  // that click, not to a clock: on a busy machine a timer could fire before the form was emptied, and the pick was lost.
+  const onCdp = page.onCdp;
+  let clicks = 0;
+  page.onCdp = (method, p) => {
+    onCdp(method, p);
+    if (method === 'Input.dispatchMouseEvent' && p.type === 'mouseReleased' && p.y === 110 && ++clicks === 2) {
+      setTimeout(() => { cleared = [page.userEl.value, page.pw.value]; page.userEl.value = 'bkenny@example.com'; page.pw.value = 'pw-b'; }, 0);
+    }
+  };
   const r = await h.local('signin', { tabId: 7, account: 'bkenny@example.com' });
   assert.deepEqual(cleared, ['', ''], 'the other account’s password never stays in the form');
   assert.equal(r.result.account, 'bkenny@example.com');

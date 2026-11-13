@@ -626,3 +626,10 @@ test('the owner passcode backup is restored only on a signed-out page no tester 
   assert.doesNotMatch(APP, /kv(Get|Set)\('passcode'/, 'the backup is never a workspace-scoped key');
   assert.match(APP, /if \(s\.passcode \|\| workspace === 'owner'\) await DB\.ownerPasscodeSet\(s\.passcode\)/, 'a tester’s Settings never clears it');
 });
+
+// v127: on a permit search the agent left the date fields empty, got no results, and stopped to ask whether to try a
+// date range. A search form is not a send: it fills the widest sensible value, says so, and carries on.
+test('v127: the agent fills a search form’s missing values and carries on; it asks first only before a send', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /When a search or filter form needs a value the user didn't give \(a date range, a status, a type\), fill the widest sensible one, say what you chose, and carry on\. Ask first only when the form sends, buys, books or submits something for them\./);
+});
