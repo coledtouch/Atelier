@@ -606,7 +606,11 @@ async function handleApi(req, env, url) {
     if (path === 'relay/pair' && req.method === 'POST') {
       const bytes = crypto.getRandomValues(new Uint8Array(32));
       const token = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-      await relay().fetch('https://relay/token', { method: 'PUT', body: token });
+      // {device}: the kind of computer being paired (v130). Each kind holds its own token, so pairing the PC leaves the
+      // Mac's connection alone. A pairing that names none replaces the single old token, as before.
+      const { device } = await req.json().catch(() => ({}));
+      const kind = ['mac', 'win', 'linux', 'other'].includes(device) ? device : '';
+      await relay().fetch(`https://relay/token${kind ? `?device=${kind}` : ''}`, { method: 'PUT', body: token });
       return json({ token });
     }
 

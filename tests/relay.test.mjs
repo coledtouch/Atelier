@@ -256,3 +256,97 @@ test('_headers: every external stylesheet the pages link to is allowed by the re
     assert.deepEqual(inline, page === 'index.html' ? ['<script id="bootWatch">'] : [], `${page}: no inline <script> but the boot watchdog`);
   }
 });
+
+// ── v130: one connection for each kind of computer ──
+// The owner's Windows PC connected, the Mac's connection was closed as "replaced", and his texts could no longer be
+// reached from anywhere: Messages is on the Mac alone.
+const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/142.0.0.0 Safari/537.36';
+const WIN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/142.0.0.0 Safari/537.36';
+const connect = (relay, token, agent) => relay.fetch(new Request('https://relay/ws', { headers: { upgrade: 'websocket', 'sec-websocket-protocol': `atelier, ${token}`, ...(agent ? { 'user-agent': agent } : {}) } }));
+const pair = (relay, device, token) => relay.fetch(new Request(`https://relay/token?device=${device}`, { method: 'PUT', body: token }));
+const run = async (relay, server, body, answer) => {
+  const before = server.sent.length;
+  const pending = relay.fetch(new Request('https://relay/cmd', { method: 'POST', body: JSON.stringify(body) }));
+  for (let i = 0; i < 50 && server.sent.length === before; i++) await new Promise((r) => setTimeout(r, 1));
+  if (server.sent.length === before) return pending;
+  const sent = JSON.parse(server.sent.at(-1));
+  await relay.webSocketMessage(server, JSON.stringify({ id: sent.id, ok: true, result: answer }));
+  return pending;
+};
+
+test('v130: a Mac and a PC stay connected together; pairing or connecting one leaves the other alone', async () => {
+  const ctx = fakeCtx(), relay = new Relay(ctx, {});
+  const MAC = 'b'.repeat(64), WIN = 'c'.repeat(64);
+  await pair(relay, 'mac', MAC);
+  assert.equal((await connect(relay, MAC, MAC_UA)).status, 101);
+  const mac = ctx.accepted[0].ws;
+  await pair(relay, 'win', WIN);
+  assert.equal(mac.closed, null, 'pairing the PC does not sign the Mac out');
+  assert.equal((await connect(relay, WIN, WIN_UA)).status, 101);
+  const win = ctx.accepted[1].ws;
+  assert.equal(mac.closed, null, 'the PC connecting does not replace the Mac');
+  assert.deepEqual([mac.attachment.device, win.attachment.device], ['mac', 'win']);
+  // The Mac's own token says it is the Mac, whatever its browser calls itself.
+  assert.equal((await connect(relay, MAC, WIN_UA)).status, 101);
+  assert.deepEqual(mac.closed, { code: 4000, reason: 'replaced' }, 'the same computer connecting again replaces its own old connection');
+  assert.equal(win.closed, null);
+  assert.equal(ctx.accepted[2].ws.attachment.device, 'mac');
+  // Pairing the Mac again revokes the Mac's connections only.
+  await pair(relay, 'mac', 'd'.repeat(64));
+  assert.deepEqual(ctx.accepted[2].ws.closed, { code: 4001, reason: 'repaired' });
+  assert.equal(win.closed, null);
+  assert.equal((await connect(relay, MAC, MAC_UA)).status, 401, 'the Mac’s old token is no way in');
+  assert.equal((await connect(relay, 'e'.repeat(64), MAC_UA)).status, 401);
+  // A kind that isn't one of ours is the old single token.
+  await relay.fetch(new Request('https://relay/token?device=toaster', { method: 'PUT', body: TOKEN }));
+  assert.equal(ctx.store.get('token'), TOKEN);
+});
+
+test('v130: a Messages command goes to the Mac, whichever computer connected last; anything else to the newest', async () => {
+  const ctx = fakeCtx(), relay = new Relay(ctx, {});
+  await pair(relay, 'mac', 'b'.repeat(64));
+  await pair(relay, 'win', 'c'.repeat(64));
+  await connect(relay, 'b'.repeat(64), MAC_UA);
+  await connect(relay, 'c'.repeat(64), WIN_UA); // the PC is the newest
+  const [mac, win] = ctx.accepted.map((a) => a.ws);
+  const texts = await run(relay, mac, { cmd: 'messages', args: { op: 'recent' } }, { conversations: [] });
+  assert.deepEqual(await texts.json(), { ok: true, result: { conversations: [] } });
+  assert.equal(JSON.parse(mac.sent[0]).cmd, 'messages');
+  assert.deepEqual(win.sent, [], 'the PC never sees a Messages command');
+  const tabs = await run(relay, win, { cmd: 'tabs', args: {} }, []);
+  assert.deepEqual(await tabs.json(), { ok: true, result: [] });
+  assert.equal(mac.sent.length, 1, 'other commands go to the newest connection');
+  assert.deepEqual(await (await relay.fetch(new Request('https://relay/status'))).json(), { online: true, since: win.attachment.since, mac: true });
+});
+
+test('v130: with only a PC connected, a Messages command says the Mac is not; a connection from before v130 is read by its browser', async () => {
+  const { ctx, relay } = await pairedRelay();
+  await connect(relay, TOKEN, WIN_UA);
+  const win = ctx.accepted[0].ws;
+  assert.equal(win.attachment.device, 'win', 'the single old token: the kind comes from the user-agent');
+  const r = await relay.fetch(new Request('https://relay/cmd', { method: 'POST', body: JSON.stringify({ cmd: 'messages', args: { op: 'recent' } }) }));
+  assert.equal(r.status, 503);
+  assert.deepEqual(await r.json(), { ok: false, error: 'Your Mac isn’t connected, and texts go through it. Open Atelier in Chrome on the Mac, then try again.' });
+  assert.deepEqual(win.sent, []);
+  assert.equal((await (await relay.fetch(new Request('https://relay/status'))).json()).mac, false);
+  // An attachment written before v130 has no kind: the Mac is still found by its user-agent.
+  const old = fakeCtx(), relay2 = new Relay(old, {});
+  await relay2.fetch(new Request('https://relay/token', { method: 'PUT', body: TOKEN }));
+  await connect(relay2, TOKEN, MAC_UA);
+  old.accepted[0].ws.attachment = { since: 1, agent: MAC_UA };
+  const texts = await run(relay2, old.accepted[0].ws, { cmd: 'messages', args: { op: 'recent' } }, { conversations: [] });
+  assert.equal((await texts.json()).ok, true);
+});
+
+test('v130: the app pairs each computer as its own kind, and sends a Messages command from a PC through the relay', () => {
+  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /fetch\('\/api\/relay\/pair', \{ method: 'POST', headers: apiHeaders\(\), body: JSON\.stringify\(\{ device: deviceKind\(\) \}\) \}\)/);
+  assert.match(app, /const here = EXT\.ready && !\(cmd === 'messages' && deviceKind\(\) !== 'mac'\);\r?\n  if \(here\) return extLocal\(/);
+  const kind = new Function('navigator', `return (${/\nconst deviceKind = (\(\) => \{[^\n]+\});\r?\n/.exec(app)[1]})();`);
+  assert.equal(kind({ userAgentData: { platform: 'macOS' }, platform: 'MacIntel', userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' }), 'mac');
+  assert.equal(kind({ platform: 'Win32', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }), 'win');
+  assert.equal(kind({ platform: 'Linux armv8l', userAgent: 'Mozilla/5.0 (Linux; Android 16; SM-S938U)' }), 'linux');
+  assert.equal(kind({ platform: 'iPhone', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X)' }), 'other', 'an iPhone is no Mac');
+  const worker = readFileSync(new URL('../src/worker.js', import.meta.url), 'utf8');
+  assert.match(worker, /const kind = \['mac', 'win', 'linux', 'other'\]\.includes\(device\) \? device : '';/);
+});

@@ -18,6 +18,12 @@ export function relayNeedsApproval(cmd, args) {
   return cmd === 'read' && Boolean(args?.url);
 }
 
+// The kinds of computer a browser can be paired as (v130). A connection's kind rides in its attachment; one accepted
+// before v130 has none there, and is read from the browser's own user-agent.
+const DEVICES = ['mac', 'win', 'linux', 'other'];
+const deviceFromAgent = (agent) => (/Macintosh|Mac OS X/i.test(agent) ? 'mac' : /Windows/i.test(agent) ? 'win' : /Linux|CrOS/i.test(agent) ? 'linux' : 'other');
+const deviceOf = (ws) => { const a = ws.deserializeAttachment?.() || {}; return DEVICES.includes(a.device) ? a.device : deviceFromAgent(a.agent || ''); };
+
 function timingSafe(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
   let diff = 0;
@@ -33,9 +39,14 @@ export class Relay extends DurableObject {
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
   }
 
-  browser() {
+  // v130: one connection for each kind of computer (a Mac, a Windows PC, ...), where there was one in all. The owner's
+  // PC connected, the Mac's connection was closed as "replaced", and his texts could no longer be reached: Messages is
+  // on the Mac alone. A command goes to the newest connection, and a Messages command to the newest one from a Mac.
+  browser(cmd) {
     const sockets = this.ctx.getWebSockets('browser');
-    return sockets[sockets.length - 1] || null; // newest connection wins
+    if (cmd !== 'messages') return sockets[sockets.length - 1] || null; // newest connection wins
+    for (let i = sockets.length - 1; i >= 0; i--) if (deviceOf(sockets[i]) === 'mac') return sockets[i];
+    return null;
   }
 
   async fetch(req) {
@@ -43,6 +54,15 @@ export class Relay extends DurableObject {
 
     // Pairing token lives here (strongly consistent) — not in KV, which can lag between locations.
     if (url.pathname === '/token' && req.method === 'PUT') {
+      const device = DEVICES.includes(url.searchParams.get('device')) ? url.searchParams.get('device') : '';
+      // A pairing that names its computer (v130) holds that computer's token alone and revokes that computer's
+      // connections alone: pairing the PC no longer signs the Mac out. One that names none is the old single token.
+      if (device) {
+        const tokens = (await this.ctx.storage.get('tokens')) || {};
+        await this.ctx.storage.put('tokens', { ...tokens, [device]: await req.text() });
+        for (const old of this.ctx.getWebSockets('browser')) if (deviceOf(old) === device) { try { old.close(4001, 'repaired'); } catch {} }
+        return new Response('ok');
+      }
       await this.ctx.storage.put('token', await req.text());
       // A new pairing revokes any connection made with the old token.
       for (const old of this.ctx.getWebSockets('browser')) { try { old.close(4001, 'repaired'); } catch {} }
@@ -56,27 +76,35 @@ export class Relay extends DurableObject {
       const protocols = (req.headers.get('sec-websocket-protocol') || '').split(',').map((p) => p.trim());
       const token = protocols[0] === 'atelier' ? protocols[1] || '' : '';
       const saved = await this.ctx.storage.get('token');
-      if (!token || !saved || !timingSafe(token, saved)) return new Response('Browser not paired — open Atelier on this computer to pair it.', { status: 401 });
-      // One live browser at a time: close older connections.
-      for (const old of this.ctx.getWebSockets('browser')) { try { old.close(4000, 'replaced'); } catch {} }
+      const tokens = (await this.ctx.storage.get('tokens')) || {};
+      const agent = req.headers.get('user-agent') || '';
+      // Which computer: the one whose own token this is, or, for the old single token, what its browser says it is.
+      let device = '';
+      if (token) for (const d of DEVICES) if (typeof tokens[d] === 'string' && timingSafe(token, tokens[d])) device = d;
+      if (!device && token && saved && timingSafe(token, saved)) device = deviceFromAgent(agent);
+      if (!device) return new Response('Browser not paired — open Atelier on this computer to pair it.', { status: 401 });
+      // One live browser for each kind of computer: close that computer's older connections.
+      for (const old of this.ctx.getWebSockets('browser')) if (deviceOf(old) === device) { try { old.close(4000, 'replaced'); } catch {} }
       const [client, server] = Object.values(new WebSocketPair());
       this.ctx.acceptWebSocket(server, ['browser']);
-      server.serializeAttachment({ since: Date.now(), agent: req.headers.get('user-agent') || '' });
+      server.serializeAttachment({ since: Date.now(), agent, device });
       return new Response(null, { status: 101, webSocket: client, headers: { 'sec-websocket-protocol': 'atelier' } });
     }
 
     if (url.pathname === '/status') {
       const ws = this.browser();
       const info = ws?.deserializeAttachment() || {};
-      return Response.json({ online: Boolean(ws), since: info.since || null });
+      return Response.json({ online: Boolean(ws), since: info.since || null, mac: Boolean(this.browser('messages')) });
     }
 
     if (url.pathname === '/cmd' && req.method === 'POST') {
-      const ws = this.browser();
-      if (!ws) return Response.json({ ok: false, error: 'Your computer’s browser isn’t connected — make sure the computer is on and Chrome is open.' }, { status: 503 });
       const { cmd, args, approved } = await req.json();
       // Defence in depth behind the Worker's own check: nothing that needs the owner's OK reaches the browser without it.
+      // Checked first (v130), before any connection is looked for: an unapproved step is refused whichever computer is on.
       if (relayNeedsApproval(cmd, args) && approved !== true) return Response.json({ ok: false, error: 'This action needs your approval in the app.' }, { status: 403 });
+      const ws = this.browser(cmd);
+      if (!ws && cmd === 'messages' && this.browser()) return Response.json({ ok: false, error: 'Your Mac isn’t connected, and texts go through it. Open Atelier in Chrome on the Mac, then try again.' }, { status: 503 });
+      if (!ws) return Response.json({ ok: false, error: 'Your computer’s browser isn’t connected — make sure the computer is on and Chrome is open.' }, { status: 503 });
       const id = crypto.randomUUID();
       const reply = new Promise((resolve) => {
         const timer = setTimeout(() => { this.pending.delete(id); resolve({ ok: false, error: 'Your computer didn’t respond in time.' }); }, COMMAND_TIMEOUT_MS);
