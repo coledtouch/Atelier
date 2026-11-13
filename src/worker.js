@@ -623,7 +623,7 @@ async function handleApi(req, env, url) {
     // which the Relay checks again and the extension checks once more.
     if (path === 'relay/cmd' && req.method === 'POST') {
       const { cmd, args, approved } = await req.json().catch(() => ({}));
-      const allowed = ['tabs', 'read', 'open', 'elements', 'describe', 'click', 'type', 'signin', 'messages', 'show'];
+      const allowed = ['tabs', 'read', 'open', 'elements', 'describe', 'click', 'type', 'signin', 'messages', 'gmessages', 'show'];
       if (!allowed.includes(cmd)) return json({ ok: false, error: 'Unknown browser command' }, 400);
       const a = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
       if (relayNeedsApproval(cmd, a) && approved !== true) return json({ ok: false, error: 'This action needs your approval in the app.' }, 403);

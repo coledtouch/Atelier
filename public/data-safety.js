@@ -1,7 +1,7 @@
-import { validVideo } from './video.js?v=130';
-import { validRemix, recoverRemix } from './remix.js?v=130';
-import { SPOKEN_FROM } from './readaloud.js?v=130';
-import { TAINTS } from './context.js?v=130';
+import { validVideo } from './video.js?v=131';
+import { validRemix, recoverRemix } from './remix.js?v=131';
+import { SPOKEN_FROM } from './readaloud.js?v=131';
+import { TAINTS } from './context.js?v=131';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);

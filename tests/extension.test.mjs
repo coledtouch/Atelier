@@ -1055,8 +1055,8 @@ test('confirm page: the tick is sent only with an Allow, and the page carries th
   assert.match(js, /port\.postMessage\(\{ answer: choice, \.\.\.\(always \? \{ always: true \} : \{\}\) \}\)/);
 });
 
-test('manifest: version 1.4.5, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
-  assert.equal(SOURCE_MANIFEST.version, '1.4.5');
+test('manifest: version 1.4.6, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
+  assert.equal(SOURCE_MANIFEST.version, '1.4.6');
   assert.ok(SOURCE_MANIFEST.description.length <= 132);
   assert.ok(Number(SOURCE_MANIFEST.minimum_chrome_version) >= 116);
 });
@@ -1069,8 +1069,8 @@ test('the app asks for the extension build it ships: MIN_EXT is the manifest ver
   const min = /const MIN_EXT = '([\d.]+)';/.exec(APP)?.[1];
   assert.equal(min, SOURCE_MANIFEST.version, 'public/app.js MIN_EXT = extension/manifest.json version');
   const olderExt = new Function(`const MIN_EXT = '${min}'; return ${/\nconst olderExt = ([^\n]+);\n/.exec(APP)[1]};`)();
-  for (const v of ['1.4.4', '1.4.3', '1.4.2', '1.4.0', '1.3.10', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
-  for (const v of [min, '1.4.5', '1.10.0', '2.0.0']) assert.equal(olderExt(v), false, v);
+  for (const v of ['1.4.5', '1.4.4', '1.4.3', '1.4.2', '1.4.0', '1.3.10', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
+  for (const v of [min, '1.4.6', '1.10.0', '2.0.0']) assert.equal(olderExt(v), false, v);
   assert.match(APP, /if \(olderExt\(d\.version\)\) setTimeout\(\(\) => toast\(`Atelier Browser has an update \(v\$\{MIN_EXT\}\)/);
 });
 
@@ -1083,7 +1083,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
   const prod = packExtension();
   const files = unzipSync(prod.zip);
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  assert.equal(manifest.version, '1.4.5');
+  assert.equal(manifest.version, '1.4.6');
   assert.deepEqual(manifest.content_scripts.map((c) => c.matches), [['https://atelier.ciprari.ai/*']]);
   assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
   assert.ok(!/localhost|127\.0\.0\.1/.test(strFromU8(files['manifest.json'])));
@@ -1092,7 +1092,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
 
   const dev = packExtension({ dev: true });
   assert.deepEqual(dev.manifest.content_scripts[0].matches, ['https://atelier.ciprari.ai/*', 'http://localhost:8787/*']);
-  assert.equal(dev.manifest.version, '1.4.5');
+  assert.equal(dev.manifest.version, '1.4.6');
   assert.deepEqual(SOURCE_MANIFEST.content_scripts[0].matches, dev.manifest.content_scripts[0].matches, 'the source keeps localhost for Load unpacked');
 });
 
@@ -1525,7 +1525,7 @@ test('messages: a send fits inside the time the relay and the Atelier tab give i
   // The Atelier tab on this computer (public/app.js): with less than that, "The browser took too long to respond" could
   // be said of a text that then goes out.
   const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
-  const limit = /extCall\('messages', \{ \.\.\.step\.args, op: step\.name\.replace\('messages_', ''\) \}, ([^\n]+?), step\.write \|\| step\.confirm === true \|\| step\.auto === true\)/.exec(app)?.[1];
+  const limit = /extCall\(step\.name\.startsWith\('personal_texts_'\) \? 'gmessages' : 'messages', \{ \.\.\.step\.args, op: step\.name\.replace\(\/\^\(messages\|personal_texts\)_\/, ''\) \}, ([^\n]+?), step\.write \|\| step\.confirm === true \|\| step\.auto === true\)/.exec(app)?.[1];
   assert.ok(limit, 'app.js runs a Messages step through extCall with a time limit');
   const given = new Function('step', `return ${limit};`)({ name: 'messages_send', write: true });
   assert.ok(given > worst, `public/app.js gives messages_send ${given} ms, and a send can take ${worst} ms`);
@@ -1610,7 +1610,8 @@ test('confirm page: the box names everything it covers, and a text message is he
   assert.match(CONFIRM_HTML, /<span>Don’t ask again on this computer\. Atelier then clicks, types, signs in and sends texts here without this window\. Turn it back on in Atelier’s Settings, under Connections\.<\/span>/);
   // what it covers is what the worker lets through with no window: the four actions that ask
   for (const action of ['click', 'type', 'signin', 'sms']) assert.match(BACKGROUND, new RegExp(`confirmFirst\\('${action}', `), action);
-  assert.equal(BACKGROUND.match(/confirmFirst\('/g).length, 4, 'a fifth kind of request would need the wording changed');
+  assert.equal(new Set(BACKGROUND.match(/confirmFirst\('\w+'/g)).size, 4, 'a fifth kind of request would need the wording changed');
+  assert.equal(BACKGROUND.match(/confirmFirst\('sms', /g).length, 2, 'a text from the Mac, and one through Google Messages (1.4.6)');
   assert.match(CONFIRM_HTML, /<h2 id="typedTitle">Text to type<\/h2>/);
   const texting = loadConfirmPage();
   texting.deliver({ info: { action: 'sms', via: 'local', submit: false, text: 'On my way', more: 0, element: { tag: 'message', type: '', label: '+16175550142' }, page: { title: 'Messages', url: '' }, expiresAt: Date.now() + 45_000 } });
@@ -1671,7 +1672,7 @@ test('sign-in 1.4.3: when the keys pick nothing, the user’s own click in Chrom
 test('sign-in 1.4.4: the first click waits for Chrome’s debugging bar', () => {
   const src = BACKGROUND.replace(/\r/g, '');
   assert.match(src, /await sleep\(TIMING\.bar\);\n      const first = await inPage\(tabId, pageLogin, \['at', form\.user \? 'user' : 'pw'\]\);/);
-  assert.match(src, /pick: 30_000, poll: 500, bar: 900 \};/, '30 s for the user’s click, inside the app’s 90 s');
+  assert.match(src, /pick: 30_000, poll: 500, bar: 900, /, '30 s for the user’s click, inside the app’s 90 s');
 });
 
 test('sign-in 1.4.5: nothing is ever typed into the form; with an account named the keys stay off and the user picks', async () => {
@@ -1735,7 +1736,7 @@ test('sign-in 1.4.5: what Chrome filled by itself stays only when it is the acco
 test('app 1.4.5: browser_signin’s account is the user’s own word, a sign-in step gets 90 s, and the card says to pick', () => {
   const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /account: \{ type: 'string', description: 'The saved user name or email the user asked for, in their own words\. Never guess one: leave it out, and the user picks from Chrome’s list\.' \}/);
-  assert.match(app, /const MIN_EXT = '1\.4\.5';/);
+  assert.match(app, /const MIN_EXT = '1\.4\.6';/);
   assert.match(app, /step\.name === 'browser_signin' \? 90000 : 60000/);
   assert.match(app, /If Chrome doesn’t fill it, click the user name field on that tab and pick your login\./);
 });

@@ -177,7 +177,7 @@ test('the browser’s reachability is held for the run: a relay flip between fol
   const r1 = v.runPrompt(turn(0), t);
   const s1 = v.SYS.code(r1), tools1 = v.agentTools(r1.browser).map((x) => x.function.name);
   assert.match(s1, /Connected right now: [^.]*their computer’s browser \(remotely\)/);
-  assert.equal(tools1.length, 12, 'gmail_search + the 8 browser tools + the 3 Messages tools');
+  assert.equal(tools1.length, 15, 'gmail_search + the 8 browser tools + the 3 Messages tools + the 3 personal-text tools (v131)');
   v.REMOTE.online = false;
   const r2 = v.runPrompt(turn(1), t);
   assert.equal(r2.browser, 'remote');
