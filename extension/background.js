@@ -36,7 +36,7 @@ const MAX_SHOWN_TEXT = 2000; // characters of the text to type shown in the conf
 // lets a page loaded for a read draw itself.
 // front: the pause after a sign-in tab comes forward. pick: how long a sign-in waits for the user to click their login in
 // Chrome's list when the keys didn't pick it, looking every poll (1.4.3, v120).
-const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800, front: 400, pick: 30_000, poll: 500, bar: 900, gm: 8000 };
+const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800, front: 400, pick: 30_000, poll: 500, bar: 900, gm: 8000, wake: 20_000 };
 // After a click or typing request is declined, closed or left unanswered, further ones from the same path (this
 // browser's Atelier tab, or another device through the relay) are refused without a window for a while: 30 s, doubling
 // with each refusal in a row (at most 10 min); an Allow resets it. A hijacked page can't keep stealing the focus.
@@ -544,9 +544,25 @@ async function gmTab() {
   if (!tab) throw new Error(GM_NOT_OPEN);
   // Chrome can't pass undefined into a page ("Value is unserializable"), so an op without a value sends {}.
   const page = (op, arg = {}) => withTimeout(inPage(tab.id, pageGMessages, [op, arg]), TIMING.read, NOT_RESPONDING);
-  const st = await page('state');
+  // Chrome's Memory Saver discards an idle tab, and a discarded or frozen tab runs no script (1.4.8). Keep this one
+  // from being discarded again, and wake it with a reload when it doesn't answer.
+  chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
+  let st = tab.discarded ? null : await page('state').catch(() => null);
+  if (!st) st = await gmWake(tab.id, page);
   if (!st?.paired) throw new Error(GM_NOT_PAIRED);
   return { tab, page };
+}
+// Reloads the Google Messages tab and waits until its conversation list shows (or it says it isn't paired).
+async function gmWake(tabId, page) {
+  await chrome.tabs.reload(tabId);
+  await waitForLoad(tabId, TIMING.wake);
+  let st = null;
+  for (let waited = 0; waited < TIMING.wake; waited += TIMING.poll) {
+    st = await page('state').catch(() => null);
+    if (st && (!st.paired || st.list > 0)) return st;
+    await sleep(TIMING.poll);
+  }
+  return st; // paired with no conversations yet, or still not answering
 }
 // Opens a conversation in that tab and waits for its messages to show.
 async function gmOpen(page, chat, limit) {
