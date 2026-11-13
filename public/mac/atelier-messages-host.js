@@ -7,7 +7,7 @@
 // It needs two macOS permissions, both asked of Google Chrome (the app that starts it): Full Disk Access to read
 // chat.db, and Automation → Messages to send.
 
-const HOST_VERSION = '1.0.1';
+const HOST_VERSION = '1.0.2';
 const LIMITS = { recent: 50, read: 100, text: 2000, chat: 200 };
 const APPLE_EPOCH_MS = 978307200000; // 2001-01-01, where Messages counts its dates from
 
@@ -127,6 +127,47 @@ const SEND_SCRIPT = [
 // failed with "illegal option" and nothing was sent, and a text shaped like "-e <line>" became a line of the script,
 // which is what passing the text as an argument is meant to rule out (1.0.1, v114).
 const sendArgs = (text, dest) => [...SEND_SCRIPT.flatMap((line) => ['-e', line]), '--', String(text), String(dest)];
+// SMS only, to a phone number: the second try when iMessage could not deliver (1.0.2, v115).
+const SMS_SCRIPT = [
+  'on run argv',
+  'if (count of argv) > 2 and item 1 of argv is "--" then set argv to rest of argv',
+  'set t to item 1 of argv',
+  'set dest to item 2 of argv',
+  'tell application "Messages"',
+  'send t to participant dest of (1st account whose service type = SMS)',
+  'end tell',
+  'end run',
+];
+const smsArgs = (text, number) => [...SMS_SCRIPT.flatMap((line) => ['-e', line]), '--', String(text), String(number)];
+// Messages takes a send at once and delivers it in the background. An iMessage to a number that isn't on iMessage
+// fails seconds later ("Not Delivered"), and osascript never hears of it, so the helper said sent and the SMS try never
+// ran. chat.db records the outcome: the helper now waits for it (1.0.2, v115).
+const WATCH = { tries: 8, every: 1 }; // seconds; the extension gives the helper 30 s in all, and a send can try twice
+const appleNs = (ms) => Math.floor((ms / 1000 - 978307200) * 1e9);
+const outcomeSql = (chat, since) => `SELECT m.error AS error, m.is_sent AS sent FROM message m
+JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
+WHERE m.is_from_me = 1 AND m.date >= ${since} AND (${chatMatch(chat)}) ORDER BY m.date DESC LIMIT 1;`;
+// 'sent', 'failed', or 'unknown' (chat.db can't be read, or nothing settled in time).
+function outcome(chat, since) {
+  for (let i = 0; i < WATCH.tries; i++) {
+    delay(WATCH.every);
+    let row;
+    try { row = query(outcomeSql(chat, since))[0]; } catch { return 'unknown'; }
+    if (row && Number(row.error)) return 'failed';
+    if (row && Number(row.sent) === 1) return 'sent';
+  }
+  return 'unknown';
+}
+// The phone number in what the owner approved (a number, or a one-to-one chat id that ends in one); '' for an email or a group.
+function phoneOf(to, dest) {
+  for (const s of [to, String(dest).split(';').pop()]) {
+    const t = String(s || '').trim();
+    if (!t.includes('@') && /^\+?[\d\s().-]{7,}$/.test(t) && t.replace(/\D/g, '').length >= 7) return t.replace(/[^\d+]/g, '');
+  }
+  return '';
+}
+const NO_SMS = 'Messages couldn’t deliver this over iMessage, and this Mac can’t send it as SMS. Sending SMS from a Mac needs an iPhone with Text Message Forwarding on.';
+const NOT_DELIVERED = 'Messages couldn’t deliver this over iMessage. Check the address in Messages on this Mac.';
 // The errors a person can fix, in words that say how.
 function friendlyError(raw) {
   const s = String(raw || '');
@@ -181,9 +222,17 @@ function handle(msg) {
     // needs Automation. The text then goes to the address as given, as it does when no conversation matches.
     let dest = to;
     if (!to.includes(';')) { try { dest = query(chatForSql(to))[0]?.chat || to; } catch { /* chat.db can't be read */ } }
+    const since = appleNs(Date.now() - 2000);
     const r = run('/usr/bin/osascript', sendArgs(text, dest));
     if (r.code !== 0) throw new Error(friendlyError(r.err || r.out));
-    return { sent: true, to: dest };
+    if (outcome(dest, since) !== 'failed') return { sent: true, to: dest };
+    // iMessage could not deliver it: the same text to the same number, once, as SMS (what the script always meant to do).
+    const number = phoneOf(to, dest);
+    if (!number) throw new Error(NOT_DELIVERED);
+    const again = appleNs(Date.now() - 1000);
+    const s = run('/usr/bin/osascript', smsArgs(text, number));
+    if (s.code !== 0 || outcome(number, again) === 'failed') throw new Error(NO_SMS);
+    return { sent: true, to: number, via: 'SMS' };
   }
   throw new Error('Unknown Messages action.');
 }

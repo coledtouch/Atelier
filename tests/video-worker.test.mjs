@@ -344,3 +344,23 @@ test('native-route failures keep their status: expired clip → 409 video_file_g
   assert.match(JSON.parse(await read(r)).error, /Bad video reference/);
   assert.equal(calls.length, 0);
 });
+
+test('v115: Gemini gets its tool-call signatures back; any other provider never sees them', async () => {
+  const sig = { google: { thought_signature: 'c2lnbmF0dXJl' } };
+  const messages = [
+    { role: 'user', content: 'Send a test text' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'messages_send', arguments: '{"to":"5550100","text":"Test"}' }, extra_content: sig }] },
+    { role: 'tool', tool_call_id: 'c1', content: '{"sent":true}' },
+  ];
+  const ok = () => new Response('data: {"choices":[{"index":0,"delta":{"content":"done"}}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+  calls = [];
+  mockFetch([[/\/chat\/completions$/, ok]]);
+  assert.equal((await chat(makeEnv(), { model: 'gemini:gemini-3.8-flash', stream: true, messages })).status, 200);
+  assert.deepEqual(JSON.parse(calls[0].body).messages[1].tool_calls[0].extra_content, sig, 'Gemini: kept, or it answers 400');
+  calls = [];
+  mockFetch([[/\/chat\/completions$/, ok]]);
+  assert.equal((await chat(makeEnv(), { model: 'moonshotai/kimi-k3', stream: true, messages })).status, 200);
+  const sent = JSON.parse(calls[0].body).messages[1].tool_calls[0];
+  assert.equal('extra_content' in sent, false, 'another provider: dropped');
+  assert.deepEqual(sent.function, messages[1].tool_calls[0].function);
+});

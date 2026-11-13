@@ -98,7 +98,7 @@ test('helper: the errors a person can fix say how; anything else passes through,
   assert.match(H.friendlyError('execution error: Not authorized to send Apple events to Messages. (-1743)'), /Automation/);
   assert.equal(H.friendlyError('x'.repeat(900)).length, 300);
   assert.equal(H.friendlyError(''), 'The Messages helper failed.');
-  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.1' });
+  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.2' });
   assert.throws(() => H.handle({ op: 'delete' }), /Unknown Messages action/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: '  ' }), /Pass to and text/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: 'x'.repeat(2001) }), /over 2000/);
@@ -110,6 +110,7 @@ function hostRig(answer) {
   const ctx = vm.createContext({});
   vm.runInContext(HOST, ctx);
   ctx.$ = { NSHomeDirectory: () => ({ js: '/Users/cole' }) };
+  ctx.delay = () => {}; // JXA's pause: the delivery check waits between looks (1.0.2)
   ctx.run = (path, args) => { calls.push([path.split('/').pop(), JSON.parse(JSON.stringify(args))]); return { code: 0, out: '', err: '', ...answer(path.split('/').pop(), args) }; };
   const handle = (msg) => { try { return JSON.parse(JSON.stringify(ctx.handle(msg))); } catch (err) { return { threw: String(err.message) }; } };
   return { handle, calls, sent: () => calls.filter(([tool]) => tool === 'osascript').map(([, args]) => args.slice(-3)) };
@@ -122,7 +123,7 @@ test('helper: a send without Full Disk Access goes to the address as given; read
   const rig = hostRig((tool) => (tool === 'sqlite3' ? NO_ACCESS : {}));
   assert.deepEqual(rig.handle({ op: 'send', to: '+16175550142', text: 'On my way' }), { sent: true, to: '+16175550142' });
   assert.deepEqual(rig.sent(), [['--', 'On my way', '+16175550142']], 'one send, to the number the owner approved');
-  assert.deepEqual(rig.calls.map(([tool]) => tool), ['sqlite3', 'osascript'], 'the lookup was tried once, then the send');
+  assert.deepEqual(rig.calls.map(([tool]) => tool), ['sqlite3', 'osascript', 'sqlite3'], 'the lookup was tried once, then the send, then one look for its outcome (chat.db can’t be read: the send stands)');
   assert.deepEqual(rig.handle({ op: 'send', to: 'pat@example.com', text: 'hi' }), { sent: true, to: 'pat@example.com' });
   // reading can't do without chat.db
   assert.match(rig.handle({ op: 'recent' }).threw, /^Chrome can’t read Messages yet\. Give Google Chrome Full Disk Access/);
@@ -142,7 +143,7 @@ test('helper: with chat.db readable a send goes to the conversation that number 
   assert.deepEqual(none.handle({ op: 'send', to: '+16175550142', text: 'x' }), { sent: true, to: '+16175550142' }, 'no conversation yet: the number as given');
   const chat = hostRig((tool) => (tool === 'sqlite3' ? NO_ACCESS : {}));
   assert.deepEqual(chat.handle({ op: 'send', to: 'iMessage;+;chat8291', text: 'x' }), { sent: true, to: 'iMessage;+;chat8291' });
-  assert.deepEqual(chat.calls.map(([tool]) => tool), ['osascript'], 'a chat id is sent to as it is');
+  assert.deepEqual(chat.calls.map(([tool]) => tool), ['osascript', 'sqlite3'], 'a chat id is sent to as it is (then one look for its outcome)');
   // Messages refused (no Automation yet): nothing claims the text was sent
   const refused = hostRig((tool) => (tool === 'osascript' ? { code: 1, err: 'execution error: Not authorized to send Apple events to Messages. (-1743)' } : NO_ACCESS));
   assert.match(refused.handle({ op: 'send', to: '+16175550142', text: 'x' }).threw, /^Chrome can’t control Messages yet\./);
@@ -179,4 +180,57 @@ test('app: asking for texts reaches the agent while a browser is connected, typo
   for (const p of ['read my most recent sm,s', 'read my sms', "check my sm's", 'any new texts?', 'what did Scott text me', 'show my txts', 'my iMessages', 'S M S from mom']) assert.ok(hint.test(p), p);
   for (const p of ['write a poem about summer', 'small steps', 'the smiths', 'is mom ok', 'some numbers']) assert.ok(!hint.test(p), p);
   assert.match(app, /\(Boolean\(browser\) && \(BROWSER_HINT\.test\(e\.prompt\) \|\| MESSAGES_HINT\.test\(e\.prompt\)\)\)/);
+});
+
+// v115 (helper 1.0.2): an iMessage to a number that isn't on iMessage is taken by Messages, then fails seconds later
+// ("Not Delivered"). osascript never heard of it, so the helper said sent and its SMS try never ran.
+function deliveryRig({ lookup = '[]', first, second, smsCode = 0 }) {
+  let outcomeLooks = 0;
+  return hostRig((tool, args) => {
+    if (tool === 'osascript') return args.includes('send t to participant dest of (1st account whose service type = SMS)') && !args.some((a) => /iMessage/.test(a)) ? { code: smsCode, err: smsCode ? 'execution error: Can’t get account 1 whose service type = SMS. (-1728)' : '' } : {};
+    const sql = args.at(-1);
+    if (!/m\.is_sent AS sent/.test(sql)) return { out: lookup };
+    outcomeLooks++;
+    const row = outcomeLooks === 1 ? first : second; // the first look is the iMessage try; the rest, the SMS try
+    return { out: JSON.stringify(row ? [row] : []) };
+  });
+}
+const SMS_ONLY = 'send t to participant dest of (1st account whose service type = SMS)';
+const isSms = (args) => args.includes(SMS_ONLY) && !args.some((a) => /iMessage/.test(a));
+
+test('helper 1.0.2: an iMessage that fails to deliver is sent once more as SMS, to the same number', () => {
+  const rig = deliveryRig({ lookup: '[{"chat":"iMessage;-;+15086885824"}]', first: { error: 22, sent: 0 }, second: { error: 0, sent: 1 } });
+  assert.deepEqual(rig.handle({ op: 'send', to: '508-688-5824', text: 'Test message.' }), { sent: true, to: '5086885824', via: 'SMS' });
+  const sends = rig.calls.filter(([tool]) => tool === 'osascript').map(([, args]) => args);
+  assert.equal(sends.length, 2, 'the iMessage try, then one SMS try');
+  assert.deepEqual(sends[0].slice(-2), ['Test message.', 'iMessage;-;+15086885824']);
+  assert.ok(isSms(sends[1]) && sends[1].at(-2) === 'Test message.' && sends[1].at(-1) === '5086885824', 'the same text to the same number, SMS only');
+  // The outcome is looked for in that number's conversations, sent from here since just before the send.
+  const look = rig.calls.find(([tool, args]) => tool === 'sqlite3' && /m\.is_sent AS sent/.test(args.at(-1)))[1].at(-1);
+  assert.match(look, /m\.is_from_me = 1 AND m\.date >= \d{15,} AND \(\(c\.guid = 'iMessage;-;\+15086885824'/);
+});
+
+test('helper 1.0.2: no SMS on this Mac (no iPhone forwarding) is a plain failure, never "sent"', () => {
+  const none = deliveryRig({ first: { error: 22, sent: 0 }, smsCode: 1 });
+  assert.match(none.handle({ op: 'send', to: '+15086885824', text: 'x' }).threw, /^Messages couldn’t deliver this over iMessage, and this Mac can’t send it as SMS\. Sending SMS from a Mac needs an iPhone with Text Message Forwarding on\.$/);
+  const failedToo = deliveryRig({ first: { error: 22, sent: 0 }, second: { error: 1, sent: 0 } });
+  assert.match(failedToo.handle({ op: 'send', to: '+15086885824', text: 'x' }).threw, /can’t send it as SMS/);
+  // An email address or a group has no SMS to fall back to: one try, and the failure says so.
+  const mail = deliveryRig({ first: { error: 22, sent: 0 } });
+  assert.match(mail.handle({ op: 'send', to: 'pat@example.com', text: 'x' }).threw, /^Messages couldn’t deliver this over iMessage\. Check the address/);
+  assert.equal(mail.sent().length, 1);
+  const group = deliveryRig({ first: { error: 22, sent: 0 } });
+  assert.match(group.handle({ op: 'send', to: 'iMessage;+;chat8291', text: 'x' }).threw, /Check the address/);
+  assert.equal(group.sent().length, 1);
+});
+
+test('helper 1.0.2: a delivered iMessage is sent once; an outcome that never settles keeps the old answer', () => {
+  const ok = deliveryRig({ first: { error: 0, sent: 1 } });
+  assert.deepEqual(ok.handle({ op: 'send', to: '+16175550142', text: 'On my way' }), { sent: true, to: '+16175550142' });
+  assert.equal(ok.sent().length, 1);
+  assert.equal(ok.calls.filter(([tool, args]) => tool === 'sqlite3' && /is_sent/.test(args.at(-1))).length, 1, 'it stops looking once sent');
+  const slow = deliveryRig({});
+  assert.deepEqual(slow.handle({ op: 'send', to: '+16175550142', text: 'x' }), { sent: true, to: '+16175550142' });
+  assert.equal(slow.sent().length, 1, 'no answer from chat.db is never a reason to send twice');
+  assert.match(HOST, /const WATCH = \{ tries: 8, every: 1 \};/, 'two tries of 8 s fit the extension’s 30 s for the helper');
 });
