@@ -46,8 +46,9 @@ done
 cat <<'EOF'
 Atelier Messages helper installed.
 
-Two macOS permissions are left, both for Google Chrome:
-  1. Reading texts: System Settings → Privacy & Security → Full Disk Access → turn on Google Chrome.
+Two macOS permissions are left:
+  1. Reading texts: System Settings → Privacy & Security → Full Disk Access → turn on osascript and Google Chrome.
+     To add osascript, run:  open -R /usr/bin/osascript   and drag the selected file into that list.
      Then quit Chrome (Cmd-Q) and reopen it.
   2. Sending: the first time Atelier sends a text, macOS asks to let Chrome control Messages. Click OK.
 

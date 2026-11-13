@@ -7,7 +7,7 @@
 // It needs two macOS permissions, both asked of Google Chrome (the app that starts it): Full Disk Access to read
 // chat.db, and Automation → Messages to send.
 
-const HOST_VERSION = '1.0.6';
+const HOST_VERSION = '1.0.7';
 const LIMITS = { recent: 50, read: 100, text: 2000, chat: 200 };
 const APPLE_EPOCH_MS = 978307200000; // 2001-01-01, where Messages counts its dates from
 
@@ -96,10 +96,20 @@ WHERE ${chatMatch(chat)} ORDER BY m.date DESC LIMIT ${clampInt(limit, 1, LIMITS.
 }
 // The conversation a number already has, and the service its last text that got through used: one the owner received,
 // or one sent from here that was delivered (1.0.3, v116). A failed iMessage never counts.
+// A text that got through: one received, an iMessage delivered, or a carrier text Messages sent. SMS has no delivery
+// receipt, so asking "delivered" of it (1.0.3 to 1.0.6) never counted the owner's SMS texts that did go out, and the
+// helper kept choosing iMessage for an Android number (1.0.7, v123).
+const WORKED = "(m.is_from_me = 0 OR (m.error = 0 AND (m.is_delivered = 1 OR (m.is_sent = 1 AND m.service IN ('SMS', 'RCS')))))";
+// refused (1.0.7): this number's last iMessage from here failed with error 22 (not on iMessage), and no iMessage has
+// worked since. Such a number gets a carrier text.
 const chatForSql = (to) => `SELECT (SELECT c.guid FROM chat c JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
 WHERE ${chatMatch(to)} ORDER BY cmj.message_id DESC LIMIT 1) AS chat,
 (SELECT m.service FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
-WHERE ${chatMatch(to)} AND IFNULL(m.item_type, 0) = 0 AND (m.is_from_me = 0 OR (m.error = 0 AND m.is_delivered = 1)) ORDER BY m.date DESC LIMIT 1) AS service;`;
+WHERE ${chatMatch(to)} AND IFNULL(m.item_type, 0) = 0 AND ${WORKED} ORDER BY m.date DESC LIMIT 1) AS service,
+(SELECT IFNULL((SELECT MAX(m.date) FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
+WHERE ${chatMatch(to)} AND m.is_from_me = 1 AND m.service = 'iMessage' AND m.error = 22), 0)
+> IFNULL((SELECT MAX(m.date) FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
+WHERE ${chatMatch(to)} AND m.service = 'iMessage' AND m.error = 0 AND (m.is_from_me = 0 OR m.is_delivered = 1)), 0)) AS refused;`;
 function shapeRecent(rows) {
   return rows.map((r) => ({ chat: r.chat, name: r.name || '', people: r.people || r.id || '', service: r.service || '', last: { at: appleDate(r.d), fromMe: r.fromMe === 1, text: bodyOf(r) } }));
 }
@@ -187,13 +197,15 @@ const NOT_DELIVERED = 'Messages couldn’t deliver this over iMessage. Check the
 const SMS_FAILED = 'Messages couldn’t send this as a text (RCS or SMS). On your iPhone, turn on Text Message Forwarding for this Mac.';
 const SMS_SERVICE = /^(SMS|RCS)$/i;
 const SMS_CHAT = /^(SMS|RCS);-;/i;
-const NO_HISTORY = 'Atelier couldn’t read this Mac’s texts, so it sent iMessage without checking. If it shows Not Delivered, give Google Chrome Full Disk Access, then quit and reopen Chrome.';
+const NO_HISTORY = 'Atelier couldn’t read this Mac’s texts, so it sent a plain text message (SMS). That reaches any phone.';
 const RETRIED = 'iMessage couldn’t deliver it, so it went again as a carrier text.';
 // The errors a person can fix, in words that say how.
 function friendlyError(raw) {
   const s = String(raw || '');
   if (/authorization denied|unable to open database|operation not permitted|not authorized to access/i.test(s)) {
-    return 'Chrome can’t read Messages yet. Give Google Chrome Full Disk Access in System Settings → Privacy & Security, then quit and reopen Chrome.';
+    // 1.0.7 (v123): macOS checks the helper's own program (/usr/bin/osascript), not Chrome: the owner's Chrome had
+    // Full Disk Access and reading was still refused. What macOS said goes along, so the next refusal explains itself.
+    return `Atelier’s helper can’t read Messages yet. In System Settings → Privacy & Security → Full Disk Access, turn on osascript (add /usr/bin/osascript) and Google Chrome, then quit and reopen Chrome. macOS said: ${s.trim().replace(/\s+/g, ' ').slice(0, 160)}`;
   }
   if (/-1743|not allowed to send Apple events|Not authorized to send Apple events/i.test(s)) {
     return 'Chrome can’t control Messages yet. Allow it in System Settings → Privacy & Security → Automation, then try again.';
@@ -262,18 +274,23 @@ function handle(msg) {
         if (!to.includes(';')) dest = row.chat || to;
         service = String(row.service || '');
         history = SMS_SERVICE.test(service) ? service.toUpperCase() : service ? 'iMessage' : 'none';
+        if (Number(row.refused) === 1 && !SMS_SERVICE.test(service)) history = 'not on iMessage';
       } catch { history = 'unreadable'; /* chat.db can't be read */ }
     }
     number = phoneOf(to, dest);
     // SMS straight away, never an iMessage try first, when (1.0.4, v117) the owner asked for SMS (an SMS or RCS chat id:
     // "SMS;-;+15085550142"), or (1.0.3, v116) the last text with this number that got through was SMS. Messages would
     // otherwise try iMessage, which fails later as "Not Delivered", and catching that in time is not a sure thing.
-    // 1.0.5 (v121): by the service that last worked. With no carrier history RCS goes first: it is what reached the
-    // owner's Android number, and plain SMS did not.
-    if (number && (SMS_CHAT.test(to) || history === 'SMS' || history === 'RCS')) {
-      const got = carrier(history === 'SMS' ? ['SMS', 'RCS'] : ['RCS', 'SMS'], [WATCH.first, WATCH.again]);
+    // 1.0.5 (v121): by the service that last worked. 1.0.7 (v123): SMS first unless RCS is what worked (1.0.5 put RCS
+    // first on a wrong reading: the owner's RCS texts were the ones timing out). Also a carrier text, never iMessage:
+    // a number that last refused iMessage, and any number when chat.db can't be read. Blind, the helper can't see an
+    // iMessage fail, and SMS reaches every phone.
+    if (number && (SMS_CHAT.test(to) || history === 'SMS' || history === 'RCS' || history === 'not on iMessage' || history === 'unreadable')) {
+      const got = carrier(history === 'RCS' ? ['RCS', 'SMS'] : ['SMS', 'RCS'], [WATCH.first, WATCH.again]);
       if (!got) throw new Error(SMS_FAILED);
-      return { sent: true, to: number, via: got.via, history, delivery: got.delivery };
+      const done = { sent: true, to: number, via: got.via, history, delivery: got.delivery };
+      if (history === 'unreadable' && !SMS_CHAT.test(to)) done.note = NO_HISTORY;
+      return done;
     }
     const since = appleNs(Date.now() - 2000);
     const r = run('/usr/bin/osascript', sendArgs(text, dest));
@@ -283,12 +300,11 @@ function handle(msg) {
     // from a missing Full Disk Access, an iMessage-only history, or a failure that came too late.
     if (o !== 'failed') {
       const done = { sent: true, to: dest, via: /^(SMS|RCS);/i.test(dest) ? 'SMS' : 'iMessage', history, delivery: o === 'sent' ? 'confirmed' : 'unconfirmed' };
-      if (number && history === 'unreadable') done.note = NO_HISTORY;
       return done;
     }
     // iMessage could not deliver it: the same text to the same number, once, as SMS (what the script always meant to do).
     if (!number) throw new Error(NOT_DELIVERED);
-    const got = carrier(['RCS', 'SMS'], [WATCH.again, 0]);
+    const got = carrier(['SMS', 'RCS'], [WATCH.again, 0]);
     if (!got) throw new Error(NO_SMS);
     return { sent: true, to: number, via: got.via, history, delivery: got.delivery, note: RETRIED };
   }
