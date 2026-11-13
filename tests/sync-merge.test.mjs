@@ -666,7 +666,7 @@ async function push(dev, srv, id) {
     const out = applyPush(cur, body, ++srv.clock, id);
     if (out.changed) srv.docs.set(id, out.doc);
     const res = { ...out.response, etag: out.doc ? `e${out.doc.rev}` : null };
-    const p = await planPushResult({ thread: t, record: dev.records.get(id) || null, sent: plan.sent, title: body.title, res, uid });
+    const p = await planPushResult({ thread: t, record: dev.records.get(id) || null, sent: plan.sent, title: body.title, flow: body.flow, res, uid });
     const r = applyPlan(t, p, await hydrateAll(p, srv.blobs));
     assert.equal(r.ok, true);
     dev.records.set(id, r.record);
@@ -1198,4 +1198,212 @@ test('a push answered with a version that lacks the mark (stale or conflict) kee
   applyPlan(local, plan, await hydrateAll(plan));
   assert.equal(local.entries.find((x) => x.id === 'e1').untrusted, 'link');
   assert.ok(local.entries.every((x) => x.untrusted === 'link'), 'the fork of the local edit keeps it too');
+});
+
+// ── flow tag (Days and Flows): flow / flowRev sync like title / titleRev ──
+const KID = { kind: 'kid' }, COEN = { kind: 'coen', color: '#c2410c' };
+const flowBody = (flow, extra = {}) => ({ v: FORMAT, createdAt: 1, entries: [], flow, ...extra });
+
+test('push sets flow on a new doc', async () => {
+  const body = { ...(await bodyOf([ask('e1', 1)])), flow: { v: COEN, base: 0 } };
+  assert.equal(checkPush(body), null);
+  const out = applyPush(null, body, NOW, 't1');
+  assert.deepEqual(out.doc.flow, COEN);
+  assert.equal(out.doc.flowRev, 1);
+  assert.deepEqual(out.response.flow, { v: COEN, rev: 1 });
+  const view = viewOf(out.doc);
+  assert.deepEqual([view.flow, view.flowRev], [COEN, 1]);
+  assert.equal(checkView(view, 't1'), null);
+});
+
+test('checkPush rejects a bad flow', async () => {
+  const body = await bodyOf([ask('e1', 1)]);
+  assert.equal(checkPush({ ...body, flow: { v: { kind: 'A B' }, base: 0 } })?.code, 'bad_shape');
+  for (const flow of [{ v: { kind: '' }, base: 0 }, { v: { kind: 'x'.repeat(25) }, base: 0 }, { v: { kind: 'kid', color: 'c'.repeat(17) }, base: 0 },
+    { v: { kind: 'kid', color: 5 }, base: 0 }, { v: { kind: 'kid', extra: 1 }, base: 0 }, { v: 'kid', base: 0 }, { v: KID, base: -1 }, { v: KID }, { base: 0 }, 'kid', []]) {
+    assert.equal(checkPush({ ...body, flow })?.code, 'bad_shape', JSON.stringify(flow));
+  }
+  assert.equal(checkPush({ ...body, flow: { v: null, base: 3 } }), null, 'clearing is allowed');
+  assert.equal(checkPush({ ...body, flow: { v: { kind: 'linked-in-2', color: '#fff' }, base: 0 } }), null);
+});
+
+test('old-shape push keeps flow', async () => {
+  const doc = applyPush(await docOf('t1', [ask('e1', 1)]), flowBody({ v: KID, base: 0 }), NOW).doc;
+  const out = applyPush(doc, await bodyOf([ask('e2', 2)], { title: { v: 'Named', base: 0 } }), NOW + 1);
+  assert.equal(out.changed, true);
+  assert.deepEqual([out.doc.flow, out.doc.flowRev], [KID, 1]);
+  assert.deepEqual(out.response.flow, { v: KID, rev: 1 });
+  // a document from before flows (no keys at all) answers null / 0 and still takes one
+  const old = await docOf('t2', [ask('e1', 1)]);
+  delete old.flow; delete old.flowRev;
+  assert.deepEqual(applyPush(old, await bodyOf([ask('e2', 2)]), NOW).response.flow, { v: null, rev: 0 });
+  const set = applyPush(old, flowBody({ v: KID, base: 0 }), NOW);
+  assert.deepEqual([set.doc.flow, set.doc.flowRev], [KID, 1]);
+  assert.equal(checkView(viewOf(old), 't2'), null);
+});
+
+test('concurrent flow changes settle on one', async () => {
+  const doc = await docOf('t1', [ask('e1', 1)], { title: { v: 'Thread t1', base: 0 } });
+  const rec = { ...(await recordFor(doc)), flow: null, flowRev: 0 };
+  const a = applyPush(doc, flowBody({ v: KID, base: 0 }), NOW + 1);
+  assert.deepEqual([a.doc.flow, a.doc.flowRev], [KID, 1]);
+  const b = applyPush(a.doc, flowBody({ v: { kind: 'coen' }, base: 0 }), NOW + 2);
+  assert.equal(b.changed, false);
+  assert.equal(b.response.flow.v.kind, 'kid');
+  // B learns it from the push answer...
+  const tB = thread('t1', [ask('e1', 1)], { flow: { kind: 'coen' } });
+  const pr = await planPushResult({ thread: tB, record: rec, sent: {}, title: null, flow: { v: { kind: 'coen' }, base: 0 }, res: { ...b.response, etag: 'x' }, uid });
+  assert.deepEqual(pr.flow, KID);
+  assert.deepEqual([pr.record.flow, pr.record.flowRev], [KID, 1]);
+  // ...and from a pull
+  const plan = await planPull({ local: tB, record: rec, remote: viewOf(a.doc), uid });
+  assert.deepEqual(plan.flow, KID);
+  assert.deepEqual(plan.localFlow, { kind: 'coen' });
+  assert.equal(plan.push, false, 'nothing left to send once it adopts the server flow');
+  assert.equal(plan.changed, true);
+  const r = applyPlan(tB, plan, await hydrateAll(plan));
+  assert.equal(r.ok, true);
+  assert.deepEqual(tB.flow, KID);
+  assert.deepEqual([r.record.flow, r.record.flowRev], [KID, 1]);
+  assert.equal((await planPush({ thread: tB, record: r.record })).dirty, false);
+});
+
+test('checkView accepts a doc without flow and one with flow', async () => {
+  const doc = await docOf('t1', [ask('e1', 1)]);
+  const v = viewOf(doc);
+  const bare = { ...v };
+  delete bare.flow; delete bare.flowRev;
+  assert.equal(checkView(bare, 't1'), null);
+  assert.equal(checkView({ ...v, flow: null, flowRev: 0 }, 't1'), null);
+  assert.equal(checkView({ ...v, flow: COEN, flowRev: 2 }, 't1'), null);
+});
+
+test('checkView rejects a bad flow', async () => {
+  const v = viewOf(await docOf('t1', [ask('e1', 1)]));
+  for (const bad of [{ flow: { kind: 'A B' }, flowRev: 1 }, { flow: 'kid', flowRev: 1 }, { flow: { kind: 'kid', color: 1 }, flowRev: 1 }, { flow: KID, flowRev: -1 }, { flow: KID, flowRev: 'x' }]) {
+    assert.equal(checkView({ ...v, ...bad }, 't1'), 'bad_shape', JSON.stringify(bad));
+  }
+});
+
+test('flow on an empty thread does not push', async () => {
+  const plan = await planPush({ thread: thread('t1', [], { flow: KID }), record: null });
+  assert.equal(plan.flow, null);
+  assert.equal(plan.dirty, false);
+  // with entries (or once synced) it rides along, on the first body
+  const withEntries = await planPush({ thread: thread('t2', [ask('e1', 1)], { flow: KID }), record: null });
+  assert.deepEqual(withEntries.flow, { v: KID, base: 0 });
+  assert.deepEqual(pushBodies(withEntries)[0].flow, { v: KID, base: 0 });
+  assert.equal(checkPush(pushBodies(withEntries)[0]), null);
+  const synced = await planPush({ thread: thread('t3', [], { flow: COEN }), record: { ...newRecord(), rev: 4, title: 'Thread t3', titleRev: 1, flow: KID, flowRev: 2 } });
+  assert.deepEqual(synced.flow, { v: COEN, base: 2 });
+  assert.equal(synced.dirty, true);
+  assert.equal(pushBodies(synced).length, 1);
+  // an unchanged flow (or none on a record from before flows) sends nothing
+  const same = await planPush({ thread: thread('t3', [], { flow: { color: '#c2410c', kind: 'coen' } }), record: { ...newRecord(), rev: 4, title: 'Thread t3', titleRev: 1, flow: COEN, flowRev: 2 } });
+  assert.deepEqual([same.flow, same.dirty], [null, false]);
+  const legacy = await planPush({ thread: thread('t4', []), record: { ...newRecord(), rev: 4, title: 'Thread t4', titleRev: 1 } });
+  assert.deepEqual([legacy.flow, legacy.dirty], [null, false]);
+});
+
+test('a record from before flows: a pull of an old document neither pushes nor touches the thread', async () => {
+  const doc = await docOf('t1', [ask('e1', 1)], { title: { v: 'Thread t1', base: 0 } });
+  delete doc.flow; delete doc.flowRev;
+  const rec = await recordFor(doc);
+  delete rec.flow; delete rec.flowRev;
+  const local = thread('t1', [ask('e1', 1)]);
+  const plan = await planPull({ local, record: rec, remote: viewOf(doc), uid });
+  assert.deepEqual([plan.flow, plan.push, plan.changed], [undefined, false, false]);
+  assert.deepEqual([plan.record.flow, plan.record.flowRev], [null, 0]);
+  const r = applyPlan(local, plan, await hydrateAll(plan));
+  assert.equal(r.ok, true);
+  assert.equal('flow' in local, false);
+  // a flow set here before it ever synced goes up (base 0) and the server takes it
+  const tagged = thread('t1', [ask('e1', 1)], { flow: KID });
+  const p2 = await planPull({ local: tagged, record: rec, remote: viewOf(doc), uid });
+  assert.deepEqual([p2.flow, p2.push], [undefined, true]);
+  const pp = await planPush({ thread: tagged, record: p2.record });
+  assert.deepEqual(pp.flow, { v: KID, base: 0 });
+  assert.deepEqual(applyPush(doc, pushBodies(pp)[0], NOW).doc.flow, KID);
+});
+
+test('applyPlan refuses when local flow moved', async () => {
+  const doc = applyPush(await docOf('t1', [ask('e1', 1)]), flowBody({ v: KID, base: 0 }), NOW).doc;
+  const rec = await recordFor(await docOf('t1', [ask('e1', 1)]));
+  const local = thread('t1', [ask('e1', 1)]);
+  const plan = await planPull({ local, record: rec, remote: viewOf(doc), uid });
+  assert.deepEqual(plan.flow, KID);
+  local.flow = { kind: 'coen' }; // picked meanwhile
+  assert.equal(applyPlan(local, plan, await hydrateAll(plan)).ok, false);
+  assert.deepEqual(local.flow, { kind: 'coen' });
+  // the plan snapshots the flow: an in-place edit of the same object is noticed too
+  const local2 = thread('t1', [ask('e1', 1)], { flow: { kind: 'coen' } });
+  const plan2 = await planPull({ local: local2, record: { ...rec, flow: null, flowRev: 0 }, remote: viewOf(doc), uid });
+  local2.flow.kind = 'linkedin';
+  assert.equal(applyPlan(local2, plan2, await hydrateAll(plan2)).ok, false);
+});
+
+test('applyPlan applies a pulled flow', async () => {
+  const doc = applyPush(await docOf('t1', [ask('e1', 1)]), flowBody({ v: COEN, base: 0 }), NOW).doc;
+  const local = thread('t1', [ask('e1', 1)]);
+  const plan = await planPull({ local, record: await recordFor(await docOf('t1', [ask('e1', 1)])), remote: viewOf(doc), uid });
+  const r = applyPlan(local, plan, await hydrateAll(plan));
+  assert.equal(r.ok, true);
+  assert.deepEqual(local.flow, COEN);
+  assert.notEqual(local.flow, plan.flow, 'a copy, not the plan object');
+  // a thread new to this device arrives with its flow
+  const fresh = await planPull({ local: null, record: null, remote: viewOf(doc), uid });
+  const r2 = applyPlan(null, fresh, await hydrateAll(fresh));
+  assert.deepEqual(r2.thread.flow, COEN);
+  assert.deepEqual([r2.record.flow, r2.record.flowRev], [COEN, 1]);
+  // a server null never clears a local flow (as an empty title never clears a title): it goes back up
+  const cleared = applyPush(doc, flowBody({ v: null, base: 1 }), NOW + 1).doc;
+  assert.deepEqual([cleared.flow, cleared.flowRev], [null, 2]);
+  const p3 = await planPull({ local, record: r.record, remote: viewOf(cleared), uid });
+  assert.deepEqual([p3.flow, p3.push], [undefined, true]);
+});
+
+test('tombstone clears flow', async () => {
+  const doc = applyPush(await docOf('t1', [ask('e1', 1), ask('e2', 2)]), flowBody({ v: KID, base: 0 }), NOW).doc;
+  const part = applyDelete(doc, { e1: 1 }, NOW + 1).doc;
+  assert.deepEqual([part.flow, part.flowRev], [KID, 1], 'a thread with entries left keeps it');
+  const tomb = applyDelete(part, { e2: 1 }, NOW + 2).doc;
+  assert.ok(tomb.deletedAt);
+  assert.deepEqual([tomb.flow, tomb.flowRev], [null, 2]);
+  assert.equal(applyPush(tomb, flowBody({ v: COEN, base: 2 }), NOW + 3).changed, false, 'a tombstone takes no flow on its own');
+  const plain = applyDelete(await docOf('t2', [ask('e1', 1)]), { e1: 1 }, NOW).doc;
+  assert.deepEqual([plain.flow ?? null, plain.flowRev ?? 0], [null, 0], 'no flow: nothing to clear');
+});
+
+test('restore brings flow back', async () => {
+  const doc = applyPush(await docOf('t1', [ask('e1', 1)]), flowBody({ v: COEN, base: 0 }), NOW).doc;
+  const tomb = applyDelete(doc, { e1: 1 }, NOW + 1).doc;
+  const r = applyRestore(tomb, doc, NOW + 2);
+  assert.deepEqual([r.doc.flow, r.doc.flowRev], [COEN, 3]);
+  assert.equal(checkView(viewOf(r.doc), 't1'), null);
+  // a flow set since stands; a bad snapshot flow is ignored
+  const now = applyRestore({ ...tomb, flow: KID, flowRev: 3 }, doc, NOW + 2);
+  assert.deepEqual([now.doc.flow, now.doc.flowRev], [KID, 3]);
+  assert.deepEqual(applyRestore(tomb, { ...doc, flow: { kind: 'A B' } }, NOW + 2).doc.flow ?? null, null);
+});
+
+test('two devices: a flow set on one reaches the other once and then both are quiet', async () => {
+  const srv = server(), pc = device(), phone = device();
+  pc.threads.set('t1', thread('t1', [ask('e1', 1)]));
+  await push(pc, srv, 't1');
+  await pull(phone, srv, 't1');
+  pc.threads.get('t1').flow = { kind: 'linkedin' };
+  await push(pc, srv, 't1');
+  assert.deepEqual(srv.docs.get('t1').flow, { kind: 'linkedin' });
+  await pull(phone, srv, 't1');
+  assert.deepEqual(phone.threads.get('t1').flow, { kind: 'linkedin' });
+  for (const dev of [pc, phone]) assert.equal((await planPush({ thread: dev.threads.get('t1'), record: dev.records.get('t1') })).dirty, false);
+  // both change it offline: the first to push wins and the other adopts it from the push answer
+  phone.threads.get('t1').flow = { kind: 'kid' };
+  pc.threads.get('t1').flow = { kind: 'coen' };
+  await push(phone, srv, 't1');
+  await push(pc, srv, 't1');
+  assert.deepEqual(srv.docs.get('t1').flow, { kind: 'kid' });
+  assert.deepEqual(pc.threads.get('t1').flow, { kind: 'kid' });
+  await pull(pc, srv, 't1');
+  for (const dev of [pc, phone]) assert.equal((await planPush({ thread: dev.threads.get('t1'), record: dev.records.get('t1') })).dirty, false);
 });

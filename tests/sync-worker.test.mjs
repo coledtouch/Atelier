@@ -277,7 +277,7 @@ test('push: create, idempotent resend, fast-forward and the response shape', asy
   assert.equal(r.status, 200);
   assert.equal(r.headers.get('cache-control'), 'private, no-store');
   const res = await bodyOf(r);
-  assert.deepEqual({ ...res, changedAt: 0, etag: 0 }, { v: 1, rev: 1, prevRev: 0, born: NOW, changedAt: 0, deletedAt: null, revived: false, title: { v: 'Hello', rev: 1 }, accepted: { e1: 1, e2: 1 }, stale: [], conflicts: [], dropped: [], etag: 0 });
+  assert.deepEqual({ ...res, changedAt: 0, etag: 0 }, { v: 1, rev: 1, prevRev: 0, born: NOW, changedAt: 0, deletedAt: null, revived: false, title: { v: 'Hello', rev: 1 }, flow: { v: null, rev: 0 }, accepted: { e1: 1, e2: 1 }, stale: [], conflicts: [], dropped: [], etag: 0 });
   assert.equal(res.changedAt, NOW);
   assert.match(res.etag, /^[0-9a-f]{32}$/);
   const doc = env.SYNC_BUCKET.json('t/t1.json');
@@ -292,6 +292,22 @@ test('push: create, idempotent resend, fast-forward and the response shape', asy
   assert.deepEqual([ff.rev, ff.prevRev, ff.accepted], [2, 1, { e1: 2 }]);
   const conflict = await bodyOf(await push(env, 't1', [ask('e1', 2, 'other')], { bases: { e1: 1 }, createdAt: 2 }));
   assert.deepEqual(conflict.conflicts.map((v) => [v.id, v.rev, v.d.text]), [['e1', 2, 'edited']]);
+});
+
+test('worker round-trips flow', async () => {
+  const env = syncEnv();
+  const body = { ...(await pushBody([ask('e1', 2)], { createdAt: 2 })), flow: { v: { kind: 'kid', color: '#2563eb' }, base: 0 } };
+  const res = await bodyOf(await call(env, 'POST', 'thread/t1', { body }));
+  assert.deepEqual(res.flow, { v: { kind: 'kid', color: '#2563eb' }, rev: 1 });
+  const view = await bodyOf(await call(env, 'GET', 'thread/t1'));
+  assert.deepEqual([view.flow, view.flowRev], [{ kind: 'kid', color: '#2563eb' }, 1]);
+  // an old client's push (no flow) keeps it; a bad flow is refused
+  clock += 1000;
+  const old = await bodyOf(await push(env, 't1', [ask('e2', 3)], { createdAt: 2 }));
+  assert.deepEqual([old.rev, old.flow], [2, { v: { kind: 'kid', color: '#2563eb' }, rev: 1 }]);
+  assert.deepEqual((await bodyOf(await call(env, 'GET', 'thread/t1'))).flow, { kind: 'kid', color: '#2563eb' });
+  const bad = await call(env, 'POST', 'thread/t1', { body: { ...body, flow: { v: { kind: 'A B' }, base: 1 } } });
+  assert.deepEqual([bad.status, await codeOf(bad)], [400, 'bad_shape']);
 });
 
 test('push validation: 400 bad shape / bad id / hash mismatch, 422 pending or live steps, 413 entry or thread too large', async () => {
