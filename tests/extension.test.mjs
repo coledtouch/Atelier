@@ -65,7 +65,7 @@ function loadBackground({ manifest = SOURCE_MANIFEST, pages = {}, storage = {}, 
   const on = () => { const fns = []; return { fns, addListener: (f) => fns.push(f), removeListener: (f) => { const i = fns.indexOf(f); if (i >= 0) fns.splice(i, 1); } }; };
   const h = {
     events: { message: on(), connect: on(), removed: on(), startup: on(), installed: on(), alarm: on(), updated: on() },
-    windows: [], removedWindows: [], injected: [], sockets: [], storage: { ...storage }, session: structuredClone(session), pages, cdp: [], native: [], os: 'win', nativeMissing: false, nativeReply: null,
+    windows: [], removedWindows: [], injected: [], sockets: [], storage: { ...storage }, session: structuredClone(session), pages, cdp: [], native: [], os: 'win', nativeMissing: false, nativeReply: null, tabUpdates: [],
   };
   class FakeInput {}
   Object.defineProperty(FakeInput.prototype, 'value', { set(v) { this.typedValue = v; }, get() { return this.typedValue; } });
@@ -111,7 +111,7 @@ function loadBackground({ manifest = SOURCE_MANIFEST, pages = {}, storage = {}, 
       get: async (id) => tab(id),
       query: async () => Object.keys(pages).map((id) => tab(Number(id))),
       create: async () => { throw new Error('not in these tests'); },
-      update: async (id) => tab(id), remove: async () => {},
+      update: async (id, props) => { h.tabUpdates.push([id, props]); return tab(id); }, remove: async () => {},
       onUpdated: h.events.updated,
     },
     scripting: {
@@ -1055,8 +1055,8 @@ test('confirm page: the tick is sent only with an Allow, and the page carries th
   assert.match(js, /port\.postMessage\(\{ answer: choice, \.\.\.\(always \? \{ always: true \} : \{\}\) \}\)/);
 });
 
-test('manifest: version 1.4.1, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
-  assert.equal(SOURCE_MANIFEST.version, '1.4.1');
+test('manifest: version 1.4.2, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
+  assert.equal(SOURCE_MANIFEST.version, '1.4.2');
   assert.ok(SOURCE_MANIFEST.description.length <= 132);
   assert.ok(Number(SOURCE_MANIFEST.minimum_chrome_version) >= 116);
 });
@@ -1083,7 +1083,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
   const prod = packExtension();
   const files = unzipSync(prod.zip);
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  assert.equal(manifest.version, '1.4.1');
+  assert.equal(manifest.version, '1.4.2');
   assert.deepEqual(manifest.content_scripts.map((c) => c.matches), [['https://atelier.ciprari.ai/*']]);
   assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
   assert.ok(!/localhost|127\.0\.0\.1/.test(strFromU8(files['manifest.json'])));
@@ -1092,7 +1092,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
 
   const dev = packExtension({ dev: true });
   assert.deepEqual(dev.manifest.content_scripts[0].matches, ['https://atelier.ciprari.ai/*', 'http://localhost:8787/*']);
-  assert.equal(dev.manifest.version, '1.4.1');
+  assert.equal(dev.manifest.version, '1.4.2');
   assert.deepEqual(SOURCE_MANIFEST.content_scripts[0].matches, dev.manifest.content_scripts[0].matches, 'the source keeps localhost for Load unpacked');
 });
 
@@ -1128,7 +1128,9 @@ test('productionManifest refuses a manifest that would still reach a local host'
 // They sit 40 px apart from y 180, so a click's y says which one took it (190, 230, 270, …); page.pressed names them.
 // onEnter: 'send' = the page's own key handler sends the form on an Enter that gives a keypress. stays: the form is
 // sent and the page stays as it was (a real page moves on, and the marks the extension left on its fields go with it).
-function loginPage({ fill = 'click', user = true, submit = true, password = true, buttons: specs, onEnter = '', stays = false, url = 'https://permits.example.gov/login' } = {}) {
+// 1.4.2: saved = the user names Chrome holds for the site, in its order. A click fills the first; typed text (insertText)
+// narrows the list to the names that start with it, and ArrowDown + Enter fills the first of those.
+function loginPage({ fill = 'click', user = true, submit = true, password = true, buttons: specs, onEnter = '', stays = false, url = 'https://permits.example.gov/login', saved = null } = {}) {
   const form = {};
   const box = (top, h = 20) => () => ({ left: 10, top, width: h ? 100 : 0, height: h });
   const mk = (tag, attrs, rect) => { const el = fakeEl({ tag, attrs }); el.getBoundingClientRect = rect; el.form = form; return el; };
@@ -1172,12 +1174,14 @@ function loginPage({ fill = 'click', user = true, submit = true, password = true
   page.onCdp = (method, p) => {
     const up = method === 'Input.dispatchMouseEvent' && p.type === 'mouseReleased';
     const key = method === 'Input.dispatchKeyEvent' && p.type === 'rawKeyDown' ? p.key : '';
-    if (up && p.y === 110 && fill === 'click') pw.value = 'hunter2';
-    if (key === 'ArrowDown' && fill === 'pick') listed = true;
+    if (up && p.y === 110 && fill === 'click') { pw.value = 'hunter2'; if (saved) userEl.value = saved[0]; }
+    if (method === 'Input.insertText' && userEl.focused) userEl.value += p.text;
+    if (key === 'ArrowDown' && (fill === 'pick' || saved)) listed = true;
     if (key === 'Enter') {
       // With Chrome's list showing, Chrome takes the Enter; otherwise the page gets it, unless the guard holds it.
       // A rawKeyDown carries no character, so the page gets a keydown and no keypress: no form is sent by it.
-      if (listed) pw.value = 'hunter2';
+      if (listed && saved) { const hit = saved.find((s) => s.toLowerCase().startsWith(userEl.value.toLowerCase())); if (hit) { userEl.value = hit; pw.value = `pw-of-${hit}`; } else page.enters.push({ guarded: listeners.length > 0 }); }
+      else if (listed) pw.value = 'hunter2';
       else page.enters.push({ guarded: listeners.length > 0 });
       listed = false;
     }
@@ -1199,7 +1203,7 @@ const keysSent = (h) => h.cdp.filter(([m, p]) => m === 'Input.dispatchKeyEvent' 
 function signinRig(opts, storage = { noAsk: true }) {
   const page = loginPage(opts);
   const h = loadBackground({ pages: { 7: page }, storage });
-  h.run('TIMING.fill = 0');
+  h.run('TIMING.fill = 0; TIMING.front = 0');
   return { h, page };
 }
 
@@ -1615,4 +1619,49 @@ test('confirm page: the box names everything it covers, and a text message is he
   const typing = loadConfirmPage();
   typing.deliver({ info: { ...INFO, expiresAt: Date.now() + 45_000 } });
   assert.equal(typing.els.typedTitle.textContent, 'Text to type');
+});
+
+// ── 1.4.2 (v119): the agent opened the sign-in page in a background tab, where Chrome shows no saved passwords, so the
+// sign-in said none was saved. With two saved logins for the site, it also took Chrome's first without saying so.
+test('sign-in 1.4.2: the tab comes to the front before any click', async () => {
+  const { h } = signinRig({ fill: 'pick' });
+  const r = await h.local('signin', { tabId: 7 });
+  assert.ok(r.ok, r.error);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.tabUpdates[0])), [7, { active: true }]);
+  assert.match(BACKGROUND.replace(/\r/g, ''), /await chrome\.windows\.update\(front\.windowId, \{ focused: true \}\);\n    \} catch \{[^}]*\}\n    await sleep\(TIMING\.front\);\n    const target = \{ tabId \};/, 'its window focused, then a moment, then the clicks');
+});
+
+test('sign-in 1.4.2: a named account is typed, picked from Chrome’s list and reported; the password never leaves the page', async () => {
+  const saved = ['coen@example.com', 'bk@example.com'];
+  const { h, page } = signinRig({ fill: 'click', saved });
+  const r = await h.local('signin', { tabId: 7, account: 'bk@example.com' });
+  assert.ok(r.ok, r.error);
+  assert.equal(r.result.account, 'bk@example.com');
+  assert.equal(page.userEl.value, 'bk@example.com');
+  assert.equal(page.pw.value, 'pw-of-bk@example.com', 'that account’s password, not the one Chrome filled first');
+  assert.deepEqual(h.cdp.filter(([m]) => m === 'Input.insertText').map(([, p]) => p.text), ['bk@example.com']);
+  assert.deepEqual(keysSent(h), ['ArrowDown', 'Enter']);
+  assert.equal(page.submitted, 1);
+  assert.doesNotMatch(JSON.stringify(r), /pw-of/);
+  // No account named: Chrome's first, and the answer says which.
+  const first = signinRig({ fill: 'click', saved });
+  const r2 = await first.h.local('signin', { tabId: 7 });
+  assert.equal(r2.result.account, 'coen@example.com');
+  assert.ok(!first.h.cdp.some(([m]) => m === 'Input.insertText'));
+});
+
+test('sign-in 1.4.2: an account Chrome has no login for submits nothing', async () => {
+  const { h, page } = signinRig({ fill: 'click', saved: ['coen@example.com'] });
+  const r = await h.local('signin', { tabId: 7, account: 'someone@else.com' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /^Chrome has no saved password for that account on this page, so nothing was submitted\./);
+  assert.equal(page.submitted, 0);
+  assert.equal(page.pw.value, '', 'the password Chrome filled first is cleared, never sent under another name');
+  assert.deepEqual(h.cdp.at(-1), ['detach', 7]);
+});
+
+test('app 1.4.2: browser_signin takes an account, and the app asks for extension 1.4.2', () => {
+  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /The result names the account it used\.', \{ tabId: B_TAB, account: \{ type: 'string'/);
+  assert.match(app, /const MIN_EXT = '1\.4\.2';/);
 });

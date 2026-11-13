@@ -34,7 +34,7 @@ const MAX_SHOWN_TEXT = 2000; // characters of the text to type shown in the conf
 // helper: the longest wait for the Messages helper on a Mac. A text can so take confirm + helper, 75 s: more than
 // those 60 s, so Atelier has to give a text 90 s, as the relay gives every command (v114). render: the pause that
 // lets a page loaded for a read draw itself.
-const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800 };
+const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800, front: 400 };
 // After a click or typing request is declined, closed or left unanswered, further ones from the same path (this
 // browser's Atelier tab, or another device through the relay) are refused without a window for a while: 30 s, doubling
 // with each refusal in a row (at most 10 min); an Allow resets it. A hijacked page can't keep stealing the focus.
@@ -364,6 +364,7 @@ const NO_SAVED = 'Chrome didn’t fill a saved password on this page, so nothing
 const NO_SIGNIN_BUTTON = 'Atelier Browser couldn’t tell which button signs in on that page, so nothing was submitted. Ask the user to sign in.';
 const SIGNIN_UNKNOWN = 'The tab stopped answering while the sign-in form was being sent. It isn’t known whether it went through. Look at that tab before trying again.';
 const FILLED = 'Chrome filled the password it had saved. Atelier never saw it.';
+const NO_SUCH_ACCOUNT = 'Chrome has no saved password for that account on this page, so nothing was submitted. Ask the user which account to use.';
 function pageLogin(op, which) {
   const q = (k) => document.querySelector(`[data-atelier-login="${k}"]`);
   const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
@@ -414,6 +415,14 @@ function pageLogin(op, which) {
     return r.width > 0 && r.height > 0 ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null;
   }
   if (op === 'filled') return { filled: String(q('pw')?.value || '').length > 0 };
+  // The user name the form holds (never the password): which saved account Chrome filled (1.4.2, v119).
+  if (op === 'who') return { who: String(q('user')?.value || '') };
+  // Both fields emptied, the user name field focused: typing the account then makes Chrome list only its logins.
+  if (op === 'clear') {
+    for (const k of ['user', 'pw']) { const el = q(k); if (el) { el.value = ''; el.dispatchEvent?.(new Event('input', { bubbles: true })); } }
+    q('user')?.focus();
+    return true;
+  }
   // After the click or the Enter: is that same password field still showing? A page that moved on has lost the mark.
   if (op === 'after') { const el = q('pw'); return { still: Boolean(el) && shown(el) }; }
   // While the extension picks from Chrome's own list, an Enter that reaches the page (no list showing) must not send
@@ -535,7 +544,17 @@ const COMMANDS = {
     if (!form || form.error) throw new Error(NO_LOGIN_FORM);
     const ok = await confirmFirst('signin', { tabId, element: 'signin' }, ctx.via);
     await samePage(tabId, ok.url);
+    // Which saved login, when Chrome has more than one for the site (1.4.2, v119). Without it Chrome's first is taken.
+    const account = String(args?.account || '').trim().slice(0, 200);
+    // Chrome shows its saved passwords only on a tab in front, in a focused window. The agent opens pages in the
+    // background, so the sign-in found nothing to pick and said none was saved (1.4.2, v119).
+    try {
+      const front = await chrome.tabs.update(tabId, { active: true });
+      if (front?.windowId !== undefined) await chrome.windows.update(front.windowId, { focused: true });
+    } catch { /* the clicks below still say whether Chrome filled */ }
+    await sleep(TIMING.front);
     const target = { tabId };
+    let used = '';
     try { await chrome.debugger.attach(target, '1.3'); } catch (err) {
       throw new Error(`Atelier Browser couldn’t take control of that tab (${err?.message || err}). Ask the user to sign in.`);
     }
@@ -568,7 +587,15 @@ const COMMANDS = {
       // on a sign-up form Chrome offers a new password there, and the same keys accept it. A real Chrome must settle it.)
       await click(first);
       await sleep(TIMING.fill);
-      if (!(await filled())) {
+      // An account named: empty both fields and type it, so Chrome's list holds that account's login alone; then pick it.
+      // The password Chrome filled on load may be another account's, so it never stays (1.4.2, v119).
+      const pick = Boolean(account && form.user);
+      if (pick) {
+        await inPage(tabId, pageLogin, ['clear']);
+        await cdp('Input.insertText', { text: account });
+        await sleep(TIMING.fill);
+      }
+      if (pick || !(await filled())) {
         await inPage(tabId, pageLogin, ['guard']);
         try {
           await key('ArrowDown', 40);
@@ -577,7 +604,10 @@ const COMMANDS = {
           await sleep(TIMING.fill);
         } finally { await inPage(tabId, pageLogin, ['unguard']).catch(() => {}); }
       }
-      if (!(await filled())) throw new Error(NO_SAVED);
+      if (!(await filled())) throw new Error(pick ? NO_SUCH_ACCOUNT : NO_SAVED);
+      const who = String((await inPage(tabId, pageLogin, ['who']))?.who || '');
+      if (pick && who.toLowerCase() !== account.toLowerCase()) throw new Error(NO_SUCH_ACCOUNT);
+      used = who;
       const sub = form.submit ? await inPage(tabId, pageLogin, ['at', 'submit']) : null;
       if (sub) await sent(click(sub));
       else if (form.enter === false) throw new Error(NO_SIGNIN_BUTTON); // the button found went away, and Enter would press another
@@ -590,12 +620,13 @@ const COMMANDS = {
     // What the page did next decides the answer (1.4.1, v114: it was 'submitted' whatever happened). The same password
     // field still showing at the same address means the form may never have gone: 'unclear', and the note says so.
     const t = await chrome.tabs.get(tabId).catch(() => null);
-    if (!t) return { signedIn: 'unclear', note: `${FILLED} That tab then closed, so it isn’t known whether the sign-in went through.` };
+    const as = used ? { account: used } : {};
+    if (!t) return { signedIn: 'unclear', ...as, note: `${FILLED} That tab then closed, so it isn’t known whether the sign-in went through.` };
     const now = { title: t.title, url: t.url };
     const still = withoutHash(t.url) === withoutHash(ok.url)
       && await withTimeout(inPage(tabId, pageLogin, ['after']), TIMING.read, NOT_RESPONDING).then((r) => r?.still === true, () => true);
-    if (still) return { signedIn: 'unclear', note: `${FILLED} The sign-in form is still showing, so it isn’t known whether it went through. Look at that tab before trying again.`, now };
-    return { signedIn: 'submitted', note: FILLED, now };
+    if (still) return { signedIn: 'unclear', ...as, note: `${FILLED} The sign-in form is still showing, so it isn’t known whether it went through. Look at that tab before trying again.`, now };
+    return { signedIn: 'submitted', ...as, note: FILLED, now };
   },
   // Messages on this Mac: op recent / read / send (see messagesHost).
   async messages(args = {}, ctx = {}) {

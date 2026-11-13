@@ -125,11 +125,13 @@ test('the Browser extension item: its Allow window, the box that turns it off, a
   assert.match(login, /if \(op === 'filled'\) return \{ filled: String\(q\('pw'\)\?\.value \|\| ''\)\.length > 0 \};/);
   assert.equal((login.match(/q\('pw'\)\?\.value/g) || []).length, 1, 'the one read of the field’s value: is it empty');
   assert.doesNotMatch(login, /\bpw\.value\b/, 'the field found is never read');
-  assert.match(EXT, /if \(!\(await filled\(\)\)\) throw new Error\(NO_SAVED\);/, 'nothing filled: nothing submitted');
+  assert.match(EXT, /if \(!\(await filled\(\)\)\) throw new Error\(pick \? NO_SUCH_ACCOUNT : NO_SAVED\);/, 'nothing filled: nothing submitted');
   const signin = /\n {2}async signin\(args, ctx = \{\}\) \{\n([\s\S]*?)\n {2}\},\n/.exec(EXT)?.[1] || '';
   const answers = signin.split('\n').filter((l) => l.includes('signedIn:'));
   assert.ok(answers.length >= 1, 'the sign-in command’s answers');
-  for (const a of answers) assert.match(a, /return \{ signedIn: '(?:submitted|unclear)', note: (?:FILLED|`\$\{FILLED\} [^`$]*`)(?:, now)? \};$/, `a sign-in answers with a note and the tab, nothing from the form: ${a.trim()}`);
+  // 1.4.2 (v119): and the account it signed in as (the user name field, never the password).
+  for (const a of answers) assert.match(a, /return \{ signedIn: '(?:submitted|unclear)', \.\.\.as, note: (?:FILLED|`\$\{FILLED\} [^`$]*`)(?:, now)? \};$/, `a sign-in answers with a note and the tab, nothing from the form: ${a.trim()}`);
+  assert.match(signin, /const as = used \? \{ account: used \} : \{\};/);
   assert.match(signin, /const now = \{ title: t\.title, url: t\.url \};/);
   assert.match(EXT, /\nconst FILLED = 'Chrome filled the password it had saved\. Atelier never saw it\.';/);
   // the terms say the same in short
