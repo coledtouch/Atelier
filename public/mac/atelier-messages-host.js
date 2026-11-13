@@ -7,7 +7,7 @@
 // It needs two macOS permissions, both asked of Google Chrome (the app that starts it): Full Disk Access to read
 // chat.db, and Automation → Messages to send.
 
-const HOST_VERSION = '1.0.3';
+const HOST_VERSION = '1.0.4';
 const LIMITS = { recent: 50, read: 100, text: 2000, chat: 200 };
 const APPLE_EPOCH_MS = 978307200000; // 2001-01-01, where Messages counts its dates from
 
@@ -99,7 +99,7 @@ WHERE ${chatMatch(chat)} ORDER BY m.date DESC LIMIT ${clampInt(limit, 1, LIMITS.
 const chatForSql = (to) => `SELECT (SELECT c.guid FROM chat c JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
 WHERE ${chatMatch(to)} ORDER BY cmj.message_id DESC LIMIT 1) AS chat,
 (SELECT m.service FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
-WHERE ${chatMatch(to)} AND (m.is_from_me = 0 OR (m.error = 0 AND m.is_delivered = 1)) ORDER BY m.date DESC LIMIT 1) AS service;`;
+WHERE ${chatMatch(to)} AND IFNULL(m.item_type, 0) = 0 AND (m.is_from_me = 0 OR (m.error = 0 AND m.is_delivered = 1)) ORDER BY m.date DESC LIMIT 1) AS service;`;
 function shapeRecent(rows) {
   return rows.map((r) => ({ chat: r.chat, name: r.name || '', people: r.people || r.id || '', service: r.service || '', last: { at: appleDate(r.d), fromMe: r.fromMe === 1, text: bodyOf(r) } }));
 }
@@ -175,6 +175,9 @@ const NO_SMS = 'Messages couldn’t deliver this over iMessage, and this Mac can
 const NOT_DELIVERED = 'Messages couldn’t deliver this over iMessage. Check the address in Messages on this Mac.';
 const SMS_FAILED = 'Messages couldn’t send this as SMS. On your iPhone, turn on Text Message Forwarding for this Mac.';
 const SMS_SERVICE = /^(SMS|RCS)$/i;
+const SMS_CHAT = /^(SMS|RCS);-;/i;
+const NO_HISTORY = 'Atelier couldn’t read this Mac’s texts, so it sent iMessage without checking. If it shows Not Delivered, give Google Chrome Full Disk Access, then quit and reopen Chrome.';
+const RETRIED = 'iMessage couldn’t deliver it, so it went again as SMS.';
 // The errors a person can fix, in words that say how.
 function friendlyError(raw) {
   const s = String(raw || '');
@@ -227,31 +230,47 @@ function handle(msg) {
     // A phone number or an email goes to the conversation it already has, when chat.db can say which. That lookup is
     // best effort (1.0.1, v114): without Full Disk Access it failed and took every send with it, though sending only
     // needs Automation. The text then goes to the address as given, as it does when no conversation matches.
-    let dest = to, service = '';
+    let dest = to, service = '', history = 'none';
     const phone = phoneOf(to, to);
     if (!to.includes(';') || phone) {
-      try { const row = query(chatForSql(phone || to))[0] || {}; if (!to.includes(';')) dest = row.chat || to; service = String(row.service || ''); } catch { /* chat.db can't be read */ }
+      try {
+        const row = query(chatForSql(phone || to))[0] || {};
+        if (!to.includes(';')) dest = row.chat || to;
+        service = String(row.service || '');
+        history = SMS_SERVICE.test(service) ? 'SMS' : service ? 'iMessage' : 'none';
+      } catch { history = 'unreadable'; /* chat.db can't be read */ }
     }
     const number = phoneOf(to, dest);
-    // The last text with this number that got through was SMS: send this one as SMS too (1.0.3, v116). Messages would
+    // SMS straight away, never an iMessage try first, when (1.0.4, v117) the owner asked for SMS (an SMS or RCS chat id:
+    // "SMS;-;+15085550142"), or (1.0.3, v116) the last text with this number that got through was SMS. Messages would
     // otherwise try iMessage, which fails later as "Not Delivered", and catching that in time is not a sure thing.
-    if (number && SMS_SERVICE.test(service)) {
+    if (number && (SMS_CHAT.test(to) || history === 'SMS')) {
       const since = appleNs(Date.now() - 1000);
       const s = run('/usr/bin/osascript', smsArgs(text, number));
       if (s.code !== 0) throw new Error(/-1743|Apple events/i.test(s.err || s.out) ? friendlyError(s.err || s.out) : SMS_FAILED);
-      if (outcome(number, since, WATCH.first) === 'failed') throw new Error(SMS_FAILED);
-      return { sent: true, to: number, via: 'SMS' };
+      const o = outcome(number, since, WATCH.first);
+      if (o === 'failed') throw new Error(SMS_FAILED);
+      return { sent: true, to: number, via: 'SMS', history, delivery: o === 'sent' ? 'confirmed' : 'unconfirmed' };
     }
     const since = appleNs(Date.now() - 2000);
     const r = run('/usr/bin/osascript', sendArgs(text, dest));
     if (r.code !== 0) throw new Error(friendlyError(r.err || r.out));
-    if (outcome(dest, since, WATCH.first) !== 'failed') return { sent: true, to: dest };
+    const o = outcome(dest, since, WATCH.first);
+    // What the helper saw goes back with the answer (1.0.4, v117): a blue "Not Delivered" text could not be told apart
+    // from a missing Full Disk Access, an iMessage-only history, or a failure that came too late.
+    if (o !== 'failed') {
+      const done = { sent: true, to: dest, via: /^(SMS|RCS);/i.test(dest) ? 'SMS' : 'iMessage', history, delivery: o === 'sent' ? 'confirmed' : 'unconfirmed' };
+      if (number && history === 'unreadable') done.note = NO_HISTORY;
+      return done;
+    }
     // iMessage could not deliver it: the same text to the same number, once, as SMS (what the script always meant to do).
     if (!number) throw new Error(NOT_DELIVERED);
     const again = appleNs(Date.now() - 1000);
     const s = run('/usr/bin/osascript', smsArgs(text, number));
-    if (s.code !== 0 || outcome(number, again, WATCH.again) === 'failed') throw new Error(NO_SMS);
-    return { sent: true, to: number, via: 'SMS' };
+    if (s.code !== 0) throw new Error(NO_SMS);
+    const o2 = outcome(number, again, WATCH.again);
+    if (o2 === 'failed') throw new Error(NO_SMS);
+    return { sent: true, to: number, via: 'SMS', history, delivery: o2 === 'sent' ? 'confirmed' : 'unconfirmed', note: RETRIED };
   }
   throw new Error('Unknown Messages action.');
 }

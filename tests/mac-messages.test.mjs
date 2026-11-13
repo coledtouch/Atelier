@@ -98,7 +98,7 @@ test('helper: the errors a person can fix say how; anything else passes through,
   assert.match(H.friendlyError('execution error: Not authorized to send Apple events to Messages. (-1743)'), /Automation/);
   assert.equal(H.friendlyError('x'.repeat(900)).length, 300);
   assert.equal(H.friendlyError(''), 'The Messages helper failed.');
-  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.3' });
+  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.4' });
   assert.throws(() => H.handle({ op: 'delete' }), /Unknown Messages action/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: '  ' }), /Pass to and text/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: 'x'.repeat(2001) }), /over 2000/);
@@ -112,8 +112,10 @@ function hostRig(answer) {
   ctx.$ = { NSHomeDirectory: () => ({ js: '/Users/cole' }) };
   ctx.delay = () => {}; // JXA's pause: the delivery check waits between looks (1.0.2)
   ctx.run = (path, args) => { calls.push([path.split('/').pop(), JSON.parse(JSON.stringify(args))]); return { code: 0, out: '', err: '', ...answer(path.split('/').pop(), args) }; };
-  const handle = (msg) => { try { return JSON.parse(JSON.stringify(ctx.handle(msg))); } catch (err) { return { threw: String(err.message) }; } };
-  return { handle, calls, sent: () => calls.filter(([tool]) => tool === 'osascript').map(([, args]) => args.slice(-3)) };
+  const full = (msg) => { try { return JSON.parse(JSON.stringify(ctx.handle(msg))); } catch (err) { return { threw: String(err.message) }; } };
+  // handle: where it went and how. What the helper saw (1.0.4: history, delivery, note) is checked with full.
+  const handle = (msg) => { const r = full(msg); if (r && r.sent) { delete r.history; delete r.delivery; delete r.note; if (r.via === 'iMessage') delete r.via; } return r; };
+  return { handle, full, calls, sent: () => calls.filter(([tool]) => tool === 'osascript').map(([, args]) => args.slice(-3)) };
 }
 const NO_ACCESS = { code: 1, err: 'Error: unable to open database "/Users/cole/Library/Messages/chat.db": authorization denied' };
 
@@ -136,7 +138,7 @@ test('helper: a send without Full Disk Access goes to the address as given; read
 
 test('helper: with chat.db readable a send goes to the conversation that number has; a chat id needs no lookup; a failed send is a failure', () => {
   const found = hostRig((tool) => (tool === 'sqlite3' ? { out: '[{"chat":"SMS;-;+16175550142"}]' } : {}));
-  assert.deepEqual(found.handle({ op: 'send', to: '(617) 555-0142', text: 'On my way' }), { sent: true, to: 'SMS;-;+16175550142' });
+  assert.deepEqual(found.handle({ op: 'send', to: '(617) 555-0142', text: 'On my way' }), { sent: true, to: 'SMS;-;+16175550142', via: 'SMS' });
   assert.deepEqual(found.sent(), [['--', 'On my way', 'SMS;-;+16175550142']]);
   assert.match(found.calls[0][1].at(-1), /c\.chat_identifier LIKE '%6175550142'/, 'looked up by the number’s last ten digits');
   const none = hostRig(() => ({}));
@@ -271,4 +273,42 @@ test('helper 1.0.3: an SMS that fails says how to fix it; iMessage numbers and u
   assert.deepEqual(mail.handle({ op: 'send', to: 'pat@example.com', text: 'x' }), { sent: true, to: 'iMessage;-;pat@example.com' });
   const noDb = hostRig((tool) => (tool === 'sqlite3' ? NO_ACCESS : {}));
   assert.deepEqual(noDb.handle({ op: 'send', to: '+16175550142', text: 'x' }), { sent: true, to: '+16175550142' });
+});
+
+// v117 (helper 1.0.4): the owner's texts to an Android number still went blue and "Not Delivered". Nothing said why:
+// no Full Disk Access, an iMessage-only history, or a failure that came too late all looked the same.
+test('helper 1.0.4: an SMS chat id sends SMS straight away, with or without any history', () => {
+  for (const lookup of ['[]', '[{"chat":"iMessage;-;+15086885824","service":"iMessage"}]']) {
+    const rig = deliveryRig({ lookup, first: { error: 0, sent: 1 } });
+    assert.deepEqual(rig.full({ op: 'send', to: 'SMS;-;+15086885824', text: 'x' }), { sent: true, to: '+15086885824', via: 'SMS', history: lookup === '[]' ? 'none' : 'iMessage', delivery: 'confirmed' });
+    assert.equal(rig.sent().length, 1);
+    assert.ok(isSms(rig.calls.find(([tool]) => tool === 'osascript')[1]), 'SMS only, no iMessage try');
+  }
+  // No Full Disk Access: still SMS, since the chat id says so.
+  const noDb = hostRig((tool) => (tool === 'sqlite3' ? NO_ACCESS : {}));
+  assert.deepEqual(noDb.full({ op: 'send', to: 'RCS;-;+15086885824', text: 'x' }), { sent: true, to: '+15086885824', via: 'SMS', history: 'unreadable', delivery: 'unconfirmed' });
+  // A group chat id is never forced to SMS.
+  const group = deliveryRig({ first: { error: 0, sent: 1 } });
+  assert.equal(group.full({ op: 'send', to: 'SMS;+;chat8291', text: 'x' }).via, 'SMS', 'an SMS group goes to its chat id, which Messages sends as SMS');
+  assert.deepEqual(group.sent().at(-1).slice(-1), ['SMS;+;chat8291']);
+});
+
+test('helper 1.0.4: the answer says what the helper saw, and says how to fix a send it could not check', () => {
+  const noDb = hostRig((tool) => (tool === 'sqlite3' ? NO_ACCESS : {}));
+  const r = noDb.full({ op: 'send', to: '+15086885824', text: 'x' });
+  assert.deepEqual(r, { sent: true, to: '+15086885824', via: 'iMessage', history: 'unreadable', delivery: 'unconfirmed', note: 'Atelier couldn’t read this Mac’s texts, so it sent iMessage without checking. If it shows Not Delivered, give Google Chrome Full Disk Access, then quit and reopen Chrome.' });
+  // An email has no SMS road, so no note about one.
+  assert.equal(noDb.full({ op: 'send', to: 'pat@example.com', text: 'x' }).note, undefined);
+  const retried = deliveryRig({ first: { error: 22, sent: 0 }, second: { error: 0, sent: 1 } });
+  assert.deepEqual(retried.full({ op: 'send', to: '+15086885824', text: 'x' }), { sent: true, to: '+15086885824', via: 'SMS', history: 'none', delivery: 'confirmed', note: 'iMessage couldn’t deliver it, so it went again as SMS.' });
+  const pending = deliveryRig({ lookup: '[{"chat":"iMessage;-;+16175550142","service":"iMessage"}]' });
+  assert.deepEqual(pending.full({ op: 'send', to: '+16175550142', text: 'x' }), { sent: true, to: 'iMessage;-;+16175550142', via: 'iMessage', history: 'iMessage', delivery: 'unconfirmed' });
+  // Only real texts count as history: no group events or other system rows.
+  assert.match(pending.calls[0][1].at(-1), /IFNULL\(m\.item_type, 0\) = 0 AND \(m\.is_from_me = 0/);
+});
+
+test('app: the agent is told how to send SMS, to pass on the helper’s note, and never to resend on its own', () => {
+  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /To send as SMS \(the user asks for SMS, or the person uses Android\), set to "SMS;-;" plus the number with its country code, like SMS;-;\+15085550142\. Pass on any note in the send result\. Never send the same text again unless the user asks\./);
+  assert.match(app, /For SMS: SMS;-; plus the number, like SMS;-;\+15085550142' \}/);
 });
