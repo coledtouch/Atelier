@@ -542,7 +542,8 @@ async function gmTab() {
   const tabs = await chrome.tabs.query({ url: GM_URL });
   const tab = tabs.find((t) => /\/web\/conversations/.test(t.url || '')) || tabs[0];
   if (!tab) throw new Error(GM_NOT_OPEN);
-  const page = (op, arg) => withTimeout(inPage(tab.id, pageGMessages, [op, arg]), TIMING.read, NOT_RESPONDING);
+  // Chrome can't pass undefined into a page ("Value is unserializable"), so an op without a value sends {}.
+  const page = (op, arg = {}) => withTimeout(inPage(tab.id, pageGMessages, [op, arg]), TIMING.read, NOT_RESPONDING);
   const st = await page('state');
   if (!st?.paired) throw new Error(GM_NOT_PAIRED);
   return { tab, page };
