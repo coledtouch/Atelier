@@ -3,7 +3,8 @@
 // Every click and every typing action first waits for the user's own OK in a window this extension opens itself
 // (confirm.html), whatever Atelier already approved, so a hijacked page or relay can never drive the browser silently.
 // Since 1.3.4 that window has "Don't ask again on this computer": ticked with an Allow, later clicks and typing here run
-// without the window (storage.local noAsk). Only that window can turn it on (no page and no relay command can); the
+// without the window (storage.local noAsk), and since 1.4.0 so do saved-password sign-ins and texts (the window's own
+// wording says so since 1.4.1). Only that window can turn it on (no page and no relay command can); the
 // Atelier tab on this computer can turn asking back on (askAgain). Password and payment fields are refused either way.
 // Opening a page, and reading one by its address, run only with Atelier's own approval flag (the owner OK'd that step in
 // the app): the address the model chose loads signed in as the user, so it could carry data out. The server's relay
@@ -30,7 +31,10 @@ const MAX_SHOWN_TEXT = 2000; // characters of the text to type shown in the conf
 // confirm: how long a click/type request may wait, from its arrival to the user's answer. Atelier gives a command on
 // this computer 60 s in all, so this leaves room for the action itself. settle: pause after a click or a submit so the
 // page can react. read: the longest wait for a page to answer the extension (a page showing a dialog box never does).
-const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700 };
+// helper: the longest wait for the Messages helper on a Mac. A text can so take confirm + helper, 75 s: more than
+// those 60 s, so Atelier has to give a text 90 s, as the relay gives every command (v114). render: the pause that
+// lets a page loaded for a read draw itself.
+const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800 };
 // After a click or typing request is declined, closed or left unanswered, further ones from the same path (this
 // browser's Atelier tab, or another device through the relay) are refused without a window for a while: 30 s, doubling
 // with each refusal in a row (at most 10 min); an Allow resets it. A hijacked page can't keep stealing the focus.
@@ -38,6 +42,7 @@ const COOLDOWN = { first: 30_000, max: 600_000 };
 const REFUSED_FIELD = 'Refused: Atelier never types into password, payment or ID fields. Ask the user to fill this in themselves.';
 const NOT_RESPONDING = 'The page isn’t responding (it may be showing a dialog box), so nothing was done. Ask the user to close it, then try again.';
 const NEEDS_APPROVAL = 'Opening a page or reading one by its address needs the user’s approval in Atelier first, so nothing was loaded.';
+const NO_ANSWER = 'That page didn’t answer in time, so nothing was read. It may be slow, or showing a dialog box.';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -352,8 +357,13 @@ chrome.windows.onRemoved.addListener((windowId) => { if (asking && asking.window
 // its "started debugging" bar meanwhile), so Chrome's own password manager fills the form it already knows. Chrome only
 // offers a saved password on the site it was saved for, so a look-alike page gets nothing. The page script reports
 // whether the password field is filled, never what is in it. If nothing fills, nothing is submitted.
+// Since 1.4.1 (v114) it also reports whether that field is still on the page afterwards, so a form that never went
+// anywhere is not called submitted.
 const NO_LOGIN_FORM = 'No sign-in form with a password field on that tab. Open the sign-in page first.';
 const NO_SAVED = 'Chrome didn’t fill a saved password on this page, so nothing was submitted. Ask the user to sign in, or to save the password in Chrome first.';
+const NO_SIGNIN_BUTTON = 'Atelier Browser couldn’t tell which button signs in on that page, so nothing was submitted. Ask the user to sign in.';
+const SIGNIN_UNKNOWN = 'The tab stopped answering while the sign-in form was being sent. It isn’t known whether it went through. Look at that tab before trying again.';
+const FILLED = 'Chrome filled the password it had saved. Atelier never saw it.';
 function pageLogin(op, which) {
   const q = (k) => document.querySelector(`[data-atelier-login="${k}"]`);
   const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
@@ -365,15 +375,36 @@ function pageLogin(op, which) {
     if (!pw) return { error: 'none' };
     const scope = pw.form ? inputs.filter((el) => el.form === pw.form) : inputs;
     const user = scope.slice(0, scope.indexOf(pw)).filter((el) => /^(text|email|tel|)$/.test(kind(el))).at(-1) || null;
-    const buttons = [...(pw.form || document).querySelectorAll('button, input[type=submit]')].filter(shown);
+    const buttons = [...(pw.form || document).querySelectorAll('button, input[type=submit]')];
     const words = (b) => String(b.innerText || b.value || b.getAttribute('aria-label') || '');
-    const submit = (pw.form && buttons.find((b) => b.form === pw.form && /^(submit|)$/.test(kind(b))))
-      || buttons.find((b) => /sign.?in|log.?in|continue|submit/i.test(words(b))) || null;
+    // Which button to click (1.4.1, v114). It was the form's first button that submits, and a <button> with no type
+    // does: a show-password eye, "Forgot password?" or "Continue with Google" placed before the real one got the click.
+    // Now, in this order: a button of this form marked type=submit; a button whose words say sign in; the form's first
+    // button with no type (one with words before a bare icon, which is what an unnamed eye is). Never a button of
+    // those three kinds (other), and "Sign in" before "Sign in with …". A provider's name counts only away from its
+    // own site: on github.com "Sign in to GitHub" is the sign-in button.
+    let host = '';
+    try { host = new URL(location.href).hostname.toLowerCase(); } catch { /* no address */ }
+    const all = (b) => [b.innerText, b.value, b.getAttribute('aria-label'), b.getAttribute('title')].join(' ');
+    const other = (b) => {
+      const brand = /\b(google|apple|facebook|microsoft|github)\b/i.exec(all(b))?.[1].toLowerCase();
+      return /\b(show|hide|toggle|forg[eo]t(ten)?|reset)\b|visibility/i.test(all(b)) || Boolean(brand && !host.includes(brand));
+    };
+    const mine = (b) => Boolean(pw.form) && b.form === pw.form;
+    const named = (list) => { const hit = list.filter((b) => /sign.?in|log.?in|continue|submit/i.test(words(b))); return hit.find((b) => !/\bwith\b/i.test(words(b))) || hit[0]; };
+    const ok = buttons.filter((b) => shown(b) && !other(b));
+    const explicit = ok.filter((b) => mine(b) && kind(b) === 'submit'), typeless = ok.filter((b) => mine(b) && kind(b) === '');
+    const submit = named(explicit) || explicit[0] || named(ok) || typeless.find((b) => /\p{L}/u.test(all(b))) || typeless[0] || null;
+    // With no button to click, Enter in the password field sends the form through its default button: the first one in
+    // it that submits, shown or not. When that is a button of the three kinds above, Enter would press it too.
+    const first = buttons.find((b) => mine(b) && /^(submit|)$/.test(kind(b)) && !b.disabled);
+    const enter = !(first && other(first));
+    if (!submit && !enter) return { error: 'button' };
     pw.setAttribute('data-atelier-login', 'pw');
     pw.setAttribute('data-atelier-i', 'signin'); // the confirmation describes this field
     if (user) user.setAttribute('data-atelier-login', 'user');
     if (submit) submit.setAttribute('data-atelier-login', 'submit');
-    return { user: Boolean(user), submit: Boolean(submit) };
+    return { user: Boolean(user), submit: Boolean(submit), enter };
   }
   if (op === 'at') {
     const el = q(which);
@@ -383,6 +414,8 @@ function pageLogin(op, which) {
     return r.width > 0 && r.height > 0 ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null;
   }
   if (op === 'filled') return { filled: String(q('pw')?.value || '').length > 0 };
+  // After the click or the Enter: is that same password field still showing? A page that moved on has lost the mark.
+  if (op === 'after') { const el = q('pw'); return { still: Boolean(el) && shown(el) }; }
   // While the extension picks from Chrome's own list, an Enter that reaches the page (no list showing) must not send
   // the form with an empty password. Chrome's list takes its Enter before the page ever sees it.
   if (op === 'guard' || op === 'unguard') {
@@ -407,12 +440,22 @@ const NO_MESSAGES = 'Messages isn’t set up on this computer. On the Mac, open 
 const SEND_NEEDS_APPROVAL = 'Sending a text needs the user’s approval in Atelier first, so nothing was sent.';
 const MAX_SMS = 2000;
 const clampInt = (v, lo, hi, dflt) => { const n = Math.floor(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt; };
+// A send that ends without the helper's own answer may have gone out, or may yet: the helper keeps running after this
+// wait is over (the first send ever sits on macOS's "Chrome wants to control Messages" prompt until the user answers),
+// and a helper that died may have sent first. Both used to read as a plain failure, and a retry then sent the text
+// twice. They now say the outcome isn't known (1.4.1, v114). A helper that never started sent nothing.
+const SEND_UNKNOWN = 'The Messages helper didn’t answer in time, so it isn’t known whether the text was sent. Check Messages before trying again.';
+const SEND_LOST = 'The Messages helper stopped before it answered, so it isn’t known whether the text was sent. Check Messages before trying again.';
 async function messagesHost(msg) {
+  const sending = msg?.op === 'send';
   let r;
   try {
-    r = await withTimeout(chrome.runtime.sendNativeMessage(MESSAGES_HOST, msg), 30_000, 'The Messages helper on this computer didn’t answer.');
+    r = await withTimeout(chrome.runtime.sendNativeMessage(MESSAGES_HOST, msg), TIMING.helper, sending ? SEND_UNKNOWN : 'The Messages helper on this computer didn’t answer.');
   } catch (err) {
-    if (/native messaging host|not found|forbidden|not allowed/i.test(err?.message || '')) throw new Error(NO_MESSAGES);
+    const m = err?.message || '';
+    if (/not found|forbidden|not allowed|failed to start|invalid native messaging host/i.test(m)) throw new Error(NO_MESSAGES); // it never ran
+    if (sending) throw new Error(m === SEND_UNKNOWN ? SEND_UNKNOWN : SEND_LOST);
+    if (/native messaging host/i.test(m)) throw new Error(NO_MESSAGES);
     throw err;
   }
   if (!r || r.ok !== true) throw new Error(String(r?.error || 'The Messages helper failed.').slice(0, 400));
@@ -437,18 +480,19 @@ const COMMANDS = {
   },
   async read({ tabId, url }, ctx = {}) {
     if (url && ctx.approved !== true) throw new Error(NEEDS_APPROVAL); // a url needs it even beside a tabId, as in the app
-    let id = tabId;
-    let opened = false;
-    if (!id && url) {
+    if (!tabId && url) {
       const tab = await chrome.tabs.create({ url: checkUrl(url), active: false });
-      id = tab.id; opened = true;
-      await waitForLoad(id);
-      await sleep(800); // let client-rendered pages settle
+      // The tab opened for this read is closed whatever the page does (1.4.1, v114). Chrome lets no extension read its
+      // own error page (a dead host), the Web Store or a PDF, and each such read left one more hidden tab open. A page
+      // that never answers (it opens a dialog box as it loads) held its tab the same way, so that wait has an end too.
+      try {
+        await waitForLoad(tab.id);
+        await sleep(TIMING.render); // let client-rendered pages settle
+        return { ...(await withTimeout(inPage(tab.id, pageExtract, [MAX_TEXT]), TIMING.read, NO_ANSWER)) };
+      } finally { chrome.tabs.remove(tab.id).catch(() => {}); }
     }
-    if (!id) throw new Error('Pass a tabId or a url.');
-    const page = await inPage(id, pageExtract, [MAX_TEXT]);
-    if (opened) chrome.tabs.remove(id).catch(() => {});
-    return { ...(opened ? {} : { tabId: id }), ...page };
+    if (!tabId) throw new Error('Pass a tabId or a url.');
+    return { tabId, ...(await inPage(tabId, pageExtract, [MAX_TEXT])) };
   },
   async elements({ tabId }) {
     if (!tabId) throw new Error('tabId is required.');
@@ -487,6 +531,7 @@ const COMMANDS = {
     const tabId = Number(args?.tabId);
     if (!Number.isInteger(tabId) || tabId < 0) throw new Error('tabId is required.');
     const form = await withTimeout(inPage(tabId, pageLogin, ['find']), TIMING.read, NOT_RESPONDING);
+    if (form?.error === 'button') throw new Error(NO_SIGNIN_BUTTON); // before anything is asked, clicked or filled
     if (!form || form.error) throw new Error(NO_LOGIN_FORM);
     const ok = await confirmFirst('signin', { tabId, element: 'signin' }, ctx.via);
     await samePage(tabId, ok.url);
@@ -505,10 +550,22 @@ const COMMANDS = {
         await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: vk });
         await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: vk });
       };
+      // The Enter that sends the form is a keyDown carrying its character: that gives the page a keypress, and a form
+      // is sent on keypress. The rawKeyDown above carries none, so the page saw a key go down and the form stayed where
+      // it was (1.4.1, v114). Chrome's own list still gets the rawKeyDown: that is the one it takes.
+      const pressEnter = async () => {
+        await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' });
+        await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+      };
+      // Once the click or the Enter that sends the form is on its way, a failure can't say the form stayed put.
+      const sent = (p) => p.catch(() => { throw new Error(SIGNIN_UNKNOWN); });
       const filled = async () => (await inPage(tabId, pageLogin, ['filled']))?.filled === true;
       const first = await inPage(tabId, pageLogin, ['at', form.user ? 'user' : 'pw']);
       if (!first) throw new Error(NO_LOGIN_FORM);
       // A real click releases what Chrome filled when the page loaded; if it didn't fill, it shows its list here.
+      // (v114 review, tools #3, left open: with no login saved, the list Chrome shows at a user-name field can hold its
+      // saved addresses, and the pick below takes the first row. Picking at the password field instead was not done:
+      // on a sign-up form Chrome offers a new password there, and the same keys accept it. A real Chrome must settle it.)
       await click(first);
       await sleep(TIMING.fill);
       if (!(await filled())) {
@@ -522,15 +579,23 @@ const COMMANDS = {
       }
       if (!(await filled())) throw new Error(NO_SAVED);
       const sub = form.submit ? await inPage(tabId, pageLogin, ['at', 'submit']) : null;
-      if (sub) await click(sub);
-      else { await inPage(tabId, pageLogin, ['focusPw']); await key('Enter', 13); }
+      if (sub) await sent(click(sub));
+      else if (form.enter === false) throw new Error(NO_SIGNIN_BUTTON); // the button found went away, and Enter would press another
+      else { await inPage(tabId, pageLogin, ['focusPw']); await sent(pressEnter()); }
     } finally {
       await Promise.resolve(chrome.debugger.detach(target)).catch(() => {});
     }
     await sleep(TIMING.settle);
     await waitForLoad(tabId, 8000);
-    const t = await chrome.tabs.get(tabId);
-    return { signedIn: 'submitted', note: 'Chrome filled the password it had saved. Atelier never saw it.', now: { title: t.title, url: t.url } };
+    // What the page did next decides the answer (1.4.1, v114: it was 'submitted' whatever happened). The same password
+    // field still showing at the same address means the form may never have gone: 'unclear', and the note says so.
+    const t = await chrome.tabs.get(tabId).catch(() => null);
+    if (!t) return { signedIn: 'unclear', note: `${FILLED} That tab then closed, so it isn’t known whether the sign-in went through.` };
+    const now = { title: t.title, url: t.url };
+    const still = withoutHash(t.url) === withoutHash(ok.url)
+      && await withTimeout(inPage(tabId, pageLogin, ['after']), TIMING.read, NOT_RESPONDING).then((r) => r?.still === true, () => true);
+    if (still) return { signedIn: 'unclear', note: `${FILLED} The sign-in form is still showing, so it isn’t known whether it went through. Look at that tab before trying again.`, now };
+    return { signedIn: 'submitted', note: FILLED, now };
   },
   // Messages on this Mac: op recent / read / send (see messagesHost).
   async messages(args = {}, ctx = {}) {

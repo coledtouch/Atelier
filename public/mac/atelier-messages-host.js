@@ -7,7 +7,7 @@
 // It needs two macOS permissions, both asked of Google Chrome (the app that starts it): Full Disk Access to read
 // chat.db, and Automation → Messages to send.
 
-const HOST_VERSION = '1.0.0';
+const HOST_VERSION = '1.0.1';
 const LIMITS = { recent: 50, read: 100, text: 2000, chat: 200 };
 const APPLE_EPOCH_MS = 978307200000; // 2001-01-01, where Messages counts its dates from
 
@@ -105,6 +105,9 @@ function shapeRead(rows) {
 // Sends to a chat id when it has one (the conversation that exists), else to the person over iMessage, then SMS.
 const SEND_SCRIPT = [
   'on run argv',
+  // sendArgs puts "--" before the text (see there). osascript takes it off; should a version ever hand it on, it is
+  // dropped here, so the text and the destination are always the last two.
+  'if (count of argv) > 2 and item 1 of argv is "--" then set argv to rest of argv',
   'set t to item 1 of argv',
   'set dest to item 2 of argv',
   'tell application "Messages"',
@@ -120,7 +123,10 @@ const SEND_SCRIPT = [
   'end tell',
   'end run',
 ];
-const sendArgs = (text, dest) => [...SEND_SCRIPT.flatMap((line) => ['-e', line]), String(text), String(dest)];
+// "--" ends osascript's options. Without it a text that starts with a dash was read as one: "- milk" or "-5 out here"
+// failed with "illegal option" and nothing was sent, and a text shaped like "-e <line>" became a line of the script,
+// which is what passing the text as an argument is meant to rule out (1.0.1, v114).
+const sendArgs = (text, dest) => [...SEND_SCRIPT.flatMap((line) => ['-e', line]), '--', String(text), String(dest)];
 // The errors a person can fix, in words that say how.
 function friendlyError(raw) {
   const s = String(raw || '');
@@ -170,7 +176,11 @@ function handle(msg) {
     const to = String(msg.to || '').trim().slice(0, LIMITS.chat), text = String(msg.text ?? '');
     if (!to || !text.trim()) throw new Error('Pass to and text.');
     if (text.length > LIMITS.text) throw new Error(`That text is over ${LIMITS.text} characters.`);
-    const dest = to.includes(';') ? to : query(chatForSql(to))[0]?.chat || to;
+    // A phone number or an email goes to the conversation it already has, when chat.db can say which. That lookup is
+    // best effort (1.0.1, v114): without Full Disk Access it failed and took every send with it, though sending only
+    // needs Automation. The text then goes to the address as given, as it does when no conversation matches.
+    let dest = to;
+    if (!to.includes(';')) { try { dest = query(chatForSql(to))[0]?.chat || to; } catch { /* chat.db can't be read */ } }
     const r = run('/usr/bin/osascript', sendArgs(text, dest));
     if (r.code !== 0) throw new Error(friendlyError(r.err || r.out));
     return { sent: true, to: dest };

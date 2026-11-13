@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=113';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=114';
 
 export const CHAT_KINDS = ['ask', 'code'];
 // Earlier turns replayed (chat answers and notes alike): every one while a thread has fewer than HISTORY_TURNS +
@@ -14,16 +14,28 @@ export const HISTORY_BLOCK = 5;
 // A tester's window: the same blocks, never more than v86's 10 turns (6 to 10). The tester router reserves every replayed
 // token at the cache-write rate with no credit for cache reads (a 5-minute entry may be gone by the next turn), so 11-14
 // turns would trip the per-call cap on the bigger models (src/tester/prices.js maxTokensWithin) and switch model.
-export const TESTER_HISTORY = Object.freeze({ min: 6, block: HISTORY_BLOCK });
+// filesRoom / filesBytes: a tester's file budget for one request (REPLAY_FILES below), in UTF-8 bytes: the router caps
+// the whole conversation at 400 KB of text (src/tester/router.js LIMITS.chatText), and the answers replayed beside the
+// files can take half of that.
+export const TESTER_HISTORY = Object.freeze({ min: 6, block: HISTORY_BLOCK, filesRoom: 200_000, filesBytes: true });
 export const VIDEO_CHAIN_TURNS = 10; // a video stays in view for this many chat turns after it was attached
 export const IMAGE_FOLLOW_TURNS = 3; // photos attached to one of the last 3 chat turns are shown again to a follow-up
 export const CTX_IMAGES = 6; // frames / photos a follow-up carries to the agent, web or vision path (testers: ≤ MAX_IMAGES)
 const PROMPT_MAX = 400, ANSWER_MAX = 12000, THINK_MAX = 8000;
 
+// Reasoning is a run of <think> blocks at the very start, or, with no opening tag, everything up to the last
+// </think>. Tags later in the answer are the answer's own text (v114: an answer about the tags lost what sat
+// between them). app.js splitThink reads them the same way.
 export function stripThink(s) {
-  s = s.replace(/<think>[\s\S]*?(<\/think>|$)/g, '');
-  const i = s.lastIndexOf('</think>');
-  return i >= 0 ? s.slice(i + 8) : s;
+  if (!s.includes('<think>')) { const i = s.lastIndexOf('</think>'); return i >= 0 ? s.slice(i + 8) : s; }
+  let t = s;
+  for (;;) {
+    const u = t.trimStart();
+    if (!u.startsWith('<think>')) return t;
+    const end = u.indexOf('</think>', 7);
+    if (end < 0) return '';
+    t = u.slice(end + 8);
+  }
 }
 const clip = (s, n) => { s = String(s ?? '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
@@ -101,19 +113,35 @@ export function sentTag(x) {
 // (data-safety), so names are flattened and a closing tag inside a file's text can't end its block early.
 const FILE_NAME_MAX = 120;
 const fileName = (n) => String(n || 'file').replace(/["<>\r\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, FILE_NAME_MAX) || 'file';
-export function filesBlock(x) {
+// brief: a line per file in place of its text, for a replayed turn whose files no longer fit the request (buildHistory).
+// A file the turn had no room for (files.js fitFiles: cut, with nothing kept) says so. Before v114 it read as "no
+// text could be read" and "the file is longer" at once, and the model reported a reading failure for a file it was
+// never sent.
+const FILE_GONE = '[Sent earlier in this thread. Its text is not included now. Ask for the file again if you need it.]';
+// What the app itself ever stores for a turn (files.js FILE_CHARS, FILES_CHARS; tests/app-v114.test.mjs keeps them
+// equal). A restored backup or a synced entry is only shape-checked and may hold any length: it is cut to the same
+// limits as it is read, so what the app made goes out byte for byte and nothing larger ever does (v114).
+const FILE_CAP = 150_000, FILES_CAP = 250_000;
+export function filesBlock(x, { brief = false } = {}) {
   const files = Array.isArray(x?.files) ? x.files.filter((f) => f && typeof f.text === 'string') : [];
+  let left = FILES_CAP;
   return files.map((f) => {
     const kind = typeof f.kind === 'string' && /^[a-z]{1,8}$/.test(f.kind) ? ` type="${f.kind}"` : '';
-    const body = f.text.replace(/<\/attached_file/gi, '</attached-file');
-    const cut = f.cut ? '\n[The file is longer. Only this first part was included.]' : '';
-    return `<attached_file name="${fileName(f.name)}"${kind}>\n${body || '[No text could be read from this file.]'}${cut}\n</attached_file>`;
+    let room = Math.max(0, Math.min(FILE_CAP, left));
+    const over = f.text.length > room;
+    if (over && room > 0 && f.text.charCodeAt(room - 1) >= 0xd800 && f.text.charCodeAt(room - 1) <= 0xdbff) room--; // never half a pair
+    const kept = over ? f.text.slice(0, room) : f.text;
+    left -= kept.length;
+    const body = kept.replace(/<\/attached_file/gi, '</attached-file');
+    const cut = f.cut || over ? '\n[The file is longer. Only this first part was included.]' : '';
+    const text = brief ? FILE_GONE : body ? `${body}${cut}` : f.cut || over ? '[This file was left out. The files before it filled the message.]' : '[No text could be read from this file.]';
+    return `<attached_file name="${fileName(f.name)}"${kind}>\n${text}\n</attached_file>`;
   }).join('\n\n');
 }
 // A user turn's content with x's send time in front: a first line for text, a first text part for content parts.
 // Its attached documents' text (filesBlock) comes right after the time, before the words that ask about them.
-export function withSent(content, x) {
-  const tag = sentTag(x), docs = filesBlock(x);
+export function withSent(content, x, { brief = false } = {}) {
+  const tag = sentTag(x), docs = filesBlock(x, { brief });
   if (!tag && !docs) return content;
   const head = [tag, docs].filter(Boolean).join('\n');
   if (typeof content === 'string') return `${head}${docs ? '\n\n' : '\n'}${content}`;
@@ -180,19 +208,52 @@ export function heldForRun(memo, id, run, live) {
 // A turn whose answer was declined partway (x.refused, app.js: finish 'content_filter') is left out like a failed one:
 // the docs say to discard a partial answer a refusal cut off, not treat it as complete, and a refusal before any text is
 // already an error.
-export function buildHistory(prior, { kinds = CHAT_KINDS, media, label, min = HISTORY_TURNS, block = HISTORY_BLOCK } = {}) {
+// turn: the turn being sent, whose own files count against the file budget first (filesRoom, in characters, or in
+// UTF-8 bytes with filesBytes: a tester's, TESTER_HISTORY).
+export function buildHistory(prior, { kinds = CHAT_KINDS, media, label, min = HISTORY_TURNS, block = HISTORY_BLOCK, turn = null, filesRoom = REPLAY_FILES, filesBytes = false } = {}) {
   const { notes, turns } = historyTurns(prior, kinds, label);
+  const replayed = turns.slice(historyDrop(turns.length, { min, block }));
+  const brief = filesOver(replayed.filter((x) => !notes.has(x)), filesRoom - filesSize(turn, filesBytes), filesBytes);
   const msgs = [];
-  for (const x of turns.slice(historyDrop(turns.length, { min, block }))) {
+  for (const x of replayed) {
     const n = notes.get(x);
     if (n) { msgs.push({ role: 'user', content: n.user }, { role: 'assistant', content: n.assistant }); continue; }
     const att = attachNote(x);
-    msgs.push({ role: 'user', content: withSent(media?.(x) || (att ? `${x.prompt}\n\n${att}` : x.prompt), x) });
+    msgs.push({ role: 'user', content: withSent(media?.(x) || (att ? `${x.prompt}\n\n${att}` : x.prompt), x, { brief: brief.has(x) }) });
     const m = { role: 'assistant', content: stripThink(x.text).slice(0, ANSWER_MAX) };
     if (x.think && /kimi/i.test(x.meta?.model || '')) m.reasoning_content = x.think.slice(0, THINK_MAX);
     msgs.push(m);
   }
   return msgs;
+}
+// ── one budget for the file text a request carries (v114) ──
+// Every follow-up used to send every replayed turn's files again in full: up to 250,000 characters a turn, 14 turns.
+// A thread that outgrew the model's window could then not be asked anything more (a failed turn never enters the
+// history, so the window never moved). The files of the turn being sent and of the replayed turns now share
+// REPLAY_FILES characters, counted from the newest back: once a turn's files don't fit, that turn and every older one
+// replay with a line per file in place of its text (filesBlock brief). The choice moves only when a turn with files is
+// sent, never between plain follow-ups (the turn being sent counts first, and counts the same once it is the newest
+// replayed one), so the cached front of the history holds as it does between block steps.
+export const REPLAY_FILES = 500_000;
+function filesSize(x, bytes = false) {
+  let n = 0;
+  for (const f of Array.isArray(x?.files) ? x.files : []) {
+    const s = typeof f?.text === 'string' ? f.text : '';
+    if (!bytes) { n += s.length; continue; }
+    for (let i = 0; i < s.length; i++) { const cp = s.codePointAt(i); n += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4; if (cp > 0xffff) i++; }
+  }
+  return n;
+}
+// turns: replayed chat turns, oldest first. → the ones whose files no longer fit `room`.
+function filesOver(turns, room, bytes) {
+  const over = new Set();
+  let left = room, full = false;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const n = filesSize(turns[i], bytes);
+    if (!n) continue;
+    if (full || n > left) { full = true; over.add(turns[i]); } else left -= n;
+  }
+  return over;
 }
 // The turns buildHistory can replay, oldest first, before the window: answered chat turns, and other modes' work as notes.
 function historyTurns(prior, kinds = CHAT_KINDS, label) {
@@ -418,7 +479,10 @@ export const leavesWithData = ({ wayOut = false, outside = false, data = false }
 export function agentThread(prior) {
   for (let i = (prior?.length || 0) - 1; i >= 0; i--) {
     const x = prior[i];
-    if (x?.kind === 'ask' || x?.kind === 'code') return Array.isArray(x.steps) || /accounts agent/.test(x.meta?.note || '');
+    // An agent turn has steps, or (when it called no tool) its note. An empty steps list alone is not one: every entry
+    // of a restored backup carries one (data-safety importedSteps), so each restored chat looked like the agent's, and
+    // its first follow-up went to the tools and stayed there (v114).
+    if (x?.kind === 'ask' || x?.kind === 'code') return (Array.isArray(x.steps) && x.steps.length > 0) || /accounts agent/.test(x.meta?.note || '');
   }
   return false;
 }
@@ -440,3 +504,78 @@ export const approvalsToSeed = (synced, local) => {
   for (const k of APPROVAL_KEYS) if (typeof have[k] !== 'boolean' && local?.[k] === true) out[k] = true;
   return out;
 };
+
+// ── the You profile across devices and tabs (v114) ──
+// The owner's profile (bio, style, memory, the three approval switches above) is one record on the server, and every
+// device used to send its whole copy, newest wins. A tab left open since morning then wrote its old copy back hours
+// later: facts the phone had learned were gone, and "Approve everything", turned off on the phone, came back on for
+// every device. mergeProfile joins the two copies field by field instead, against the copy this browser last knew the
+// server to hold (base: app.js keeps it beside the profile):
+//   - a text field: the side that changed it since base. Both did: the side whose profile is newer.
+//   - an approval switch: the side that changed it since base. With no base to say who did, a disagreement is off.
+//   - memory: the server's facts, minus the ones forgotten here since base, plus the ones added here since base. A
+//     fact forgotten on the other device stays forgotten. The same words are kept once; oldest first, the newest
+//     MEMORY_MAX.
+//   - import sources: both sides', the later import of each.
+// With no base (a browser that has not synced since this shipped) nothing can be called a local change: the newer
+// profile's text wins as it did before, and memory is both sides' together.
+// The server's copy leads the order of everything, so two devices that hold the same things end with the same record
+// and stop sending it to each other.
+export const PROFILE_TEXT = Object.freeze(['name', 'bio', 'learned', 'style', 'samples']);
+export const MEMORY_MAX = 400;
+const record = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+const factsOf = (p) => (Array.isArray(p?.memory) ? p.memory.filter((f) => f && typeof f === 'object' && typeof f.id === 'string' && typeof f.text === 'string') : []);
+// → { profile, changed }. changed: the result is not what the server holds, so it has to be sent (it carries `now`).
+export function mergeProfile(base, mine, theirs, now = Date.now()) {
+  const b = base && typeof base === 'object' && !Array.isArray(base) ? base : null, m = record(mine), t = record(theirs);
+  const mineNewer = (Number(m.updatedAt) || 0) > (Number(t.updatedAt) || 0);
+  const out = { ...t };
+  for (const k of PROFILE_TEXT) {
+    const mv = typeof m[k] === 'string' ? m[k] : '', tv = typeof t[k] === 'string' ? t[k] : '', bv = typeof b?.[k] === 'string' ? b[k] : '';
+    const v = mv === tv ? mv : b && mv !== bv && tv === bv ? mv : b && tv !== bv && mv === bv ? tv : mineNewer ? mv : tv;
+    if (v || typeof t[k] === 'string') out[k] = v;
+  }
+  const is = (x) => typeof x === 'boolean', switches = { ...record(t.approvals) };
+  for (const k of APPROVAL_KEYS) {
+    const mv = m.approvals?.[k], tv = t.approvals?.[k], bv = b?.approvals?.[k];
+    const v = !is(mv) ? tv : !is(tv) ? mv : mv === tv ? mv : is(bv) ? (mv !== bv ? mv : tv) : false;
+    if (is(v)) switches[k] = v; else delete switches[k];
+  }
+  if (Object.keys(switches).length || t.approvals) out.approvals = switches;
+  const M = factsOf(m), T = factsOf(t);
+  let facts;
+  if (b) {
+    const known = new Set(factsOf(b).map((f) => f.id)), here = new Set(M.map((f) => f.id)), there = new Set(T.map((f) => f.id));
+    facts = T.filter((f) => !(known.has(f.id) && !here.has(f.id))).concat(M.filter((f) => !known.has(f.id) && !there.has(f.id)));
+  } else {
+    const there = new Set(T.map((f) => f.id));
+    facts = T.concat(M.filter((f) => !there.has(f.id)));
+  }
+  const said = new Set();
+  out.memory = facts.map((f, i) => [f, i]).sort((p, q) => (Number(p[0].at) || 0) - (Number(q[0].at) || 0) || p[1] - q[1]).map(([f]) => f)
+    .filter((f) => { const words = f.text.trim().toLowerCase(); if (said.has(words)) return false; said.add(words); return true; }).slice(-MEMORY_MAX);
+  const sources = { ...record(t.sources) };
+  for (const [k, v] of Object.entries(record(m.sources))) if (!sources[k] || (Number(v?.at) || 0) > (Number(sources[k]?.at) || 0)) sources[k] = v;
+  if (Object.keys(sources).length || t.sources) out.sources = sources;
+  const body = (p) => { const { updatedAt, ...rest } = p; return JSON.stringify(rest); };
+  const changed = body(out) !== body(t);
+  // A change is stamped later than the copy it was joined against, whatever this device's clock says: the Worker and
+  // the app both tell a newer copy from an older one by this number alone.
+  out.updatedAt = changed ? Math.max(now, (Number(t.updatedAt) || 0) + 1) : Number(t.updatedAt) || 0;
+  return { profile: out, changed };
+}
+
+// ── which remembered facts reach a prompt (v114) ──
+// The profile keeps up to MEMORY_MAX facts and a system prompt carries FACTS_IN_PROMPT of them. It used to be the
+// newest ones, whoever added them: a fact the user typed in by hand ("I am allergic to penicillin") dropped out once
+// sixty newer ones had been learned from chats, with nothing to show it had stopped counting. Hand-added facts
+// (src 'you') now go first, the newest of them if there are more than fit, then the newest of the rest. The order
+// stays the stored one (oldest first): the list sits in the cached front of every request.
+export const FACTS_IN_PROMPT = 60;
+export function factsInUse(memory, max = FACTS_IN_PROMPT) {
+  const list = Array.isArray(memory) ? memory.filter((f) => f && typeof f.text === 'string') : [];
+  if (list.length <= max) return list;
+  const own = list.filter((f) => f.src === 'you').slice(-max), room = max - own.length;
+  const keep = new Set([...own, ...(room > 0 ? list.filter((f) => f.src !== 'you').slice(-room) : [])]); // (slice(-0) would be all of them)
+  return list.filter((f) => keep.has(f));
+}

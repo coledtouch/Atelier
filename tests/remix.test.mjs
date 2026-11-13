@@ -667,3 +667,48 @@ test('recoverRemix migrates a pre-Omni remix (reload or import)', () => {
   assert.equal(imp.remix.shots.s4.model, OMNI);
   assert.ok(R.validRemix(imp.remix));
 });
+
+// ── v114 review ──
+test('v114 #0: migrateRemix drops a saved rotation tag: the stored size is already upright, so the tag swapped it a second time', () => {
+  // what newRemix saved before v114 for a portrait phone clip: probeSource's upright display size AND its 90° tag
+  const saved = () => ({ ...goodRemix(), source: { ...goodRemix().source, width: 1080, height: 1920, rotation: 90 } });
+  const r = saved();
+  assert.deepEqual(R.outputSize(r.source, 'desktop'), { w: 1920, h: 1080 }, 'how it was cut: as landscape');
+  assert.deepEqual(R.cropFor(r.source.width, r.source.height, 1920, 1080, r.source.rotation), { sx: 0, sy: 0, sw: 1920, sh: 1080, rotation: 90, scale: 1 }, 'with a crop wider than the 1080 px display frame');
+  assert.equal(R.migrateRemix(r), r);
+  assert.equal(r.source.rotation, 0);
+  assert.deepEqual(R.outputSize(r.source, 'desktop'), { w: 1080, h: 1920 });
+  assert.deepEqual(R.outputSize(r.source, 'android'), { w: 1072, h: 1904 });
+  assert.deepEqual(R.cropFor(r.source.width, r.source.height, 1080, 1920, r.source.rotation), { sx: 0, sy: 0, sw: 1080, sh: 1920, rotation: 0, scale: 1 });
+  assert.equal(R.validRemix(r), true);
+  assert.deepEqual(JSON.stringify(R.migrateRemix(clone(r))), JSON.stringify(r), 'idempotent');
+  // the film tick's call (keepOps) and a reload or import (recoverRemix) read it the same way; 270° and 180° too
+  assert.equal(R.migrateRemix(saved(), { keepOps: true }).source.rotation, 0);
+  assert.equal(R.recoverRemix({ remix: saved() }, { imported: true }).remix.source.rotation, 0);
+  for (const rotation of [180, 270]) assert.equal(R.migrateRemix({ ...saved(), source: { ...saved().source, rotation } }).source.rotation, 0);
+  assert.doesNotThrow(() => R.migrateRemix({ ...saved(), source: null }));
+  // the pure functions still take a coded size with its tag (remix-draw and tests use them that way)
+  assert.deepEqual(R.outputSize({ width: 1920, height: 1080, rotation: 90 }, 'desktop'), { w: 1080, h: 1920 });
+});
+
+test('v114 #6: a clip with no audio track: the prompt says so, and the limits on cutting audio don’t apply to it', () => {
+  assert.match(R.remixSystem({ source: { ...SRC, hasAudio: false } }), /audio: none/);
+  assert.match(R.remixSystem({ source: { ...SRC, hasAudio: true } }), /audio: yes/);
+  assert.match(R.remixSystem({ source: { ...SRC, hasAudio: null } }), /audio: yes/, 'not probed yet: as before');
+  assert.match(R.remixSystem({ source: { ...SRC, audio: null } }), /audio: yes/, 'no known codec is not “no audio”');
+  const SILENT = { ...SRC, hasAudio: false };
+  // no AAC encoder in this browser: a clip with sound falls back to keep mode; a silent one has nothing to encode
+  const fc = R.normalizePlan(base({ audio: { mode: 'follow_cuts' } }), SILENT, {}, { aacEncode: false });
+  assert.equal(fc.plan.audio.mode, 'follow_cuts');
+  assert.deepEqual(levels(fc.issues, 'warn'), []);
+  assert.equal(R.normalizePlan(base({ audio: { mode: 'follow_cuts' } }), { ...SRC, hasAudio: true }, {}, { aacEncode: false }).plan.audio.mode, 'keep');
+  // over 90 s on a phone: only a real soundtrack has to be held in memory
+  const long = (source) => R.normalizePlan(base({ audio: { mode: 'follow_cuts' }, scenes: [], timeline: [{ id: 'a', type: 'source', src_in: 0, src_out: 120 }] }), source, {}, { mobile: true });
+  assert.ok(levels(long({ ...SRC, duration: 120 }).issues, 'block').some((i) => /on a phone/.test(i.msg)));
+  assert.deepEqual(levels(long({ ...SILENT, duration: 120 }).issues, 'block'), []);
+  // and the plan is never fitted to a soundtrack: a 2 s card added to a 48 s silent clip takes no footage out
+  const withCard = base({ audio: { mode: 'follow_cuts' }, timeline: [{ id: 'a', type: 'source', src_in: 0, src_out: 48 }, { id: 'c', type: 'card', seconds: 2, backdrop: { kind: 'brand' }, lines: [{ text: 'Title', style: 'headline' }] }] });
+  const s = R.settlePlan(withCard, { source: SILENT, opts: {}, caps: { aacEncode: false } });
+  assert.equal(R.outputDuration(s.plan), 50);
+  assert.ok(!s.issues.some((i) => /soundtrack/.test(i.msg)));
+});

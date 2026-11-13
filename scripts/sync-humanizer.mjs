@@ -9,9 +9,9 @@
 // When the coleos-api checkout isn't on this machine it says so, changes nothing and exits 0.
 // A --from or COLEOS_WORKER path that isn't there exits 1; --from without a path exits 2.
 // A copy that changed needs a version bump before it ships (sw.js caches /humanizer.js?v=<n>).
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -119,5 +119,11 @@ async function main(argv) {
   return code;
 }
 
-const self = (p) => resolve(p).toLowerCase();
-if (process.argv[1] && self(process.argv[1]) === self(fileURLToPath(import.meta.url))) process.exitCode = await main(process.argv.slice(2));
+// Run directly, by whatever path leads here (v114): through a linked folder the two paths differed as written, and
+// --check exited 0 without comparing anything, which read as "in step".
+function isMain() {
+  if (!process.argv[1]) return false;
+  const real = (p) => { const r = realpathSync(p); return process.platform === 'win32' ? r.toLowerCase() : r; };
+  try { return real(process.argv[1]) === real(fileURLToPath(import.meta.url)); } catch { return false; }
+}
+if (isMain()) process.exitCode = await main(process.argv.slice(2));

@@ -8,31 +8,31 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=113';
-import * as Sync from './sync.js?v=113';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=113';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=113';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=113';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=113';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=113';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=113';
-import { initLookup } from './lookup.js?v=113';
-import { createRemix } from './remix-app.js?v=113';
-import { sendMode, looksLikeQuestion } from './remix.js?v=113';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=113';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=113';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=113';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=113';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=113';
-import * as ClaudeImport from './claude-import.js?v=113';
-import { createFeedback } from './feedback.js?v=113';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=113';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=113';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=113';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=113';
-import { HUMANIZER } from './humanizer.js?v=113';
-import { docKind, officeText, clipText, fitFiles, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=113';
-import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=113';
+import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=114';
+import * as Sync from './sync.js?v=114';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=114';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=114';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=114';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY, mergeProfile, factsInUse, FACTS_IN_PROMPT } from './context.js?v=114';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=114';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=114';
+import { initLookup } from './lookup.js?v=114';
+import { createRemix } from './remix-app.js?v=114';
+import { sendMode, looksLikeQuestion } from './remix.js?v=114';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=114';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=114';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=114';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=114';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=114';
+import * as ClaudeImport from './claude-import.js?v=114';
+import { createFeedback } from './feedback.js?v=114';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=114';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=114';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=114';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=114';
+import { HUMANIZER } from './humanizer.js?v=114';
+import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=114';
+import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=114';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -215,7 +215,7 @@ $('#composerModeBtn').onclick = () => { setComposerOpen(true); if (document.acti
 const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)'); // JS behavior:'smooth' ignores the CSS scroll-behavior override
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('atelier.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem('atelier.' + k, JSON.stringify(v)); } catch {} },
+  set(k, v) { try { localStorage.setItem('atelier.' + k, JSON.stringify(v)); return true; } catch { return false; } }, // false: not kept (storage is full or blocked)
   del(k) { try { localStorage.removeItem('atelier.' + k); } catch {} },
 };
 
@@ -294,7 +294,7 @@ function reloadWorkspace(external = false, extra = null) {
   // for upload; from here on nothing else is written. The reload waits for that save, at most 2 s, and so do the Build
   // apps' writes still on their way to this page's app data database (appdata.js): a page that is unloading can't finish them.
   stopAll();
-  const flushed = persist(true);
+  const flushed = persist(true, { flush: true });
   const apps = appStore.busy() ? appStore.flush() : null;
   accountReloading = true;
   Sync.suspend(); clearTimeout(persistTimer); S.thread = null;
@@ -622,18 +622,28 @@ function syncMigrateBtn() { const b = $('#migrateBtn'); if (b) b.hidden = !migra
 function newThread() {
   return { id: uid(), title: '', createdAt: Date.now(), updatedAt: Date.now(), entries: [] };
 }
+// flush: a save made on the way out of a thread (opening another, New, leaving the app), in case a change is still
+// waiting. It writes as any save does, but it only stamps the thread "now" when something was waiting (persistDue) or
+// the thread is still generating. Before v114 every flush stamped it: reading last month's thread moved it to the top
+// under Today, gave it a Continue tile, and the resume-if-recent rule measured when the app was last hidden.
 let persistTimer;
-function persist(now = false) {
+let persistDue = null; // the thread whose save is waiting: a flag for any thread stamped the next one flushed
+function persist(now = false, { flush = false } = {}) {
   clearTimeout(persistTimer);
   const thread = S.thread;
   // → the save's promise (settled either way), or undefined when there was nothing to save; persist(true) returns it.
   const go = () => {
+    const due = persistDue === thread;
+    if (due) persistDue = null;
     if (!thread?.entries.length || accountReloading) return;
-    thread.updatedAt = Date.now(); const saved = DB.put(thread).catch(storageError);
+    const changed = !flush || due || liveThreads.get(thread.id) === thread;
+    if (changed || !Number.isFinite(thread.updatedAt)) thread.updatedAt = Date.now();
+    const saved = DB.put(thread).catch(storageError);
     if (thread === S.thread) LS.set(workspaceKey('lastThread'), thread.id);
     return saved;
   };
   if (now) return go();
+  persistDue = thread;
   persistTimer = setTimeout(go, 400);
 }
 function storageError(err) { console.error(err); toast('Couldn’t save your work on this device. Export a backup from Settings before closing.', { error: true }); }
@@ -642,7 +652,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '113';
+const APP_BUILD = '114';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -662,7 +672,7 @@ function appOutdated() {
   if (Date.now() - last < 60_000) { toast('Atelier was updated — reload this page to keep going.', { error: true, ms: 9000 }); return; }
   try { sessionStorage.setItem('atelier.outdatedAt', String(Date.now())); } catch {}
   toast('Atelier was updated — reloading…');
-  Promise.resolve().then(() => persist(true)).catch(() => {})
+  Promise.resolve().then(() => persist(true, { flush: true })).catch(() => {})
     .then(() => navigator.serviceWorker?.getRegistration?.()).then((r) => r?.update()).catch(() => {})
     .then(() => appDataSaved()).catch(() => {}).finally(() => location.reload());
 }
@@ -673,7 +683,11 @@ class ApiError extends Error {
 // The passcode guard's refusals (src/guard.js): a lock on this network (429), the global seal (429) or the guard itself
 // unreachable (503). Every model and every request is refused alike, so nothing falls back to another model on them
 // (each try would only be refused again), and the passcode is fine: never the "Enter passcode" screen.
-const GUARD_CODES = new Set(['passcode_locked', 'passcode_busy', 'guard_unavailable']);
+// session_busy (v114): the tester sign-in check shed for this network. It refuses every model alike too.
+const GUARD_CODES = new Set(['passcode_locked', 'passcode_busy', 'guard_unavailable', 'session_busy']);
+// How the providers say "the input is larger than the model's window" (Anthropic, OpenAI and the OpenAI-shaped ones,
+// Gemini, xAI). Never a max_tokens complaint: that is about the answer's room, and has its own handling.
+const TOO_LONG = /prompt is too long|maximum context length|context_length_exceeded|context (?:window|limit)|input token count|maximum prompt length|reduce the length of the (?:messages|prompt|input)/i;
 async function toApiError(r) {
   noteAllowance(r);
   let detail = '', j = null;
@@ -697,6 +711,10 @@ async function toApiError(r) {
   if (GUARD_CODES.has(code)) return new ApiError(r.status, detail || `Request failed (${r.status}).`, { code, ...(Number(j.retryAfter) > 0 ? { retryAfter: Number(j.retryAfter) } : {}) });
   if (r.status === 401 && /passcode|key on the server/i.test(detail)) return new ApiError(401, detail);
   if (/^error code: \d+$/i.test(detail.trim())) detail = '';
+  // v114: the conversation is larger than this model can read. It came through as "Request failed (400)." and the
+  // provider's own sentence about token counts, with no way forward: a failed turn never enters the history, so every
+  // retry in that thread failed alike. (Claude's mid-stream stop already says this: src/anthropic.js.)
+  if ((r.status === 400 || r.status === 413) && TOO_LONG.test(detail)) return new ApiError(r.status, 'This thread is too long for this model. Start a new thread, or attach less.', code && { code });
   const lead = {
     401: S.tester ? 'That model isn’t available right now — try another.' : 'The provider rejected the server’s API key — run “Check provider keys” in Settings.',
     403: S.tester ? 'That model isn’t available right now — try another.' : 'This key isn’t allowed to use that model.',
@@ -715,7 +733,11 @@ async function toApiError(r) {
 // or to another provider when one is unusable (bad key, workspace, billing, quota).
 // onModel(id) reports the model that actually answered; onSkip(provider, err) reports a provider switch.
 const accountProblem = (err) => (err.status === 401 || err.status === 403 || err.status === 402
-  || ((err.status === 400 || err.status === 429) && /workspace|api key|credit|billing|quota|balance|permission|not enabled|organization|spending limit/i.test(err.message))
+  || (err.status === 400 && /workspace|api key|credit|billing|quota|balance|permission|not enabled|organization|spending limit/i.test(err.message))
+  // A 429 that reads as a rate limit is the provider asking to slow down, whatever else it names ("Rate limit reached …
+  // in organization org-… on tokens per min"): not an account problem. It used to take the whole provider out (v114).
+  // "(?!ed —)": toApiError's own lead, "Rate limited — give it a few seconds.", is in front of every 429.
+  || (err.status === 429 && /workspace|api key|credit|billing|quota|balance|permission|not enabled|spending limit/i.test(err.message) && !/rate limit(?!ed —)|per[- ]min|tokens per|requests per|try again in/i.test(err.message))
   // out of credit reported mid-stream or as a 5xx (DeepSeek "Insufficient Balance", OpenAI insufficient_quota…): same as a 402
   || (err.status >= 500 && /insufficient[ _](balance|quota|credit|funds)|out of credits?|credit balance is too low|exceeded your current quota|billing|spending limit|(?:does not|doesn[’']t) have any credits/i.test(err.message)));
 // Friendly error kinds. New entries store e.errorKind; older/restored entries only have e.error, so text is classified too.
@@ -775,7 +797,15 @@ function withoutThinking(ac) {
   const rounds = replayRounds(ac).map((r) => (Array.isArray(r) ? r.filter((b) => !THINKING_BLOCKS.has(b?.type)) : [])).filter((r) => r.length);
   return rounds.length > 1 ? rounds : rounds[0] || null;
 }
-const deadProviders = new Map(); // provider → reason, for this session
+// provider → reason. A bad key or an empty account lasts the session. One reported as a 429 lasts a minute: providers
+// word a per-minute limit and an empty account alike ("You exceeded your current quota"), and an installed app stays
+// open for days. One busy minute used to take Claude or Gemini out until the next reload (v114).
+const deadProviders = new (class extends Map {
+  until = new Map();
+  mark(prov, reason, ms = 0) { this.set(prov, reason); if (ms > 0) this.until.set(prov, Date.now() + ms); else this.until.delete(prov); }
+  has(prov) { const t = this.until.get(prov); if (t && Date.now() > t) { this.until.delete(prov); this.delete(prov); } return super.has(prov); }
+  clear() { this.until.clear(); super.clear(); }
+})();
 // Gemini can take a video as the clip: it has a key and hasn't failed on an account problem this session.
 const geminiUsable = () => providerReady('gemini') && !deadProviders.has('gemini') && feat('video');
 // Testers send whole clips only up to 200 MB / 3 min (addendum A2); past that the model gets frames, as with any long clip.
@@ -858,7 +888,7 @@ async function streamChat(opts) {
         }
         if (accountProblem(err)) {
           const prov = providerOf(model);
-          deadProviders.set(prov, err.message);
+          deadProviders.mark(prov, err.message, err.status === 429 ? 60_000 : 0);
           if (prov === 'gemini') syncClip(); // a composer clip upload Gemini can't use any more stops now
           toast(/credit|balance|quota|billing|402/i.test(`${err.status} ${err.message}`) ? `${PROVIDER_NAMES[prov]} is out of credit — switching to the next best model` : `${PROVIDER_NAMES[prov]} unavailable — switching models`);
           console.warn(`[atelier] ${prov} skipped:`, err.message);
@@ -1005,11 +1035,14 @@ async function streamChatRaw({ model, messages, temperature, max_tokens = 4096, 
 const noThink = (model) => (/nemotron|qwen|gemma|glm|deepseek|zai:|xai:/i.test(model) ? { chat_template_kwargs: { enable_thinking: false, thinking: false } } : {});
 
 // Pull the answer out of <tag>…</tag>; reject rambling output so it never reaches a model or the UI.
+// The rambling shapes are a model counting or numbering its tries ("Draft 2: …", "Word count: 6"). The word "draft"
+// alone is not one: until v114 it threw away every title and polished prompt about a draft ("Draft client follow-up
+// email", "Overdraft fee dispute"), and those threads stayed untitled.
 function helperAnswer(raw, tag, maxWords) {
   const s = stripThink(raw);
   const m = s.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i'));
   let out = (m ? m[1] : s).trim().replace(/^["'“”]+|["'“”]+$/g, '').trim();
-  if (!out || out.split(/\s+/).length > maxWords || /\*\*|draft|word count|count:/i.test(out)) return '';
+  if (!out || out.split(/\s+/).length > maxWords || /\*\*|\b(?:draft|version|attempt)\s*\d*\s*[:\-–—]|word count|count:/i.test(out)) return '';
   return out;
 }
 
@@ -1047,7 +1080,9 @@ async function xfetch(path, { method = 'POST', body, signal } = {}) {
   noteAllowance(r);
   return r;
 }
-const blobToDataUrl = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+// A read that fails or is aborted now rejects: with no error path the card stayed on "Saving" for good (v114). The clip
+// is made and paid for, so the error is resumable: the job id stays and Try again fetches it.
+const blobToDataUrl = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = r.onabort = () => rej(Object.assign(new Error('Couldn’t save the video on this device. Tap Try again. It won’t make a new video.'), { resumable: true })); r.readAsDataURL(blob); });
 const splitDataUrl = (u) => { const m = u.match(/^data:([^;]+);base64,(.+)$/); return m ? { mime: m[1], data: m[2] } : null; };
 
 // null only for a tester whose plan has no image (or video) model: there is no free fallback for testers.
@@ -1120,11 +1155,12 @@ async function runOmni(e, prompt, still, signal) {
       },
       onStatus: (text) => { e.stage = text; repaint(e); },
     });
+    const src = await blobToDataUrl(out.blob); // read first: a read that fails leaves the clip not done, so Try again fetches it (v114)
     e.omni = { id: out.id, at: e.omni?.at || Date.now(), done: true };
-    return blobToDataUrl(out.blob);
+    return src;
   } catch (err) {
     if (!err.resumable) delete e.omni; // failed or filtered at Google: Try again starts afresh
-    if (err.status != null && !(err instanceof ApiError)) throw new ApiError(err.status, err.message, { code: err.code, scope: err.scope, resetsAt: err.resetsAt });
+    if (err.status != null && !(err instanceof ApiError)) throw new ApiError(err.status, err.message, { code: err.code, scope: err.scope, resetsAt: err.resetsAt, ...(err.resumable ? { resumable: true } : {}) });
     throw err;
   } finally { clearInterval(timer); }
 }
@@ -1164,7 +1200,7 @@ function extractMedia(j, kind) {
 function persona({ anchor, browser } = {}) {
   const name = S.settings.name;
   const bio = ME.bio || S.settings.about || '';
-  const mem = factsFor(ME.memory, anchor).slice(-60).map((m) => `- ${m.text}`).join('\n');
+  const mem = factsInUse(factsFor(ME.memory, anchor)).map((m) => `- ${m.text}`).join('\n'); // every fact added by hand, then the newest learned ones (context.js)
   return [
     `You are Atelier, ${name ? name + '’s' : 'the user’s'} personal AI — sharp, knowledgeable and genuinely funny. Talk like a trusted friend who happens to be an expert: plain words, no filler, no corporate tone. Use quick, clever humor when it fits; skip it for serious, sensitive or high-stakes topics, and never let a joke cost accuracy.`,
     bio ? `## Who ${name || 'the user'} is (in their words)\n${bio.slice(0, 3000)}` : '',
@@ -1308,9 +1344,19 @@ function splitThink(s) {
     const i = s.lastIndexOf('</think>');
     return { think: s.slice(0, i), text: s.slice(i + 8).trimStart() };
   }
-  const m = s.match(/<think>([\s\S]*?)(<\/think>|$)/);
-  if (!m) return { think: '', text: s };
-  return { think: m[1], text: s.replace(m[0], '').trimStart(), open: !m[2] };
+  // Only blocks at the very start are reasoning (v114). An answer that quotes the tags, such as code that strips
+  // them, lost the text between them on screen. context.js stripThink reads them the same way.
+  const think = [];
+  let rest = s, open = false;
+  for (;;) {
+    const t = rest.trimStart();
+    if (!t.startsWith('<think>')) break;
+    const end = t.indexOf('</think>', 7);
+    if (end < 0) { think.push(t.slice(7)); rest = ''; open = true; break; }
+    think.push(t.slice(7, end)); rest = t.slice(end + 8);
+  }
+  if (!think.length) return { think: '', text: s };
+  return { think: think.join('\n\n'), text: rest.trimStart(), open };
 }
 
 // ───────────────────────── markdown ─────────────────────────
@@ -1531,9 +1577,22 @@ function linkRisk(e, thread = S.thread) {
   return worseTaint(threadTaint(prior), entryTaint(e)) ? 'outside' : '';
 }
 const guardedLinks = new WeakMap(); // <a> → { url, where, risk }
+const previewAsked = new WeakSet(); // answers whose code-block Preview the owner already agreed to run (asked once each, see 'code-preview')
 // Every link of both kinds: an HTML <a> or <area>, and an SVG <a> (by href or xlink:href), which loses its address here
 // as in md() (lockReplyFetches). Attributes only, never .target or .rel: an SVG <a>'s are read-only, and one throw
 // used to leave that link and every later one unguarded (v91 review). A link that can't be guarded loses its address.
+// Does a link's own words name the site it goes to? Only as a whole name: "paypal.com/reset" holds "pal.com" but names
+// another site, and until v114 that was enough to leave the real site off the link (a steered summary of a phishing
+// mail could show paypal.com and open pal.com).
+function namesSite(text, where) {
+  const t = String(text).toLowerCase(), w = String(where).toLowerCase();
+  if (!w) return false;
+  for (let i = t.indexOf(w); i >= 0; i = t.indexOf(w, i + 1)) {
+    const before = t[i - 1] || ' ', after = t.slice(i + w.length, i + w.length + 2);
+    if (!/[a-z0-9.-]/.test(before) && !/^(?:[a-z0-9-]|\.[a-z0-9])/.test(after)) return true;
+  }
+  return false;
+}
 function guardLinks(root, e, thread = S.thread) {
   let risk;
   // (A blocked image's link counts like any other: its address is the one the model wrote for the image.)
@@ -1549,7 +1608,7 @@ function guardLinks(root, e, thread = S.thread) {
       let where = web ? u.host : u.protocol.replace(/:$/, '');
       if (u.protocol === 'mailto:') { try { where = decodeURIComponent(u.pathname) || 'email'; } catch { where = u.pathname || 'email'; } }
       a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer');
-      if (!a.textContent.toLowerCase().includes(where.toLowerCase())) {
+      if (!namesSite(a.textContent, where)) {
         const s = document.createElement('span');
         s.className = 'link-host'; s.textContent = ` (${where})`;
         a.append(s);
@@ -1617,9 +1676,9 @@ function renderEntry(e, i = S.thread.entries.indexOf(e)) {
     <div class="body">
       ${e.group ? `<p class="task-of">task ${esc(e.part)} of ${esc(e.parts)} · <span>${esc(e.from.slice(0, 90))}${e.from.length > 90 ? '…' : ''}</span></p>` : ''}
       ${e.via === 'assist' ? '<p class="task-of">From Atelier Assist</p>' : ''}
-      <h2 class="prompt" title="Click to expand">${esc(e.prompt)}</h2>
+      <h2 class="prompt" title="Click to expand" tabindex="0" aria-expanded="false">${esc(e.prompt)}</h2>
       ${e.images?.length ? `<div class="prompt-thumbs">${e.images.map((s) => `<img src="${esc(s)}" alt="attachment" />`).join('')}</div>` : ''}
-      ${e.files?.length ? `<div class="prompt-files">${e.files.map((f) => `<span class="file-pill"><b>${esc(KIND_LABEL[f.kind] || 'File')}</b> ${esc(f.name)}</span>`).join('')}</div>` : ''}
+      ${e.files?.length ? `<div class="prompt-files">${e.files.map((f, k) => `<button type="button" class="file-pill" data-act="file-peek" data-k="${k}" title="See what Atelier read"${leftOut(f) ? ' data-left-out' : ''}><b>${esc(KIND_LABEL[f.kind] || 'File')}</b> ${esc(f.name)}${f.cut ? `<span class="file-pill-note"> · ${leftOut(f) ? 'not sent' : 'first part'}</span>` : ''}</button>`).join('')}</div>` : ''}
       ${e.video ? videoThumb(e) : ''}
       <div class="out"></div>
       <div class="actions"></div>
@@ -1767,6 +1826,7 @@ function paintEntry(li, e) {
     acts.innerHTML = (e.kind === 'ask' || e.kind === 'code') && e.text ? btn('copy', ICON.copy, 'Copy') : '';
   } else if (e.cut === 'stopped' && !e.pending) out.insertAdjacentHTML('beforeend', '<p class="cut-note">Stopped early</p>');
   else if (e.cut === 'cap' && !e.pending) out.insertAdjacentHTML('beforeend', '<p class="cut-note">Stopped at the tester length limit — ask it to continue</p>');
+  else if (e.cut === 'short' && !e.pending) out.insertAdjacentHTML('beforeend', '<p class="cut-note">The app’s code ended early — ask Atelier to finish it</p>');
   if (e.forkOf && !$('.sync-note', out)) out.insertAdjacentHTML('afterbegin', `<p class="sync-note">${esc(Sync.forkNote(e))}</p>`); // owner thread sync kept both versions
   li.setAttribute('aria-busy', e.pending ? 'true' : 'false');
   if (e.pending) syncLoops(out);
@@ -2023,7 +2083,7 @@ const appDataSaved = (ms = 2000) => (appStore.busy() ? Promise.race([appStore.fl
 // The app a Build entry of the open thread belongs to ('' when it can't be named: that preview saves nothing).
 const appKeyOf = (e, thread = S.thread) => (thread ? appKey(thread.id, thread.entries, e) : '');
 // apart: this version (or one it was built on) came from text that may not be yours (appdata.js appKey): its data is its own.
-const appDataRow = (key, apart = false) => `<div class="appdata" data-appdata="${esc(key)}"><span class="appdata-size">App data</span><button class="mini" data-act="app-data-clear" hidden>${ICON.trash}Clear app data</button>${apart ? '<span class="appdata-apart">Separate from earlier versions. This one came from text in a link, a share or a backup. It can’t see what they saved.</span>' : ''}</div>`;
+const appDataRow = (key, apart = false) => `<div class="appdata" data-appdata="${esc(key)}"><span class="appdata-size">App data</span><button class="mini" data-act="app-data-clear" hidden>${ICON.trash}Clear app data</button>${apart ? '<span class="appdata-apart">Separate from earlier versions. This one came from text in a link, a share, a file or a backup. It can’t see what they saved.</span>' : ''}</div>`;
 // The "App data" line on every card of that app: how much it has saved here, and Clear app data when there is any.
 // root: where to look (a card being painted isn't in the stream yet).
 function paintAppData(key, root = stream) {
@@ -2139,14 +2199,16 @@ async function submit(textArg, modeArg, extra = {}) {
   // Only a composer send takes the composer's video (never vary / idea-* / to-build and other action buttons).
   const video = textArg == null && !extra.entry ? S.video : null;
   if (video?.status === 'reading') { toast('Still reading the video — one moment'); return; }
-  const images = video ? [] : extra.images ?? S.attachments.map((a) => a.src);
   // v113: the composer's documents, read into text (addDocs). Only a composer send takes them, like its video.
   const ownSend = textArg == null && !extra.entry;
+  // ...and like its photos (v114). A button on an earlier turn (Variation, an idea's Expand / Build / Image, To app)
+  // used to take the photos waiting in the composer: Variation became an edit of that photo, and the tray was emptied.
+  const images = video ? [] : extra.images ?? (ownSend ? S.attachments.map((a) => a.src) : []);
   const held = ownSend ? S.files || [] : [];
   if (held.some((f) => f.status === 'reading')) { toast('Still reading the file — one moment'); return; }
-  const docs = !video ? held.filter((f) => f.status === 'ready').map(({ name, kind, text: t, cut, pages }) => ({ name, kind, text: t, cut: Boolean(cut), ...(pages && { pages }) })) : [];
+  const docs = !video ? held.filter((f) => f.status === 'ready').slice(0, MAX_FILES).map(({ name, kind, text: t, cut, pages }) => ({ name, kind, text: t, cut: Boolean(cut), ...(pages && { pages }) })) : [];
   if (!text && !images.length && !video && !docs.length) { input.focus(); return; }
-  if (docs.length && mode !== 'ask' && mode !== 'code') { mode = 'ask'; setMode('ask'); } // files are read in Ask (or Code)
+  if (docs.length && mode !== 'ask' && mode !== 'code') { mode = 'ask'; setMode('ask'); toast('Sent to Ask — files are read there'); } // files are read in Ask (or Code); said, like a video's switch
   if (!text && docs.length) text = docs.length > 1 ? 'Summarize these files.' : 'Summarize this file.';
   const route = video ? sendMode(mode, true, remixOn()) : mode; // 'remix' only in Video mode with Labs → Remix on
   if (!text && route === 'remix') { await remix.composer.gate('', video, S.thread); return; } // shake + "Tell Atelier what to change"
@@ -2169,7 +2231,7 @@ async function submit(textArg, modeArg, extra = {}) {
   // Photos or a video that came in with a share (addFiles from 'share') mark the turn 'share' too, whoever wrote the text:
   // a drive-by share can carry an image with words in it, and a later follow-up shows it to the agent again (ctxTurn).
   // When only the files were shared, the entry says so (untrustedFiles): Edit prompt then gives back the text unmarked.
-  const sharedFiles = video ? video.from === 'share' : !extra.images && S.attachments.some((a) => a.from === 'share');
+  const sharedFiles = video ? video.from === 'share' : ownSend && !extra.images && S.attachments.some((a) => a.from === 'share');
   const textMark = textArg == null ? composerFrom : extra.untrusted || '';
   const untrusted = textMark || (sharedFiles ? 'share' : '');
   if (textArg == null) setMark(''); // the composer's text goes out with this turn (Stop on a task split gives it back)
@@ -2193,7 +2255,11 @@ async function submit(textArg, modeArg, extra = {}) {
   }
 
   if (!S.thread) S.thread = newThread();
-  const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(docs.length && { files: fitFiles(docs) }), ...(untrusted && { untrusted }), ...(untrusted && !textMark && { untrustedFiles: true }), ...(extra.via === 'assist' && { via: 'assist' }), ...(said && { spoken: said }), ...(textArg != null && { composed: true }), ...extra.entry };
+  // The turn's files, cut to the one budget they share. A file with no room left goes as a name only: the chip said so
+  // before Send (renderAttachments), the sent turn says so, and so does this toast (v114: it used to be silent).
+  const fitted = docs.length ? fitFiles(docs, fileBudget()) : [], out = fitted.filter((f, i) => leftOut(f) && docs[i].text);
+  if (out.length) toast(out.length === 1 ? `“${shortName(out[0].name)}” was not sent. The files before it filled the message.` : `${out.length} files were not sent. The files before them filled the message.`, { ms: 7000 });
+  const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(docs.length && { files: fitted }), ...(untrusted && { untrusted }), ...(untrusted && !textMark && { untrustedFiles: true }), ...(extra.via === 'assist' && { via: 'assist' }), ...(said && { spoken: said }), ...(textArg != null && { composed: true }), ...extra.entry };
   delete e.images_;
   // Video mode after Edit on an Omni clip (the chip shows it): this prompt edits that clip. Once only.
   if (mode === 'video' && omniEdit && !video && !images.length && !extra.entry && route !== 'remix' && videoModel(e.params.model)?.omni) {
@@ -2218,7 +2284,7 @@ async function submit(textArg, modeArg, extra = {}) {
     S.video = null; renderOptions();
   }
   if (docs.length) { S.files = []; renderAttachments(); } // (S.files only empties for a send that took them)
-  if (!extra.images) { S.attachments = []; renderAttachments(); } // a caller's own images (Look up's ask: none) leave the composer's photos waiting
+  if (ownSend && !extra.images) { S.attachments = []; renderAttachments(); } // a button's send, or a caller's own images (Look up's ask: none), leaves the composer's photos waiting
   syncRunwayHint();
   welcome.classList.add('gone');
   stream.append(renderEntry(e));
@@ -2273,6 +2339,10 @@ const videoFiles = new Map(), clipJobs = new Map();
 const entryRuns = new Map(), runDone = new Map();
 function stopAll() { running.forEach((c) => c.abort()); }
 
+// The result a "Run again" (or Rebuild) is replacing, kept in memory until the new run ends. Run again used to wipe
+// the finished result first: when the new run then failed or was stopped, a clip that was paid for, or an app that
+// worked, was gone and only an error card was saved (v114). A run that makes nothing now gives the earlier result back.
+const retryPrev = new WeakMap();
 async function run(e) {
   const ctrl = new AbortController();
   running.add(ctrl);
@@ -2309,9 +2379,20 @@ async function run(e) {
       if (err.status === 401) updateKeyState(false);
       if (err.code === 'tester_signin') testerSignedOut('expired');
       else if (err.code === 'tester_closed') testerSignedOut('closed');
-      else if (err.status === 401 && /passcode/i.test(e.error)) { Sync.pause('passcode'); S.settings.passcode = ''; saveSettings(); syncRole(); DB.ownerPasscodeSet('').catch(() => {}); signinReason = 'rejected'; openOnboard('rejected'); }
+      else if (err.status === 401 && /passcode/i.test(e.error)) { Sync.pause('passcode'); S.settings.passcode = ''; LS.set('outReason', 'rejected'); saveSettings(); syncRole(); DB.ownerPasscodeSet('').catch(() => {}); signinReason = 'rejected'; openOnboard('rejected'); } // outReason: syncRole reloads the page, and the sign-in screen after it must still say why
+    }
+    // A Run again that made nothing: the result it was replacing comes back, and a toast says why (retryPrev). Not when
+    // the new job can be picked up again (err.resumable: a clip that is already paid for must win over the old one).
+    const prev = retryPrev.get(e);
+    if (prev && !err.resumable && !e.text && !e.media?.length && !e.ideas && !e.app) {
+      const why = err.name === 'AbortError' ? 'Stopped.' : e.error;
+      Object.assign(e, prev, { error: null, errorKind: null, cut: null });
+      delete e.budget;
+      for (const key of libThumbs.keys()) if (key.includes(`:${e.id}:`)) libThumbs.delete(key);
+      toast(`${why} Your earlier result is back.`, { error: err.name !== 'AbortError', ms: 9000 });
     }
   } finally {
+    retryPrev.delete(e);
     e.pending = false;
     if (thread) { // this tab's last run in the thread ended (another tab's generating entry never keeps it live)
       const left = (liveRuns.get(thread.id) || 1) - 1;
@@ -2347,10 +2428,13 @@ async function run(e) {
 // video) instead of its plain prompt. thread: the one e belongs to (run() passes it, so switching threads mid-turn never
 // mixes in another conversation).
 function historyFor(e, kinds, media, thread = S.thread) {
-  return buildHistory(thread.entries.slice(0, thread.entries.indexOf(e)), { kinds, media, label: outputLabel, ...historyWindow() });
+  return buildHistory(thread.entries.slice(0, thread.entries.indexOf(e)), { kinds, media, label: outputLabel, ...historyWindow(), turn: e }); // turn: its own files count first against the request's file budget
 }
 // The replay window (context.js historyDrop): the owner's 10-14 turns, a tester's 6-10 (TESTER_HISTORY).
 const historyWindow = () => (S.tester ? TESTER_HISTORY : {});
+// What one turn's files may hold together (files.js fitFiles): the owner's 250,000 characters, or a tester's request
+// budget in bytes (context.js TESTER_HISTORY: the server caps a tester's whole conversation at 400 KB).
+const fileBudget = () => (S.tester ? { total: TESTER_HISTORY.filesRoom, bytes: true } : {});
 // What a thread turn's system prompt states, fixed for its run of the thread so the prompt's front stays byte-identical
 // on every provider (context.js): the remembered facts up to its memoryAnchor (the same window as historyFor), and
 // whether the user's computer's browser is reachable, held for the run (heldForRun: stated, routed to and offered as
@@ -2562,7 +2646,7 @@ const EXT = { ready: false, version: null, pending: new Map() };
 // it ships: MIN_EXT is extension/manifest.json's version (tests/extension.test.mjs keeps them equal, and
 // scripts/check-bump.mjs makes every change to extension/ raise that version). 1.3.3: sign-in codes, ID numbers and a
 // password shown as text are refused too.
-const MIN_EXT = '1.4.0';
+const MIN_EXT = '1.4.1';
 const olderExt = (v) => { const a = String(v || '0').split('.').map((n) => Number(n) || 0), b = MIN_EXT.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== b[i]) return (a[i] || 0) < b[i]; return false; };
 window.addEventListener('message', (ev) => {
   if (ev.source !== window || ev.origin !== location.origin) return;
@@ -2573,7 +2657,7 @@ window.addEventListener('message', (ev) => {
     // Older than MIN_EXT: the copy installed here lacks protections the app counts on (1.3.0 asks on this computer
     // before every click or type; 1.3.2 needs Atelier's approval to open or read a page by its address; 1.3.3 refuses
     // more sensitive fields).
-    if (olderExt(d.version)) setTimeout(() => toast(`Atelier Browser has an update (v${MIN_EXT}). It asks before it acts. It never types into password, sign-in code, payment or ID fields. Unzip it over the old folder, then Reload it in chrome://extensions.`, { ms: 15000, link: { href: '/atelier-browser.zip', label: `Download v${MIN_EXT}` } }), 1500);
+    if (olderExt(d.version)) setTimeout(() => toast(`Atelier Browser has an update (v${MIN_EXT}). It asks before it acts. It never types into password, sign-in code, payment or ID fields. Unzip it over the old folder, reload it in chrome://extensions, then reload this tab.`, { ms: 15000, link: { href: '/atelier-browser.zip', label: `Download v${MIN_EXT}` } }), 1500);
   }
   if (d.__atelier === 'res') {
     const p = EXT.pending.get(d.id);
@@ -2587,7 +2671,9 @@ const REMOTE = { online: false, checked: 0 };
 async function refreshRemote(force = false) {
   if (!S.settings.passcode || (!force && Date.now() - REMOTE.checked < 15000)) return REMOTE.online;
   try {
-    const r = await fetch('/api/relay/status', { headers: apiHeaders(), cache: 'no-store' });
+    // 2.5 s at most (v114): every chat turn waits for this check first, and a request that hung held the turn with
+    // nothing Stop could cancel.
+    const r = await fetch('/api/relay/status', { headers: apiHeaders(), cache: 'no-store', signal: AbortSignal.timeout(2500) });
     REMOTE.online = r.ok && Boolean((await r.json()).online);
   } catch {} // a check that never reached the server says nothing about the computer: the last known state stands
   REMOTE.checked = Date.now();
@@ -2602,7 +2688,16 @@ async function extCall(cmd, args = {}, timeout = 60000, approved = false) {
   // An extension older than 1.4.0 has no sign-in command: say how to get it.
   const oldExt = (msg) => (cmd === 'signin' && /Unknown command/i.test(msg || '')
     ? 'Saved-password sign-in needs Atelier Browser 1.4.0. Get it in Settings → Connections.' : msg);
-  if (EXT.ready) return extLocal(cmd, args, timeout, approved).catch((err) => { throw new Error(oldExt(err?.message)); });
+  // A reloaded or updated extension leaves this tab talking to a dead copy (v114): every command failed until the
+  // tab was reloaded. Drop the local link so the relay path is tried next, and say what fixes it here.
+  if (EXT.ready) return extLocal(cmd, args, timeout, approved).catch((err) => {
+    if (/context invalidated/i.test(err?.message || '')) {
+      EXT.ready = false; REMOTE.checked = 0; renderOptions();
+      toast('Atelier Browser was reloaded. Reload this tab to reconnect it.', { ms: 10000 });
+      throw new Error('Atelier Browser was reloaded. Reload the Atelier tab to reconnect it.');
+    }
+    throw new Error(oldExt(err?.message));
+  });
   const r = await fetch('/api/relay/cmd', { method: 'POST', headers: apiHeaders(), body: JSON.stringify({ cmd, args, approved }) });
   const j = await r.json().catch(() => ({}));
   if (!j.ok) {
@@ -2744,8 +2839,17 @@ function pinMailbox(args) {
 }
 
 const approvals = new Map(); // step id → resolve(boolean)
-function awaitApproval(step, signal) {
+const WRITE_DROPPED = 'The connection dropped while this ran. It may already have gone through. Check before trying again.';
+// thread: the thread the run belongs to. A card that appears somewhere the owner is not looking is said: in words for
+// a screen reader (the card takes no focus: on a phone that would open the keyboard), and as a toast when the owner
+// has another thread open (v114: the run sat waiting on a card nobody knew about).
+function awaitApproval(step, signal, thread = S.thread) {
   return new Promise((resolve, reject) => {
+    // Stop was already pressed: the listener below would never fire, and the run sat on a card until someone tapped it (v114).
+    if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
+    const status = $('#activityStatus');
+    if (status) status.textContent = `${step.label} needs your OK.`;
+    if (thread && thread !== S.thread) toast(`${step.label} needs your OK. Open “${thread.title || 'the other thread'}” to answer.`, { ms: 9000 });
     approvals.set(step.id, resolve);
     signal?.addEventListener('abort', () => { approvals.delete(step.id); reject(new DOMException('Aborted', 'AbortError')); }, { once: true });
   });
@@ -2873,6 +2977,10 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
     }
 
     for (const call of toolCalls) {
+      // Stop ends the batch here: a model can ask for several tools in one turn, and the ones still waiting their turn
+      // used to run after Stop. With "Approve everything" on, that meant emails 2 and 3 still went out (v114). A call
+      // already on its way is not cut off: the service may have acted, and its result is worth knowing.
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const def = allTools.find((t) => t.function.name === call.function.name);
       let args = {};
       try { args = JSON.parse(call.function.arguments || '{}'); } catch {}
@@ -2908,24 +3016,34 @@ Their Claude history: ${claudeChats.toLocaleString()} of the user's own past cla
           return step.service === 'browser'
             ? { ok: true, result: await extCall(step.name.replace('browser_', ''), step.args, 60000, step.write || step.confirm === true || step.auto === true) }
             : step.service === 'messages'
-              ? { ok: true, result: await extCall('messages', { ...step.args, op: step.name.replace('messages_', '') }, 60000, step.write || step.confirm === true || step.auto === true) }
+              ? { ok: true, result: await extCall('messages', { ...step.args, op: step.name.replace('messages_', '') }, step.name === 'messages_send' ? 90000 : 60000, step.write || step.confirm === true || step.auto === true) }
             : step.service === 'claude' && ClaudeImport.TOOL_NAMES.has(step.name) ? await runClaudeTool(step.name, step.args)
             : await callTool(step.name, step.args, step.write);
-        } catch (err) { if (err.name === 'AbortError') throw err; return { ok: false, error: err.message }; }
+        } catch (err) {
+          if (err.name === 'AbortError') throw err;
+          // v114: a write whose request dropped on the way may still have gone through (the mail sent, the refund
+          // made). "Failed to fetch" read as "it failed", and the model, or the owner, sent it a second time.
+          const dropped = step.write && (err instanceof TypeError || /failed to fetch|networkerror|load failed|connection was lost/i.test(err.message || ''));
+          return { ok: false, error: dropped ? WRITE_DROPPED : err.message };
+        }
       };
       let result;
       // A Gmail draft or send: the full address of the mailbox it uses goes in its account, and the card names it.
       let from = writesMail(step.name) ? pinMailbox(step.args) : null;
       if ((step.write || step.confirm) && !step.auto) { // step.auto: the owner's standing OK, so no card
-        if (step.service === 'browser' && step.write) step.target = await extCall('describe', { tabId: args.tabId, element: args.element }).catch(() => null);
+        // A sign-in has no element to describe (it names a tab): its card says which site, from the tab itself. Asked
+        // to describe "no element", the extension threw, and every sign-in card carried the warning meant for a click
+        // whose target couldn't be read (v114).
+        if (step.name === 'browser_signin') step.target = await extCall('tabs').then((tabs) => { const t = (Array.isArray(tabs) ? tabs : []).find((x) => x?.tabId === args.tabId); return t ? { page: t.title, url: t.url } : null; }).catch(() => null);
+        else if (step.service === 'browser' && step.write) step.target = await extCall('describe', { tabId: args.tabId, element: args.element }).catch(() => null);
         step.status = 'awaiting'; repaint(e); scrollDown(true);
-        if (!(await awaitApproval(step, signal))) result = declined();
+        if (!(await awaitApproval(step, signal, thread))) result = declined();
         // An account changed on that card asks again, naming the mailbox it now resolves to.
         while (!result && from !== null) {
           const now = pinMailbox(step.args);
           if (now === from) break;
           from = now; step.status = 'awaiting'; repaint(e); scrollDown(true);
-          if (!(await awaitApproval(step, signal))) result = declined();
+          if (!(await awaitApproval(step, signal, thread))) result = declined();
         }
       }
       if (!result) {
@@ -3004,6 +3122,7 @@ function renderSteps(e) {
       return `<div class="approve-card" data-step="${st.id}">
         <div class="ac-head"><span class="svc">${SERVICE_ICON[st.service] || '•'}</span><b>${esc(st.label)}</b><span class="ac-tag">needs your OK</span></div>
         ${st.service === 'browser' && st.confirm ? `<p class="ac-target">${st.args?.url ? `Loads <b>${esc(urlHost(st.args.url))}</b> in your browser, signed in as you — anything in the address reaches that site.<br><span>${esc(st.args.url)}</span>` : `${BROWSER_READS[st.name] || BROWSER_READS.browser_read}${st.moved ? ` That tab has changed since it was read. It now shows <b>${esc(st.moved)}</b>.` : ''}`}</p>`
+          : st.name === 'browser_signin' ? `<p class="ac-target">${st.target?.url ? `Signs in on <b>${esc(urlHost(st.target.url))}</b> with the password Chrome saved. Atelier never sees it.<br><span>${esc(st.target.url)}</span>` : '<b>Couldn’t find that tab — decline unless you’re sure.</b>'}</p>`
           : st.service === 'browser' ? `<p class="ac-target">${st.target && !st.target.error ? `${esc(st.target.tag)}${st.target.type ? ` (${esc(st.target.type)})` : ''} <b>“${esc(st.target.label || 'unlabeled')}”</b> on <b>${esc(st.target.page || '')}</b><br><span>${esc(st.target.url || '')}</span>` : '<b>Couldn’t read the target element — decline unless you’re sure.</b>'}</p>`
           : writesMail(st.name) ? `<p class="ac-target">${from ? `From: <b>${esc(from)}</b>` : '<b>Couldn’t tell which Gmail account this uses — decline unless you’re sure.</b>'}</p>` : ''}
         ${taintNote(st.taint) ? `<p class="ac-target ac-why">${esc(taintNote(st.taint))}</p>` : st.afterWeb ? '<p class="ac-target">Asked after a web search. A web page can try to steer the assistant. So every account read or change now waits for your OK.</p>' : ''}
@@ -3120,7 +3239,9 @@ async function runVideo(e, signal) {
   if (cfg.xai) return runXai(e, cfg, still, signal);
   e.meta = { model: cfg.id, note: still ? 'image → video' : 'text → video' };
   e.media = []; e.expect = 1;
-  const prompt = await enhance(e, 'video', signal);
+  // An edit of an Omni clip goes out as the owner wrote it (v114): "Add detail" rewrote "make it night" into a whole
+  // invented scene, and the paid edit changed things nobody asked for.
+  const prompt = e.params.omniEdit?.id ? e.prompt : await enhance(e, 'video', signal);
   if (cfg.omni) {
     e.stage = 'Filming with Gemini Omni · 1–6 min'; repaint(e);
     if (e.params.omniEdit?.id) e.meta.note = 'edit of an Omni clip';
@@ -3194,9 +3315,9 @@ async function runRunway(e, cfg, still, signal) {
     if (!err.resumable) delete e.runway; // failed, refused or gone at Runway: Try again starts afresh
     throw err;
   }
-  delete e.runway;
   e.stage = 'Saving'; repaint(e);
   e.media = [{ type: 'video', src: await blobToDataUrl(out.blob) }];
+  delete e.runway; // only once the clip is in the thread: a read that fails keeps the task for Try again (v114)
   const cost = runwayCredits(out.credits ?? out.estimate);
   e.meta.note = `${req.note} · ${req.seconds} s${cost ? ` · ${cost}` : ''} · Powered by Runway`;
 }
@@ -3229,9 +3350,9 @@ async function runXai(e, cfg, still, signal) {
     if (!err.resumable) delete e.xaiJob;
     throw err;
   }
-  delete e.xaiJob;
   e.stage = 'Saving'; repaint(e);
   e.media = [{ type: 'video', src: await blobToDataUrl(out.blob) }];
+  delete e.xaiJob; // only once the clip is in the thread: a read that fails keeps the id for Try again (v114)
   e.meta.note = `${note}${typeof out.usd === 'number' ? ` · $${out.usd.toFixed(2)}` : ''} · Grok Imagine by xAI`;
 }
 
@@ -3357,7 +3478,9 @@ async function runBuild(e, signal, thread = S.thread) {
   await streamChat({ model, role: 'build', onModel: (m) => { e.meta.model = m; }, messages, signal, temperature: 0.4, max_tokens: 32000, onDelta: ({ content }) => { e.text += content; repaint(e); } });
   const html = extractHtml(stripThink(e.text));
   if (!html) throw new Error('No HTML came back. Try again, or pick a stronger Build model in Settings.');
-  if (S.tester && !/<\/html>\s*$/i.test(html)) e.cut = 'cap'; // the reply hit the per-call length cap before the file ended
+  // The file has no ending: for a tester the reply hit the per-call length cap; for the owner the model stopped early.
+  // Either way the card says so: an unfinished app used to be saved as if it were whole (v114).
+  if (!/<\/html>\s*$/i.test(html)) e.cut = S.tester ? 'cap' : 'short';
   const title = (html.match(/<title>([^<]*)<\/title>/i)?.[1] || e.prompt).trim().slice(0, 60);
   e.app = { html, title };
   e.text = '';
@@ -3375,14 +3498,17 @@ function waitForRun(x, signal) {
     else { const poll = () => { if (!x.pending) finish(); else timer = setTimeout(poll, 500); }; poll(); }
   });
 }
+// The app in a Build reply: from its first <!doctype html (or <html) to the LAST </html> anywhere in the reply. It used
+// to take the fenced block up to the first ``` after it opened, so an app whose own script holds ``` (a Markdown
+// previewer, a notes app with code blocks) was cut off in the middle of its code and saved that way (v114). With no
+// closing tag the reply itself ended early: what there is, without the fence that closes it.
 function extractHtml(s) {
-  const fence = s.match(/```(?:html)?\s*\n([\s\S]*?)(?:```|$)/i);
-  let h = fence ? fence[1] : s;
-  const start = h.search(/<!doctype html|<html/i);
+  const src = String(s || ''), start = src.search(/<!doctype html|<html/i);
   if (start < 0) return null;
-  h = h.slice(start);
-  const end = h.search(/<\/html>/i);
-  return end >= 0 ? h.slice(0, end + 7) : h;
+  const end = src.toLowerCase().lastIndexOf('</html>');
+  if (end > start) return src.slice(start, end + 7);
+  const rest = src.slice(start), fence = rest.lastIndexOf('```');
+  return (fence > 0 ? rest.slice(0, fence) : rest).trimEnd();
 }
 
 async function nameThread(e, thread) {
@@ -3394,13 +3520,23 @@ async function nameThread(e, thread) {
 }
 
 // ───────────────────────── entry actions ─────────────────────────
+// A long prompt shows five lines. It opens by click, tap, or Enter and Space when it has focus (v114: a keyboard
+// could not open it at all).
+function togglePrompt(p) {
+  p.setAttribute('aria-expanded', String(p.classList.toggle('open')));
+}
+stream.addEventListener('keydown', (ev) => {
+  const p = (ev.key === 'Enter' || ev.key === ' ') && ev.target.matches?.('.prompt') ? ev.target : null;
+  if (p) { ev.preventDefault(); togglePrompt(p); }
+});
 stream.addEventListener('click', async (ev) => {
   const guarded = ev.target.closest('a.link-guarded');
   if (guarded && openGuardedLink(guarded)) { ev.preventDefault(); return; }
   const b = ev.target.closest('[data-act]');
   if (!b) {
+    // A drag that selects text in the prompt is not a click on it (v114).
     const p = ev.target.closest('.prompt');
-    if (p) p.classList.toggle('open');
+    if (p && (getSelection()?.isCollapsed ?? true)) togglePrompt(p);
     return;
   }
   const li = b.closest('.entry');
@@ -3408,6 +3544,7 @@ stream.addEventListener('click', async (ev) => {
   const act = b.dataset.act;
   const k = +b.dataset.k;
 
+  if (act === 'file-peek') { if (e?.files?.[k]) openPeek(e.files[k]); return; } // a sent turn's file: the text that went to the model
   if (act === 'code-copy' || act === 'code-download' || act === 'code-preview') {
     // Only addCodeBars makes these (a reply keeps no data-act, lockReplyFetches). Belt and braces: the button sits in its
     // block's own bar, and what it acts on is that block's own <pre><code>, the text the block shows.
@@ -3417,7 +3554,18 @@ stream.addEventListener('click', async (ev) => {
     const lang = block.dataset.lang;
     if (act === 'code-copy') return copy(code);
     if (act === 'code-download') return download(code, `atelier-snippet.${LANG_EXT[lang] || 'txt'}`, 'text/plain');
-    return openViewer({ title: 'Preview', html: lang === 'svg' ? `<body style="margin:0;display:grid;place-items:center;min-height:100vh">${code}</body>` : code });
+    // v114: a previewed block runs as a page, scripts and all. Where a link in this answer would ask first (linkRisk:
+    // the thread read accounts, or holds a file or other outside text), a steered answer can write the block to send
+    // what it read: an <img>, a fetch, a page that moves itself. Preview asks once per answer there, and the page runs
+    // under the strict policy (no network but the two CDNs). The policy can't stop a page moving itself; the question can.
+    const risk = e ? linkRisk(e) : 'outside';
+    if (risk && !previewAsked.has(e)) {
+      const why = risk === 'accounts' ? 'The assistant wrote this code after reading your accounts. Running it can send what it read to another site.'
+        : 'The assistant wrote this code in a thread with text from outside Atelier. Running it can send that text to another site.';
+      if (!confirm(`${why} Run it?`)) return;
+      if (e) previewAsked.add(e);
+    }
+    return openViewer({ title: 'Preview', html: lang === 'svg' ? `<body style="margin:0;display:grid;place-items:center;min-height:100vh">${code}</body>` : code, strict: Boolean(risk) });
   }
   if (!e) return;
   if (act === 'approve' || act === 'decline') {
@@ -3425,6 +3573,20 @@ stream.addEventListener('click', async (ev) => {
     const resolve = approvals.get(b.dataset.step);
     if (!st || !resolve) return toast('This request expired — ask again', { error: true });
     if (act === 'approve') {
+      // The boxes are checked before anything is approved. A number box that no longer reads as a number, or a list
+      // emptied of every item, used to go out as "none given": for a refund that is the whole payment, for a cache
+      // purge every file (v114: "$7" typed into amount_cents refunded in full). The card stays open on what to fix.
+      const boxes = $$(`.approve-card[data-step="${st.id}"] [data-arg]`, li);
+      const wrong = boxes.find((f) => {
+        const orig = st.args[f.dataset.arg];
+        if (typeof orig === 'number') return !f.value.trim() || !Number.isFinite(Number(f.value));
+        return Array.isArray(orig) && orig.length > 0 && !isRecipient(st, f.dataset.arg) && !f.value.split(',').some((x) => x.trim());
+      });
+      if (wrong) {
+        toast(`${wrong.dataset.arg} needs ${typeof st.args[wrong.dataset.arg] === 'number' ? 'a plain number' : 'at least one item'}. Fix it, or decline.`, { error: true });
+        wrong.focus();
+        return;
+      }
       $$(`.approve-card[data-step="${st.id}"] [data-arg]`, li).forEach((f) => {
         const k = f.dataset.arg;
         const orig = st.args[k];
@@ -3450,13 +3612,15 @@ stream.addEventListener('click', async (ev) => {
       // What this run read stays on record: a page, someone else's GitHub, Claude history or a shared chat taint the thread
       // through its steps, and later turns may already quote it. The retry clears the steps; ranTaint keeps the reason
       // (context.js entryTaint reads it; sync keeps it, STICKY).
+      // What is about to be replaced is kept until the new run ends (retryPrev: run() gives it back if this one makes nothing).
+      if (!e.error && (e.text || e.media?.length || e.ideas || e.app)) retryPrev.set(e, { text: e.text, think: e.think, media: e.media, ideas: e.ideas, app: e.app, meta: e.meta, enhanced: e.enhanced });
       { const was = entryTaint(e); if (was) e.ranTaint = worseTaint(e.ranTaint, was); }
       Object.assign(e, { text: '', think: '', media: [], ideas: null, app: null, error: null, errorKind: null, cut: null, steps: null, enhanced: null, budget: null });
       if (e.params?.seed) delete e.params.seed;
       rearmRetry(e); // a spoken request this device sent, tried again, reads its new answer too
       for (const key of libThumbs.keys()) if (key.includes(`:${e.id}:`)) libThumbs.delete(key); // new media, same entry id: drop stale Library thumbs/posters
       return run(e);
-    case 'edit-prompt': setMode(e.kind); setComposer(e.prompt); setMark(e.untrustedFiles ? '' : e.untrusted); autosize(); return input.focus(); // a link/share prompt stays marked (only the shared photos marked it: they don't come back, the typed text is yours)
+    case 'edit-prompt': setMode(e.kind); setComposer(e.prompt); setMark(e.untrustedFiles ? '' : e.untrusted); restoreFiles(e); autosize(); return input.focus(); // a link/share prompt stays marked (only the shared photos marked it: they don't come back, the typed text is yours)
     case 'settings': return openSettings();
     case 'allowance': openSettings(); return selectSettings('general');
     case 'signin': return openOnboard('expired');
@@ -3501,7 +3665,9 @@ stream.addEventListener('click', async (ev) => {
     case 'idea-ask': { const d = e.ideas[k]; setMode('ask'); return submit(`Expand this idea into a concrete plan: “${d.title}” — ${d.pitch}`, 'ask', { untrusted: e.untrusted }); }
     case 'idea-build': { const d = e.ideas[k]; setMode('build'); return submit(`Build a working prototype of: ${d.title}. ${d.pitch}`, 'build', { untrusted: e.untrusted, entry: { params: { ...S.opts.build, refine: false } } }); }
     case 'idea-image': { const d = e.ideas[k]; setMode('image'); return submit(`${d.title}: ${d.pitch}`, 'image', { untrusted: e.untrusted }); }
-    case 'to-build': setMode('build'); return submit(`Turn this into an interactive app:\n\n${stripThink(e.text).slice(0, 4000)}`, 'build', { untrusted: e.untrusted, entry: { params: { ...S.opts.build, refine: false } } });
+    // v114: so is an answer about an attached file. The file's words can steer it as a link's can (context.js ownTaint
+    // 'file'), and the app built from it ran with the network open and the shared app data. It is marked as shared text.
+    case 'to-build': setMode('build'); return submit(`Turn this into an interactive app:\n\n${stripThink(e.text).slice(0, 4000)}`, 'build', { untrusted: e.untrusted || (e.files?.length ? 'share' : ''), entry: { params: { ...S.opts.build, refine: false } } });
     case 'app-tab': {
       const card = b.closest('.appcard');
       $$('.tabs button', card).forEach((x) => x.classList.toggle('on', x === b));
@@ -3848,7 +4014,12 @@ $('#options').addEventListener('click', (ev) => {
   if (ev.target.closest('[data-remix-in-video]')) { setMode('video'); return; }
   const t = ev.target.closest('[data-toggle]');
   const set = ev.target.closest('[data-set]');
-  if (t) { S.opts[S.mode][t.dataset.toggle] = !S.opts[S.mode][t.dataset.toggle]; }
+  if (t) {
+    S.opts[S.mode][t.dataset.toggle] = !S.opts[S.mode][t.dataset.toggle];
+    // The Accounts chip and the Context dialog's "Tool access" are one setting. Lit must mean on: an "Off for this
+    // mode" chosen there earlier used to stay in force, so the chip lit up and the agent still never ran (v114).
+    if (t.dataset.toggle === 'tools') S.opts[S.mode].accountAccess = S.opts[S.mode].tools ? 'always' : 'auto';
+  }
   else if (set) { S.opts[S.mode][set.dataset.set] = set.dataset.v; }
   else return;
   const sel = t ? `[data-toggle="${t.dataset.toggle}"]` : `[data-set="${set.dataset.set}"][data-v="${set.dataset.v}"]`;
@@ -4009,7 +4180,7 @@ input.addEventListener('input', syncRunwayHint);
 let clock = null; // 1s interval that keeps every elapsed-time label current while anything runs
 function setBusy() {
   S.busy = running.size > 0;
-  document.body.classList.toggle('busy', S.busy); // brand-mark spin
+  document.body.classList.toggle('busy', S.busy); // the brand mark pulses (app.css body.busy .brand-mark)
   const b = $('#sendBtn');
   const reading = S.video?.status === 'reading' && !S.busy; // nothing to send until the frames are in
   const state = reading ? 'idle' : hasDraft() ? 'send' : S.busy ? 'stop' : 'idle';
@@ -4053,8 +4224,13 @@ $('#attachBtn').onclick = () => {
 };
 
 // Google Photos Picker: Google shows its own picker; Atelier only receives the photos the user picks.
+// A new pick ends the wait of the one before it (v114): closing the window and trying again left the first wait
+// polling Google for up to 15 minutes, then saying "nothing picked" out of nowhere. The window's closed flag is not
+// read: Google's page can cut the link to it, which reads as closed while the owner is still picking.
+let photosPick = 0;
 async function pickGooglePhotos(email) {
   if (S.video) return toast('One video per message — remove it to attach something else');
+  if (S.attachments.length >= MAX_ATT) return toast(`${MAX_ATT} images max — remove one first`); // before Google's window opens
   const win = window.open('about:blank', 'atelier-photos', 'width=1000,height=720'); // open now, inside the click, so it isn't blocked
   const q = `account=${encodeURIComponent(email)}`;
   const api = (path, init = {}) => fetch(`/api/photos/${path}${path.includes('?') ? '&' : '?'}${q}`, { ...init, headers: apiHeaders() }).then(async (r) => {
@@ -4063,6 +4239,7 @@ async function pickGooglePhotos(email) {
     return j;
   });
   let session;
+  const mine = ++photosPick;
   try {
     session = await api('session', { method: 'POST' });
     if (win) win.location.href = `${session.pickerUri}/autoclose`; else location.href = session.pickerUri;
@@ -4070,37 +4247,51 @@ async function pickGooglePhotos(email) {
     const every = Math.max(parseFloat(session.pollingConfig?.pollInterval) || 3, 2) * 1000;
     const until = Date.now() + Math.min(parseFloat(session.pollingConfig?.timeoutIn) || 600, 900) * 1000;
     let st = session;
-    while (!st.mediaItemsSet && Date.now() < until) {
+    while (!st.mediaItemsSet && Date.now() < until && mine === photosPick) {
       await new Promise((r) => setTimeout(r, every));
+      if (mine !== photosPick) break;
       st = await api(`session/${session.id}`);
     }
+    if (mine !== photosPick) return; // a newer pick took over: it owns the window and the tray
     if (!st.mediaItemsSet) return toast('Google Photos: nothing picked');
     const { items } = await api(`items?session=${session.id}`);
     if (S.video) return toast('A message can carry photos or one video — remove the current attachment first'); // a video was attached meanwhile
-    const photos = items.filter((i) => i.type !== 'VIDEO' && i.baseUrl).slice(0, MAX_ATT - S.attachments.length);
+    const picked = items.filter((i) => i.type !== 'VIDEO' && i.baseUrl), photos = picked.slice(0, MAX_ATT - S.attachments.length);
+    let added = 0;
     for (const it of photos) {
       const r = await fetch(`/api/photos/file?u=${encodeURIComponent(it.baseUrl)}&${q}`, { headers: apiHeaders() });
       if (!r.ok) continue;
       const blob = await r.blob();
-      const raw = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob); });
-      S.attachments.push({ src: await shrinkDataUrl(raw, 1280, 1280) });
+      const raw = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = fr.onabort = () => res(''); fr.readAsDataURL(blob); });
+      try { if (raw) { S.attachments.push({ src: await shrinkDataUrl(raw, 1280, 1280) }); added++; } } catch { /* a photo this browser can't decode: counted as not added */ }
     }
-    if (photos.length) {
+    if (added) {
       if (S.mode === 'ideas' || S.mode === 'build') setMode('ask');
       renderAttachments();
       input.focus();
     }
-    toast(photos.length ? `Added ${photos.length} photo${photos.length > 1 ? 's' : ''} from Google Photos` : 'Google Photos videos aren’t supported yet — attach the video from this device');
+    // What happened, as it happened: photos that came in, a pick of videos only, no room left, or downloads that failed
+    // (v114: "Added 3 photos" showed with nothing in the tray, and a full tray was blamed on videos).
+    const said = added ? `Added ${added} photo${added > 1 ? 's' : ''} from Google Photos${photos.length < picked.length ? ` — ${MAX_ATT} images max` : ''}`
+      : !picked.length ? 'Google Photos videos aren’t supported yet — attach the video from this device'
+        : !photos.length ? `${MAX_ATT} images max — remove one first` : 'Couldn’t get those photos from Google Photos — try again';
+    toast(said, { error: !added && photos.length > 0 });
   } catch (err) {
+    if (mine !== photosPick) return; // the window is the newer pick's now (both use one name)
     win?.close();
-    toast(err.message, { error: true });
+    toast(err?.message || 'Google Photos: something went wrong — try again', { error: true });
   } finally {
     if (session?.id) api(`session/${session.id}`, { method: 'DELETE' }).catch(() => {});
   }
 }
 $('#fileInput').onchange = (ev) => { addFiles(ev.target.files); ev.target.value = ''; };
 input.addEventListener('paste', (ev) => {
-  const files = [...(ev.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/') || isVideoFile(f));
+  const dt = ev.clipboardData;
+  // Cells copied in Excel, or text from a slide, arrive as words plus a picture of them. The words are what was meant:
+  // the picture used to win, so nothing landed in the box and a screenshot was attached instead (v114).
+  if (dt?.types?.includes('text/plain') && dt.types.includes('text/html') && dt.getData('text/plain').trim()) return;
+  // A document copied in Explorer or Finder pastes like a screenshot does.
+  const files = [...(dt?.files || [])].filter((f) => f.type.startsWith('image/') || isVideoFile(f) || docKind(f.name, f.type));
   if (files.length) { ev.preventDefault(); addFiles(files); }
 });
 const composer = $('#composer');
@@ -4124,26 +4315,57 @@ function syncPlaceholder() {
   else if ([...Object.values(ATT_PH), VIDEO_PH, remix?.composer.placeholder].includes(el.placeholder)) el.placeholder = MODES[S.mode].ph; // keeps app-refine's custom placeholder
 }
 function attNote(n) {
+  // A document in the tray outside Ask and Code (the mode was changed after it was attached, or Animate / Edit put a
+  // photo beside it): Send goes to Ask (submit), so the tray says that, not that a photo will be edited or animated.
+  if (S.files.length && !chatMode()) return 'Files are read in Ask. Sending switches there.';
+  if (!n) return '';
   if (S.mode === 'image') return n > 1 ? 'Only the first photo is edited' : 'Describe the change — e.g. “make it night”';
   if (S.mode === 'video') return n > 1 ? 'Only the first image is animated' : 'This image will be animated';
   if (S.mode === 'ideas' || S.mode === 'build') return `${MODES[S.mode].label} ignores images`;
   return n >= MAX_ATT ? `${n} of ${MAX_ATT} — limit reached` : `${n} of ${MAX_ATT} images`;
 }
 const MIXED = 'A message can carry photos or one video — remove the current attachment first';
+// A .ts file is TypeScript far more often than an MPEG transport stream, and browsers call both video/*. The first bytes
+// say which: a transport stream starts with 0x47 and has it again 188 bytes on (v114: main.ts went down the video path).
+async function isTransportStream(f) {
+  try { const b = new Uint8Array(await f.slice(0, 377).arrayBuffer()); return b.length > 188 && b[0] === 0x47 && b[188] === 0x47; } catch { return false; }
+}
+// A file whose name says nothing Atelier knows (Dockerfile, .gitignore, main.tf) is text when its first bytes read as text.
+async function looksLikeText(f) {
+  if (!f.size || f.size > FILE_MAX_BYTES) return false;
+  try {
+    const b = new Uint8Array(await f.slice(0, 4096).arrayBuffer());
+    if ((b[0] === 0xFF && b[1] === 0xFE) || (b[0] === 0xFE && b[1] === 0xFF)) return true; // UTF-16 with its byte-order mark
+    let odd = 0;
+    for (const c of b) { if (c === 0) return false; if (c < 9 || (c > 13 && c < 32 && c !== 27)) odd++; }
+    return odd <= b.length / 50;
+  } catch { return false; }
+}
+// What each picked, pasted or dropped file is: a photo, a video, a document (read into text) or none of them.
+// A share never brings documents: anyone can POST one (docs/quick-launch.md), and their text would go to the model.
+async function sortFiles(list, from) {
+  const imgs = [], vids = [], docs = [], other = [];
+  for (const f of list) {
+    if (String(f.type).startsWith('image/')) imgs.push(f);
+    else if (isVideoFile(f) && !(/\.ts$/i.test(f.name || '') && !(await isTransportStream(f)))) vids.push(f);
+    else if (from !== 'share' && (docKind(f.name, f.type) || await looksLikeText(f))) docs.push(f);
+    else other.push(f);
+  }
+  return { imgs, vids, docs, other };
+}
 async function addFiles(list, { from = '' } = {}) {
-  const every = [...list];
-  // v113: documents (PDF, Word, Excel, PowerPoint, text, code) are read here into text (addDocs). Never from a share.
-  const docs = from === 'share' ? [] : every.filter((f) => !isVideoFile(f) && !String(f.type).startsWith('image/') && docKind(f.name, f.type));
-  const files = every.filter((f) => !docs.includes(f));
-  if (docs.length) { await addDocs(docs); if (!files.length) return; }
-  const vids = files.filter(isVideoFile), imgs = files.filter((f) => f.type.startsWith('image/'));
+  const { imgs, vids, docs, other } = await sortFiles([...list], from);
+  if (docs.length) {
+    await addDocs(docs);
+    if (!imgs.length && !vids.length) { if (other.length) toast('Skipped files Atelier can’t read', { error: true }); return; }
+  }
   if (vids.length) {
     if (S.attachments.length || S.video || S.files.length) return toast(MIXED);
     if (vids.length > 1 || imgs.length) toast('Attached the first video — one video per message');
     return attachVideo(vids[0], { deferClip: from === 'share', from }); // a share (maybe a drive-by POST) never uploads before Send
   }
   const room = MAX_ATT - S.attachments.length;
-  if (!imgs.length) return toast(docs.length ? 'Skipped files Atelier can’t read' : 'Atelier reads photos, videos, PDFs, Word, Excel, PowerPoint and text files', { error: true });
+  if (!imgs.length) return toast('Atelier reads photos, videos, PDFs, Word, Excel, PowerPoint and text files', { error: true });
   if (S.video) return toast(MIXED);
   if (room <= 0) return toast(`${MAX_ATT} images max — remove one first`);
   for (const f of imgs.slice(0, room)) {
@@ -4151,89 +4373,241 @@ async function addFiles(list, { from = '' } = {}) {
     // and a read error (a huge or unreadable file) skips that file instead of leaving the launch waiting forever.
     const raw = from === 'share' && f.size > SHARE_LIMITS.imageBytes ? '' : await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = r.onabort = () => res(''); r.readAsDataURL(f); });
     if (!raw) { toast('Couldn’t read one of the images — skipped it', { error: true }); continue; }
-    S.attachments.push({ src: await shrinkDataUrl(raw, 1280, 1280), ...(from === 'share' && { from }) }); // a shared photo marks its turn (submit)
+    // A picture this browser can't decode (an iPhone HEIC in Chrome, a TIFF, a damaged file) is skipped with a word too.
+    // Uncaught, it stopped addFiles: no message, and photos added before it sat in the turn unseen (v114).
+    try { S.attachments.push({ src: await shrinkDataUrl(raw, 1280, 1280), ...(from === 'share' && { from }) }); } // a shared photo marks its turn (submit)
+    catch { toast('This browser can’t open one of the images — skipped it', { error: true }); }
   }
   if (imgs.length > room) toast(`Added ${room} — ${MAX_ATT} images max`);
-  else if (imgs.length < files.length) toast('Skipped files Atelier can’t read');
+  else if (other.length) toast('Skipped files Atelier can’t read');
   if (S.mode === 'ideas' || S.mode === 'build') setMode('ask');
   renderAttachments();
   input.focus();
 }
 // ── composer documents (S.files, v113): each read on this device into text (files.js; PDFs with pdf.js) ──
 const DOC_MIXED = 'A message can carry files or one video — remove the video first';
+const GONE = Symbol('removed'); // the chip was taken away while its file was being read: stop, and say nothing
+// Takes a document out of the composer, with the page images a scanned PDF brought (they are its content, not photos
+// of the user's own: left behind, they went out without the file and without its "file" mark, v114).
+function dropDoc(doc) {
+  const at = S.files.indexOf(doc);
+  if (at >= 0) S.files.splice(at, 1);
+  S.attachments = S.attachments.filter((a) => a.doc !== doc.id);
+}
 async function addDocs(list) {
   if (S.video) return toast(DOC_MIXED);
   const room = MAX_FILES - S.files.length;
   if (room <= 0) return toast(`${MAX_FILES} files max — remove one first`);
   if (!chatMode()) setMode('ask');
+  // The room is counted again before each file (v114): a second pick made while the first was still being read used
+  // its own count, and the two together passed the limit. Past 10 files a thread fails backup and sync checks.
+  let skipped = Math.max(0, list.length - room);
   for (const f of list.slice(0, room)) {
-    const kind = docKind(f.name, f.type), name = f.name || 'file';
-    if (kind === 'old') { toast(`${name}: save it as .docx, .xlsx, .pptx or PDF, then attach it again`, { error: true }); continue; }
+    if (S.files.length >= MAX_FILES) { skipped++; continue; }
+    const kind = docKind(f.name, f.type) || 'text', name = f.name || 'file';
+    if (kind === 'old') { toast(`${name}: Atelier can’t read this format. Save it as a PDF, then attach it again.`, { error: true }); continue; }
     if (f.size > FILE_MAX_BYTES) { toast(`${name} is over 50 MB — too big to read here`, { error: true }); continue; }
-    const doc = { id: uid(), name, kind, status: 'reading', text: '' };
+    const doc = { id: uid(), name, kind, status: 'reading', note: '', text: '' };
     S.files.push(doc); renderAttachments();
-    try { Object.assign(doc, await readDoc(f, kind), { status: 'ready' }); }
-    catch (err) { if (S.files.includes(doc)) S.files.splice(S.files.indexOf(doc), 1); toast(`${name}: ${err?.message || 'couldn’t read it'}`, { error: true }); }
+    try {
+      const got = await readDoc(f, kind, doc);
+      if (!S.files.includes(doc)) throw GONE;
+      Object.assign(doc, got, { status: 'ready', note: '' });
+    } catch (err) {
+      const mine = S.files.includes(doc);
+      dropDoc(doc);
+      if (mine && err !== GONE) toast(`${name}: ${err?.message || 'couldn’t read it'}`, { error: true });
+    }
     renderAttachments();
   }
-  if (list.length > room) toast(`Added ${room} — ${MAX_FILES} files max`);
+  if (skipped) toast(`${MAX_FILES} files max. ${skipped === 1 ? '1 file was' : `${skipped} files were`} left out.`);
   input.focus();
 }
-async function readDoc(f, kind) {
-  if (kind === 'pdf') return pdfDoc(f);
-  const raw = kind === 'text' ? await f.text() : officeText(kind, new Uint8Array(await f.arrayBuffer()), await loadFflate());
-  if (kind === 'text' && raw.slice(0, 8000).includes('\u0000')) throw new Error('that isn’t a text file');
+// Edit prompt on a turn that carried documents puts them back in the composer: their text is in the entry, so the
+// question can change without attaching them again. A PDF whose pages went in as images is not put back (PDF_IMAGED):
+// the entry keeps those pages as plain images, and the note about them would go out alone.
+const PDF_IMAGED = /^\[(?:A scanned PDF|This PDF is mostly pictures\. Its text follows\. Pages? 1 )/;
+function restoreFiles(e) {
+  if (!Array.isArray(e?.files) || !e.files.length || S.video || S.files.length) return;
+  const back = e.files.filter((f) => f && typeof f.text === 'string' && !PDF_IMAGED.test(f.text)).slice(0, MAX_FILES);
+  if (back.length < e.files.length) toast('Attach the scanned PDF again — its pages aren’t kept with the prompt');
+  if (!back.length) return;
+  S.files = back.map((f) => ({ id: uid(), name: String(f.name || 'file'), kind: f.kind, status: 'ready', note: '', text: f.text, cut: Boolean(f.cut), chars: f.text.length, ...(f.pages && { pages: f.pages }) }));
+  renderAttachments();
+}
+const ZIPPED = new Set(['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp']); // the kinds that need fflate
+async function readDoc(f, kind, doc) {
+  if (kind === 'pdf') return pdfDoc(f, doc);
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  const raw = readFile(kind, bytes, ZIPPED.has(kind) ? await loadFflate() : null);
+  if (kind === 'text' && raw.slice(0, 8000).includes(String.fromCharCode(0))) throw new Error('that isn’t a text file');
+  if (!raw.trim()) throw new Error('there’s no text in it');
   return { ...clipText(raw), chars: raw.length };
 }
+// What pdf.js fetches on demand (scripts/vendor.mjs): its wasm image decoders, and under cmaps/ its character maps.
+const PDF_ASSETS = '/vendor/pdfjs/';
+const PDF_SPARSE = 30; // under this many letters a page, a PDF's pages are pictures: a scan, or slides with a title each
+const PDF_PROBE = 40; // a PDF with no text at all on its first pages is a scan: the rest are not read one by one for text
+const PDF_BARE = 15; // a page with fewer letters than this had nothing to read (a page number or a stamp at most)
 let pdfReady;
 const loadPdf = () => (pdfReady ??= import('/vendor/pdf.js').then((m) => { m.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.js'; return m; }).catch((err) => { pdfReady = null; throw err; }));
-// A PDF's text layer, page by page. A scanned PDF has none: its first pages go in as photos instead (pdfShots).
-async function pdfDoc(f) {
+// A PDF's text layer, page by page. When the pages are pictures, they also go in as images (pdfShots), with whatever
+// text there is. doc: the composer's record of the file, for its progress note and to stop when its chip is removed.
+async function pdfDoc(f, doc) {
   let pdfjs;
+  // v114: pdf.js needs Promise.withResolvers (Safari 17.4, Chrome 119, Firefox 121). On an older browser the reader
+  // threw as it opened any PDF, and the toast blamed the file ("couldn’t open that PDF") or the connection.
+  if (typeof Promise.withResolvers !== 'function') throw new Error('this browser is too old to read PDFs. Update it, then attach the file again');
   try { pdfjs = await loadPdf(); } catch { throw new Error('couldn’t load the PDF reader — check your connection'); }
-  let task, doc;
-  try { task = pdfjs.getDocument({ data: new Uint8Array(await f.arrayBuffer()), isEvalSupported: false }); doc = await task.promise; }
-  catch (err) { throw new Error(err?.name === 'PasswordException' ? 'that PDF has a password — remove it, then attach it again' : 'couldn’t open that PDF'); }
+  let task, pdf;
   try {
-    const pages = [];
-    let size = 0;
-    for (let i = 1; i <= doc.numPages && size < FILE_CHARS; i++) {
-      const page = await doc.getPage(i);
-      const tc = await page.getTextContent();
-      const t = tc.items.map((it) => (it.str || '') + (it.hasEOL ? '\n' : ' ')).join('').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim();
-      pages.push(`--- Page ${i} ---\n${t}`); size += t.length;
-    }
-    const letters = pages.join('').replace(/--- Page \d+ ---|\s/g, '').length;
-    if (letters < 30 * pages.length) {
-      const shots = await pdfShots(doc, MAX_ATT - S.attachments.length);
-      if (shots) toast(`That PDF is scanned. Its first ${shots === 1 ? 'page is' : `${shots} pages are`} attached as images.`);
-      return { text: shots ? `[A scanned PDF with ${doc.numPages} pages and no text layer. Its first ${shots} pages are attached as images.]` : '[A scanned PDF with no text layer.]', cut: false, pages: doc.numPages, chars: 0 };
+    // wasmUrl: the fax (CCITT), JBIG2 and JPEG 2000 decoders, which most office scanners' PDFs need. Without them
+    // those pages rendered blank and went to the model as white images (v113). cMapUrl: the character maps that East
+    // Asian PDFs name instead of carrying.
+    task = pdfjs.getDocument({ data: new Uint8Array(await f.arrayBuffer()), isEvalSupported: false, wasmUrl: PDF_ASSETS, cMapUrl: `${PDF_ASSETS}cmaps/`, cMapPacked: true });
+    pdf = await task.promise;
+  } catch (err) { throw new Error(err?.name === 'PasswordException' ? 'that PDF has a password — remove it, then attach it again' : 'couldn’t open that PDF'); }
+  const live = () => S.files.includes(doc);
+  try {
+    const total = pdf.numPages, pages = [], bare = [];
+    let size = 0, letters = 0;
+    for (let i = 1; i <= total && size < FILE_CHARS; i++) {
+      if (!live()) throw GONE;
+      if (i > PDF_PROBE && !letters) break;
+      if (total > 3) { doc.note = `page ${i} of ${total}`; paintDocNote(doc); }
+      const page = await pdf.getPage(i);
+      const t = pdfPageText((await page.getTextContent()).items);
+      const n = t.replace(/\s/g, '').length;
+      pages.push(`--- Page ${i} ---\n${t}`); size += t.length; letters += n;
+      if (n < PDF_BARE) bare.push(i);
+      page.cleanup();
     }
     const all = pages.join('\n\n'), { text, cut } = clipText(all);
-    return { text, cut: cut || pages.length < doc.numPages, pages: doc.numPages, chars: all.length };
+    const whole = { text, cut: cut || pages.length < total, pages: total, chars: all.length };
+    if (letters >= PDF_SPARSE * pages.length) {
+      // v114: a PDF that is part typed, part scanned (a contract with scanned signature pages, a report with full-page
+      // figures) reads as text, and its scanned pages came through as bare "--- Page N ---" lines with nothing to say
+      // why. The model summarized three pages as the whole file. The text now says which pages had nothing to read,
+      // the chip counts them, and a toast says so when they are a fifth of the file or more.
+      if (!bare.length || bare.length === pages.length) return whole;
+      const one = bare.length === 1;
+      if (bare.length * 5 >= pages.length) toast(`${bare.length} of ${pages.length} pages in “${shortName(doc.name)}” have little or no text. They may be scans.`, { ms: 7000 });
+      return { ...whole, text: `[${one ? 'Page' : 'Pages'} ${pageRanges(bare)} ${one ? 'has' : 'have'} little or no text here. ${one ? 'It may be a scan or a picture, and was' : 'They may be scans or pictures, and were'} not read.]\n\n${text}`, bare: bare.length };
+    }
+    const shot = await pdfShots(pdf, doc, live);
+    if (!live()) throw GONE;
+    const sent = shot.pages === 1 ? 'Page 1 is attached as an image.' : `Pages 1 to ${shot.pages} are attached as images${shot.two ? ', two to an image' : ''}.`;
+    const rest = shot.pages && shot.pages < total ? ` Pages ${shot.pages + 1} to ${total} are not included.` : '';
+    if (!letters) {
+      if (!shot.pages) throw new Error(shot.blank ? 'couldn’t read its pages. Check your connection, then attach it again' : 'it’s a scan, and there’s no room for its pages. Remove an image, then attach it again');
+      toast(`That PDF is a scan. ${sent}${rest}`);
+      return { text: `[A scanned PDF with ${total} ${total === 1 ? 'page' : 'pages'} and no text layer. ${sent}${rest}]`, cut: shot.pages < total, pages: total, chars: 0 };
+    }
+    const lead = shot.pages ? `[This PDF is mostly pictures. Its text follows. ${sent}${rest}]` : '[This PDF is mostly pictures. Only its text follows: its pages were not attached as images.]';
+    return { ...whole, text: `${lead}\n\n${text}` };
   } finally { await Promise.resolve(task.destroy?.()).catch(() => {}); } // the loading task frees the document and its worker
 }
-async function pdfShots(doc, room) {
-  let n = 0;
-  for (let i = 1; i <= Math.min(doc.numPages, room); i++) {
-    const page = await doc.getPage(i);
-    const base = page.getViewport({ scale: 1 }), vp = page.getViewport({ scale: Math.min(2, 1600 / Math.max(base.width, base.height)) });
+// [4, 5, 6, 9] → "4 to 6, 9": the pages a note names, the first few runs of them.
+function pageRanges(list, max = 6) {
+  const runs = [];
+  for (const n of list) { const last = runs.at(-1); if (last && n === last[1] + 1) last[1] = n; else runs.push([n, n]); }
+  const said = runs.slice(0, max).map(([a, b]) => (a === b ? `${a}` : `${a} to ${b}`)).join(', ');
+  return runs.length > max ? `${said} and others` : said;
+}
+const shortName = (name) => (name.length > 40 ? `${name.slice(0, 39)}…` : name);
+// Pages as images, for a PDF whose pages are pictures. One page an image while they fit in the images a message can
+// carry; past that, two pages side by side in each (still readable; four to an image are not). Each image belongs to
+// its document (doc: id), so removing the chip removes them (dropDoc).
+// → { pages: how many pages went in, two: were they paired, blank: every page rendered blank }
+async function pdfShots(pdf, doc, live) {
+  const room = MAX_ATT - S.attachments.length, total = pdf.numPages;
+  if (room <= 0) return { pages: 0, two: false, blank: false };
+  const two = total > room, count = Math.min(total, two ? room * 2 : room);
+  const draw = async (n, long) => {
+    const page = await pdf.getPage(n);
+    const base = page.getViewport({ scale: 1 }), vp = page.getViewport({ scale: Math.min(3, long / Math.max(base.width, base.height)) });
     const c = document.createElement('canvas');
     c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
     await page.render({ canvas: c, canvasContext: c.getContext('2d'), viewport: vp }).promise;
-    S.attachments.push({ src: await shrinkDataUrl(c.toDataURL('image/jpeg', 0.85), 1280, 1280) }); n++;
+    page.cleanup();
+    return c;
+  };
+  const made = [];
+  let empty = 0;
+  for (let n = 1; n <= count; n += two ? 2 : 1) {
+    if (!live()) throw GONE;
+    doc.note = `page ${n} of ${total}`; paintDocNote(doc);
+    const a = await draw(n, two ? 1100 : 1600), b = two && n < count ? await draw(n + 1, 1100) : null;
+    // A page that came out all white is not sent: with its decoder missing (offline, or blocked), every page does.
+    if (blankCanvas(a) && (!b || blankCanvas(b))) { empty++; continue; }
+    const c = two ? pagePair(a, b, n) : a, max = two ? 1800 : 1280;
+    made.push({ src: await shrinkDataUrl(c.toDataURL('image/jpeg', 0.85), max, max), doc: doc.id });
   }
-  if (n) renderAttachments();
-  return n;
+  if (!live()) throw GONE;
+  S.attachments.push(...made);
+  if (made.length) renderAttachments();
+  return { pages: made.length ? count : 0, two, blank: !made.length && empty > 0 };
 }
-const docMeta = (f) => (f.status === 'reading' ? 'Reading…' : [f.pages ? `${f.pages} ${f.pages === 1 ? 'page' : 'pages'}` : '', f.chars ? `${f.chars >= 1000 ? `${Math.round(f.chars / 1000)}k` : f.chars} characters` : '', f.cut ? 'first part sent' : ''].filter(Boolean).join(' · '));
-const fileChip = (f, i) => `<div class="att att-file" data-status="${esc(f.status)}"><span class="att-file-kind">${esc(KIND_LABEL[f.kind] || 'File')}</span><span class="att-file-name" title="${esc(f.name)}">${esc(f.name)}</span><span class="att-file-meta">${esc(docMeta(f))}</span><button type="button" data-f="${i}" aria-label="Remove ${esc(f.name)}">${ICON.x}</button></div>`;
+// Two page renders side by side on white, each under its page number, so an answer can say which page it read.
+function pagePair(a, b, n) {
+  const gap = 24, top = 44, c = document.createElement('canvas');
+  c.width = a.width + gap + (b ? b.width : a.width); c.height = top + Math.max(a.height, b ? b.height : 0);
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = '#111'; g.font = '600 26px system-ui, sans-serif'; g.textBaseline = 'middle';
+  g.fillText(`Page ${n}`, 12, top / 2); g.drawImage(a, 0, top);
+  if (b) { g.fillText(`Page ${n + 1}`, a.width + gap + 12, top / 2); g.drawImage(b, a.width + gap, top); }
+  return c;
+}
+// Is a rendered page all white? Read from a small copy: a page with any ink has some pixel well under white.
+function blankCanvas(c) {
+  try {
+    const s = document.createElement('canvas'); s.width = s.height = 64;
+    const g = s.getContext('2d', { willReadFrequently: true });
+    g.fillStyle = '#fff'; g.fillRect(0, 0, 64, 64); g.drawImage(c, 0, 0, 64, 64);
+    const d = g.getImageData(0, 0, 64, 64).data;
+    for (let i = 0; i < d.length; i += 4) if (d[i] < 244 || d[i + 1] < 244 || d[i + 2] < 244) return false;
+    return true;
+  } catch { return false; }
+}
+// sent: the file as Send would carry it (sendFit). A turn's files share one budget, so a later file can be cut, or
+// have no room at all, though it was read whole: the chip says so before the turn is spent (v114).
+const docMeta = (f, sent = f) => (f.status === 'reading' ? `Reading…${f.note ? ` ${f.note}` : ''}` : [f.pages ? `${f.pages} ${f.pages === 1 ? 'page' : 'pages'}` : '', f.bare ? `${f.bare} without text` : '', f.chars ? `${f.chars >= 1000 ? `${Math.round(f.chars / 1000)}k` : f.chars} characters` : '', leftOut(sent) && f.text ? 'no room left, not sent' : sent.cut ? 'first part sent' : ''].filter(Boolean).join(' · '));
+const sendFit = () => { const ready = S.files.filter((f) => f.status === 'ready'), fit = fitFiles(ready, fileBudget()); return new Map(ready.map((f, i) => [f, fit[i]])); };
+// While a file is read, only its own line changes: redrawing the whole tray on every page would drop focus and flicker.
+function paintDocNote(doc) { const el = $(`#attachments [data-doc="${doc.id}"] .att-file-meta`); if (el) el.textContent = docMeta(doc); }
+// The chip opens what Atelier read from the file (openPeek); the × beside it removes the file.
+const fileChip = (f, i, fit) => `<div class="att att-file" data-status="${esc(f.status)}" data-doc="${esc(f.id)}"${leftOut(fit?.get(f)) && f.text ? ' data-left-out' : ''}><button type="button" class="att-file-open" data-peek="${i}"${f.status === 'ready' ? '' : ' disabled'} title="See what Atelier read"><span class="att-file-kind">${esc(KIND_LABEL[f.kind] || 'File')}</span><span class="att-file-name">${esc(f.name)}</span><span class="att-file-meta">${esc(docMeta(f, fit?.get(f)))}</span></button><button type="button" data-f="${i}" aria-label="Remove ${esc(f.name)}">${ICON.x}</button></div>`;
 function renderAttachments() {
-  const n = S.attachments.length, box = $('#attachments'), refocus = document.activeElement?.matches('#attachments [data-video]');
-  box.innerHTML = S.video ? videoChip(S.video) : S.files.map(fileChip).join('') + S.attachments.map((a, i) => `<div class="att"><img src="${esc(a.src)}" alt="Attached image ${i + 1}" /><button type="button" data-i="${i}" aria-label="Remove image ${i + 1}">${ICON.x}</button></div>`).join('') + (n ? `<span class="att-note">${esc(attNote(n))}</span>` : '');
+  const n = S.attachments.length, box = $('#attachments'), refocus = document.activeElement?.matches('#attachments [data-video]'), note = S.video ? '' : attNote(n);
+  const fit = S.files.length > 1 || S.tester ? sendFit() : null; // one file, the owner's: read within its own limit already
+  box.innerHTML = S.video ? videoChip(S.video) : S.files.map((f, i) => fileChip(f, i, fit)).join('') + S.attachments.map((a, i) => `<div class="att"><img src="${esc(a.src)}" alt="${a.doc ? 'A page of the attached PDF' : `Attached image ${i + 1}`}" /><button type="button" data-i="${i}" aria-label="Remove image ${i + 1}">${ICON.x}</button></div>`).join('') + (note ? `<span class="att-note">${esc(note)}</span>` : '');
   if (refocus) $('[data-video]', box)?.focus({ preventScroll: true }); // the chip is rebuilt once the video has been read
   syncPlaceholder(); syncDock(); setBusy(); renderContextChips();
 }
+
+// ── what Atelier read from a file (v114) ──
+// A file chip in the composer, or a file's name on a sent turn, opens the text that goes to the model: a wrong read of
+// a spreadsheet or a scan shows before a turn is spent on it. Text only (textContent): a file's words are never markup.
+document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet file-peek" id="filePeek" aria-labelledby="filePeekTitle"><div class="sheet-body"><header class="sheet-head"><h2 id="filePeekTitle"></h2><button type="button" class="icon-btn" data-peek-close aria-label="Close">${ICON.x}</button></header><p class="hint" id="filePeekMeta"></p><pre class="file-peek-text" id="filePeekText" tabindex="0" aria-label="What Atelier read from the file"></pre><div class="sheet-foot"><button type="button" class="chip" data-peek-remove hidden>Remove file</button><button type="button" class="btn-primary" data-peek-close>Done</button></div></div></dialog>`);
+const PEEK_CHARS = 30_000;
+let peekDoc = null;
+function openPeek(f, { removable = false } = {}) {
+  if (!f || typeof f.text !== 'string') return;
+  peekDoc = removable ? f : null;
+  const more = f.text.length > PEEK_CHARS;
+  $('#filePeekTitle').textContent = f.name || 'File';
+  $('#filePeekMeta').textContent = `${[KIND_LABEL[f.kind] || 'File', f.pages ? `${f.pages} ${f.pages === 1 ? 'page' : 'pages'}` : '', `${f.text.length.toLocaleString()} characters go to the model`, f.cut ? 'the file is longer than Atelier sends' : ''].filter(Boolean).join(' · ')}.${more ? ` Showing the first ${PEEK_CHARS.toLocaleString()}.` : ''}`;
+  $('#filePeekText').textContent = more ? f.text.slice(0, PEEK_CHARS) : f.text;
+  $('[data-peek-remove]', $('#filePeek')).hidden = !removable;
+  $('#filePeek').showModal();
+  $('#filePeekText').scrollTop = 0;
+}
+$('#filePeek').addEventListener('click', (ev) => {
+  if (ev.target.closest('[data-peek-close]')) return $('#filePeek').close();
+  if (ev.target.closest('[data-peek-remove]') && peekDoc) { dropDoc(peekDoc); renderAttachments(); $('#filePeek').close(); $('#attachBtn').focus(); }
+});
+$('#filePeek').addEventListener('close', () => { peekDoc = null; $('#filePeekText').textContent = ''; });
 
 // ── composer video (S.video): one per message, never mixed with photos ──
 // Frames are read locally (poster + 4–16 stills); when Gemini will watch it, the clip upload starts right away
@@ -4321,9 +4695,13 @@ function paintChip() {
 }
 $('#attachments').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-video]')) { clearComposerVideo(); if (ev.detail === 0) $('#attachBtn').focus(); return; }
+  const peek = ev.target.closest('button[data-peek]');
+  if (peek) return openPeek(S.files[+peek.dataset.peek], { removable: true });
   const fb = ev.target.closest('button[data-f]');
   if (fb) {
-    S.files.splice(+fb.dataset.f, 1); renderAttachments();
+    const gone = S.files[+fb.dataset.f];
+    if (gone) dropDoc(gone); // with the page images a scanned PDF brought
+    renderAttachments();
     if (ev.detail === 0) ($(`#attachments button[data-f="${Math.min(+fb.dataset.f, S.files.length - 1)}"]`) || $('#attachBtn')).focus();
     return;
   }
@@ -4390,7 +4768,9 @@ const dictation = createDictation({
   },
   onResponse: (r) => noteAllowance(r), // x-tester-allowance
   onRefusal: (r) => { if (r.code === 'tester_signin' || r.code === 'tester_closed') refreshTesterSoon(); },
-  toast: (msg, o) => toast(msg, o),
+  // A recording that couldn't be sent is kept (dictate.js puts retry: true on its toast). The button sends it again:
+  // without it the words had to be said again (v114). Sent again, it only fills the box (dictate.js retry()).
+  toast: (msg, o) => toast(msg, o?.retry ? { ...o, ms: 9000, action: { label: 'Send again', onClick: () => { dictation.retry(); } } } : o),
 });
 function paintMic(state, { engine, reason, fallback } = {}) {
   micBtn.dataset.state = state;
@@ -4624,9 +5004,12 @@ function renderWelcome() {
 let recentSeq = 0;
 const pinnedThreads = new Set(LS.get(workspaceKey('pinnedThreads'), []));
 const manualTitles = new Set();
-async function renderRecentThreads() {
-  const seq = ++recentSeq, rows = await allThreads();
+async function renderRecentThreads(known) {
+  const seq = ++recentSeq, rows = await allThreads(known);
   if (seq !== recentSeq || accountReloading) return;
+  // The store is slow or held by another tab: this list is short, not final. It is drawn again from the rows once they
+  // arrive, and with nothing to show yet the home screen is left as it is: never the first-use cards over real work (v114).
+  if (rows.busy) { rows.late.then((saved) => { if (seq === recentSeq) renderRecentThreads(saved); }); if (!rows.length) return; }
   const hasWork = rows.length > 0;
   $('#continueMaking').hidden = !hasWork;
   $('#firstUseGoals').hidden = hasWork;
@@ -4638,7 +5021,7 @@ async function renderRecentThreads() {
   }).join('');
 }
 async function openThread(id) {
-  persist(true);
+  persist(true, { flush: true });
   const t = liveThreads.get(id) || recoverThread(await DB.get(id));
   if (!t || accountReloading) return toast('That thread is no longer on this device. Refresh the list.', { error: true });
   if (t.id !== S.thread?.id) stopReading({ disarm: true });
@@ -4713,7 +5096,7 @@ function renderContextDetails() {
   const focused = document.activeElement;
   const focusKey = focused?.closest('#contextDetails') ? focused.dataset.contextToggle || focused.id : '';
   const available = [...CONNECTORS.filter(([key]) => TOOLS.services?.[key]).map(([, name]) => name), ...(browserAvailable() ? ['Browser'] : [])];
-  $('#contextDetails').innerHTML = `<section class="field-group"><h4>Attached to this prompt</h4>${S.video ? `<p>${esc(S.video.name || 'Video')}</p><button type="button" class="chip" data-context-video>Remove video</button>` : S.attachments.length ? S.attachments.map((_, i) => `<div class="context-file"><span>Image ${i + 1}</span><button type="button" class="chip" data-context-remove="${i}">Remove</button></div>`).join('') : '<p class="hint">No files attached. Use the attachment button to add a photo or video.</p>'}</section><section class="field-group"><h4>Profile &amp; memory</h4><p class="hint">${ME.bio || ME.learned || ME.memory.length ? `Your profile and ${ME.memory.length} remembered ${ME.memory.length === 1 ? 'fact' : 'facts'} personalize answers. Review or remove them in your profile.` : 'Your profile is empty. Add details when you want more personal answers.'}</p></section>${S.mode === 'ask' ? `<section class="field-group"><h4>Writing &amp; research</h4><label class="context-check"><input type="checkbox" data-context-toggle="voice"${o.voice ? ' checked' : ''} /> Write in my voice</label>${providerReady('anthropic') && feat('web') ? `<label class="context-check"><input type="checkbox" data-context-toggle="web"${o.web ? ' checked' : ''} /> Enable web research</label>` : ''}</section>` : ''}${tools && (S.mode === 'ask' || S.mode === 'code') ? `<section class="field-group"><h4>Connected tools</h4><p class="hint">${esc(available.join(', ') || 'Your connected tools')} are available. External changes still require your approval.</p><label class="field"><span>Tool access for this mode</span><select id="contextToolAccess"><option value="auto">When my request needs them</option><option value="always">Always available</option><option value="off">Off for this mode</option></select></label></section>` : ''}`;
+  $('#contextDetails').innerHTML = `<section class="field-group"><h4>Attached to this prompt</h4>${S.video ? `<p>${esc(S.video.name || 'Video')}</p><button type="button" class="chip" data-context-video>Remove video</button>` : S.files.length || S.attachments.length ? S.files.map((f, i) => `<div class="context-file"><span>${esc(KIND_LABEL[f.kind] || 'File')} · ${esc(f.name)}${docMeta(f) ? ` · ${esc(docMeta(f))}` : ''}</span><button type="button" class="chip" data-context-file="${i}">Remove</button></div>`).join('') + S.attachments.map((a, i) => `<div class="context-file"><span>${a.doc ? 'PDF page image' : 'Image'} ${i + 1}</span><button type="button" class="chip" data-context-remove="${i}">Remove</button></div>`).join('') : '<p class="hint">Nothing attached. Use the attachment button to add photos, a video or files.</p>'}</section><section class="field-group"><h4>Profile &amp; memory</h4><p class="hint">${ME.bio || ME.learned || ME.memory.length ? `Your profile and ${ME.memory.length} remembered ${ME.memory.length === 1 ? 'fact' : 'facts'} personalize answers. Review or remove them in your profile.` : 'Your profile is empty. Add details when you want more personal answers.'}</p></section>${S.mode === 'ask' ? `<section class="field-group"><h4>Writing &amp; research</h4><label class="context-check"><input type="checkbox" data-context-toggle="voice"${o.voice ? ' checked' : ''} /> Write in my voice</label>${providerReady('anthropic') && feat('web') ? `<label class="context-check"><input type="checkbox" data-context-toggle="web"${o.web ? ' checked' : ''} /> Enable web research</label>` : ''}</section>` : ''}${tools && (S.mode === 'ask' || S.mode === 'code') ? `<section class="field-group"><h4>Connected tools</h4><p class="hint">${esc(available.join(', ') || 'Your connected tools')} ${available.length === 1 ? 'is' : 'are'} available. ${approveAll() ? 'Atelier acts without asking first. Change that in Settings → Connections.' : 'External changes still need your approval.'}</p><label class="field"><span>Tool access for this mode</span><select id="contextToolAccess"><option value="auto">When my request needs them</option><option value="always">Always available</option><option value="off">Off for this mode</option></select></label></section>` : ''}`;
   const s = $('#contextToolAccess'); if (s) { const cur = S.opts[S.mode]; s.value = cur.accountAccess === 'off' ? 'off' : cur.tools ? 'always' : 'auto'; }
   if (focusKey) ($(`[data-context-toggle="${CSS.escape(focusKey)}"]`, $('#contextDetails')) || (focusKey === 'contextToolAccess' ? s : null))?.focus({ preventScroll: true });
 }
@@ -4723,6 +5106,8 @@ $('#contextChips').addEventListener('click', openContext);
 $('#contextDialog').addEventListener('click', (ev) => {
   if (ev.target.closest('[data-context-close]')) return $('#contextDialog').close();
   if (ev.target.closest('[data-context-profile]')) { $('#contextDialog').close(); $('#youBtn').click(); return; }
+  const file = ev.target.closest('[data-context-file]');
+  if (file) { const doc = S.files[+file.dataset.contextFile]; if (doc) dropDoc(doc); renderAttachments(); renderContextDetails(); }
   const remove = ev.target.closest('[data-context-remove]');
   if (remove) { S.attachments.splice(+remove.dataset.contextRemove, 1); renderAttachments(); renderContextDetails(); }
   if (ev.target.closest('[data-context-video]')) { clearComposerVideo(); renderContextDetails(); }
@@ -4764,8 +5149,15 @@ function openDrawer(id) {
   if (id === 'threadsDrawer') { $('#threadList').innerHTML = '<li class="empty-note" role="status">Loading your threads…</li>'; renderThreads(); }
   if (id === 'libraryDrawer') renderLibrary(); // first load shows skeleton tiles; a reopen keeps the last grid until the repaint
 }
+// v114: the rows of the Threads drawer's last read, kept while it is open. Typing in the search, a new order and a
+// folded heading draw from these (renderThreads). Each key used to read every saved thread again, pictures and videos
+// included (allThreads → DB.all), and a read slower than 2.5 s showed the red "Storage is busy" toast with no other tab
+// open. Whatever changes a thread (a rename, a delete, a pin, a synced change, opening the drawer) still reads, and
+// replaces them. Dropped when the drawer closes: they hold every thread's media.
+let threadRows = null, searchTimer = 0;
 function closeDrawers(restore = true) {
   $$('.drawer').forEach((d) => (d.hidden = true)); $('#scrim').hidden = true; syncOverlay();
+  clearTimeout(searchTimer); threadRows = null; // read again when the drawer next opens
   if (cv.open && !cv.busy) cvClose({ focus: false }); // the Library reopens on its grid; a running import keeps its picker and progress
   if (restore && overlayReturn?.isConnected) overlayReturn.focus({ preventScroll: true });
 }
@@ -4775,14 +5167,17 @@ $('#threadsBtn').onclick = () => { openDrawer('threadsDrawer'); Sync.kick('drawe
 $('#libraryBtn').onclick = () => openDrawer('libraryDrawer');
 
 // All saved threads plus the one on screen (even if it hasn't reached storage yet). Never hangs.
-async function allThreads() {
-  const reading = DB.all().catch(() => []);
-  const saved = await Promise.race([reading, sleep(2500).then(() => null)]);
-  if (saved === null) toast('Storage is busy — close other Atelier tabs if this persists', { error: true });
+// known: rows a slow read has since delivered (the `late` of an earlier call): used as they are, with no second read.
+let busyToastAt = 0; // "Storage is busy" at most twice a minute: the lists that wait say so in place, and a large library is slow with no other tab open
+async function allThreads(known) {
+  const reading = known ? Promise.resolve(known) : DB.all().catch(() => []);
+  const saved = known || await Promise.race([reading, sleep(2500).then(() => null)]);
+  if (saved === null && Date.now() - busyToastAt > 30_000) { busyToastAt = Date.now(); toast('Storage is busy — close other Atelier tabs if this persists', { error: true }); }
   const list = [...(saved || [])];
   if (S.thread?.entries.length && !list.some((t) => t.id === S.thread.id)) list.push(S.thread);
   const out = list.map((t) => (t.id === S.thread?.id ? S.thread : t)).map((t) => [ClaudeImport.listAt(t), t]).sort((a, b) => b[0] - a[0]).map(([, t]) => t);
   // Another copy of Atelier holds the store: the list is short, not empty. `late` settles when the read gets through.
+  out.saved = saved; // the rows as they were read (null while the store is busy): the Threads drawer keeps them (threadRows)
   if (saved === null) { out.busy = true; out.late = reading; }
   return out;
 }
@@ -4835,15 +5230,19 @@ async function sortIntoSpaces(threads) {
 const shutGroups = new Set(LS.get(workspaceKey('threadGroupsShut'), []).filter((k) => typeof k === 'string'));
 const groupKey = (label) => `${threadSort}:${label}`;
 let threadsSeq = 0; // newest renderThreads() call wins (search typing fires many)
-async function renderThreads(fromSorter = false) {
+async function renderThreads(fromSorter = false, known = null) {
   const seq = ++threadsSeq;
   const q = $('#threadSearch').value.trim().toLowerCase();
-  let all = await allThreads();
+  let all = await allThreads(Array.isArray(known) ? known : fromSorter === true && threadRows ? threadRows : undefined);
   if (seq !== threadsSeq) return;
+  if (all.saved && !$('#threadsDrawer').hidden) threadRows = all.saved;
   const storeBusy = all.busy === true; // the saved threads haven't been read yet: never say there are none
-  if (storeBusy) all.late.then(() => { if (seq === threadsSeq && !$('#threadsDrawer').hidden) renderThreads(); });
+  // Drawn again from the rows the slow read delivers (not from a second read, which was slow again and toasted again, v114).
+  if (storeBusy) all.late.then((saved) => { if (seq === threadsSeq && !$('#threadsDrawer').hidden) renderThreads(false, saved); });
   $('#clearThreadSearch').hidden = !q;
+  // Also by the name of a file a turn carried (v114): "invoice.pdf" finds the thread that read it.
   if (q) all = all.filter((t) => [t.title, ...t.entries.flatMap((e) => [e.prompt, e.text, e.app?.title,
+    ...(Array.isArray(e.files) ? e.files.map((f) => f?.name) : []),
     ...(e.ideas || []).flatMap((idea) => [idea.title, idea.pitch])])].join(' ').toLowerCase().includes(q));
   all = sortThreads(all, threadSort);
   all = [...all.filter((t) => pinnedThreads.has(t.id)), ...all.filter((t) => !pinnedThreads.has(t.id))];
@@ -4872,12 +5271,15 @@ async function renderThreads(fromSorter = false) {
   }
   list.innerHTML = busyNote + h; // the open thread can show while the rest are still being read
 }
-$('#threadSearch').addEventListener('input', renderThreads);
-$('#threadSort').addEventListener('change', (ev) => { if (!Object.hasOwn(THREAD_SORTS, ev.target.value)) return; threadSort = ev.target.value; LS.set('threadSort', threadSort); $('#threadList').scrollTop = 0; renderThreads(); });
+// Typing filters the rows already read (threadRows), a moment after the last key. Before any read has come back
+// (threadRows null) it reads, as before.
+$('#threadSearch').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => renderThreads(false, threadRows), 120); });
+$('#threadSort').addEventListener('change', (ev) => { if (!Object.hasOwn(THREAD_SORTS, ev.target.value)) return; threadSort = ev.target.value; LS.set('threadSort', threadSort); $('#threadList').scrollTop = 0; renderThreads(false, threadRows); });
 $('#clearThreadSearch').onclick = () => {
+  clearTimeout(searchTimer);
   $('#threadSearch').value = '';
   $('#threadSearch').focus({ preventScroll: true });
-  renderThreads();
+  renderThreads(false, threadRows);
 };
 $('#drawerNewThread').onclick = () => { closeDrawers(false); startFresh(); };
 document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog" id="threadMenuDialog" aria-labelledby="threadMenuTitle"><form class="sheet-body" id="threadMenuForm"><div class="sheet-head"><h2 id="threadMenuTitle">Your <em>thread</em></h2><button type="button" class="icon-btn" data-thread-close aria-label="Close thread options">${ICON.x}</button></div><div class="thread-edit-body"><label class="field"><span>Thread name</span><input id="threadName" maxlength="120" required autocomplete="off" /></label><p class="hint">Renaming keeps all of your conversation. Pins are saved for this account on this device.</p><div class="thread-space" id="threadSpace" role="group" aria-label="Group"><span>Group, for the By group order</span><button type="button" class="chip" data-space="">Automatic</button>${GROUPS.groups.map((g) => `<button type="button" class="chip" data-space="${g.key}" title="${esc(g.label)}">${esc(g.short)}</button>`).join('')}</div><p class="hint bad" id="threadMenuError" role="alert"></p></div><div class="sheet-foot"><button type="button" class="chip danger" id="threadMenuDelete">Delete thread</button><button type="submit" class="btn-primary">Save name</button></div></form></dialog>`);
@@ -4966,12 +5368,15 @@ $('#libFilter').addEventListener('click', (ev) => {
   $('#libGrid').scrollTop = 0;
   if (libLoaded) paintLibrary(); // filtering reuses libItems — no IndexedDB read
 });
-async function renderLibrary() {
+async function renderLibrary(known) {
   const grid = $('#libGrid'), token = ++libToken;
   $('#libCanvaBtn').hidden = !canvaOn() || cv.open;
   if (!libLoaded) { grid.setAttribute('aria-busy', 'true'); grid.innerHTML = LIB_SKEL.repeat(6); }
-  const all = await allThreads();
+  const all = await allThreads(Array.isArray(known) ? known : undefined);
   if (token !== libToken) return;
+  // The store is slow or held by another tab: what came back is short, not final. What is on screen stays (the loading
+  // tiles, or the last library) until the rows arrive: never "Nothing made yet" over a full library (v114).
+  if (all.busy) { all.late.then((saved) => { if (token === libToken) renderLibrary(saved); }); return; }
   libItems = [];
   for (const t of all) for (const e of [...t.entries].reverse()) {
     (e.media || []).forEach((m, k) => { if (m?.src) libItems.push({ type: m.type === 'video' ? 'video' : 'image', src: m.src, still: m.still, e, k, t }); });
@@ -5594,7 +5999,8 @@ $('#settingsForm').addEventListener('submit', async (ev) => {
   const hadPasscode = Boolean(s.passcode);
   s.passcode = f.passcode.value.trim();
   // The owner signing out here: the browser's passcode-guard clearance (an HttpOnly cookie) goes too (src/guard.js).
-  if (hadPasscode && !s.passcode) fetch('/api/clearance/end', { method: 'POST' }).catch(() => {});
+  // The sign-in screen that follows says so ('ownerout'), not that the browser cleared the sign-in (v114).
+  if (hadPasscode && !s.passcode) { fetch('/api/clearance/end', { method: 'POST' }).catch(() => {}); LS.set('outReason', 'ownerout'); }
   // A page that isn't the owner's (a tester's Settings) never clears the owner's passcode backup; typing one in signs in.
   if (s.passcode || workspace === 'owner') await DB.ownerPasscodeSet(s.passcode).catch(() => {});
   s.temperature = +f.temperature.value;
@@ -5690,7 +6096,8 @@ $('#importInput').onchange = async (ev) => {
 // ── Claude chats → threads (claude-import.js) ──
 // The claude.ai export is read on this device: unzipped and parsed in claude-worker.js when the browser can start a
 // module worker, else here between short pauses. Nothing is sent anywhere while importing. Each conversation becomes a
-// thread 'claude-<uuid>' saved like any other (owner: it syncs; tester: it stays on this device), batch by batch, so
+// thread 'claude-<uuid>' saved like any other (it syncs wherever sync is on: the owner's devices, or a tester's who
+// turned device sync on; otherwise it stays on this device), batch by batch, so
 // Cancel or a full disk keeps what was saved, and importing again picks up the rest: unchanged chats are skipped, grown
 // ones get their new turns.
 let claudeJob = null;
@@ -5793,7 +6200,8 @@ async function importClaudeChats(file) {
     }
     if (openChanged) renderThread();
     if (job.stopped) { claudeStatus(stoppedText()); return; }
-    const where = S.tester ? ' Saved on this device only.' : Sync.on() && (added || grew) ? ' They’ll sync to your other devices.' : '';
+    // Sync first: a tester who turned device sync on uploads these chats too, and was told "this device only" (v114).
+    const where = Sync.on() && (added || grew) ? ' They’ll sync to your other devices.' : S.tester ? ' Saved on this device only.' : '';
     claudeStatus(`Done: ${tally()}.${skipped ? ` The ${nf(skipped)} oldest were left out (${nf(ClaudeImport.LIMITS.conversations)} per import).` : ''}${where} Find them in Threads, marked “from Claude”.`);
     if (added || grew) toast(`Imported ${nf(added + grew)} Claude chat${added + grew === 1 ? '' : 's'}`);
   } catch (err) {
@@ -5823,12 +6231,15 @@ $('#migrateBtn').onclick = async (ev) => {
 // own (keys scoped to it, and the shared preferences and session keys that hold no owner data), never the owner's
 // migration flags, sign-in markers, profile cache or navigation keys, another account's scoped keys, settings that now
 // hold an owner passcode (signed in from another tab), or the older-thread boundary flag (it protects the owner's rows).
-const OWNER_LS_KEEP = new Set(['migratedV3', 'migrateToastAt', 'owner', 'signedIn', 'me', 'lastThread', 'pinnedThreads']);
+const OWNER_LS_KEEP = new Set(['migratedV3', 'migrateToastAt', 'owner', 'signedIn', 'me', 'meBase', 'lastThread', 'pinnedThreads', 'threadGroupsShut']);
 function wipesKey(k) {
   if (!k.startsWith('atelier.') || k === 'atelier.sharedHistoryUnguarded') return false;
   if (workspace === 'owner') return true;
   const name = k.slice('atelier.'.length);
   if (OWNER_LS_KEEP.has(name)) return false;
+  // The owner's thread groups (v99 on: 'threadGroups.<set>', unscoped like the keys above). A tester's Clear this
+  // device deleted them (v114). Another account's own groups carry its scope after a colon, and still go with it.
+  if (name.startsWith('threadGroups.') && !name.includes(':')) return false;
   if (name.includes(':')) return name.endsWith(`:${workspace}`); // workspaceKey(): this account's, or another's
   return !(name === 'settings' && LS.get('settings', {})?.passcode);
 }
@@ -5857,10 +6268,13 @@ $('#wipeBtn').onclick = async () => {
   } catch (err) { toast(err.message || 'Couldn’t clear this device. Please try again.', { error: true }); }
 };
 
+// The browser bar follows the chosen theme, not only the device's (v114: Paper on a dark phone drew a black bar).
+const THEME_BG = { dark: '#0e0d0b', light: '#f3eee3' };
 function applyTheme() {
   const t = S.settings.theme;
   if (t === 'auto') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = t;
+  for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.content = THEME_BG[t] || THEME_BG[/light/.test(m.media) ? 'light' : 'dark'];
 }
 
 // ───────────────────────── connections ─────────────────────────
@@ -5953,15 +6367,15 @@ async function renderConnections() {
   const extSt = EXT.ready ? await extLocal('status', {}, 8000).catch(() => null) : null;
   const extAsks = extSt?.asks !== false;
   if (seq !== connSeq) return;
-  const browserState = EXT.ready ? `extension v${esc(EXT.version)} here${REMOTE.online ? ' · reachable from your other devices' : ' · pairing…'}${extAsks ? '' : ' · clicks and typing run unasked on this computer'}`
+  const browserState = EXT.ready ? `extension v${esc(EXT.version)} here${REMOTE.online ? ' · reachable from your other devices' : ' · pairing…'}${extAsks ? '' : ' · the Allow window is off on this computer'}`
     : REMOTE.online ? 'your computer’s browser is online' : 'offline — turn on your computer and open Chrome';
   const rows = [];
   // The owner's standing approvals. They follow his account to every signed-in device.
   if (S.settings.passcode) rows.push(connRow({ key: 'approvals', on: true, name: 'Approvals', state: approveAll() ? 'Nothing asks' : 'Writes ask', detail: approveAll() ? 'Atelier sends, posts, pays, clicks and types without asking first. This holds on all your devices.' : 'Sending, posting, clicking and typing ask. After a web page or a search, account reads ask too. Changes here apply on all your devices.', action: `<span class="conn-acts"><button type="button" class="chip${approveAll() ? ' on' : ''}" data-approve-all aria-pressed="${approveAll()}" title="Run every step without an approval card: sending, posting, payments, clicks and typing.">Approve everything</button><button type="button" class="chip${accountsUnasked() ? ' on' : ''}" data-accounts-unasked aria-pressed="${accountsUnasked()}" title="Read your connected accounts without an approval card. Sending and changing things still ask.">Read accounts unasked</button></span>` }));
-  rows.push(connRow({ on: browserAvailable(), name: 'Browser', state: EXT.ready ? 'This browser' : REMOTE.online ? 'Online' : 'Offline', detail: browserState, action: `<span class="conn-acts"><a class="chip" href="/atelier-browser.zip" download>Get extension</a>${S.settings.passcode ? `<button type="button" class="chip${browserUnasked() ? ' on' : ''}" data-browser-unasked aria-pressed="${browserUnasked()}" title="Open and read pages in your browser without an approval card. Clicks and typing still ask.">Open pages unasked</button>` : ''}${extAsks ? '' : '<button type="button" class="chip" data-ext-ask title="Bring back the Allow window on this computer for clicks and typing.">Ask on this computer</button>'}</span>` }));
+  rows.push(connRow({ on: browserAvailable(), name: 'Browser', state: EXT.ready ? 'This browser' : REMOTE.online ? 'Online' : 'Offline', detail: browserState, action: `<span class="conn-acts"><a class="chip" href="/atelier-browser.zip" download>Get extension</a>${S.settings.passcode ? `<button type="button" class="chip${browserUnasked() ? ' on' : ''}" data-browser-unasked aria-pressed="${browserUnasked()}" title="Open and read pages in your browser without an approval card. Clicks and typing still ask.">Open pages unasked</button>` : ''}${extAsks ? '' : '<button type="button" class="chip" data-ext-ask title="Bring back the Allow window on this computer for clicks, typing, sign-ins and texts.">Ask on this computer</button>'}</span>` }));
   // Messages on this Mac (extension 1.4.0 + the helper install-messages.sh sets up). Shown only on a Mac.
   if (extSt?.mac) rows.push(connRow({ key: 'messages', on: extSt.messages === true, name: 'Messages', state: extSt.messages ? 'Ready on this Mac' : 'Not set up',
-    detail: extSt.messages ? 'Atelier can read your texts here and send one once you approve it.' : 'Copy the setup command, paste it in Terminal, then follow what it prints.',
+    detail: extSt.messages ? (approveAll() ? 'Atelier can read your texts here and send them. Approve everything is on, so it doesn’t ask.' : 'Atelier can read your texts here and send one once you approve it.') : 'Copy the setup command, paste it in Terminal, then follow what it prints.',
     action: extSt.messages ? '' : `<button type="button" class="chip" data-mac-messages="${esc(extSt.id || '')}">Set up Messages</button>` }));
   const rw = rwRow();
   rows.push(connRow({ key: 'runway', on: rw.on, name: 'Runway', state: esc(rw.state), detail: esc(rwBack ? rw.detail : 'checking credits…'), action: `<a class="chip" href="${RUNWAY_PORTAL}" target="_blank" rel="noopener">Developer portal</a>` }));
@@ -5996,7 +6410,7 @@ $('#connList').addEventListener('click', async (ev) => {
   const un = ev.target.closest('[data-browser-unasked]');
   if (un) {
     const on = !browserUnasked();
-    if (on && !confirm('Atelier will open and read pages in your signed-in browser without asking first.\n\nA page it reads can try to steer it. It could then open another address and carry what it read on those pages with it.\n\nClicks and typing still ask. So does a new address once your account data is in the conversation. Turn this on?')) return;
+    if (on && !confirm('Atelier will open and read pages in your signed-in browser without asking first.\n\nA page it reads can try to steer it. It could then open another address and carry what it read on those pages with it.\n\nClicks and typing still ask. A new address asks too once two things share the conversation. They are your account data, and a page, a search or shared text. Turn this on?')) return;
     setApproval('browserUnasked', on);
     un.classList.toggle('on', on); un.setAttribute('aria-pressed', String(on));
     return toast(on ? 'Atelier now opens and reads pages without asking' : 'Atelier asks before it opens a page again');
@@ -6013,7 +6427,7 @@ $('#connList').addEventListener('click', async (ev) => {
   const extAsk = ev.target.closest('[data-ext-ask]');
   if (extAsk) {
     const ok = await extLocal('askAgain', {}, 5000).then(() => true, () => false);
-    toast(ok ? 'This computer asks before clicks and typing again' : 'Couldn’t reach the extension on this computer', ok ? {} : { error: true });
+    toast(ok ? 'This computer asks before clicks, typing, sign-ins and texts again' : 'Couldn’t reach the extension on this computer', ok ? {} : { error: true });
     return renderConnections();
   }
   const all = ev.target.closest('[data-approve-all]');
@@ -6027,7 +6441,7 @@ $('#connList').addEventListener('click', async (ev) => {
   const ac = ev.target.closest('[data-accounts-unasked]');
   if (ac) {
     const on = !accountsUnasked();
-    if (on && !confirm('Atelier will read your connected accounts without asking first.\n\nThat holds even after it has read a web page or a search result. That outside text can try to steer it. It could read mail or messages you did not ask about.\n\nSending, posting and changing things still ask. So does a new web address once account data is in the conversation. Turn this on?')) return;
+    if (on && !confirm('Atelier will read your connected accounts without asking first.\n\nThat holds even after it has read a web page or a search result. That outside text can try to steer it. It could read mail or messages you did not ask about.\n\nSending, posting and changing things still ask. A new web address asks too once two things share the conversation. They are your account data, and a page, a search or shared text. Turn this on?')) return;
     setApproval('accountsUnasked', on);
     ac.classList.toggle('on', on); ac.setAttribute('aria-pressed', String(on));
     return toast(on ? 'Atelier now reads your accounts without asking' : 'Atelier asks before account reads again');
@@ -6060,12 +6474,16 @@ $('#connList').addEventListener('click', async (ev) => {
     addTokenAccount(b.dataset.svc);
   } else if (b.dataset.conn === 'tok-off') {
     if (!confirm(`Remove ${b.dataset.label} from Atelier?`)) return;
-    await fetch(`/api/accounts/${b.dataset.svc}/${encodeURIComponent(b.dataset.id)}`, { method: 'DELETE', headers: apiHeaders() });
+    // A removal that didn't happen says so, like Canva's above: offline or refused, the account is still connected,
+    // and silence read as "Atelier's access is gone" (v114).
+    const r = await fetch(`/api/accounts/${b.dataset.svc}/${encodeURIComponent(b.dataset.id)}`, { method: 'DELETE', headers: apiHeaders() }).catch(() => null);
+    if (!r?.ok) toast(!r ? 'Couldn’t reach Atelier — check your connection.' : (await r.json().catch(() => ({}))).error || `Couldn’t remove ${b.dataset.label}`, { error: true });
     renderConnections();
   } else if (b.dataset.conn === 'gmail-off') {
     const email = b.dataset.email;
     if (!confirm(`Disconnect ${email || 'Gmail'} from Atelier?`)) return;
-    await fetch(`/api/oauth/google${email ? `?email=${encodeURIComponent(email)}` : ''}`, { method: 'DELETE', headers: apiHeaders() });
+    const r = await fetch(`/api/oauth/google${email ? `?email=${encodeURIComponent(email)}` : ''}`, { method: 'DELETE', headers: apiHeaders() }).catch(() => null);
+    if (!r?.ok) toast(!r ? 'Couldn’t reach Atelier — check your connection.' : (await r.json().catch(() => ({}))).error || `Couldn’t disconnect ${email || 'Gmail'}`, { error: true });
     renderConnections();
   }
 });
@@ -6079,7 +6497,8 @@ function addTokenAccount(svc) {
   const [name, help] = TOKEN_HELP[svc];
   const dlg = document.createElement('dialog');
   dlg.className = 'tok-dialog';
-  dlg.innerHTML = `<form method="dialog"><h3>Add a <em>${name}</em> account</h3><p class="hint">${help}</p><input type="password" name="token" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste token" aria-label="${name} token" required /><p class="hint err" role="alert" hidden></p><div class="row"><button type="button" class="chip" value="cancel">Cancel</button><button class="btn-primary" value="ok">Add account</button></div></form>`;
+  dlg.setAttribute('aria-labelledby', 'tokTitle');
+  dlg.innerHTML = `<form method="dialog"><h3 id="tokTitle">Add a <em>${name}</em> account</h3><p class="hint">${help}</p><input type="password" name="token" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste token" aria-label="${name} token" required /><p class="hint err" role="alert" hidden></p><div class="row"><button type="button" class="chip" value="cancel">Cancel</button><button class="btn-primary" value="ok">Add account</button></div></form>`;
   document.body.append(dlg);
   const form = dlg.querySelector('form');
   const err = dlg.querySelector('.err');
@@ -6194,6 +6613,7 @@ const SIGNIN_NOTES = {
   cleared: 'This browser cleared Atelier’s saved sign-in (a private window, or a “clear on exit” setting). Sign in again — threads on this device are still here.',
   expired: 'Your tester session ended. Sign in with LinkedIn again to continue.',
   signedout: 'You’re signed out. The threads you made stay on this device.',
+  ownerout: 'You’re signed out. Your threads stay on this device.', // the owner, signing out in Settings (v114)
   full: 'All tester spots are taken right now. Spots open up from time to time — try again later.',
   revoked: 'Your tester access has ended. Questions? Write to cole@ciprari.ai.',
   paused: 'Tester access is paused right now. Try again soon.',
@@ -6263,7 +6683,8 @@ let onboardReason = '';
 function openOnboard(reason = 'new') {
   onboardReason = reason;
   const forget = testerDataHere(); // a former tester's data on this device: they can remove it here (removeTesterData)
-  const note = SIGNIN_NOTES[!testersOpen && TESTER_NOTES.has(reason) ? 'closed' : reason] || '';
+  const noteKey = !testersOpen && TESTER_NOTES.has(reason) ? 'closed' : reason;
+  const note = Object.hasOwn(SIGNIN_NOTES, noteKey) ? SIGNIN_NOTES[noteKey] : ''; // a reason can come from the URL: only a note of its own
   const STAY = /stay on this device\.$/;
   const offerForget = (on) => {
     $('#signinNote').textContent = note && on && STAY.test(note) ? note.replace(STAY, 'stay on this device. You can remove them below.') : note;
@@ -6273,7 +6694,7 @@ function openOnboard(reason = 'new') {
   $('#signinNote').hidden = !note;
   // No trace in localStorage: the databases may still be here (testerDataStored).
   if (!forget) testerDataStored().then((yes) => { if (yes && onboardReason === reason && $('#onboard').open) offerForget(true); });
-  $('#onboardMsg').textContent = SIGNIN_REASONS[reason] || ''; $('#onboardMsg').className = 'hint';
+  $('#onboardMsg').textContent = Object.hasOwn(SIGNIN_REASONS, reason) ? SIGNIN_REASONS[reason] : ''; $('#onboardMsg').className = 'hint';
   if (reason === 'rejected' || LS.get('owner', false) || !testersOpen) $('#ownerEntry').open = true; // owner devices keep owner mode; with tester access closed the passcode is the only way in
   if (testersOpen) loadSpots();
   if ($('#onboard').open) return;
@@ -6521,6 +6942,13 @@ const tpPaused = (c) => c.paused === true || Number(c.paused) === 1;
 function paintTesters() {
   const box = $('#testersPanel'), d = TP.data || {}, c = d.config || {}, pool = d.pool || {};
   box.removeAttribute('aria-busy');
+  // A repaint (after Add, Revoke, Refresh, the Open/Paused switch, or Settings opening) keeps what was typed and not
+  // yet saved, and the caret. The fields used to go back to the saved values: Save then found nothing changed and
+  // said "Saved" while the old limit stayed in force (v114).
+  const typed = ['tpCap', 'tpDay', 'tpMonth', 'tpPool', 'tpSub'].map((id) => {
+    const el = document.getElementById(id);
+    return el && el.value !== el.defaultValue ? { id, value: el.value, caret: document.activeElement === el ? [el.selectionStart, el.selectionEnd] : null } : null;
+  }).filter(Boolean);
   const list = (Array.isArray(d.testers) ? d.testers : []).filter((x) => x && isSub(x.sub))
     .sort((a, b) => Boolean(toMs(a.revoked_at)) - Boolean(toMs(b.revoked_at)) || (toMs(b.last_seen) || 0) - (toMs(a.last_seen) || 0));
   const active = list.filter((x) => !toMs(x.revoked_at)).length, paused = tpPaused(c);
@@ -6566,6 +6994,12 @@ function paintTesters() {
       <p class="tp-label tp-roster">Roster <small>${list.length} ${list.length === 1 ? 'person' : 'people'}</small><button type="button" class="chip" data-tp="reload">Refresh</button></p>
       <ul class="tp-list">${list.map(row).join('') || '<li class="hint">No one has signed in yet.</li>'}</ul>
     </div>`;
+  for (const t of typed) {
+    const el = document.getElementById(t.id);
+    if (!el) continue;
+    el.value = t.value; // defaultValue stays the saved one, so tpEdited still sees the change
+    if (t.caret) { el.focus({ preventScroll: true }); try { el.setSelectionRange(t.caret[0], t.caret[1]); } catch { /* not a text field */ } }
+  }
 }
 async function tpAddPreview(sub, b) {
   const c = TP.data?.config || {}, have = (Array.isArray(c.preview_subs) ? c.preview_subs : []).filter(isSub);
@@ -6698,31 +7132,96 @@ function saveMe() {
   meTimer = setTimeout(pushMe, 1200);
 }
 function setSync(text, ok) { const el = $('#meSync'); if (el) { el.textContent = text; el.classList.toggle('ok', ok === true); el.classList.toggle('bad', ok === false); } }
+// The owner's profile and the server's copy are joined field by field (context.js mergeProfile) against the copy this
+// browser last knew the server to hold (LS meBase, shared by its tabs). Sending always reads first: a tab left open for
+// hours used to write its whole old copy over what other devices had saved since, and turned "Approve everything"
+// back on after it was turned off elsewhere (v114). One exchange at a time; a change made while one runs goes out with
+// the next. → 'synced' | 'failed' (the server has an older copy than this device) | 'refused' | 'offline'
+let meSyncing = null, meAgain = false, meRefused = false, meChecked = 0;
+function syncMe() {
+  if (meSyncing) { meAgain = true; return meSyncing; }
+  meSyncing = (async () => {
+    try {
+      meChecked = Date.now();
+      const r = await fetch('/api/me', { headers: apiHeaders(), cache: 'no-store' });
+      // This free call proves the passcode works, so the status can go green without spending a model call.
+      meRefused = r.status === 401;
+      if (r.status === 401) { updateKeyState(false); Sync.pause('passcode'); }
+      if (!r.ok) return 'refused';
+      updateKeyState(true);
+      Sync.verified(); // this free call just proved the passcode: owner thread sync may start (never adds a wrong-passcode attempt)
+      let remote = await r.json();
+      const was = JSON.stringify(ME), held = LS.get('meBase', null);
+      // The store can answer with an older copy for up to a minute after a write. Every write is stamped later than
+      // the copy it was joined against, so an answer older than the one already seen here is that lag: go by the newer.
+      // (Joining against the old one would take what it lacks for forgotten elsewhere, an approval switch included.)
+      if (held && (Number(remote?.updatedAt) || 0) < (Number(held.updatedAt) || 0)) remote = held;
+      let { profile, changed } = mergeProfile(held, ME, remote);
+      let mine = JSON.stringify(ME); // what was joined: an edit made here while the write is out is laid on top after
+      // The write names the copy it was joined against (x-me-base: its updatedAt). If another device wrote in between,
+      // the Worker answers 409 with what it holds now, and the copies are joined once more before the second try.
+      const put = (doc, against) => fetch('/api/me', { method: 'PUT', headers: apiHeaders({ 'x-me-base': String(Number(against?.updatedAt) || 0) }), body: JSON.stringify(doc) }).catch(() => null);
+      let res = changed ? await put(profile, remote) : null;
+      if (res?.status === 409) {
+        const newer = (await res.json().catch(() => null))?.profile;
+        if (newer && typeof newer === 'object' && !Array.isArray(newer)) {
+          remote = newer;
+          ({ profile, changed } = mergeProfile(held, ME, remote));
+          mine = JSON.stringify(ME);
+          res = changed ? await put(profile, remote) : null;
+        }
+      }
+      const sent = !changed || res?.ok === true;
+      // Changed here while the write was out (an approval switch, a fact learned or forgotten): joined on top of what
+      // went, and sent next. It was replaced by the older copy and lost (v114).
+      const edited = JSON.stringify(ME) !== mine;
+      ME = { ...ME_DEFAULT, ...(edited ? mergeProfile(profile, ME, profile).profile : profile) };
+      if (edited) meAgain = true;
+      const kept = LS.set('me', ME);
+      // What the server holds now: the joined profile once it is sent, else what it answered with (so a change that
+      // did not go still counts as made here, and goes with the next exchange). Only beside the copy it describes: a
+      // profile this browser could not keep (storage full) leaves the old pair, or its facts would read as forgotten here.
+      if (kept) LS.set('meBase', sent ? profile : remote);
+      if (ME.name && ME.name !== S.settings.name) { S.settings.name = ME.name; saveSettings(); renderWelcome(); } // the name a second device never typed (v114: it was set in memory only, and gone after a reload)
+      if (JSON.stringify(ME) !== was && !$('#youDrawer').hidden) renderYou();
+      return sent ? 'synced' : 'failed';
+    } catch { return 'offline'; } finally {
+      meSyncing = null;
+      if (meAgain) { meAgain = false; clearTimeout(meTimer); meTimer = setTimeout(pushMe, 300); }
+    }
+  })();
+  return meSyncing;
+}
 async function pushMe() {
   if (S.tester) return pushTesterMe();
   if (!S.settings.passcode || !server.nvidia) return setSync('this device only');
-  try {
-    const r = await fetch('/api/me', { method: 'PUT', headers: apiHeaders(), body: JSON.stringify(ME) });
-    setSync(r.ok ? 'synced' : 'sync failed', r.ok);
-  } catch { setSync('offline'); }
+  const how = await syncMe();
+  if (how === 'synced') setSync('synced', true); else if (how === 'offline') setSync('offline'); else setSync('sync failed', false);
 }
 async function pullMe() {
   if (S.tester) return pullTesterMe();
   if (!S.settings.passcode) return;
-  try {
-    const r = await fetch('/api/me', { headers: apiHeaders() });
-    // This free call proves the passcode works, so the status can go green without spending a model call.
-    if (r.status === 401) { updateKeyState(false); Sync.pause('passcode'); }
-    if (!r.ok) return;
-    updateKeyState(true);
-    Sync.verified(); // this free call just proved the passcode: owner thread sync may start (never adds a wrong-passcode attempt)
-    const remote = await r.json();
-    if ((remote.updatedAt || 0) > (ME.updatedAt || 0)) { ME = { ...ME_DEFAULT, ...remote }; LS.set('me', ME); if (remote.name) S.settings.name = remote.name; }
-    else if ((ME.updatedAt || 0) > (remote.updatedAt || 0)) pushMe();
-    seedApprovals();
-    setSync('synced', true);
-  } catch {}
+  const how = await syncMe();
+  if (how !== 'synced' && how !== 'failed') return;
+  seedApprovals();
+  setSync(how === 'synced' ? 'synced' : 'sync failed', how === 'synced');
 }
+// A tab that comes back into view asks again, at most twice a minute: a switch turned off on another device, or a fact
+// forgotten there, takes hold here without a reload. Never while the server is refusing the passcode: each try counts
+// against the wrong-passcode budget (src/guard.js).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || S.tester || !S.settings.passcode || meRefused || !navigator.onLine || Date.now() - meChecked < 30_000) return;
+  pullMe();
+});
+// Another tab of this browser saved the profile: this tab takes it whole. Each tab stores its copy on every change, so
+// the one stored last already holds what the others had. An open You panel shows it.
+window.addEventListener('storage', (ev) => {
+  if (ev.key !== 'atelier.me' || S.tester || workspace === 'guest') return;
+  const next = LS.get('me', null);
+  if (!next || typeof next !== 'object' || Array.isArray(next)) return;
+  ME = { ...ME_DEFAULT, ...next };
+  if (!$('#youDrawer').hidden) renderYou();
+});
 
 async function pushTesterMe() {
   if (!feat('profile')) return setSync('this device only');
@@ -6754,8 +7253,11 @@ function addMemory(texts, src) {
   const have = new Set(ME.memory.map((m) => m.text.toLowerCase()));
   const added = [];
   for (const raw of texts) {
-    const text = raw.replace(/^[-*•\d.)\s]+/, '').trim();
-    if (text.length < 6 || text.length > 240 || have.has(text.toLowerCase())) continue;
+    // One list marker at most ("- ", "• ", "3. ", "3) "). The old pattern took every leading digit: "2019 was the
+    // year I moved to Ohio" was kept as "was the year I moved to Ohio" (v114). The 6-character floor is for a model's
+    // output; what the owner types is kept however short ("Vegan").
+    const text = String(raw).replace(/^\s*(?:[-*•]\s+|\d{1,2}[.)]\s+)/, '').trim();
+    if (!text || (src !== 'you' && text.length < 6) || text.length > 240 || have.has(text.toLowerCase())) continue;
     have.add(text.toLowerCase());
     const m = { id: uid(), text, src, at: Date.now() };
     ME.memory.push(m); added.push(m);
@@ -6793,14 +7295,20 @@ async function learnFrom(e, thread = null) {
 }
 
 function renderYou() {
-  $('#meName').value = S.settings.name || '';
-  $('#meBio').value = ME.bio || '';
-  $('#meSamples').value = ME.samples || '';
-  $('#meStyle').value = ME.style || '';
-  $('#meLearned').value = ME.learned || '';
-  $('#memCount').textContent = ME.memory.length ? `· ${ME.memory.length}` : '';
+  // Only a field whose text really changed is written: this also runs when a sync lands while the panel is open, and
+  // writing the same text back would move the caret of the field being typed in.
+  const show = (sel, v) => { const el = $(sel); if (el.value !== v) el.value = v; };
+  show('#meName', S.settings.name || '');
+  show('#meBio', ME.bio || '');
+  show('#meSamples', ME.samples || '');
+  show('#meStyle', ME.style || '');
+  show('#meLearned', ME.learned || '');
+  // A prompt carries FACTS_IN_PROMPT facts (context.js factsInUse): the list says which ones, so a fact that has
+  // dropped out is not taken for one that still counts (v114).
+  const used = new Set(factsInUse(ME.memory));
+  $('#memCount').textContent = ME.memory.length ? `· ${ME.memory.length}${used.size < ME.memory.length ? ` · ${used.size} in use` : ''}` : '';
   $('#memList').innerHTML = ME.memory.length
-    ? [...ME.memory].reverse().map((m) => `<li><span>${esc(m.text)}</span><small>${esc(m.src || '')}</small><button data-mem="${m.id}" aria-label="Forget">${ICON.x}</button></li>`).join('')
+    ? [...ME.memory].reverse().map((m) => `<li${used.has(m) ? '' : ` class="idle" title="Not in use. A prompt carries ${FACTS_IN_PROMPT} facts: the ones you added, then the newest."`}><span>${esc(m.text)}</span><small>${esc(used.has(m) ? m.src || '' : 'not in use')}</small><button data-mem="${m.id}" aria-label="Forget: ${esc(String(m.text).slice(0, 60))}">${ICON.x}</button></li>`).join('')
     : '<li class="hint" style="padding-left:0">Nothing yet — Atelier picks things up as you chat, or add them here.</li>';
   $('#srcList').innerHTML = Object.entries(ME.sources || {}).map(([k, v]) => `<li>✓ ${esc(k)} · ${v.count} messages · ${new Date(v.at).toLocaleDateString()}</li>`).join('');
   DB.kvGet('ccHandle').then((h) => { $('#impCodeSync').hidden = !h; }).catch(() => {});
@@ -6811,13 +7319,27 @@ $('#openYouFromSettings').onclick = () => { $('#settings').close(); openDrawer('
   $(sel).addEventListener('input', (ev) => { ME[key] = ev.target.value; saveMe(); });
 });
 $('#meName').addEventListener('input', (ev) => { S.settings.name = ev.target.value.trim(); ME.name = S.settings.name; saveSettings(); saveMe(); renderWelcome(); });
-$('#memAdd').onclick = () => { const v = $('#memInput').value.trim(); if (v) { addMemory([v], 'you'); $('#memInput').value = ''; renderYou(); } };
+// A memory that was not added stays in the box, with the reason (v114: the box emptied whatever happened).
+$('#memAdd').onclick = () => {
+  const box = $('#memInput'), v = box.value.trim();
+  if (!v) return;
+  if (!addMemory([v], 'you').length) return toast(v.length > 240 ? 'That is too long to remember. Keep it under 240 characters.' : 'Atelier already remembers that.');
+  box.value = ''; renderYou();
+};
 $('#memInput').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('#memAdd').click(); } });
 $('#memList').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-mem]');
   if (!b) return;
-  ME.memory = ME.memory.filter((m) => m.id !== b.dataset.mem);
+  // One tap forgets a fact on every device, so the toast offers it back, in its old place (v114).
+  const at = ME.memory.findIndex((m) => m.id === b.dataset.mem), gone = ME.memory[at];
+  if (!gone) return;
+  ME.memory = ME.memory.filter((m) => m !== gone);
   saveMe(); renderYou();
+  toast('Forgotten', { ms: 7000, action: { label: 'Undo', onClick: () => {
+    if (ME.memory.some((m) => m.id === gone.id)) return;
+    ME.memory.splice(Math.min(at, ME.memory.length), 0, gone);
+    saveMe(); renderYou();
+  } } });
 });
 
 $('#learnStyle').onclick = async () => {
@@ -6845,14 +7367,20 @@ function loadFflate() {
     document.head.append(sc);
   }));
 }
-// Returns the parsed conversations.json from an export (.zip or .json).
+// The chats of a ChatGPT export (.zip, or the conversations.json inside it): always a list, or an error in plain words.
 async function readExport(file) {
-  if (/\.json$/i.test(file.name)) return JSON.parse(await file.text());
-  const { unzipSync, strFromU8 } = await loadFflate();
-  const files = unzipSync(new Uint8Array(await file.arrayBuffer()), { filter: (f) => /(^|\/)conversations\.json$/.test(f.name) });
-  const key = Object.keys(files)[0];
-  if (!key) throw new Error('No conversations.json in that zip.');
-  return JSON.parse(strFromU8(files[key]));
+  let data;
+  if (/\.json$/i.test(file.name)) data = JSON.parse(await file.text());
+  else {
+    const { unzipSync, strFromU8 } = await loadFflate();
+    const files = unzipSync(new Uint8Array(await file.arrayBuffer()), { filter: (f) => /(^|\/)conversations\.json$/.test(f.name) });
+    const key = Object.keys(files)[0];
+    if (!key) throw new Error('No conversations.json in that zip.');
+    data = JSON.parse(strFromU8(files[key]));
+  }
+  const list = Array.isArray(data) ? data : Array.isArray(data?.conversations) ? data.conversations : null;
+  if (!list) throw new Error('That file holds no list of chats. Choose the .zip from your ChatGPT export.');
+  return list;
 }
 // ChatGPT: [{ mapping: { id: { message: { author: {role}, content: {parts}, create_time } } } }]
 function chatgptTexts(convs) {
@@ -6868,9 +7396,9 @@ function chatgptTexts(convs) {
 // Claude: [{ chat_messages: [{ sender: 'human', text, content: [{type:'text', text}], created_at }] }]
 function claudeTexts(convs) {
   const out = [];
-  for (const c of convs || []) for (const m of c.chat_messages || []) {
-    if (m.sender !== 'human') continue;
-    const t = (m.text || (m.content || []).filter((x) => x.type === 'text').map((x) => x.text).join('\n')).trim();
+  for (const c of convs || []) for (const m of c?.chat_messages || []) {
+    if (m?.sender !== 'human' && m?.sender !== 'user') continue; // newer exports say 'user'
+    const t = String((typeof m.text === 'string' && m.text) || (Array.isArray(m.content) ? m.content : []).filter((x) => x?.type === 'text' && typeof x.text === 'string').map((x) => x.text).join('\n')).trim();
     if (t) out.push({ text: t, at: Date.parse(m.created_at) || 0 });
   }
   return out;
@@ -6901,21 +7429,34 @@ async function analyzeCorpus(label, items, extra = '') {
   const facts = tagged(raw, 'facts').split('\n').filter(Boolean);
   if (!profile && !facts.length) throw new Error('The analysis came back empty — try again.');
   if (profile) ME.learned = profile;
-  if (style) ME.style = style;
+  // v114: the Style guide is the owner's to edit ("learned — edit freely"), and every import wrote over it, hand edits
+  // included. A first import fills it. After that the new guide is offered, and the old one stays unless it is taken.
+  const had = (ME.style || '').trim();
+  if (style && !had) ME.style = style;
   const added = addMemory(facts, label);
   ME.sources = { ...(ME.sources || {}), [label]: { at: Date.now(), count: picked.length } };
   saveMe(); renderYou();
+  if (style && had && style.trim() !== had) toast('This import wrote a new Style guide. Yours was kept.', { ms: 15000, action: { label: 'Use the new one', onClick: () => { ME.style = style; saveMe(); renderYou(); } } });
   impStatus(`Done — learned from ${picked.length.toLocaleString()} messages, ${added.length} new memories.`);
 }
 
+// One history import at a time. Each reads the profile when it starts and writes it when it ends, so two at once (a
+// ChatGPT export, then Claude Code while the first still ran) left the profile of whichever ended last, made without
+// the other's result, and paid for both (v114). The update reload waits for one too (reloadWhenIdle).
+let importing = false;
+const importBusy = () => { if (importing) toast('An import is still running — wait for it to finish'); return importing; };
 async function runImport(kind, file) {
-  if (!file) return;
+  if (!file || importBusy()) return;
+  importing = true;
   try {
     impStatus(`Opening ${file.name}…`);
-    const convs = await readExport(file);
+    // Claude: the reader the Settings import uses (claude-import.js). It knows the classic export, the newer
+    // conversations-000.zip with several files in it, and says in plain words what the email's list of links is. This
+    // one still read only the classic shape: the new zip failed, and the list threw "convs is not iterable" (v114).
+    const convs = kind === 'Claude' ? ClaudeImport.readConversations(new Uint8Array(await file.arrayBuffer()), await loadFflate()) : await readExport(file);
     const items = kind === 'ChatGPT' ? chatgptTexts(convs) : claudeTexts(convs);
     await analyzeCorpus(`${kind} history`, items);
-  } catch (err) { impStatus(`Import failed: ${err.message}`, 'bad'); }
+  } catch (err) { impStatus(`Import failed: ${err.message}`, 'bad'); } finally { importing = false; }
 }
 $('#impChatgpt').onchange = (ev) => { runImport('ChatGPT', ev.target.files[0]); ev.target.value = ''; };
 $('#impClaude').onchange = (ev) => { runImport('Claude', ev.target.files[0]); ev.target.value = ''; };
@@ -6945,10 +7486,13 @@ async function readClaudeCode(dir, since = 0) {
         for (const line of (await f.text()).split('\n')) {
           if (!line.includes('"type":"user"')) continue;
           let j; try { j = JSON.parse(line); } catch { continue; }
-          if (j.type !== 'user' || j.message?.role !== 'user' || j.isMeta) continue;
+          // Only what the person typed. Claude Code also writes a "user" line for each prompt Claude sends a subagent
+          // (isSidechain) and for the summary after a compaction (isCompactSummary): model-written text, which can
+          // restate pages and files Claude read. Counted as the user's own, it shaped the style guide and memory (v114).
+          if (j.type !== 'user' || j.message?.role !== 'user' || j.isMeta || j.isSidechain === true || j.isCompactSummary === true) continue;
           const c = j.message.content;
-          const t = (typeof c === 'string' ? c : (c || []).filter((x) => x.type === 'text').map((x) => x.text).join('\n')).trim();
-          if (!t || t.startsWith('<') || t.startsWith('Caveat:')) continue;
+          const t = (typeof c === 'string' ? c : (Array.isArray(c) ? c : []).filter((x) => x?.type === 'text' && typeof x.text === 'string').map((x) => x.text).join('\n')).trim();
+          if (!t || t.startsWith('<') || t.startsWith('Caveat:') || t.startsWith('This session is being continued from a previous conversation')) continue;
           items.push({ text: t, at: Date.parse(j.timestamp) || f.lastModified });
           const folder = j.cwd ? claudeCodeFolder(j.cwd) : '';
           if (folder) projects.set(folder, (projects.get(folder) || 0) + 1);
@@ -6961,6 +7505,8 @@ async function readClaudeCode(dir, since = 0) {
   return { items, extra: top.length ? `Projects they work on in Claude Code (folder names only):\n${top.join('\n')}` : '' };
 }
 async function importClaudeCode(dir, incremental) {
+  if (importBusy()) return;
+  importing = true;
   try {
     if ((await dir.queryPermission?.({ mode: 'read' })) !== 'granted' && (await dir.requestPermission?.({ mode: 'read' })) !== 'granted') throw new Error('Folder access was not granted.');
     const since = incremental ? ME.sources?.['Claude Code sessions']?.at || 0 : 0;
@@ -6968,11 +7514,14 @@ async function importClaudeCode(dir, incremental) {
     const { items, extra } = await readClaudeCode(dir, since);
     if (!items.length) return impStatus(incremental ? 'No new Claude Code sessions since the last sync.' : 'No prompts found — pick the .claude\\projects folder.');
     await analyzeCorpus('Claude Code sessions', items, extra);
-  } catch (err) { if (err.name !== 'AbortError') impStatus(`Claude Code import failed: ${err.message}`, 'bad'); }
+  } catch (err) { if (err.name !== 'AbortError') impStatus(`Claude Code import failed: ${err.message}`, 'bad'); } finally { importing = false; }
 }
 $('#impCode').onclick = async () => {
   if (!window.showDirectoryPicker) return toast('Folder access needs Chrome or Edge on desktop');
-  toast('Pick C:\\Users\\<you>\\.claude\\projects (type the path in the address bar)');
+  if (importBusy()) return;
+  // The folder is hidden on a Mac, and has another path there (v114: the hint was the Windows one everywhere).
+  if (/mac/i.test(navigator.userAgentData?.platform || navigator.platform || '')) toast('Pick ~/.claude/projects. Press Cmd+Shift+. to show hidden folders.', { ms: 9000 });
+  else toast('Pick C:\\Users\\<you>\\.claude\\projects (type the path in the address bar)');
   try {
     const dir = await window.showDirectoryPicker({ id: 'claude-projects', mode: 'read' });
     await DB.kvSet('ccHandle', dir);
@@ -7041,7 +7590,7 @@ document.addEventListener('keydown', (ev) => {
 });
 
 function startFresh() {
-  persist(true);
+  persist(true, { flush: true });
   stopReading({ disarm: true });
   S.thread = null;
   $('#activityStatus').textContent = '';
@@ -7113,7 +7662,7 @@ function networkChanged() {
 window.addEventListener('online', networkChanged);
 window.addEventListener('offline', networkChanged);
 $('#connectionBanner').hidden = navigator.onLine;
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { persist(true); Sync.flush(); } else Sync.kick('visible'); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { persist(true, { flush: true }); Sync.flush(); } else Sync.kick('visible'); });
 window.addEventListener('beforeunload', ev => { if (S.busy || remix?.cutting()) { ev.preventDefault(); ev.returnValue = ''; } });
 new ResizeObserver(syncDock).observe($('#dock'));
 setBusy();
@@ -7168,7 +7717,7 @@ function armTapToTalk() {
 // (micSendAfter), paintMic sends everything once dictation ends: no hold (and no stale "Sending… Cancel") on top.
 dictatedSend = () => {
   if (micSendAfter) return;
-  if (!S.busy && document.visibilityState === 'visible' && composerSrc.hidden && !S.attachments.length && !S.video) holdThenSend({ ms: HOLD_MS.voice });
+  if (!S.busy && document.visibilityState === 'visible' && composerSrc.hidden && !S.attachments.length && !S.files.length && !S.video) holdThenSend({ ms: HOLD_MS.voice });
   else armSend();
 };
 // First use of a "Send without a tap" key: show what will be sent, default to Not now.
@@ -7205,7 +7754,7 @@ async function launchCtx(extra = {}) {
   return {
     signedIn: hasCredentials(), role: roleNow(), standalone: STANDALONE(), sr: dictation.available(), needsTap: dictation.needsGesture(),
     perm, dialogOpen: appDialogs().length > 0, online: navigator.onLine, busy: S.busy, visible: document.visibilityState === 'visible',
-    ios: PLATFORM === 'ios', now: Date.now(), composer: input.value, attachments: S.attachments.length + (S.video ? 1 : 0), store: LS, ...extra,
+    ios: PLATFORM === 'ios', now: Date.now(), composer: input.value, attachments: S.attachments.length + S.files.length + (S.video ? 1 : 0), store: LS, ...extra,
   };
 }
 async function runLaunch(intent, extra = {}) {
@@ -7342,6 +7891,10 @@ window.atelierBoot?.started();
   // this tab's address before anything else runs. This clears this tab's URL only: the browser's History (and History
   // sync) still records the launch link with its key and words (docs/quick-launch.md).
   const launch = readLaunch(location.search, location.hash);
+  // A new tester lands on /?tester=welcome, and signing them in reloads the page into their own workspace (setTester):
+  // the URL is clean by then, so the welcome (their allowance, and where their prompts go) never showed (v114). The
+  // word is kept for this tab until the welcome has been shown or the sign-in has failed.
+  try { if (params.get('tester') === 'welcome') sessionStorage.setItem('atelier.testerWelcome', '1'); } catch {}
   if (params.toString() || location.hash.length > 1) history.replaceState(null, '', '/');
   applyTheme();
   renderWelcome();
@@ -7352,7 +7905,7 @@ window.atelierBoot?.started();
   const testerWorkspace = workspace.startsWith('tester:');
   const scopeHash = testerWorkspace ? [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(workspace)))].map((x) => x.toString(16).padStart(2, '0')).join('') : '';
   Sync.init({
-    rawDB, uid, toast, account: testerWorkspace ? 'tester' : 'owner', scope: testerWorkspace ? `tester-${scopeHash}` : undefined,
+    rawDB, uid, toast, account: testerWorkspace ? 'tester' : 'owner', scope: testerWorkspace ? `tester-${scopeHash}` : undefined, build: APP_BUILD,
     onOutdated: appOutdated, // 426 app_outdated on a sync write: reload into the deployed version
     // The passcode as stored now (not this tab's copy): every Atelier tab's sync sends the same one, so a tab with an
     // older copy never gets refused and pauses the others.
@@ -7407,26 +7960,32 @@ window.atelierBoot?.started();
     const restorable = workspace === 'guest' && !testerTrace;
     const backup = restorable ? await Promise.race([DB.ownerPasscodeGet().catch(() => null), sleep(1500).then(() => null)]) : null;
     if (typeof backup === 'string' && backup) { S.settings.passcode = backup; saveSettings(); if (reloadWorkspace()) return; console.info('[atelier] passcode restored from backup'); }
-    else if (SIGNIN_NOTES[LS.get('outReason', '')]) signinReason = LS.get('outReason', ''); // signed out on purpose, or the session ended
+    else if (Object.hasOwn(SIGNIN_NOTES, LS.get('outReason', '')) || Object.hasOwn(SIGNIN_REASONS, LS.get('outReason', ''))) signinReason = LS.get('outReason', ''); // signed out on purpose, the session ended, or the passcode was refused
     else if (LS.get('signedIn', 0) || (await Promise.race([DB.all().then((t) => t.length).catch(() => 0), sleep(1500).then(() => 0)]))) signinReason = 'cleared';
   }
   if (S.settings.passcode && S.tester) { setTester(null); fetch('/api/li/logout', { method: 'POST' }).catch(() => {}); } // the owner always wins on this device (its tester session ends too)
   syncRole(); renderAllowance(); renderOptions();
-  const testerResult = params.get('tester');
+  const welcomeKept = () => { try { return sessionStorage.getItem('atelier.testerWelcome') === '1'; } catch { return false; } };
+  const welcomeDone = () => { try { sessionStorage.removeItem('atelier.testerWelcome'); } catch {} };
+  const testerResult = params.get('tester') || (welcomeKept() ? 'welcome' : null);
   if (S.settings.passcode) {
     LS.set('signedIn', LS.get('signedIn', 0) || Date.now()); checkKey(); health.then(() => { pullMe(); loadTools(); refreshRemote(true).then(() => renderOptions()); });
-    if (testerResult) toast('This device uses the owner passcode — open a private window to try LinkedIn sign-in.', { ms: 9000 });
+    if (params.get('tester')) toast('This device uses the owner passcode — open a private window to try LinkedIn sign-in.', { ms: 9000 });
+    welcomeDone();
   } else {
     // Tester or signed out. A cached tester starts in tester mode; the Worker's answer settles it either way.
     const cached = Boolean(S.tester);
-    if (cached) checkKey(); else { updateKeyState(null); openOnboard(SIGNIN_NOTES[testerResult] && testerResult !== 'welcome' ? testerResult : signinReason); }
+    // The note is looked up by a word from the URL: only a note of its own counts (?tester=constructor showed
+    // "function Object() { [native code] }" as the sign-in note, v114).
+    if (cached) checkKey(); else { updateKeyState(null); openOnboard(Object.hasOwn(SIGNIN_NOTES, testerResult || '') && testerResult !== 'welcome' ? testerResult : signinReason); }
     loadTester().then((st) => {
       if (st === 'ok' && S.tester && !accountReloading) {
         if ($('#onboard').open) $('#onboard').close();
         updateKeyState(null); health.then(() => pullMe());
         if (S.tester.features.sync) Sync.verified();
-        if (testerResult === 'welcome') welcomeTester(); else if (!cached) resumeLaunch(); // a session found now is a sign-in
+        if (testerResult === 'welcome') { welcomeDone(); welcomeTester(); } else if (!cached) resumeLaunch(); // a session found now is a sign-in
       } else if (st === 'none' || st === 'closed') {
+        welcomeDone();
         if (cached) testerSignedOut(st === 'closed' ? 'closed' : 'expired');
         else if (testerResult === 'welcome') openOnboard(st === 'closed' ? 'closed' : 'nocookie');
       }
@@ -7448,11 +8007,15 @@ window.atelierBoot?.started();
     if (asideDraft.src) showSource(asideDraft.src === 'share' ? NOTES.shared : NOTES.link);
   });
   const connected = params.get('connected');
-  if (connected) {
+  // Said only when this device started a sign-in (oauthVia, set as the Google or Canva window opens): anyone can write a
+  // link with ?connected=…&account=…&why=… in it, and those words were shown as Atelier's own (v114).
+  const via = connected ? LS.get('oauthVia', '') : '';
+  if (connected && via) {
+    LS.set('oauthVia', '');
     // denied / error don't say which sign-in they came from: use the one this device started last.
-    const via = LS.get('oauthVia', ''); if (via) LS.set('oauthVia', '');
     const svc = connected === 'canva' || (connected !== 'gmail' && via === 'canva') ? 'Canva' : 'Google';
-    toast(connected === 'gmail' || connected === 'canva' ? `${svc} connected ✓ ${params.get('account') || ''}` : connected === 'denied' ? `${svc} access was declined` : `${svc} connection failed — ${params.get('why') || 'try again'}`, { error: connected === 'error' });
+    const word = (k) => String(params.get(k) || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+    toast(connected === 'gmail' || connected === 'canva' ? `${svc} connected ✓ ${word('account')}` : connected === 'denied' ? `${svc} access was declined` : `${svc} connection failed — ${word('why') || 'try again'}`, { error: connected === 'error' });
   }
 
   syncDock(); moveInk();
@@ -7463,7 +8026,9 @@ window.atelierBoot?.started();
       let reloaded = false;
       const reloadWhenIdle = () => {
         if (reloaded) return;
-        if (S.busy || Sync.busy() || dictation.busy() || hasDraft() || sendHold || micOn() || lookup.pinned() || appDialogs().length || $('.drawer:not([hidden])') || !$('#viewer').hidden || learning) return setTimeout(reloadWhenIdle, 3000);
+        // Also never under a Remix cut, a Claude chats import or a history import: closing Settings or You leaves them
+        // running, and the reload stopped them partway with no word (v114).
+        if (S.busy || Sync.busy() || dictation.busy() || hasDraft() || sendHold || micOn() || lookup.pinned() || appDialogs().length || $('.drawer:not([hidden])') || !$('#viewer').hidden || learning || remix?.cutting() || claudeJob || importing) return setTimeout(reloadWhenIdle, 3000);
         reloaded = true; appDataSaved().then(() => location.reload()); // a Build app's last write lands first
       };
       navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) reloadWhenIdle(); });

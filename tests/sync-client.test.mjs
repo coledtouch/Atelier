@@ -385,6 +385,49 @@ test('a pulled entry that fails validateBackup is quarantined, never applied, an
   assert.ok(w.log.filter((x) => x.path.startsWith('thread/')).length <= 1, 'a quarantined version is not fetched over and over');
 });
 
+// v114 (review, sync #1): a phone tab still on an older build set aside an entry of a kind it could not read (v113's
+// attached files). After the update the entry stayed hidden there for good: its q: record outlived the build that wrote it.
+test('an entry set aside by an older build is read again after the update, and shows; one that is still bad is set aside again', async () => {
+  const w = world();
+  const pc = device(w, 'pc', { engine: { build: '114' } });
+  const withFile = { ...ask('e2', T0 + 1), files: [{ name: 'a.txt', kind: 'text', text: 'ABC' }] };
+  await pc.db.put(thread('t1', [ask('e1', T0), withFile]));
+  await online(pc);
+  // The phone's open tab runs the build before attached files: its validator refuses them.
+  const store = memoryStore(), db = memDb();
+  const old = device(w, 'phone', { store, db, engine: { build: '112' }, validate: (b) => { for (const t of b.threads) for (const e of t.entries) if (e.files) throw new Error('unknown field: files'); return b; } });
+  await online(old);
+  assert.deepEqual(old.get('t1').entries.map((e) => e.id), ['e1'], 'the older build sets the file turn aside');
+  const [[qKey, q]] = await store.entries('q:');
+  assert.equal(q.build, '112', 'what is set aside names the build that did it');
+  await sync(old); await sync(old);
+  assert.equal((await store.entries('q:')).length, 1, 'the same build keeps it aside (no refetch loop)');
+  // The tab reloads into the new build: same database, same sync store.
+  const now = device(w, 'phone', { store, db, engine: { build: '114' } });
+  await online(now);
+  assert.deepEqual(now.get('t1').entries.map((e) => e.id), ['e1', 'e2'], 'the turn is back');
+  assert.deepEqual(now.get('t1').entries[1].files, withFile.files);
+  assert.equal((await store.entries('q:')).length, 0);
+  assert.doesNotMatch(countsLine(now.engine.status()), /set aside/);
+  // A record from before this rule (no build) is tried once too; an entry that is really bad goes back aside, named with this build.
+  const bad = { id: 'bad1', kind: 'bogus', prompt: 'x', createdAt: T0 + 5 };
+  const r = await w.fetchFor({ name: 'x' })('/api/sync/thread/t1', { method: 'POST', headers: { 'x-app-pass': 'pw', 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, createdAt: T0, entries: [{ id: 'bad1', base: 0, createdAt: T0 + 5, h: await entryHash(bad), d: bad }] }) });
+  assert.equal(r.status, 200);
+  await sync(now);
+  const kept = await store.entries('q:');
+  assert.deepEqual(kept.map(([, v]) => v.build), ['114']);
+  await store.set(kept[0][0], { ...kept[0][1], build: undefined });
+  const again = device(w, 'phone', { store, db, engine: { build: '114' } });
+  await online(again);
+  assert.deepEqual((await store.entries('q:')).map(([, v]) => [v.reason, v.build]), [['invalid', '114']]);
+  assert.deepEqual(again.get('t1').entries.map((e) => e.id), ['e1', 'e2']);
+  assert.ok(qKey.startsWith('q:t1/e2/'));
+  // An engine told no build (a test, another host) leaves records alone, as before.
+  const plain = device(w, 'phone', { store, db });
+  await online(plain);
+  assert.equal((await store.entries('q:')).length, 1);
+});
+
 // ── server loss, deletes, trash ──
 test('a thread the server lost is pushed again, never deleted locally', async () => {
   const w = world();
@@ -1024,6 +1067,9 @@ test('review: a full server (507) gets no more uploads until there is room; a re
   assert.ok(w.doc('small'), 'the other thread synced');
   assert.equal(pc.engine.status().quotaFull, true);
   assert.match(statusLine(pc.engine.status(), w.clock.t), /^Server storage limit reached/);
+  // v114 (sync #5): with no room, the part held back can't reach the trash, and the confirm says so. It promised a
+  // 30-day restore for all of it.
+  assert.equal(await pc.engine.deleteCopy('big'), COPY.deleteConfirm + COPY.deleteUnsynced);
   for (let i = 0; i < 3; i++) { w.clock.t += MIN; await sync(pc); }
   assert.equal(puts(), 1, 'no re-upload on later polls');
   assert.equal(await pc.store.get('d:big'), undefined, 'and the thread isn’t pushed over and over');

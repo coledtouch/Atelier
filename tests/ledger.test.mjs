@@ -2,9 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeLedger, PROFILE } from './tester-env.mjs';
 import { fakeR2 } from './fake-r2.mjs';
+import { problems } from './humanizer-lint.mjs';
 import { chatWorstCase, chatActual, imageCost, veoCost, WEB_SEARCH_USD, VEO_CALL_RESERVE_CAP } from '../src/tester/prices.js';
 
-const { DEFAULTS, DAILY_UPLOADS, OVERRUN, REFUSED_TTL, dayKey, monthKey, resetsAt } = await import('../src/tester/ledger.js'); // after tester-env's module hook
+const { DEFAULTS, DAILY_UPLOADS, OVERRUN, REFUSED_TTL, OMNI_JOB_TTL, dayKey, monthKey, resetsAt } = await import('../src/tester/ledger.js'); // after tester-env's module hook
 
 // The real Ledger class on an in-memory SQLite shim; `ledger.clock` is pinned so days and months are deterministic.
 const T0 = Date.parse('2026-10-15T12:00:00Z');
@@ -289,6 +290,47 @@ test('jobs and uploads: ownership, the daily upload gate, and the first owner ke
   assert.equal(L.ledger.uploadGate(b).scope, 'signin');
 });
 
+// v114 review: the alarm deleted every job row after 7 days, so the Ledger forgot whose Omni clip it was while Google
+// still held it (55 days) and the app still offered Edit (54): the tester's own edit answered 403 tester_owner.
+test('job rows: an Omni clip’s is kept 55 days, as long as it can be edited; uploads, upload slots and files go after 7', async () => {
+  const DAY = 86_400_000;
+  const L = setup();
+  const sub = L.join(), other = L.join();
+  assert.equal(OMNI_JOB_TTL, 55 * DAY, 'Google keeps an interaction 55 days (src/omni.js, privacy page §6)');
+  L.ledger.addJob(sub, 'omni:v1_clip', 'omni', { actual: 405_440 });
+  L.ledger.addJob(sub, 'file:files/f', 'file');
+  L.ledger.addJob(sub, 'upload:u1', 'upload');
+  assert.equal(L.ledger.uploadGate(sub).ok, true);
+  const kinds = () => L.shim.db.prepare('SELECT kind FROM jobs WHERE sub = ? ORDER BY kind').all(sub).map((r) => r.kind);
+  L.later(7 * DAY - 1);
+  await L.ledger.alarm();
+  assert.deepEqual(kinds(), ['file', 'omni', 'upload', 'upload_slot'], 'nothing goes before 7 days');
+  L.later(1);
+  await L.ledger.alarm();
+  assert.deepEqual(kinds(), ['omni'], 'the short-lived rows are gone; the clip’s stays');
+  assert.equal(L.ledger.ownsJob(sub, 'omni:v1_clip'), true);
+  assert.equal(L.ledger.ownsJob(other, 'omni:v1_clip'), false);
+  L.later(47 * DAY); // day 54: the last day the app offers Edit
+  await L.ledger.alarm();
+  assert.equal(L.ledger.ownsJob(sub, 'omni:v1_clip'), true);
+  assert.equal(L.ledger.jobActual(sub, 'omni:v1_clip'), 405_440, 'and its recorded price, which an edit is held at');
+  L.later(DAY); // day 55: Google no longer has it either
+  await L.ledger.alarm();
+  assert.deepEqual(kinds(), []);
+  assert.equal(L.ledger.ownsJob(sub, 'omni:v1_clip'), false);
+});
+
+test('jobActual: the price recorded for a tester’s own job, null for someone else’s, an unknown id or a row without one', () => {
+  const L = setup();
+  const a = L.join(), b = L.join();
+  L.ledger.addJob(a, 'omni:v1_a', 'omni', { reservation: 'r1', actual: 608_160 });
+  L.ledger.addJob(a, 'file:files/x', 'file');
+  assert.equal(L.ledger.jobActual(a, 'omni:v1_a'), 608_160);
+  assert.equal(L.ledger.jobActual(b, 'omni:v1_a'), null);
+  assert.equal(L.ledger.jobActual(a, 'omni:v1_none'), null);
+  assert.equal(L.ledger.jobActual(a, 'file:files/x'), null);
+});
+
 test('retention: a tester unused for 90 days is deleted with spend, sessions, jobs and profile', async () => {
   const L = setup();
   const p = PROFILE();
@@ -361,6 +403,31 @@ test('setConfig validates every field and caps the pool at $1,000', () => {
   assert.deepEqual(L.ledger.roster().config, before);
   const r = L.ledger.setConfig({ cap: 10, paused: 1, day_limit: 500_000, month_limit: 5_000_000, pool_limit: 1_000_000_000, preview_subs: ['a-1', 'a-1', 'b_2'] });
   assert.deepEqual(r.config, { cap: 10, paused: true, day_limit: 500_000, month_limit: 5_000_000, pool_limit: 1_000_000_000, preview_subs: ['a-1', 'b_2'] });
+});
+
+// v114 review: $150 a day passed the Testers panel's own checks, and the toast then read "day_limit must be a whole
+// number from 0 to 100000000 (micro-dollars)." The panel works in dollars and never shows that name.
+test('a refused limit reads in the Testers panel’s own words and in dollars, never a column name in micro-dollars', () => {
+  const L = setup();
+  const said = (patch) => { const r = L.ledger.setConfig(patch); assert.equal(r.ok, false, JSON.stringify(patch)); return r.error; };
+  const texts = [
+    [{ day_limit: 150_000_000 }, 'The daily limit can’t go above $100.'],
+    [{ month_limit: 1_000_000_001 }, 'The monthly limit can’t go above $1,000.'],
+    [{ pool_limit: 2_000_000_000 }, 'The monthly pool can’t go above $1,000.'],
+    [{ cap: 1_001 }, 'Spots must be a whole number from 0 to 1,000.'],
+    [{ cap: 2.5 }, 'Spots must be a whole number from 0 to 1,000.'],
+    // what only another caller of the API can send (the panel sends whole amounts above $0)
+    [{ day_limit: 1.5 }, 'The daily limit must be a whole number of micro-dollars, $0 to $100.'],
+    [{ month_limit: -1 }, 'The monthly limit must be a whole number of micro-dollars, $0 to $1,000.'],
+    [{ pool_limit: '100' }, 'The monthly pool must be a whole number of micro-dollars, $0 to $1,000.'],
+  ];
+  for (const [patch, text] of texts) {
+    assert.equal(said(patch), text);
+    assert.doesNotMatch(text, /day_limit|month_limit|pool_limit|\bcap\b|\d{7,}/, 'no column name, no figure in micro-dollars');
+    assert.deepEqual(problems(text), [], `the copy rules: ${text}`);
+  }
+  // the bounds themselves are unchanged: exactly the maximum still saves
+  assert.equal(L.ledger.setConfig({ day_limit: 100_000_000, month_limit: 1_000_000_000, pool_limit: 1_000_000_000, cap: 1_000 }).ok, true);
 });
 
 test('roster: every tester with today and this month spend, newest first', () => {

@@ -56,7 +56,7 @@ test('app.js: no spending-limit card any more — no owner_cap code is mapped, a
   assert.equal(skippable({ status: 429, message: 'busy' }, isTesterCode, accountProblem), true);
   assert.equal(skippable({ status: 402, code: 'runway_credits', message: 'out of credits' }, isTesterCode, accountProblem), true);
   assert.equal(skippable({ status: 402, code: 'tester_budget', message: 'x' }, isTesterCode, accountProblem), false);
-  for (const code of ['passcode_locked', 'passcode_busy', 'guard_unavailable']) assert.equal(skippable({ status: code === 'guard_unavailable' ? 503 : 429, code, message: 'x' }, isTesterCode, accountProblem), false, `${code}: the passcode guard refuses every model alike`);
+  for (const code of ['passcode_locked', 'passcode_busy', 'guard_unavailable', 'session_busy']) assert.equal(skippable({ status: code === 'guard_unavailable' ? 503 : 429, code, message: 'x' }, isTesterCode, accountProblem), false, `${code}: the passcode guard refuses every model alike`);
 });
 
 test('an entry saved with v84’s spending-limit card still imports, renders as the plain card, and runs again', () => {

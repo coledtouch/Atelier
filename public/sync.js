@@ -50,8 +50,8 @@ import {
   FORMAT, MEDIA_SYNC, MEDIA_HELD, TRANSIENT, syncId, validDate, isRev, sha256hex, utf8, utf8Length, fromBase64, base64Length, jsonClone, dehydrate,
   hydrate, mediaKinds, gateHeld, refsOf, refValue, reborn, bornOf, forkEntry, checkView, checkPulledEntry, newRecord, planPull, planPush, pushBodies,
   planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder, fullPrint, blobKind, LIMITS,
-} from './sync-merge.js?v=113';
-import { validateBackup } from './data-safety.js?v=113';
+} from './sync-merge.js?v=114';
+import { validateBackup } from './data-safety.js?v=114';
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 // The owner's choices and the engine's timing, kept together so they are easy to change.
@@ -410,6 +410,7 @@ export function createSync(deps = {}) {
   const timers = deps.timers || { setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (t) => clearTimeout(t) };
   const online = deps.online || (() => true), visible = deps.visible || (() => true);
   const toast = deps.toast || noop, dropThumbs = deps.dropThumbs || noop;
+  const build = typeof deps.build === 'string' ? deps.build : ''; // the app build this engine runs in (app.js APP_BUILD): kept on what it sets aside (load)
   const media = deps.media || MEDIA_SYNC, validate = deps.validate || validateBackup, base = accountTester ? TESTER_SYNC_BASE : (deps.base || SYNC_BASE);
   const mediaTag = `${media.image ? 1 : 0}${media.video ? 1 : 0}`; // cfg.media: the media kinds this device last synced
   const B = Object.freeze({ ...SYNC_CLIENT, ...(deps.budget || {}) }); // the phone budget (tests shrink its sizes)
@@ -510,7 +511,17 @@ export function createSync(deps = {}) {
     hidden.clear(); for (const [k] of hs) hidden.add(k.slice(5));
     deleting.clear(); for (const [k, v] of dels) deleting.set(k.slice(4), v);
     inbound.clear(); for (const [k, v] of ins) inbound.set(k.slice(3), v);
-    qKeys.clear(); for (const [k] of qs) qKeys.add(k.slice(2));
+    // v114: an entry another build set aside is tried again by this one. A tab still running an older build could not
+    // read a newer kind of entry (v113's attached files), set it aside, and it stayed hidden on that device for good,
+    // also after the update that reads it. Its record goes, and its thread is read whole again. A record with no
+    // build is from before this rule: tried again once. An entry that is still bad is set aside again, and said once.
+    qKeys.clear();
+    const again = new Set();
+    for (const [k, v] of qs) {
+      if (build && v?.build !== build) { again.add(k.slice(2).split('/')[0]); store.del(k).catch(warn); continue; }
+      qKeys.add(k.slice(2));
+    }
+    for (const tid of again) { const r = recs.get(tid); if (r && !r.refetch) { const next = { ...r, refetch: true }; recs.set(tid, next); store.set(`t:${tid}`, next).catch(warn); } }
     blobRefused.clear(); for (const [k, v] of bfs) if (v && Number.isFinite(v.at)) blobRefused.set(k.slice(3), v);
     if (isTester() && !traced) { traced = true; store.set('trace', 1).catch(warn); }
   }
@@ -1289,7 +1300,7 @@ export function createSync(deps = {}) {
   }
   async function quarantine(tid, view, reason) {
     const key = `${tid}/${view.id}/${view.h}`;
-    if (!qKeys.has(key)) { qKeys.add(key); await store.set(`q:${key}`, { d: view.d ?? null, reason, at: now() }).catch(warn); }
+    if (!qKeys.has(key)) { qKeys.add(key); await store.set(`q:${key}`, { d: view.d ?? null, reason, at: now(), ...(build && { build }) }).catch(warn); }
     if (!toldQuarantine) { toldQuarantine = true; toast(COPY.quarantine); }
     emitSoon();
   }
@@ -2353,8 +2364,12 @@ export function createSync(deps = {}) {
     const skip = t ? skipReason(id, t, rec) : null;
     const keep = enabled() && t && !skip && !rec?.tooLarge ? await unsyncedCopy(id, t, rec).catch(() => null) : null;
     if (skip || (!onServer && rec?.tooLarge) || !(known || keep)) return COPY.deleteLocal;
+    // No room on the server right now (v114): the unsynced part can't reach the trash, so the copy says so instead
+    // of promising a 30-day restore for it.
+    const full = Boolean(keep) && (quotaFull || capUntil > now() || capped.has(id) || quotaHeld.has(id) || blobBlocked.has(id));
+    if (full && !onServer) return COPY.deleteLocal;
     let copy = COPY.deleteConfirm;
-    if (onServer && rec.tooLarge) copy += COPY.deleteUnsynced;
+    if (onServer && (rec.tooLarge || full)) copy += COPY.deleteUnsynced;
     const plan = t && enabled() ? await planPush({ thread: t, record: rec, locked: await pushLocks(), media, hashOf: hasher(id), holdBlobs }).catch(() => null) : null;
     // Media held back is never on the server as it is here (a held entry the server knows is an older version of it,
     // such as a regenerated answer), so every such entry is lost with the thread.

@@ -1128,7 +1128,7 @@ test('tts: symbols and emoji are reserved for their spoken names, held to the ou
 test('tts: a per-tester rate limit (LI_LIMIT, keyed by sub) answers 429 tts_busy before anything is reserved', async () => {
   const { env, L, sub, call } = await tester();
   const keys = [];
-  env.LI_LIMIT = { async limit({ key }) { keys.push(key); return { success: keys.length <= 2 }; } };
+  env.LI_LIMIT = { async limit({ key }) { keys.push(key); return { success: keys.filter((k) => k.startsWith('tts:')).length <= 2 }; } };
   mockFetch([[TTS_UP, () => spoken(1)]]);
   for (let i = 0; i < 2; i++) assert.equal((await call('tts', post({ voice: 'atelier', text: 'Hello there.' }))).status, 200);
   L.calls.length = 0;
@@ -1138,7 +1138,9 @@ test('tts: a per-tester rate limit (LI_LIMIT, keyed by sub) answers 429 tts_busy
   assert.equal(r.headers.get('retry-after'), '30');
   assert.ok(!L.calls.includes('reserve'));
   assert.equal(upstream.calls.length, 2);
-  assert.deepEqual(keys, [`tts:${sub}`, `tts:${sub}`, `tts:${sub}`]);
+  // v114: the first request's cookie is new to this isolate, so its session lookup is counted once (sess:<network>,
+  // src/tester/auth.js); after that the identity is cached and only read aloud's own key is.
+  assert.deepEqual(keys, ['sess:unknown', `tts:${sub}`, `tts:${sub}`, `tts:${sub}`]);
   // A limiter that fails never blocks read aloud.
   env.LI_LIMIT = { async limit() { throw new Error('down'); } };
   assert.equal((await call('tts', post({ voice: 'atelier', text: 'Hello there.' }))).status, 200);

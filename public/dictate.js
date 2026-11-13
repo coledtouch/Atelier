@@ -388,7 +388,8 @@ export function insertText(value, start, end, text) {
  *     transcript (replace the previous live text); final: the finished text.
  *   onLevel(level 0..1, {elapsedMs, leftMs, heard}) about every tickMs while recording.
  *   onResponse(r) for every /api/transcribe response (x-tester-allowance); onRefusal({status, code, scope, resetsAt,
- *     error}) for tester refusals; toast(message, {error}).
+ *     error}) for tester refusals; toast(message, {error, retry?}). retry: true means the recording couldn't be sent
+ *     and is kept: the app puts a button on that toast that calls retry(), or it must be said again (v114).
  *   limits: DICTATE_LIMITS overrides; vad: VAD_DEFAULTS overrides.
  * Test seams (default to the browser's): navigator, MediaRecorder, AudioContext, SpeechRecognition, fetch, document,
  *   matchMedia, now, setTimeout, clearTimeout, setInterval, clearInterval.
@@ -414,7 +415,8 @@ export function createDictation(opts = {}) {
   const L = { ...DICTATE_LIMITS, ...(opts.limits || {}) };
   const V = { ...VAD_DEFAULTS, ...(opts.vad || {}) };
   const call = (f, ...a) => { try { return f?.(...a); } catch (err) { console.error(err); return undefined; } };
-  const toast = (msg, error = true) => { if (msg) call(opts.toast, msg, { error }); };
+  // kept: the recording is held for retry(). The toast says so (retry: true), and the app offers to send it again.
+  const toast = (msg, error = true, kept = false) => { if (msg) call(opts.toast, msg, kept ? { error, retry: true } : { error }); };
   const plat = platformOf(nav || {}, mm);
   // iPhone/iPad: the recognizer is never looked up, so it is never constructed.
   const SR = plat.ios ? null : has('SpeechRecognition') ? opts.SpeechRecognition : (g.SpeechRecognition || g.webkitSpeechRecognition);
@@ -479,7 +481,7 @@ export function createDictation(opts = {}) {
     if (s) { release(s); session = null; }
     const detail = { engine: s?.engine ?? null, ...(s ? pub(s) : {}), message, code, retry: Boolean(retry) };
     if (quiet) return setState('idle', detail);
-    toast(message);
+    toast(message, true, Boolean(retry) && Boolean(pending));
     setState('error', detail);
   }
   const sleep = (ms) => new Promise((r) => T.set(r, ms));
@@ -823,14 +825,19 @@ export function createDictation(opts = {}) {
     if (session) return Promise.resolve(false);
     return start(o);
   }
-  /** Sends the last recording that couldn't be (offline, busy, the server down) again. → Promise<boolean> */
+  /**
+   * Sends the last recording that couldn't be (offline, busy, the server down) again. → Promise<boolean>
+   * It only fills the box: a "talk, then send" recording no longer sends by itself (autoSend false). That send was
+   * checked against the composer when the mic opened, and this is a later tap on the toast's button (v114).
+   */
   function retry() {
     if (session || !pending) return Promise.resolve(false);
     const job = pending;
     pending = null;
-    const s = session = { id: ++seq, engine: 'record', ...job.meta, reason: 'retry', dead: false, stopping: true, chunks: [] };
+    const meta = { ...job.meta, reason: 'retry', autoSend: false };
+    const s = session = { id: ++seq, engine: 'record', ...meta, dead: false, stopping: true, chunks: [] };
     setState('transcribing', { engine: 'record', ...pub(s) });
-    return upload(s, { ...job, meta: { ...job.meta, reason: 'retry' } });
+    return upload(s, { ...job, meta });
   }
   return {
     start, stop, cancel, toggle, retry,

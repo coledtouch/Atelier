@@ -33,7 +33,8 @@ export const TRANSCRIBE_LIMITS = Object.freeze({
   maxBytes: 10 * MB, // owner and testers; 180 s of 16 kHz mono WAV is 5.76 MB, recorded AAC/Opus far less
   // Enforced only where the length is measured: a WAV's header, and a tester's Gemini fallback (countTokens). Other
   // containers (MP4, WebM, Ogg, MP3, FLAC) are held to maxBytes alone; at OpenAI (billed by duration) a tester's
-  // reservation counts such a recording's bytes at prices.js STT_MIN_BYTES_PER_SECOND, a ceiling on how long it plays.
+  // reservation counts such a recording's bytes at prices.js STT_MIN_BYTES_PER_SECOND: how long speech of that size
+  // plays at most, not a ceiling for every file (see there: an open decision since the v114 review).
   maxSeconds: 180,
   minSeconds: 0.1, // OpenAI refuses shorter audio
   minBytes: 128, // less than this can't hold a container header and any sound

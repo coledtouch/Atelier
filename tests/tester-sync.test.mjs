@@ -259,7 +259,8 @@ test('tester sync writes and status recounts are rate limited per tester (LI_LIM
   const keys = []; let allow = true;
   env.LI_LIMIT = { async limit({ key }) { keys.push(key); return { success: allow }; } };
   assert.equal((await call(env, a.token, 'POST', 'thread/limited', await pushBody('first'))).status, 200);
-  assert.deepEqual(keys, [`sync:${a.sub}`]);
+  // v114: one session check for a cookie new to this isolate (sess:<network>, src/tester/auth.js), then the write's key
+  assert.deepEqual(keys, ['sess:unknown', `sync:${a.sub}`]);
   allow = false;
   const before = bucket.keys().length;
   const r = await call(env, a.token, 'POST', 'thread/limited', await pushBody('second', 0));
@@ -342,7 +343,7 @@ test('tester feedback is rate limited per tester (LI_LIMIT fb:<sub>) before anyt
   assert.equal(r.status, 429);
   assert.equal((await r.json()).code, 'feedback_busy');
   assert.ok(r.headers.get('retry-after'));
-  assert.deepEqual(keys, [`fb:${a.sub}`, `fb:${a.sub}`]);
+  assert.deepEqual(keys, ['sess:unknown', `fb:${a.sub}`, `fb:${a.sub}`], 'one session check for a cookie new to this isolate (v114), then feedback’s own key');
   assert.equal(env.ATELIER_KV.m.size, 1);
 });
 

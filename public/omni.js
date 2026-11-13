@@ -50,7 +50,9 @@ const headersFor = (apiHeaders, json) => {
   if (json) h.set('content-type', 'application/json'); else h.delete('content-type');
   return h;
 };
-async function send(deps, path, { method = 'GET', body, timeout = OMNI_TIMING.request } = {}) {
+// read(r) (the download): reads the answer's body in here, so the time cap and Stop hold until its last byte, and
+// send() resolves with what read returns. Read after send() had returned, a clip came down with neither (v114).
+async function send(deps, path, { method = 'GET', body, timeout = OMNI_TIMING.request, read = null } = {}) {
   const f = deps.fetch || globalThis.fetch;
   const ctrl = new AbortController(), outer = deps.signal;
   let late = false;
@@ -61,7 +63,10 @@ async function send(deps, path, { method = 'GET', body, timeout = OMNI_TIMING.re
   try {
     const r = await f(`/api/omni/${path}`, { method, signal: ctrl.signal, headers: headersFor(deps.apiHeaders, body !== undefined), body: body === undefined ? undefined : JSON.stringify(body) });
     try { deps.onResponse?.(r); } catch {}
-    return r;
+    if (!read) return r;
+    const out = await read(r);
+    if (outer?.aborted) throw abortError(); // readJson swallows a Stop that cut its body short, so look again
+    return out;
   } catch (err) {
     if (outer?.aborted && !late) throw abortError();
     throw fail(0, late ? 'Atelier took too long to answer — check your connection.' : 'Couldn’t reach Atelier — the connection dropped.', { late });
@@ -98,13 +103,22 @@ export async function omniStatus(deps, id) {
   if (!r.ok) throw errorFrom(r, j, `Checking the Omni video failed (${r.status}).`);
   return j;
 }
-/** GET /api/omni/video/<id> → a video/mp4 Blob (409 {code: 'omni_not_ready'} while Google still processes it). */
+/**
+ * GET /api/omni/video/<id> → a video/mp4 Blob (409 {code: 'omni_not_ready'} while Google still processes it).
+ * The clip is read inside send(): OMNI_TIMING.download caps the whole download, and Stop ends it at once (AbortError).
+ * Before v114 the clip was read after send() had let go of both, so Stop did nothing while it came down and a download
+ * that stalled never ended. The clip is made and paid for by then: omniVideo keeps it for Try again either way.
+ */
 export async function omniFetch(deps, id) {
   if (!ID.test(id || '')) throw fail(400, 'Not an Omni video.');
-  const r = await send(deps, `video/${encodeURIComponent(id)}`, { timeout: OMNI_TIMING.download });
-  if (!r.ok) throw errorFrom(r, await readJson(r), `Downloading the Omni video failed (${r.status}).`);
-  let blob;
-  try { blob = await r.blob(); } catch { throw fail(0, 'The Omni video download dropped — tap Try again (it won’t make a new video).', { resumable: true }); }
+  let r = null, got;
+  try { got = await send(deps, `video/${encodeURIComponent(id)}`, { timeout: OMNI_TIMING.download, read: async (res) => { r = res; return res.ok ? { blob: await res.blob() } : { j: await readJson(res) }; } }); }
+  catch (err) {
+    if (err?.name === 'AbortError' || !r?.ok) throw err; // Stop, or no clip was on its way (no answer, a refusal)
+    throw fail(0, 'The Omni video download dropped — tap Try again (it won’t make a new video).', { resumable: true });
+  }
+  if (!r.ok) throw errorFrom(r, got.j, `Downloading the Omni video failed (${r.status}).`);
+  const { blob } = got;
   if (!blob.size) throw fail(502, 'Google sent back an empty video — try again.', { resumable: true });
   return /^video\/(mp4|webm)$/.test(blob.type) ? blob : new Blob([blob], { type: 'video/mp4' });
 }
@@ -146,15 +160,23 @@ export async function omniVideo(body, { apiHeaders, signal, onStatus, onId, resu
     for (;;) {
       if (!first) await sleep(Math.max(OMNI_TIMING.poll, failures ? Math.min(60_000, OMNI_TIMING.poll * 2 ** failures) : 0), signal);
       first = false;
-      if (now() > end) throw fail(504, 'Gemini Omni is still working on this after 20 minutes. Tap Try again to keep waiting. It won’t start a new video.', { code: 'omni_slow', resumable: true });
       try { s = await omniStatus(deps, id); }
       catch (err) {
         if (err?.name === 'AbortError') throw err;
+        // Too large for the Worker to read: every later poll would say so too, and it used to be asked eight more times
+        // (about seven minutes). The clip stays this entry's: Try again checks on it and never starts another (v114).
+        if (err?.code === 'omni_too_large') throw Object.assign(err, { resumable: true });
         if (!transient(err.status) || ++failures > OMNI_TIMING.failures) throw Object.assign(err, { resumable: transient(err.status) });
         continue;
       }
       failures = 0;
-      if (!s.done) { say(s.status === 'queued' ? 'Queued at Google' : 'Filming with Gemini Omni'); continue; }
+      if (!s.done) {
+        // The 20 minutes end the wait only when a poll has just said "not done". Tested before the poll, a wait the phone
+        // froze past them (the app in the background) reported "still working" on a clip that had finished (v114).
+        if (now() > end) throw fail(504, 'Gemini Omni is still working on this after 20 minutes. Tap Try again to keep waiting. It won’t start a new video.', { code: 'omni_slow', resumable: true });
+        say(s.status === 'queued' ? 'Queued at Google' : 'Filming with Gemini Omni');
+        continue;
+      }
       finished = true;
       if (s.video) break;
       throw fail(s.filtered ? 400 : 500, s.error || 'Gemini Omni couldn’t make this video.', { code: s.filtered ? 'omni_filtered' : 'omni_failed' });

@@ -162,7 +162,7 @@ function rig(o = {}) {
     if (typeof next === 'function') return next(url, init);
     return next || json({ text: 'hello there', provider: 'openai' }, 200, { 'x-transcribe-provider': 'openai' });
   };
-  const states = [], details = [], texts = [], toasts = [], levels = [], responses = [], refusals = [];
+  const states = [], details = [], texts = [], toasts = [], toastOpts = [], levels = [], responses = [], refusals = [];
   let before = 0;
   const doc = new EventTarget(); doc.visibilityState = 'visible';
   const d = createDictation({
@@ -178,10 +178,10 @@ function rig(o = {}) {
     onLevel: (l, detail) => levels.push({ l, ...detail }),
     onResponse: (r) => responses.push(r.status),
     onRefusal: (info) => refusals.push(info),
-    toast: (m, { error } = {}) => toasts.push({ m, error }),
+    toast: (m, opts = {}) => { toasts.push({ m, error: opts.error }); toastOpts.push(opts); }, // toastOpts: the options as passed (retry)
     limits: o.limits, vad: o.vad,
   });
-  return { d, c, mic, MR, AC, SR, nav, doc, streams, calls, states, details, texts, toasts, levels, responses, refusals, log, before: () => before };
+  return { d, c, mic, MR, AC, SR, nav, doc, streams, calls, states, details, texts, toasts, toastOpts, levels, responses, refusals, log, before: () => before };
 }
 const lastState = (r) => r.states.at(-1);
 const allStopped = (r) => r.streams.every((s) => s.track.readyState === 'ended');
@@ -878,6 +878,83 @@ test('a new start during an error, and start() while busy, behave', async () => 
   assert.equal(await r.d.start(), false, 'one at a time');
   r.d.cancel();
   assert.ok(allStopped(r));
+});
+
+// v114 (media #1): a recording that couldn't be sent was kept for retry(), but the toast said nothing of it, so the
+// app never offered it and the words had to be said again. The toast now carries retry: true (app.js adds the button).
+test('the toast for a recording kept for retry() carries retry: true; a refusal, an empty recording and a notice don’t', async () => {
+  const drop = () => new TypeError('Failed to fetch');
+  // the connection dropped (after its one automatic retry)
+  const net = rig({ ua: UA.iphone, replies: [drop(), drop()] });
+  await recordAndSend(net);
+  await net.c.advance(DICTATE_LIMITS.netRetryMs);
+  assert.deepEqual(net.toastOpts, [{ error: true, retry: true }]);
+  assert.equal(net.details.at(-1).retry, true);
+  assert.equal(net.d.hasRetry(), true, 'the flag and the kept recording agree');
+  // offline, a server that is down, a long 429: kept too
+  const off = rig({ ua: UA.iphone, onLine: false });
+  await recordAndSend(off);
+  assert.deepEqual(off.toastOpts, [{ error: true, retry: true }]);
+  for (const reply of [json({ error: 'x', code: 'transcribe_unavailable' }, 502), json({ error: 'x', code: 'transcribe_busy' }, 429, { 'retry-after': '30' })]) {
+    const r = rig({ ua: UA.iphone, replies: [reply] });
+    await recordAndSend(r);
+    assert.deepEqual(r.toastOpts, [{ error: true, retry: true }], String(reply.status));
+    assert.equal(r.d.hasRetry(), true);
+  }
+  // a recording the server refused is not kept: nothing to send again, so no flag (the options are as before)
+  for (const reply of [json({ error: 'too big', code: 'too_large' }, 413), json({ error: 'Add your passcode', code: 'unauthorized' }, 401), json({ text: '  ' })]) {
+    const r = rig({ ua: UA.iphone, replies: [reply] });
+    await recordAndSend(r);
+    assert.deepEqual(r.toastOpts, [{ error: true }], String(reply.status));
+    assert.equal(r.d.hasRetry(), false);
+  }
+  const tester = rig({ ua: UA.iphone, tester: true, replies: [json({ error: 'You’ve used today’s allowance.', code: 'tester_budget', scope: 'day' }, 402)] });
+  await recordAndSend(tester);
+  assert.deepEqual(tester.toastOpts, [{ error: true }], 'a tester refusal is never sent again');
+  // nothing recorded, and a notice
+  const quiet = rig({ ua: UA.iphone, level: 0.002 });
+  await quiet.d.start();
+  await quiet.c.advance(VAD_DEFAULTS.noSpeechMs + 200);
+  await flush();
+  assert.deepEqual(quiet.toastOpts, [{ error: true }]);
+  const busy = rig({ ua: UA.iphone, replies: [() => new Promise(() => {})] });
+  await recordAndSend(busy);
+  await busy.d.toggle();
+  assert.deepEqual(busy.toastOpts, [{ error: false }], 'Still transcribing…');
+});
+
+test('retry() sends the kept recording once more, says so again if that fails too, and only fills the box', async () => {
+  const drop = () => new TypeError('Failed to fetch');
+  // a "talk, then send" launch (autoSend) whose upload drops, twice over
+  const r = rig({ ua: UA.iphone, replies: [drop(), drop(), drop(), drop()] });
+  await r.d.start({ autoSend: true, reason: 'launch' });
+  await speakFor(r, 1_500, 0.1);
+  r.d.stop();
+  await flush();
+  await r.c.advance(DICTATE_LIMITS.netRetryMs);
+  assert.deepEqual(r.toastOpts, [{ error: true, retry: true }]);
+  const again = r.d.retry(); // the toast's button
+  assert.equal(lastState(r), 'transcribing');
+  await flush();
+  await r.c.advance(DICTATE_LIMITS.netRetryMs);
+  assert.equal(await again, false);
+  assert.equal(r.calls.length, 4);
+  assert.deepEqual(r.toastOpts, [{ error: true, retry: true }, { error: true, retry: true }], 'still kept, and the toast offers it again');
+  assert.equal(r.d.hasRetry(), true);
+  assert.equal(await r.d.retry(), true); // the connection is back
+  assert.equal(r.calls[4].body, r.calls[0].body, 'the same recording, never a new one');
+  // the words land in the box; the launch's automatic send does not carry over to a later tap
+  assert.deepEqual(r.texts, [{ t: 'hello there', final: true, live: false, engine: 'record', provider: 'openai', reason: 'retry', auto: false, autoSend: false }]);
+  assert.equal(r.d.hasRetry(), false);
+  assert.equal(lastState(r), 'idle');
+  // a recording that goes through the first time still sends by itself
+  const ok = rig({ ua: UA.iphone });
+  await ok.d.start({ autoSend: true, reason: 'launch' });
+  await speakFor(ok, 1_500, 0.1);
+  ok.d.stop();
+  await flush();
+  assert.equal(ok.texts[0].autoSend, true);
+  assert.equal(ok.texts[0].reason, 'launch');
 });
 
 // ── Android / desktop: Web Speech with a recording fallback ──

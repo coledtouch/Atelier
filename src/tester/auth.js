@@ -1,6 +1,7 @@
 // LinkedIn tester sign-in (OpenID Connect), the tester session cookie and identify() (spec §5, addendum A1, A4, A7b).
 // Public routes: GET /api/li/start, GET /api/li/callback, GET /api/li/spots, POST /api/li/logout.
 // The LinkedIn access token is used once for userinfo and never stored or logged; neither are codes or cookies.
+import { ipKey } from '../client-errors.js';
 
 export const COOKIE = '__Host-atelier_tester';
 const STATE_COOKIE = '__Host-atelier_li';
@@ -46,8 +47,22 @@ let spotsCache = null;
 export function resetTesterCaches() { identities.clear(); spotsCache = null; }
 export const forgetSession = (hash) => identities.delete(hash);
 
+// v114 (review: made-up tester cookies reached the Ledger with no throttle). A cookie this isolate has no answer for
+// is looked up in the Ledger, the one object that also holds the tester meter and the owner's spend record. Anyone can
+// send a well-formed cookie, so those lookups are limited per network: the LI_LIMIT binding, keyed sess:<network> (its
+// 20 a minute; an IPv6 address counts by its /64, as in src/guard.js). Over it the lookup is shed and nothing reaches
+// the Ledger. A live tester rarely counts: an answer (a miss too) is cached for 60 s, and the minute's re-check of a
+// session this isolate last saw live skips the limit, so only a cookie new to the isolate is counted. Without the
+// binding (tests, local dev), or when it fails, nothing is shed.
+async function sessionShed(req, env) {
+  if (!env.LI_LIMIT) return false;
+  try { return !(await env.LI_LIMIT.limit({ key: `sess:${ipKey(req.headers.get('cf-connecting-ip'))}` })).success; } catch { return false; }
+}
+
 // owner (passcode, wins over a cookie) → tester (live session cookie) → none. A cookie that no longer matches a session
-// gives {kind:'none', stale:true}, so the caller can answer "sign in again" instead of asking for a passcode.
+// gives {kind:'none', stale:true}, so the caller can answer "sign in again" instead of asking for a passcode. A cookie
+// whose lookup was shed gives {kind:'none', busy:true} (never cached: the next request asks again): the caller answers
+// sessionBusy() and leaves the cookie alone.
 export async function identify(req, env, passOk) {
   if (passOk(req, env)) return { kind: 'owner' };
   const token = readCookie(req, COOKIE);
@@ -56,6 +71,7 @@ export async function identify(req, env, passOk) {
   if (!stub || !TOKEN.test(token)) return { kind: 'none', stale: true };
   const hash = await sha256(token), now = Date.now(), hit = identities.get(hash);
   if (hit && hit.exp > now) return hit.who;
+  if (hit?.who.kind !== 'tester' && await sessionShed(req, env)) return { kind: 'none', busy: true };
   const t = await stub.session(hash);
   const who = t ? { kind: 'tester', sub: t.sub, name: t.name, email: t.email, picture: t.picture, hash } : { kind: 'none', stale: true };
   if (identities.size >= CACHE_MAX) {
@@ -68,6 +84,12 @@ export async function identify(req, env, passOk) {
 }
 
 export const signedOut = () => fail(401, 'tester_signin', 'Your tester session ended — sign in with LinkedIn again.', {}, { 'set-cookie': clearSession() });
+// A shed session lookup (sessionShed): 429 with Retry-After and no Set-Cookie, so a real tester on a busy or shared
+// network stays signed in and the app tries again. A thread-sync route answers 503, as its own rate limits do
+// (src/tester/sync.js): the sync client reads any 429 as the passcode lockout and pauses for 15 minutes.
+export const SESSION_RETRY_AFTER = '30';
+export const sessionBusy = (path = '') => fail(path.startsWith('tester/sync/') ? 503 : 429, 'session_busy',
+  'Too many sign-in checks from your network right now. Try again in a minute.', {}, { 'retry-after': SESSION_RETRY_AFTER });
 
 // ── LinkedIn OpenID Connect ──
 // The callback URL LinkedIn returns to (both are registered in the LinkedIn app, A1).
@@ -180,7 +202,10 @@ export async function handleLinkedIn(req, env, url, path) {
     const token = readCookie(req, COOKIE);
     if (stub && TOKEN.test(token)) {
       const hash = await sha256(token);
-      await stub.logout(hash);
+      // v114: sign-out reached the Ledger for any well-formed cookie too (a delete each; an Origin header is easy to
+      // send). A cookie this isolate doesn't know as a live session now shares the lookups' limit (sessionShed). Shed:
+      // the Ledger isn't called, this browser's cookie is cleared all the same, and that session ends when it expires.
+      if (identities.get(hash)?.who.kind === 'tester' || !(await sessionShed(req, env))) await stub.logout(hash);
       forgetSession(hash);
     }
     return new Response(null, { status: 204, headers: { 'set-cookie': clearSession(), 'cache-control': 'no-store' } });

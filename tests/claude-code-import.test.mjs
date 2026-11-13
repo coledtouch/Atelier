@@ -88,3 +88,23 @@ test('the Import your history hint says what a Claude Code import sends besides 
   assert.ok(hint, 'the Import your history hint');
   assert.match(hint[1], /Only your own messages go to an AI model for analysis\. A Claude Code import also sends your project folder names and prompt counts\./);
 });
+
+// v114 (review, app-4): Claude Code also writes a type "user" line for each prompt Claude sends a subagent and for the
+// summary that follows a compaction. Those are the model's words, and can restate pages and files it read: counted as
+// the user's own messages, they shaped the style guide, "What Atelier knows" and memory.
+test('readClaudeCode takes only what the person typed: no subagent prompts, no compaction summaries', async () => {
+  const cwd = '/home/jane/src/site';
+  const root = dir('projects', [dir('site', [file('s.jsonl', [
+    prompt(cwd, 'Make the header sticky'),
+    prompt(cwd, 'Search the repo for every use of fetch and report back', { isSidechain: true }),
+    prompt(cwd, 'Summary of the conversation so far: the user asked for…', { isCompactSummary: true }),
+    prompt(cwd, 'This session is being continued from a previous conversation that ran out of context. The summary below…'),
+    prompt(cwd, 'not mine either', { isMeta: true }),
+    prompt(cwd, [{ type: 'text', text: 'And tighten the footer' }, { type: 'tool_result', content: 'ignored' }, null]),
+    prompt(cwd, { not: 'a list' }),
+  ])])]);
+  const { items, extra } = await readClaudeCode(root, 0);
+  assert.deepEqual(items.map((i) => i.text), ['Make the header sticky', 'And tighten the footer']);
+  assert.match(extra, /site \(2 prompts\)/);
+  assert.match(APP, /j\.isMeta \|\| j\.isSidechain === true \|\| j\.isCompactSummary === true\) continue;/);
+});

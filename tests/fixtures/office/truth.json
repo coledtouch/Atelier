@@ -1,0 +1,166 @@
+{
+  "word": {
+    "body": "Quarterly Report\rRevenue rose 12% to €1,250,000 in Q3 — a “record” quarter.\rSee the full report for details.\rName\tValue\rLine one\u000bLine two\rA well\u001eknown café.\rFirst step\rSecond step\rThird step\rCosts fell by a third.\u0002\rHiring stayed flat.\u0002\rRegion\r\u0007Units\r\u0007Revenue\r\u0007\r\u0007North\r\u0007120\r\u0007$4,800\r\u0007\r\u0007South\r\u000795\r\u0007$3,800\r\u0007\r\u0007\rMargin was 41 percent.\rThe old new plan stays.\r\r\f\rSecond page conclusion.\r",
+    "footnote": "Source: internal ledger.",
+    "endnote": "Endnote: per the HR summary.",
+    "header": "Acme Corp Confidential Header\r",
+    "footer": "Footer line text\r",
+    "comment": "Check this number.",
+    "textbox": "Callout text in a box\r",
+    "revisions": 2
+  },
+  "excel": [
+    {
+      "name": "Alpha",
+      "visible": -1,
+      "rows": [
+        [
+          "Alpha first cell",
+          ""
+        ],
+        [
+          "",
+          "7"
+        ]
+      ]
+    },
+    {
+      "name": "Zeta",
+      "visible": -1,
+      "rows": [
+        [
+          "Item",
+          "Date",
+          "Amount",
+          "Paid",
+          "Share",
+          "When",
+          "Note"
+        ],
+        [
+          "Lumber",
+          "12/9/2025",
+          "$1,250.50",
+          "TRUE",
+          "25.0%",
+          "12:00 PM",
+          "He said \"hi\", twice"
+        ],
+        [
+          "Nails",
+          "12/10/2025 18:00",
+          "$89.99",
+          "FALSE",
+          "7.5%",
+          "8:30:00",
+          "Line1\nLine2"
+        ],
+        [
+          "Paint, blue",
+          "09-Jan-26",
+          "-$40.00",
+          "TRUE",
+          "100.0%",
+          "23:59",
+          "plain"
+        ],
+        [
+          "Total",
+          "",
+          "$1,300.49",
+          "",
+          "",
+          "",
+          ""
+        ],
+        [
+          "Lumber x",
+          "#DIV/0!",
+          "0.3",
+          "1.23457E+13",
+          "0.000012345",
+          "",
+          ""
+        ],
+        [
+          "Bold and plain",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        [
+          "Merged title",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        [
+          "00123",
+          "1,235",
+          "5.00",
+          "",
+          "",
+          "",
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "Hidden",
+      "visible": 0,
+      "rows": [
+        [
+          "secret value"
+        ]
+      ]
+    }
+  ],
+  "excel1904": {
+    "name": "Mac",
+    "visible": -1,
+    "rows": [
+      [
+        "Date"
+      ],
+      [
+        "2025-12-09"
+      ]
+    ]
+  },
+  "powerpoint": [
+    {
+      "index": 1,
+      "texts": [
+        "Launch Plan",
+        "Spring 2027"
+      ],
+      "notes": ""
+    },
+    {
+      "index": 2,
+      "texts": [
+        "Grouped A — café",
+        "Grouped B"
+      ],
+      "notes": ""
+    },
+    {
+      "index": 3,
+      "texts": [
+        "Goals",
+        "Ship the app\rWin ten customers\rStay under budget",
+        "Metric",
+        "Target",
+        "Signups",
+        "500"
+      ],
+      "notes": "Remember to thank the team."
+    }
+  ]
+}

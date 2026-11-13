@@ -6,14 +6,14 @@
 // One step does all three:  node scripts/bump-version.mjs <n>
 //   (the same by hand: sed -i -E "s/atelier-v[0-9]+'/atelier-v<n>'/" public/sw.js && sed -i -E "s/\?v=[0-9]+/?v=<n>/g" public/index.html public/*.js)
 // tests/service-worker.test.mjs fails if they disagree or a module the app loads isn't precached at its ?v= URL.
-const VERSION = 'atelier-v113';
+const VERSION = 'atelier-v114';
 const V = VERSION.slice('atelier-v'.length);
 // Modules are listed at the exact ?v=<n> URLs they are imported by (PATHS drops the query for the fetch guard below).
 // No '/index.html': the live site answers it with a redirect to '/' (see install below), and '/' is the same page.
 const SHELL = ['/', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`,
   `/data-safety.js?v=${V}`, `/sync.js?v=${V}`, `/sync-merge.js?v=${V}`, `/video.js?v=${V}`, `/runway.js?v=${V}`, `/omni.js?v=${V}`, `/xai.js?v=${V}`, `/spend.js?v=${V}`, `/tester.js?v=${V}`, `/context.js?v=${V}`, `/usage.js?v=${V}`, `/launch.js?v=${V}`, `/lookup.js?v=${V}`, `/readaloud.js?v=${V}`, `/dictate.js?v=${V}`, `/viewport.js?v=${V}`, `/builds.js?v=${V}`, `/appdata.js?v=${V}`, `/claude-import.js?v=${V}`, `/claude-worker.js?v=${V}`,
   `/remix.js?v=${V}`, `/remix-cuts.js?v=${V}`, `/remix-shots.js?v=${V}`, `/remix-graph.js?v=${V}`, `/remix-store.js?v=${V}`, `/remix-draw.js?v=${V}`, `/remix-app.js?v=${V}`, `/remix.css?v=${V}`,
-  `/feedback.js?v=${V}`, `/feedback.css?v=${V}`, `/app-errors.js?v=${V}`, `/humanizer.js?v=${V}`, `/thread-spaces.js?v=${V}`, `/files.js?v=${V}`,
+  `/feedback.js?v=${V}`, `/feedback.css?v=${V}`, `/app-errors.js?v=${V}`, `/humanizer.js?v=${V}`, `/thread-spaces.js?v=${V}`, `/files.js?v=${V}`, `/files-legacy.js?v=${V}`,
   '/manifest.webmanifest', '/vendor/marked.js', '/vendor/purify.js', '/vendor/highlight.js',
   '/vendor/fflate.js', '/icons/atelier-v2-32.png', '/icons/atelier-v2-180.png', '/icons/atelier-v2-192.png', '/icons/atelier-v2-512.png', '/icons/atelier-v2-maskable-512.png', '/icons/atelier-mark-96.png',
   '/privacy', '/tos', '/legal.css'];
@@ -93,29 +93,44 @@ self.addEventListener('fetch', e => {
   // cached copy would tell it nothing changed (new shortcuts, share_target) until the next check a day later.
   const fresh = navigation || req.destination === 'manifest' || url.pathname === '/manifest.webmanifest';
   const key = navigation ? (url.pathname === '/index.html' ? '/' : url.pathname) : req; // '/' is precached without a redirect
-  const network = fetch(req).then(async response => {
+  // v114: this cache holds one version's files, and nothing of another's. Until now a worker still in charge after a
+  // deploy stored the new version's page as '/', and refreshed its own ?v=<n> files with the new bodies: an offline
+  // launch then mixed two versions (a page, or an app.js, asking for modules this cache never held) and did not open.
+  //   - pinned: a file asked for at this version's own address (?v=<n>) never changes inside a version. Once cached it
+  //     is served as it is and never fetched again. (So a deploy has to change the number, as it always did.)
+  //   - a page is kept as '/' only when it is this version's (it loads /app.js?v=<n>). Another version's page is
+  //     still passed on to the browser.
+  const pinned = !navigation && url.search === `?v=${V}`;
+  let network = null;
+  const online = () => (network ||= fetch(req).then(async response => {
+    let keep = response.ok || response.type === 'opaque';
     // A page is read whole here before anything answers with it. Streamed straight through, a connection that stalled
     // after the headers left the app on a blank screen that never finished loading (seen on a phone relaunch, v97).
     // Redirects (opaqueredirect) and bodiless statuses pass through untouched.
     if (navigation && !['opaque', 'opaqueredirect', 'error'].includes(response.type) && response.body && ![204, 205, 304].includes(response.status)) {
-      response = new Response(await response.arrayBuffer(), { status: response.status, statusText: response.statusText, headers: response.headers });
+      const body = await response.arrayBuffer();
+      if (key === '/' && !new TextDecoder().decode(body).includes(`/app.js?v=${V}`)) keep = false;
+      response = new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
     }
-    if (response.ok || response.type === 'opaque') {
+    if (keep) {
       const cache = await caches.open(VERSION);
       await cache.put(key, response.clone()).catch(() => {});
     }
     return response;
-  }).catch(() => null);
+  }).catch(() => null));
   // Keep refreshes alive and always handle rejection, even on a cache hit.
-  e.waitUntil(network.then(() => {}));
+  if (!pinned) e.waitUntil(online().then(() => {}));
   e.respondWith((async () => {
     const cache = await caches.open(VERSION);
     if (fresh) {
       // A page waits NAV_WAIT_MS for the network, then opens from the cached shell; the fetch carries on and refreshes
       // the cache for the next launch. With nothing cached there is only the network to wait for.
-      const first = navigation ? await Promise.race([network, new Promise(r => setTimeout(r, NAV_WAIT_MS, null))]) : await network;
-      return first || await cache.match(key) || await network || Response.error();
+      const first = navigation ? await Promise.race([online(), new Promise(r => setTimeout(r, NAV_WAIT_MS, null))]) : await online();
+      // v114: the server answered a page load with an error of its own (5xx: an outage, a bad deploy). The shell is
+      // right here, so the app opens from it. Other answers (a sign-in redirect, a challenge page, a 404) pass as they are.
+      if (navigation && first && first.status >= 500) return await cache.match(key) || first;
+      return first || await cache.match(key) || await online() || Response.error();
     }
-    return await cache.match(key) || await network || Response.error();
+    return await cache.match(key) || await online() || Response.error();
   })());
 });

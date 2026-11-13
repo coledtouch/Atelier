@@ -516,6 +516,45 @@ test('waitClipActive: ACTIVE, GONE, timeout and transient errors', async () => {
   await assert.rejects(waitClipActive('files/abc', { apiHeaders }), { status: 401, message: 'Wrong passcode' });
   await assert.rejects(waitClipActive('files/../x', { apiHeaders }), { code: 'gone' });
 });
+// v114 (media #2): a phone freezes a backgrounded page while Date.now() keeps running. The wait used to end on the
+// page's return without one more poll, and uploadClip then deleted a clip Gemini had finished long before.
+test('a page frozen past the wait is not timed out: the next poll finds the clip, and uploadClip deletes nothing', async () => {
+  let skew = 0; // how far the wall clock ran while the page was frozen
+  Date.now = () => realNow() + skew;
+  const freeze = () => { skew += 10 * 60_000; };
+  const file = state => reply(200, { name: 'files/abc', uri: URI('abc'), mime: 'video/mp4', state, expiresAt: EXPIRES });
+  VIDEO_TIMING.request = 40; // a poll's cap is a small share of pollMax (400), as 20 s is of 3 minutes
+  // frozen in the pause between two polls (the timer fires inside that pause: 1 ms into its 5)
+  let n = 0;
+  mockFetch([[/^GET \/api\/video\/file/, () => file(++n === 1 ? 'PROCESSING' : 'ACTIVE')]]);
+  const ref = await waitClipActive('files/abc', { apiHeaders, onState: s => { if (s === 'PROCESSING') setTimeout(freeze, 1); } });
+  assert.equal(ref.name, 'files/abc'); assert.equal(n, 2, 'one more poll after the page came back');
+  // frozen while a poll was on its way: its answer is old news, so the next one decides
+  n = 0;
+  mockFetch([[/^GET \/api\/video\/file/, () => { if (++n === 1) { freeze(); return file('PROCESSING'); } return file('ACTIVE'); }]]);
+  assert.equal((await waitClipActive('files/abc', { apiHeaders })).name, 'files/abc');
+  assert.equal(n, 2);
+  // the whole upload: Gemini finished while the phone was away, and the clip is kept
+  calls = [];
+  const routes = uploadRoutes({ states: ['PROCESSING', 'ACTIVE'] }), poll = routes[3][1];
+  let away = true;
+  routes[3][1] = c => { if (away) { away = false; freeze(); } return poll(c); };
+  mockFetch(routes);
+  assert.deepEqual(await uploadClip(clipFile(), { apiHeaders }), { name: 'files/abc', uri: URI('abc'), mime: 'video/quicktime', expiresAt: EXPIRES });
+  assert.equal(byRoute(/^GET \/api\/video\/file/).length, 2);
+  assert.equal(byRoute(/^DELETE /).length, 0, 'the finished clip is not deleted');
+});
+test('the wait still ends on a page that keeps freezing: every poll and pause uses up its own share', async () => {
+  let skew = 0;
+  Date.now = () => realNow() + skew;
+  VIDEO_TIMING.request = 40; VIDEO_TIMING.pollMax = 200;
+  let n = 0;
+  mockFetch([[/^GET \/api\/video\/file/, () => { n++; return reply(200, { name: 'files/abc', uri: URI('abc'), state: 'PROCESSING' }); }]]);
+  // the clock jumps ten minutes in every pause, and Gemini never finishes
+  await assert.rejects(waitClipActive('files/abc', { apiHeaders, onState: () => setTimeout(() => { skew += 10 * 60_000; }, 1) }), { code: 'timeout', status: 504 });
+  assert.ok(n >= 2, 'the first freeze did not end it');
+  assert.ok(n <= VIDEO_TIMING.pollMax / VIDEO_TIMING.poll + 1, `${n} polls`);
+});
 test('deleteClip is fire-and-forget and validates the name', async () => {
   mockFetch(uploadRoutes());
   assert.equal(await deleteClip('files/abc', apiHeaders), true);

@@ -235,7 +235,15 @@ const stripe = {
       write: true, label: 'Refund a payment', desc: 'Refund a payment intent, fully or partially. Amount is in cents; omit for a full refund.',
       params: obj({ payment_intent: S('Payment intent id (pi_…)'), amount_cents: N('Partial amount in cents (optional)'), reason: S('duplicate, fraudulent or requested_by_customer', { enum: ['duplicate', 'fraudulent', 'requested_by_customer'] }) }, ['payment_intent']),
       run: async (env, a) => {
-        const r = await stripe.api(env, '/refunds', { payment_intent: a.payment_intent, ...(a.amount_cents ? { amount: String(a.amount_cents) } : {}), ...(a.reason ? { reason: a.reason } : {}) });
+        // An amount that is given must be a whole number of cents, 1 or more. It used to be left out whenever it was
+        // falsy, so a 0, a blank, or a number box edited into "$7" (which arrives as null) refunded the whole payment
+        // where the approval card showed a partial one (v114). Only a missing amount means a full refund.
+        let cents = null;
+        if (a.amount_cents !== undefined) {
+          cents = Number(a.amount_cents);
+          if (a.amount_cents === null || a.amount_cents === '' || !Number.isSafeInteger(cents) || cents < 1) throw new ToolError('amount_cents must be a whole number of cents, 1 or more. Leave it out for a full refund.');
+        }
+        const r = await stripe.api(env, '/refunds', { payment_intent: a.payment_intent, ...(cents ? { amount: String(cents) } : {}), ...(a.reason ? { reason: a.reason } : {}) });
         return { id: r.id, amount: money(r.amount, r.currency), status: r.status };
       },
     },
@@ -288,10 +296,15 @@ const cloudflare = {
     cf_purge_cache: {
       write: true, label: 'Purge Cloudflare cache', desc: 'Purge a zone\'s cache — everything, or specific URLs.',
       params: obj({ zone: S('Domain'), urls: { type: 'array', items: { type: 'string' }, description: 'URLs to purge (omit to purge everything)' }, account: ACCT('Cloudflare') }, ['zone']),
-      run: async (env, a) => firstWorking(await chooseAccounts(env, 'cloudflare', a.account, 'Cloudflare'), async (acct) => {
-        await cloudflare.api(acct, `/zones/${await cloudflare.zoneId(acct, a.zone)}/purge_cache`, { method: 'POST', body: JSON.stringify(a.urls?.length ? { files: a.urls } : { purge_everything: true }) });
-        return { purged: a.urls?.length ? a.urls : 'everything' };
-      }),
+      run: async (env, a) => {
+        // A list that is given but empty is an error, not "everything": emptying the box on the approval card used to
+        // purge the whole zone (v114). Only a missing list purges everything.
+        if (a.urls !== undefined && (!Array.isArray(a.urls) || !a.urls.length || a.urls.some((u) => typeof u !== 'string' || !u.trim()))) throw new ToolError('urls must list at least one address. Leave it out to purge everything.');
+        return firstWorking(await chooseAccounts(env, 'cloudflare', a.account, 'Cloudflare'), async (acct) => {
+          await cloudflare.api(acct, `/zones/${await cloudflare.zoneId(acct, a.zone)}/purge_cache`, { method: 'POST', body: JSON.stringify(a.urls?.length ? { files: a.urls } : { purge_everything: true }) });
+          return { purged: a.urls?.length ? a.urls : 'everything' };
+        });
+      },
     },
   },
 };
@@ -500,6 +513,14 @@ function plainBody(payload) {
   return t.replace(/\n{3,}/g, '\n\n').trim();
 }
 const ACCOUNT = S('Which connected Gmail address to use (omit for the default; searches cover all accounts)');
+// A Gmail message id or a Drive file id on its way into an API path. Google's ids are letters, digits, - and _. One
+// the model wrote with '/', '..' or '?' sent the request, with the owner's Google token, to another googleapis.com
+// path than the one the step names (v114; repoPath does this for GitHub).
+const googleId = (v, name, from) => {
+  const s = String(v ?? '').trim();
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(s)) throw new ToolError(`${name} must be an id from ${from}.`);
+  return s;
+};
 const gmail = {
   ready: (env) => Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
   api: async (env, account, path, init = {}) => {
@@ -540,9 +561,9 @@ const gmail = {
     gmail_read: {
       label: 'Read an email', desc: 'Read one email in full. Pass the `account` it came from (from gmail_search).',
       params: obj({ id: S('Message id'), account: ACCOUNT }, ['id']),
-      run: async (env, a) => {
+      run: async (env, a, id = googleId(a.id, 'id', 'gmail_search')) => {
         const acct = await pickAccount(env, a.account);
-        const m = await gmail.api(env, acct, `/messages/${a.id}?format=full`);
+        const m = await gmail.api(env, acct, `/messages/${id}?format=full`);
         return { account: acct.email, id: m.id, threadId: m.threadId, messageId: gmail.header(m, 'Message-ID'), from: gmail.header(m, 'From'), to: gmail.header(m, 'To'), cc: gmail.header(m, 'Cc'), subject: gmail.header(m, 'Subject'), date: gmail.header(m, 'Date'), body: clip(plainBody(m.payload), 15000) };
       },
     },
@@ -630,6 +651,30 @@ const gcal = {
 
 // ───────────────────────── Google Drive ─────────────────────────
 const EXPORTS = { 'application/vnd.google-apps.document': 'text/plain', 'application/vnd.google-apps.spreadsheet': 'text/csv', 'application/vnd.google-apps.presentation': 'text/plain' };
+// drive_read keeps 20,000 characters, which are at most 60,000 bytes of UTF-8, so this much of the file is enough.
+const DRIVE_HEAD_BYTES = 100_000;
+// The start of a response body as text: at most `max` bytes are read and the rest is never downloaded. r.text() held
+// the whole body to keep those characters, and a log or CSV in Drive can be hundreds of megabytes: the Worker ran out
+// of memory and the step died with a platform error (v114).
+async function headText(r, max) {
+  if (!r.body) return '';
+  const reader = r.body.getReader();
+  const parts = [];
+  let size = 0;
+  try {
+    while (size < max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const part = value.subarray(0, max - size);
+      parts.push(part);
+      size += part.byteLength;
+    }
+  } finally { reader.cancel().catch(() => {}); }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) { bytes.set(part, at); at += part.byteLength; }
+  return new TextDecoder().decode(bytes);
+}
 const gdrive = {
   ready: async (env) => gmail.ready(env) && (await googleAccounts(env)).length > 0,
   tools: {
@@ -653,16 +698,16 @@ const gdrive = {
     drive_read: {
       label: 'Read a Drive file', desc: 'Read a Drive file as text (Docs → text, Sheets → CSV, Slides → text, plain text files). Pass the id and account from drive_search.',
       params: obj({ file_id: S('File id'), account: GACCT }, ['file_id']),
-      run: async (env, a) => {
+      run: async (env, a, id = googleId(a.file_id, 'file_id', 'drive_search')) => {
         const acct = await pickAccount(env, a.account);
-        const meta = await gapi(env, acct, `https://www.googleapis.com/drive/v3/files/${a.file_id}?fields=id,name,mimeType,size,webViewLink`, {}, 'Drive');
+        const meta = await gapi(env, acct, `https://www.googleapis.com/drive/v3/files/${id}?fields=id,name,mimeType,webViewLink`, {}, 'Drive');
         const exp = EXPORTS[meta.mimeType];
-        const url = exp ? `https://www.googleapis.com/drive/v3/files/${a.file_id}/export?mimeType=${encodeURIComponent(exp)}`
-          : /^(text\/|application\/(json|xml|csv))/.test(meta.mimeType) ? `https://www.googleapis.com/drive/v3/files/${a.file_id}?alt=media` : null;
+        const url = exp ? `https://www.googleapis.com/drive/v3/files/${id}/export?mimeType=${encodeURIComponent(exp)}`
+          : /^(text\/|application\/(json|xml|csv))/.test(meta.mimeType) ? `https://www.googleapis.com/drive/v3/files/${id}?alt=media` : null;
         if (!url) return { name: meta.name, type: meta.mimeType, link: meta.webViewLink, note: 'This file type can’t be read as text here — open the link.' };
         const r = await fetch(url, { headers: { authorization: `Bearer ${await googleAccessToken(env, acct)}` } });
         if (!r.ok) throw new ToolError(`Drive (${acct.email}) ${r.status}: couldn’t read ${meta.name}`);
-        return { name: meta.name, type: meta.mimeType, link: meta.webViewLink, content: clip(await r.text(), 20000) };
+        return { name: meta.name, type: meta.mimeType, link: meta.webViewLink, content: clip(await headText(r, DRIVE_HEAD_BYTES), 20000) };
       },
     },
     drive_create_doc: {

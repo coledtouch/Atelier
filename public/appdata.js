@@ -36,7 +36,7 @@
 // tester account): it isn't synced, backed up or embedded in a download. Deleting a thread that can't be restored removes
 // its apps' data at once; a thread no longer on this device for another reason (in Recently deleted, deleted on another
 // device) keeps it 30 days, so a restore finds it, then prune deletes it. Clear this device removes all of this workspace's.
-import { rootOf } from './builds.js?v=113';
+import { rootOf } from './builds.js?v=114';
 
 export const MSG = 'atelier-appdata';
 export const APP_CAP = 5 * 1024 * 1024;     // bytes per app: 2 per UTF-16 code unit of keys + values (as browsers count)
@@ -744,7 +744,7 @@ export function createBridge({ store, origin, head = '', makeToken = randomToken
     unstall(frame);
     const old = byFrame.get(frame);
     if (old) unbind(old);
-    if (!validKey(key)) { frame.srcdoc = plainDoc(html); return null; }
+    if (!validKey(key)) { frame.srcdoc = plainDoc(html, strict); return null; } // no store; still under the strict policy when asked (v114: a code block's Preview)
     if (strict) strictKeys.add(key);
     const b = { frame, key, html, token: makeToken(), port: null, state: 'loading', goneAt: 0, rebuilds, behind: false, ok: null };
     byToken.set(b.token, b); byFrame.set(frame, b);

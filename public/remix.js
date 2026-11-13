@@ -9,10 +9,10 @@
 //     that names a retired Veo id is read as Omni (omni.js migrateVideoId; migrateRemix rewrites it).
 //   - Plan strings are untrusted (on-screen text in the footage can steer Gemini): they are cleaned and capped here and
 //     must still be escaped wherever they are shown. No plan field ever reaches a URL, a tool or a model id.
-import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=113';
-import { quote as runwayQuote, RUNWAY_MODELS, GROK_SECONDS } from './runway.js?v=113';
-import { stripThink } from './context.js?v=113';
-import { OMNI_ID, migrateVideoId } from './omni.js?v=113';
+import { veoCost, VEO_PER_SECOND, VEO_CAP, headroom, leftOf } from './tester.js?v=114';
+import { quote as runwayQuote, RUNWAY_MODELS, GROK_SECONDS } from './runway.js?v=114';
+import { stripThink } from './context.js?v=114';
+import { OMNI_ID, migrateVideoId } from './omni.js?v=114';
 
 export const REMIX_V = 1;
 export const LIMITS = Object.freeze({
@@ -476,7 +476,7 @@ function cleanLine(l) {
 /**
  * Gemini's parsed plan → {plan, issues}. Every field is rebuilt from known keys (unknown keys and __proto__ never
  * survive), strings are cleaned and capped, numbers clamped, ids made valid and unique with references remapped.
- * source: {duration, width, height, fps}. opts: {maxNew, model, res, fit, assets (ids that have a file), shotModels
+ * source: {duration, width, height, fps, hasAudio}. opts: {maxNew, model, res, fit, assets (ids that have a file), shotModels
  * ({[shotId]: {model, res}}: the user's per-shot choices)}. caps: {mobile, aacEncode}.
  * Issue levels: fix (Atelier changed something), warn, block (Approve/Cut disabled), cost (a price went up), asset
  * (an image layer needs a file before Cut).
@@ -507,7 +507,10 @@ export function normalizePlan(p, source = {}, opts = {}, caps = {}) {
   else if (a.mode != null && a.mode !== 'keep') say('fix', null, 'Unknown audio mode — keeping the original soundtrack');
   if (a.inserts === 'shot' || a.inserts === 'veo') plan.audio.inserts = 'shot';
   if (opts.fit == null && (a.fit === 'adjacent' || a.fit === 'ending')) plan.audio.fit = a.fit;
-  if (plan.audio.mode === 'follow_cuts' && caps.aacEncode === false) {
+  // v114: a clip the probe found no audio track in (source.hasAudio === false) is planned with follow_cuts (remix-app.js
+  // newRemix), and has no audio to encode or to hold in memory: the two follow_cuts limits below don't apply to it.
+  const silent = source.hasAudio === false;
+  if (plan.audio.mode === 'follow_cuts' && caps.aacEncode === false && !silent) {
     plan.audio.mode = 'keep';
     say('warn', null, 'This browser can’t encode cut audio — the original soundtrack is kept whole');
   }
@@ -694,7 +697,7 @@ export function normalizePlan(p, source = {}, opts = {}, caps = {}) {
   const total = outputDuration(plan);
   const outMax = Math.min(LIMITS.outMax, D ? 2 * D : LIMITS.outMax);
   if (total > outMax + 1e-6) say('block', null, `The cut would run ${Math.round(total)} s — the most is ${Math.round(outMax)} s`);
-  if (plan.audio.mode === 'follow_cuts' && caps.mobile && total > LIMITS.mobileFollowMax) say('block', null, `Cutting the audio works up to ${LIMITS.mobileFollowMax} s on a phone. Keep the soundtrack, or shorten the cut`);
+  if (plan.audio.mode === 'follow_cuts' && caps.mobile && total > LIMITS.mobileFollowMax && !silent) say('block', null, `Cutting the audio works up to ${LIMITS.mobileFollowMax} s on a phone. Keep the soundtrack, or shorten the cut`);
   return { plan, issues };
 }
 
@@ -1212,9 +1215,14 @@ export function recoverRemix(e, { imported = false } = {}) {
  * collect) can't be followed any more → 'expired' (Refilm films it with Omni). keepOps: leave states and ops alone
  * (the film tick: advanceShot expires such a shot through the job store, so every copy agrees). Idempotent; mutates
  * and returns r.
+ * v114: a saved source.rotation is zeroed. The stored width and height are already upright (probeSource's display size,
+ * or the <video> element's), so a 90° or 270° tag beside them made outputSize and cropFor swap them a second time: a
+ * portrait phone clip was cut as landscape and its new shots were filmed 16:9. The renderer never needed the tag
+ * (Mediabunny's drawWithFit turns each decoded sample by the track's own rotation).
  */
 export function migrateRemix(r, { keepOps = false } = {}) {
   if (!record(r)) return r;
+  if (record(r.source) && r.source.rotation) r.source.rotation = 0;
   for (const s of Object.values(record(r.shots) ? r.shots : {})) {
     if (!record(s)) continue;
     const id = shotModelId(s.model);

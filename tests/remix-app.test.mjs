@@ -25,7 +25,8 @@ const SHOT_PLAN = (() => {
 })();
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-function harness({ answers = [], fetchAnswers = [], tester = null, store: seeded = null, threads = null } = {}) {
+// over: deps a test replaces (a counting URL, a small fake document for the Fine-tune sheet, draw functions).
+function harness({ answers = [], fetchAnswers = [], tester = null, store: seeded = null, threads = null, over = {} } = {}) {
   let t = 1_700_000_000_000;
   const timers = [];
   const kv = seeded?.kv || memoryKv();
@@ -78,6 +79,7 @@ function harness({ answers = [], fetchAnswers = [], tester = null, store: seeded
     draw: { ensureFonts: async () => 'studio' },
     uid: () => 'e2', addEntry: (e) => { S.thread.entries.push(e); log.added.push(e); },
     openViewer: (o) => log.viewer.push(o), shake() { log.shaken = true; },
+    ...over,
   };
   const remix = A.createRemix(deps);
   return { remix, deps, log, kv, store, S, thread, timers, fakeRender, tick: (ms) => { t += ms; }, now: () => t, dbThreads };
@@ -141,7 +143,7 @@ test('composer: empty send shakes and holds; an undecodable clip is held before 
   await flush(); await flush();
   assert.equal(h.remix.composer.note(v), A.COPY.cantCut);
   assert.equal(await h.remix.composer.gate('make it punchier', v, h.thread), 'held');
-  assert.equal(await h.remix.composer.gate('make it punchier', video(), h.thread), 'ok', 'still probing: plan waits for it');
+  assert.equal(await h.remix.composer.gate('make it punchier', video(), h.thread), 'ok', 'a clip that was never probed is not held (v114: one still being checked is, see below)');
   assert.equal(h.log.fetches.length, 0);
 });
 
@@ -382,6 +384,8 @@ test('paint: an owner shot Google may have started (unknown) links to AI Studio 
   assert.match(h.remix.composer.options(), /New shots: Gemini Omni Flash ▾/);
 });
 
+// Here the entry can still be loaded (this harness keeps the thread open and in its database). app.js deletes the
+// thread first, so the tick can't load it: that path is "v114 #2" below.
 test('forgetThread: the thread’s job keeps polling, then its bytes are dropped', async () => {
   const h = harness({
     answers: [{ raw: SHOT_PLAN }],
@@ -702,4 +706,499 @@ test('review: opening a finished remix on a device without its cut never rewrite
   fresh.paint(li, e, '');
   assert.match(html, /isn’t on this device/);
   assert.match(html, /data-act="rx-cut"/);
+});
+
+// ── v114 review (remix #0 to #11) ──
+const OMNI_MODEL = 'gemini:gemini-omni-1.1-flash';
+const mp4 = (bytes) => new Response(new Blob([new Uint8Array(bytes)], { type: 'video/mp4' }), { status: 200 });
+// A second generation of the same shot (a refilm): its own Omni id, and a file of another size than veoDone()'s 10 bytes.
+const refilm = (seconds = 4, bytes = 20) => [json(200, { id: 'int_second', seconds, pollAfterMs: 10_000 }), json(200, { id: 'int_second', status: 'completed', done: true, video: true }), mp4(bytes)];
+const ready = async (h) => { const e = await filmed(h); h.tick(5000); await h.remix.tick('e1'); return e; };
+const settle = async (n = 6) => { for (let i = 0; i < n; i++) await flush(); };
+// planned() for a clip the test attached and probed itself
+async function plannedFrom(h, v, text = 'Add a b-roll beat of a desk after the opening') {
+  const e = { id: 'e1', kind: 'video', prompt: text, images: [], createdAt: h.now(), pending: true, video: { name: v.name, mime: 'video/mp4', size: v.size, duration: 48, width: v.width, height: v.height, frames: [] } };
+  e.remix = h.remix.newRemix(v, text);
+  h.thread.entries.push(e);
+  h.remix.keepSource(e, v.file);
+  await h.remix.plan(e, new AbortController().signal, h.thread);
+  e.pending = false;
+  return e;
+}
+// URL.createObjectURL / revokeObjectURL that count: 'blob:1', 'blob:2', … with the Blob each was made from.
+function urls() {
+  const made = [], revoked = [];
+  return { made, revoked, createObjectURL: (blob) => { const url = `blob:${made.length + 1}`; made.push({ url, blob }); return url; }, revokeObjectURL: (url) => { revoked.push(url); } };
+}
+// Just enough of a document for the Fine-tune sheet: the <dialog> it builds keeps its listeners and its innerHTML.
+function fakeDoc() {
+  const made = [];
+  const createElement = (tag) => {
+    const el = {
+      tag, dataset: {}, className: '', innerHTML: '', open: false, on: {}, setAttribute() {}, append() {}, click() {}, remove() {}, replaceChildren() {},
+      addEventListener(type, fn) { el.on[type] = fn; }, querySelector: () => null, querySelectorAll: () => [], contains: () => false,
+      showModal() { el.open = true; }, close() { el.open = false; el.on.close?.(); },
+    };
+    made.push(el);
+    return el;
+  };
+  return { hidden: false, activeElement: null, body: { append() {} }, createElement, addEventListener() {}, querySelector: () => null, sheet: () => made.find((x) => x.tag === 'dialog') };
+}
+const DRAW = { ensureFonts: async () => 'studio', grabFrame: async (file, t) => ({ t }), canvasToDataUrl: async () => 'data:image/jpeg;base64,QUJD' };
+const tapOn = (sel) => ({ target: { closest: (s) => (s === sel ? { dataset: {} } : null) } });
+const pick = (f, id, value) => ({ target: { dataset: { f, id }, value } });
+
+test('v114 #0: a portrait phone clip (stored sideways with a 90° tag) is planned, filmed and cut upright', async () => {
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: veoDone() });
+  // what remix-render.js probeSource returns for it: the upright display size AND the track's rotation
+  const PHONE = { ...INFO, width: 1080, height: 1920, codedWidth: 1920, codedHeight: 1080, rotation: 90 };
+  const v = { ...video(), width: 1080, height: 1920 };
+  const asked = [];
+  const caps = h.fakeRender.capabilities;
+  h.fakeRender.probeSource = async (f) => (f === v.file ? { ...PHONE } : { ...INFO, width: 720, height: 1280 }); // the filmed shot is 9:16
+  h.fakeRender.capabilities = async (o) => { if (o.out) asked.push(o.out); return caps(o); };
+  h.remix.composer.attached(v);
+  await flush(); await flush();
+  assert.deepEqual(asked[0], { w: 1080, h: 1920 }, 'the encoder is asked about the upright size');
+  const e = await plannedFrom(h, v);
+  assert.deepEqual([e.remix.source.width, e.remix.source.height, e.remix.source.rotation], [1080, 1920, 0], 'upright sizes carry no rotation tag');
+  assert.deepEqual(R.outputSize(e.remix.source, 'desktop'), { w: 1080, h: 1920 });
+  assert.match(h.log.streams[0].messages[0].content, /SOURCE: duration 48 s, 1080×1920 px, 30 fps, audio: yes, rotation 0°/);
+  assert.equal(R.validRemix(e.remix), true);
+  h.remix.approve(e);
+  await h.remix.tick('e1');
+  assert.equal(h.log.fetches[0].body.aspect, '9:16', 'the new shot is filmed vertical, not 16:9');
+  h.tick(5000); await h.remix.tick('e1');
+  await h.remix.cut(e);
+  const g = h.log.renders[0].graph;
+  assert.deepEqual([g.w, g.h], [1080, 1920]);
+  assert.deepEqual(g.items.find((it) => it.type === 'source').crop, { sx: 0, sy: 0, sw: 1080, sh: 1920, rotation: 0, scale: 1 }, 'the whole upright frame (the crop is in display pixels)');
+  assert.deepEqual([e.remix.export.w, e.remix.export.h], [1080, 1920]);
+
+  // a remix saved before v114 still carries the tag beside its upright size: opening it drops the tag
+  const h2 = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 })] });
+  const v2 = { ...video(), width: 1080, height: 1920 };
+  const old = await plannedFrom(h2, v2);
+  old.remix.source.rotation = 90;
+  assert.match(paintHtml(h2, old), /Approve &amp; film/);
+  assert.equal(old.remix.source.rotation, 0);
+  old.remix.source.rotation = 90; // and the film tick reads it the same way (a thread that isn't open is never painted)
+  h2.remix.approve(old);
+  await h2.remix.tick('e1');
+  assert.equal(h2.log.fetches[0].body.aspect, '9:16');
+});
+
+test('v114 #1: a remix saved in phase "cut" with no cut running here offers the review card again, never a dead Cancel', async () => {
+  const h = harness({ answers: [{ raw: FX.plan }] });
+  const e = await planned(h, 'tighten the close');
+  e.remix.phase = 'cut'; // saved mid-cut: the tab was hidden, then discarded
+  const fresh = A.createRemix({ ...h.deps }); // the next open: no render job
+  let html = paintHtml({ remix: fresh }, e);
+  assert.match(html, /data-act="rx-cut"[^>]*>Cut it · free/, 'nothing to film: the cut is offered');
+  assert.match(html, /data-act="rx-preview"/);
+  assert.match(html, /data-act="rx-finetune"/);
+  assert.doesNotMatch(html, /rx-cancel-cut|rx-cutting/);
+  assert.equal(e.remix.phase, 'cut', 'a paint never rewrites the entry (a synced copy would be pushed back)');
+  // a Cancel from a paint made before the reload puts the saved phase right
+  const saves = h.log.persists;
+  assert.equal(await fresh.onAct('rx-cancel-cut', null, e), true);
+  assert.equal(e.remix.phase, 'review');
+  assert.equal(h.log.persists, saves + 1);
+  // a cut started from the leftover state that can't run ends on the review card, with its buttons
+  e.remix.phase = 'cut';
+  const caps = h.fakeRender.capabilities;
+  h.fakeRender.capabilities = async () => ({ path: 'none', reason: 'No encoder here.' });
+  await fresh.cut(e);
+  assert.equal(e.remix.phase, 'review');
+  html = paintHtml({ remix: fresh }, e);
+  assert.match(html, /No encoder here\./);
+  assert.match(html, /data-act="rx-finetune"/);
+  // a cut that is really running still shows Cutting and Cancel, and finishes
+  e.remix.phase = 'cut';
+  h.fakeRender.capabilities = caps;
+  const real = h.fakeRender.renderCut;
+  let during = '';
+  h.fakeRender.renderCut = async (args) => { during = paintHtml({ remix: fresh }, e); return real(args); };
+  await fresh.cut(e);
+  assert.match(during, /data-act="rx-cancel-cut"/);
+  assert.doesNotMatch(during, /data-act="rx-cut"/);
+  assert.equal(e.remix.phase, 'done');
+
+  // with a shot still to film, the same leftover state offers Approve (and nothing is filmed by itself)
+  const h2 = harness({ answers: [{ raw: SHOT_PLAN }] });
+  const e2 = await planned(h2);
+  e2.remix.phase = 'cut';
+  const html2 = paintHtml({ remix: A.createRemix({ ...h2.deps }) }, e2);
+  assert.match(html2, /data-act="rx-approve"/);
+  assert.doesNotMatch(html2, /rx-cancel-cut/);
+  assert.equal(h2.log.fetches.length, 0);
+});
+
+test('v114 #2: deleting a thread while it films: the job checks the provider from the job store alone, then every file of the entry goes', async () => {
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 }), json(200, { done: false }), pollDone()] });
+  const e = await filmed(h);
+  assert.equal(e.remix.shots.s1.state, 'filming');
+  assert.ok(h.kv.map.has('rx:src:e1') && h.kv.map.has('rx:job:e1'));
+  // what app.js deleteSavedThread does: the open thread is cleared and deleted from the database, then forgetThread
+  h.S.thread = null; h.dbThreads.delete('t1');
+  await h.remix.forgetThread('t1');
+  assert.ok(h.kv.map.has('rx:src:e1'), 'kept while a shot is still at the provider');
+  h.tick(5000);
+  await h.remix.tick('e1');
+  assert.deepEqual(h.log.fetches.map((f) => f.url), ['/api/omni/start', `/api/omni/status/${OMNI}`], 'the shot is still checked');
+  assert.deepEqual(h.remix.activeThreads(), new Set(['t1']), 'the job lives until the provider is done');
+  assert.equal(h.timers.at(-1).ms, 5000, 'and asks again');
+  assert.ok(h.kv.map.has('rx:src:e1'));
+  h.tick(5000);
+  await h.remix.tick('e1');
+  assert.deepEqual(h.log.fetches.map((f) => f.url), ['/api/omni/start', `/api/omni/status/${OMNI}`, `/api/omni/status/${OMNI}`], 'the check that settles the cost; the video is not downloaded');
+  assert.deepEqual([...h.kv.map.keys()].filter((k) => k.includes('e1')), [], 'source, job, draft and shots are gone');
+  assert.deepEqual(await h.store.opsAll(), [], 'no op is left to resume at the next start');
+  assert.deepEqual(h.remix.activeThreads(), new Set());
+});
+
+test('v114 #2: a job whose thread was deleted elsewhere (another device, an earlier session) is checked, then its op goes and the next start prunes its files', async () => {
+  const kv = memoryKv();
+  const st = createRemixStore(kv);
+  const T0 = 1_700_000_000_000 - 60_000;
+  // what a delete while filming left behind before v114: the op, the job record and the source of a thread that is gone
+  await st.opsAdd({ entryId: 'e9', threadId: 'gone', shotId: 's1', op: OP, startedAt: T0 });
+  await st.jobPatch('e9', 's1', { state: 'filming', op: OP, startedAt: T0 }, 'gone');
+  await st.putBlob('rx:src:e9', new Blob([new Uint8Array(8)]), { threadId: 'gone' });
+  const h = harness({ store: { kv }, fetchAnswers: [json(200, { done: false }), pollDone()] });
+  await h.remix.boot();
+  assert.ok(h.kv.map.has('rx:src:e9'), 'the boot prune leaves an entry whose op is still listed');
+  await h.remix.tick('e9');
+  assert.deepEqual(h.remix.activeThreads(), new Set(['gone']), 'still filming at the provider: asked again');
+  h.tick(10_000);
+  await h.remix.tick('e9');
+  assert.deepEqual(h.log.fetches.map((f) => f.url), [`/api/omni/status/${OMNI}`, `/api/omni/status/${OMNI}`], 'checked until the provider is done; nothing downloaded');
+  assert.deepEqual(await h.store.opsAll(), [], 'the op no longer holds the entry back from prune');
+  assert.deepEqual(h.remix.activeThreads(), new Set());
+  assert.ok(h.kv.map.has('rx:src:e9'), 'this device never confirmed that delete: the files wait for prune’s own rule');
+  await A.createRemix({ ...h.deps }).boot(); // the next start: nothing to resume, and the thread is gone
+  assert.equal(h.log.fetches.length, 2);
+  assert.deepEqual([...h.kv.map.keys()].filter((k) => k.includes('e9')), []);
+});
+
+test('v114 #2: an entry missing from a thread that still exists loses nothing; its op goes only once the provider no longer keeps the shot', async () => {
+  const kv = memoryKv();
+  const st = createRemixStore(kv);
+  const h = harness({ store: { kv } }); // thread t1 is there, without the entry
+  const T0 = h.now() - 60_000;
+  await st.opsAdd({ entryId: 'e9', threadId: 't1', shotId: 's1', op: OP, startedAt: T0 });
+  await st.jobPatch('e9', 's1', { state: 'filming', op: OP, startedAt: T0 }, 't1');
+  await st.putBlob('rx:src:e9', new Blob([new Uint8Array(8)]), { threadId: 't1' });
+  h.remix.startJob('e9', 't1');
+  await h.remix.tick('e9');
+  assert.equal(h.log.fetches.length, 0);
+  assert.ok(h.kv.map.has('rx:src:e9') && h.kv.map.has('rx:job:e9'), 'nothing is dropped');
+  assert.equal((await h.store.opsAll()).length, 1, 'the op stays for the next start to try again');
+  assert.equal(h.remix.activeThreads().size, 0);
+  h.tick(48 * 3_600_000);
+  h.remix.startJob('e9', 't1');
+  await h.remix.tick('e9');
+  assert.deepEqual(await h.store.opsAll(), [], 'past the provider’s keep time nothing can be collected');
+  assert.ok(h.kv.map.has('rx:src:e9'), 'the files stay under the usual prune rules');
+});
+
+test('v114 #3: lengthening a filmed shot, then Approve, films the longer shot (the old take never comes back as Ready)', async () => {
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [...veoDone(), ...refilm(6)] });
+  const e = await ready(h);
+  assert.deepEqual([e.remix.shots.s1.state, e.remix.shots.s1.seconds, e.remix.phase], ['ready', 4, 'check']);
+  assert.equal(h.kv.map.get('rx:shot:e1:s1').blob.size, 10);
+  await h.store.jobPatch('e1', 's1', { take: undefined }); // a take filmed before v114: nothing in the job store says what it was filmed as
+  await h.remix.editPlan(e, (p) => { p.timeline.find((c) => c.id === 'v1').use_out = 4.1; });
+  await h.remix.editPlan(e, () => {}, { fit: true }); // Fit: the longer beat comes out of the clip after it
+  assert.deepEqual([e.remix.shots.s1.state, e.remix.shots.s1.seconds, e.remix.shots.s1.blobKey, e.remix.phase], ['idle', 6, undefined, 'review']);
+  assert.match(paintHtml(h, e), /data-act="rx-approve">Approve &amp; film · \$0\.61/);
+  assert.equal(h.remix.approve(e), true);
+  await h.remix.tick('e1');
+  const posts = h.log.fetches.filter((f) => f.method === 'POST');
+  assert.equal(posts.length, 2, 'Approve really starts the longer shot');
+  assert.equal(posts[1].body.seconds, 6);
+  assert.deepEqual([e.remix.shots.s1.state, e.remix.shots.s1.blobKey], ['filming', undefined], 'nothing of the old take is on the new one');
+  h.tick(5000); await h.remix.tick('e1');
+  assert.deepEqual([e.remix.shots.s1.state, e.remix.shots.s1.seconds, e.remix.phase], ['ready', 6, 'check']);
+  assert.equal(h.kv.map.get('rx:shot:e1:s1').blob.size, 20, 'the new take replaced the old bytes');
+  assert.equal((await h.store.jobGet('e1')).shots.s1.take, `${OMNI_MODEL}|6|720p`, 'the job store knows what it holds');
+  assert.equal(e.remix.shots.s1.take, undefined, 'that mark never goes into the thread');
+  assert.equal(R.validRemix(e.remix), true);
+});
+
+test('v114 #3: a take whose mark can’t be written to the job store is still known as the old one in this session', async () => {
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [...veoDone(), ...refilm(6)] });
+  const e = await ready(h);
+  await h.store.jobPatch('e1', 's1', { take: undefined }); // filmed before v114
+  const write = h.store.jobPatch;
+  h.store.jobPatch = async (entry, id, patch, ...rest) => { if (typeof patch?.take === 'string') throw new Error('storage is full'); return write(entry, id, patch, ...rest); };
+  await h.remix.editPlan(e, (p) => { p.timeline.find((c) => c.id === 'v1').use_out = 4.1; });
+  await h.remix.editPlan(e, () => {}, { fit: true });
+  assert.equal((await h.store.jobGet('e1')).shots.s1.take, undefined, 'the job store still says only "ready"');
+  assert.equal(h.remix.approve(e), true);
+  await h.remix.tick('e1');
+  assert.equal(h.log.fetches.filter((f) => f.method === 'POST').length, 2, 'Approve films the longer shot all the same');
+  assert.deepEqual([e.remix.shots.s1.state, e.remix.shots.s1.seconds], ['filming', 6]);
+});
+
+test('v114 #3: stepping a filmed shot past a length step and back keeps its footage: Approve films nothing new', async () => {
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: veoDone() });
+  const e = await ready(h);
+  await h.remix.editPlan(e, (p) => { p.timeline.find((c) => c.id === 'v1').use_out = 4.1; });
+  assert.deepEqual([e.remix.shots.s1.state, e.remix.shots.s1.seconds], ['idle', 6]);
+  await h.remix.editPlan(e, (p) => { p.timeline.find((c) => c.id === 'v1').use_out = 2.5; });
+  assert.deepEqual([e.remix.shots.s1.state, e.remix.shots.s1.seconds], ['idle', 4]);
+  assert.equal(h.remix.approve(e), true);
+  await h.remix.tick('e1');
+  assert.equal(h.log.fetches.filter((f) => f.method === 'POST').length, 1, 'the paid take is used again: no second start');
+  assert.deepEqual([e.remix.shots.s1.state, e.remix.shots.s1.blobKey, e.remix.phase], ['ready', 'rx:shot:e1:s1', 'check']);
+  assert.equal(h.kv.map.get('rx:shot:e1:s1').blob.size, 10);
+  assert.deepEqual(h.remix.activeThreads(), new Set());
+});
+
+test('v114 #4: Play after a refilm shows the new take', async () => {
+  const U = urls();
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [...veoDone(), ...refilm(4, 20)], over: { URL: U } });
+  const e = await ready(h);
+  const play = async () => { await h.remix.onAct('rx-play-shot', { dataset: { id: 's1' } }, e); await settle(2); return h.log.viewer.at(-1).video; };
+  assert.equal(await play(), 'blob:1');
+  assert.equal(U.made[0].blob.size, 10);
+  h.remix.retryShot(e, 's1', { anyway: true }); // Refilm: back to idle, needs approval
+  await settle(2); // the tap's write to the job store lands before the Approve tap
+  assert.equal(h.remix.approve(e), true);
+  await h.remix.tick('e1'); h.tick(5000); await h.remix.tick('e1');
+  assert.equal(h.log.fetches.filter((f) => f.method === 'POST').length, 2);
+  assert.equal(e.remix.shots.s1.state, 'ready');
+  assert.equal(await play(), 'blob:2');
+  assert.equal(U.made[1].blob.size, 20, 'the viewer gets the bytes of the new take');
+  assert.deepEqual(U.revoked, ['blob:1'], 'and the first take’s URL is let go');
+});
+
+test('v114 #4: a shot synced from another device and refilmed here stops reading “isn’t on this device”', async () => {
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: veoDone() });
+  const e = await planned(h);
+  Object.assign(e.remix.shots.s1, { state: 'ready', blobKey: 'rx:shot:e1:s1', filmedKey: e.remix.shots.s1.contentKey }); // filmed elsewhere: no bytes here
+  e.remix.phase = 'check';
+  paintHtml(h, e); // the paint looks for the bytes
+  await settle(2);
+  let html = paintHtml(h, e);
+  assert.match(html, /This shot isn’t on this device/);
+  assert.match(html, /data-act="rx-retry-anyway" data-id="s1">Refilm · \$0\.41/);
+  h.remix.retryShot(e, 's1', { anyway: true });
+  await settle(2);
+  assert.equal(h.remix.approve(e), true);
+  await h.remix.tick('e1'); h.tick(5000); await h.remix.tick('e1');
+  assert.equal(e.remix.shots.s1.state, 'ready');
+  html = paintHtml(h, e);
+  assert.doesNotMatch(html, /isn’t on this device/, 'the paid refilm is on this device');
+  assert.doesNotMatch(html, /Refilm/);
+  assert.match(html, /data-act="rx-play-shot"/);
+});
+
+test('v114 #5: Fine-tune can’t relabel a filmed or filming shot with another model', async () => {
+  const doc = fakeDoc();
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: veoDone(), over: { document: doc, draw: DRAW, runwayReady: () => true } });
+  const e = await planned(h);
+  await h.remix.onAct('rx-finetune', null, e);
+  const sheet = doc.sheet();
+  assert.match(sheet.innerHTML, /<select data-f="model" data-id="s1">/, 'not filmed yet: the model can change');
+  assert.match(sheet.innerHTML, /Runway Gen-4\.5/);
+  await sheet.on.change(pick('model', 's1', 'runway:gen4.5'));
+  assert.equal(e.remix.shots.s1.model, 'runway:gen4.5');
+  await sheet.on.change(pick('model', 's1', OMNI_MODEL));
+  assert.deepEqual([e.remix.shots.s1.model, e.remix.shots.s1.seconds], [OMNI_MODEL, 4]);
+  // filming: locked
+  h.remix.approve(e);
+  await h.remix.tick('e1');
+  assert.equal(e.remix.shots.s1.state, 'filming');
+  await sheet.on.change(pick('model', 's1', 'runway:gen4.5')); // the sheet was painted before the shot started
+  assert.equal(e.remix.shots.s1.model, OMNI_MODEL);
+  assert.equal(h.log.toasts.at(-1), A.COPY.modelBusy);
+  assert.match(sheet.innerHTML, /<select data-f="model" data-id="s1" disabled>/);
+  assert.ok(sheet.innerHTML.includes(A.COPY.modelBusy));
+  // filmed: locked, and the footage keeps its model and its price
+  h.tick(5000); await h.remix.tick('e1'); await settle(2);
+  assert.equal(e.remix.shots.s1.state, 'ready');
+  const { usd, blobKey } = e.remix.shots.s1;
+  await h.remix.onAct('rx-finetune', null, e);
+  assert.match(sheet.innerHTML, /<select data-f="model" data-id="s1" disabled>/);
+  assert.ok(sheet.innerHTML.includes(A.COPY.modelFilmed));
+  await sheet.on.change(pick('model', 's1', 'runway:gen4.5'));
+  assert.deepEqual([e.remix.shots.s1.model, e.remix.shots.s1.state, e.remix.shots.s1.usd, e.remix.shots.s1.blobKey], [OMNI_MODEL, 'ready', usd, blobKey]);
+  assert.equal(h.log.toasts.at(-1), A.COPY.modelFilmed);
+  // Refilm (needs approval) sends it back to idle: then the model can change
+  h.remix.retryShot(e, 's1', { anyway: true });
+  await sheet.on.change(pick('model', 's1', 'runway:gen4.5'));
+  assert.deepEqual([e.remix.shots.s1.model, e.remix.shots.s1.state], ['runway:gen4.5', 'idle']);
+  assert.equal(R.needsApproval(e.remix).needed, true);
+});
+
+test('v114 #6: a clip with no audio track is planned without a soundtrack to keep, and the strip says so', async () => {
+  const h = harness({ answers: [{ raw: FX.plan }] });
+  h.fakeRender.probeSource = async () => ({ ...INFO, audio: null, hasAudio: false });
+  const v = video();
+  h.S.video = v; // app.js keeps the composer's clip in S.video
+  h.remix.composer.attached(v);
+  await flush(); await flush();
+  const strip = h.remix.composer.options();
+  assert.match(strip, /No soundtrack in this clip/);
+  assert.doesNotMatch(strip, /data-rx-opt="keep"/);
+  const e = await plannedFrom(h, v, 'add a title card');
+  assert.equal(e.remix.source.hasAudio, false);
+  assert.equal(e.remix.opts.audioMode, 'follow_cuts', 'keep mode would cut footage to fit a soundtrack that isn’t there');
+  assert.match(h.log.streams[0].messages[0].content, /audio: none/);
+  assert.match(h.log.streams[0].messages[0].content, /Audio follows the cuts/);
+  assert.doesNotMatch(h.log.streams[0].messages[0].content, /SOUNDTRACK KEPT/);
+  assert.equal(e.remix.plan.audio.mode, 'follow_cuts');
+  assert.ok(!e.remix.issues.some((i) => /soundtrack/.test(i.msg)), 'nothing was taken out to match a soundtrack');
+  assert.equal(R.validRemix(e.remix), true);
+  // a clip with sound, or one not probed yet: as before
+  const h2 = harness();
+  const v2 = video();
+  h2.S.video = v2;
+  h2.remix.composer.attached(v2);
+  await flush(); await flush();
+  assert.match(h2.remix.composer.options(), /data-rx-opt="keep"/);
+  assert.deepEqual([h2.remix.newRemix(v2, 'x').source.hasAudio, h2.remix.newRemix(v2, 'x').opts.audioMode], [true, 'keep']);
+  assert.deepEqual([h2.remix.newRemix(video(), 'x').source.hasAudio, h2.remix.newRemix(video(), 'x').opts.audioMode], [null, 'keep']);
+});
+
+test('v114 #7: a preview that can’t run toasts and leaves no error card; Fine-tune’s Preview waits for the shots', async () => {
+  const doc = fakeDoc();
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], over: { document: doc, draw: DRAW } });
+  const e = await planned(h);
+  await h.remix.onAct('rx-finetune', null, e);
+  const sheet = doc.sheet();
+  assert.match(sheet.innerHTML, /data-preview disabled title="Preview after the shots are filmed">/, 'as on the cost card');
+  await sheet.on.click(tapOn('[data-preview]')); // a sheet painted before the shot went back to idle
+  assert.equal(h.log.toasts.at(-1), A.COPY.previewAfter);
+  assert.equal(sheet.open, true);
+  assert.equal(h.remix._renders.size, 0, 'no cut was started');
+  assert.equal(e.remix.renderError, undefined);
+  // a preview that fails for another reason: a toast, never the red card (its Try again is a full cut)
+  h.fakeRender.capabilities = async () => ({ path: 'none', reason: 'No encoder here.' });
+  assert.equal(await h.remix.cut(e, { preview: true }), null);
+  assert.equal(h.log.toasts.at(-1), 'No encoder here.');
+  assert.equal(e.remix.renderError, undefined);
+  assert.doesNotMatch(paintHtml(h, e), /rx-callout bad/);
+  // a cut that fails still shows the card
+  await h.remix.cut(e);
+  assert.equal(e.remix.renderError, 'No encoder here.');
+  assert.match(paintHtml(h, e), /rx-callout bad/);
+
+  // nothing to film: the sheet's Preview runs
+  const doc2 = fakeDoc();
+  const h2 = harness({ answers: [{ raw: FX.plan }], over: { document: doc2, draw: DRAW } });
+  const e2 = await planned(h2, 'tighten the close');
+  await h2.remix.onAct('rx-finetune', null, e2);
+  assert.match(doc2.sheet().innerHTML, /<button type="button" class="chip" data-preview>Preview whole cut · free/);
+  await doc2.sheet().on.click(tapOn('[data-preview]'));
+  for (let i = 0; i < 20 && !h2.log.viewer.length; i++) await flush();
+  assert.equal(h2.log.viewer[0].title, 'Preview · half size');
+  assert.equal(h2.log.renders[0].preview, true);
+});
+
+test('v114 #8: there is no half-working “stop collecting”: the action is not handled and nothing exports it', async () => {
+  const h = harness({ answers: [{ raw: SHOT_PLAN }], fetchAnswers: [json(200, { id: OMNI, seconds: 4, pollAfterMs: 10_000 })] });
+  const e = await filmed(h);
+  assert.equal(await h.remix.onAct('rx-stop-collect', null, e), false);
+  assert.equal(e.remix.shots.s1.state, 'filming');
+  assert.deepEqual(h.remix.activeThreads(), new Set(['t1']), 'the job keeps collecting');
+  assert.equal(h.remix.stopCollecting, undefined);
+  assert.equal(A.COPY.stop, undefined);
+  assert.doesNotMatch(paintHtml(h, e), /rx-stop-collect/);
+});
+
+test('v114 #9: a send while the clip is still being checked is held; the check’s answer then decides, and it never holds for ever', async () => {
+  const h = harness();
+  let answer;
+  h.fakeRender.probeSource = () => new Promise((res) => { answer = res; });
+  const v = video();
+  h.remix.composer.attached(v);
+  await flush();
+  assert.equal(h.remix.composer.note(v), A.COPY.checking);
+  assert.equal(await h.remix.composer.gate('make it punchier', v, h.thread), 'held');
+  assert.equal(h.log.toasts.at(-1), A.COPY.stillChecking);
+  answer({ ...INFO, canDecode: false }); // this browser can't decode it: before v114 a quick send got past this
+  await flush(); await flush();
+  assert.equal(await h.remix.composer.gate('make it punchier', v, h.thread), 'held');
+  assert.equal(h.log.toasts.at(-1), A.COPY.cantCut);
+  const fine = video();
+  h.remix.composer.attached(fine);
+  await flush();
+  assert.equal(await h.remix.composer.gate('make it punchier', fine, h.thread), 'held');
+  answer({ ...INFO });
+  await flush(); await flush();
+  assert.equal(await h.remix.composer.gate('make it punchier', fine, h.thread), 'ok');
+  // a check with no answer lets the send through after CHECK_HOLD_MS, as before v114
+  const slow = video();
+  h.fakeRender.probeSource = () => new Promise(() => {});
+  h.remix.composer.attached(slow);
+  await flush();
+  assert.equal(await h.remix.composer.gate('make it punchier', slow, h.thread), 'held');
+  h.tick(A.CHECK_HOLD_MS);
+  assert.equal(await h.remix.composer.gate('make it punchier', slow, h.thread), 'ok');
+  assert.equal(h.log.fetches.length, 0);
+});
+
+test('v114 #10: a beat’s thumbnail follows a Fine-tune edit (a card’s words, a kept clip’s in point)', async () => {
+  const doc = fakeDoc();
+  const b64 = (x) => `data:image/jpeg;base64,${Buffer.from(JSON.stringify(x)).toString('base64')}`;
+  const draw = { ensureFonts: async () => 'studio', grabFrame: async (file, t) => ({ frame: Math.round(t * 100) / 100 }), cardThumb: (card) => ({ card: card.lines.map((l) => l.text) }), canvasToDataUrl: async (c) => b64(c) };
+  const h = harness({ answers: [{ raw: FX.plan }], over: { document: doc, draw } });
+  const e = await planned(h, 'tighten the close');
+  // the thumbnails a paint shows, read back from their data URLs: {frame: seconds} for a kept clip, {card: [lines]} for a card
+  const shown = () => [...paintHtml(h, e).matchAll(/<img src="data:image\/jpeg;base64,([^"]+)"/g)].map((m) => JSON.parse(Buffer.from(m[1], 'base64').toString()));
+  const words = () => shown().find((x) => x.card)?.card ?? null;
+  shown(); await settle();
+  const at = (id) => e.remix.plan.timeline.find((c) => c.id === id);
+  assert.deepEqual(shown(), [{ frame: at('open').src_in + 0.05 }, { card: ['Connected to your tools:', 'Gmail, GitHub, Stripe, Slack.'] }, { frame: at('models').src_in + 0.05 }, { frame: at('close').src_in + 0.05 }]);
+  await h.remix.editPlan(e, (p) => { p.timeline.find((c) => c.id === 'tools').lines[0].text = 'Works with your tools:'; });
+  assert.equal(words(), null, 'the old picture is not shown for the new words');
+  await settle();
+  assert.deepEqual(words(), ['Works with your tools:', 'Gmail, GitHub, Stripe, Slack.']);
+  const was = at('models').src_in;
+  await h.remix.editPlan(e, (p) => { p.timeline.find((c) => c.id === 'models').src_in += 2; });
+  assert.ok(!shown().some((x) => x.frame === was + 0.05), 'nor the old frame for the new in point');
+  await settle();
+  assert.ok(shown().some((x) => x.frame === was + 2.05));
+  assert.equal(shown().length, 4, 'the beats that didn’t change kept their pictures');
+  // one picture per beat is kept: going back makes it again
+  await h.remix.editPlan(e, (p) => { p.timeline.find((c) => c.id === 'tools').lines[0].text = 'Connected to your tools:'; });
+  assert.equal(words(), null);
+  await settle();
+  assert.deepEqual(words(), ['Connected to your tools:', 'Gmail, GitHub, Stripe, Slack.']);
+});
+
+test('v114 #11: object URLs are let go: one viewer URL at a time, one per cut, and a deleted thread’s cut', async () => {
+  const U = urls();
+  const h = harness({ answers: [{ raw: FX.plan }], over: { URL: U } });
+  const e = await planned(h, 'tighten the close');
+  await h.remix.cut(e, { preview: true });
+  await h.remix.cut(e, { preview: true });
+  assert.deepEqual(h.log.viewer.map((x) => x.video), ['blob:1', 'blob:2']);
+  assert.deepEqual(U.revoked, ['blob:1'], 'the first preview goes when the second opens; the one on screen stays');
+  await h.remix.cut(e);
+  assert.equal(U.made.length, 3, 'the finished cut');
+  // another tab's paint of the finished remix: two paints ask for the cut's URL at once, one URL is made
+  const tab = A.createRemix({ ...h.deps });
+  const vid = {};
+  const li = () => {
+    const out = { dataset: {}, innerHTML: '', querySelector: (s) => (s === '[data-rx-cut]' ? vid : null) };
+    return { classList: { add() {} }, setAttribute() {}, querySelector: (s) => (s === '.out' ? out : s === '.actions' ? { innerHTML: '' } : null) };
+  };
+  tab.paint(li(), e, ''); tab.paint(li(), e, '');
+  await settle(3);
+  assert.equal(U.made.length, 4);
+  assert.equal(vid.src, 'blob:4');
+  // the thread is deleted: both sessions let their cut URL go
+  h.S.thread = null; h.dbThreads.delete('t1');
+  await tab.forgetThread('t1');
+  assert.ok(U.revoked.includes('blob:4'));
+  await h.remix.forgetThread('t1'); // its files were dropped by the other session already
+  assert.ok(U.revoked.includes('blob:3'));
+  assert.deepEqual(U.revoked, ['blob:1', 'blob:4', 'blob:3'], 'the preview on screen is still alive');
+  // Clear this device lets the rest go
+  h.remix.wipe();
+  assert.ok(U.revoked.includes('blob:2'));
 });

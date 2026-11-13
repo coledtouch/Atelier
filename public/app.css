@@ -68,14 +68,20 @@
   .thread-tools > button { min-height: 44px; }
 }
 
+/* Paper. The two blocks below hold the same values (the system's light mode, and Paper chosen by hand): change both.
+   v114: --ink-3 and the six mode colours went a step darker. Small text in them was under 4.5:1 on the surfaces it sits
+   on: hints at 4.4:1 on a sheet (--bg-2) and 4.0:1 on the Look up card (--bg-3), and a selected tab's label as low as
+   3.3:1 on its own tint. Each is now the least-darkened shade of its old hue that reads at 4.5:1 or more on --bg, --bg-2
+   and --bg-3; --ink-3 also on a panel or chip over --bg-2 (--surface-2), and a mode colour also on its own 13% tint over
+   --bg-2 (.mode-ink, .chip.on). tests/ui-v114.test.mjs recomputes every pair. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
     --bg: #f3eee3; --bg-2: #ebe5d7; --bg-3: #e2dbcb;
     --surface: rgba(40, 30, 10, 0.035); --surface-2: rgba(40, 30, 10, 0.06);
     --line: rgba(40, 30, 10, 0.1); --line-2: rgba(40, 30, 10, 0.2);
-    --ink: #1b1a16; --ink-2: #5b564c; --ink-3: #6e685e; --on-accent: #fbf8f1;
+    --ink: #1b1a16; --ink-2: #5b564c; --ink-3: #645f56; --on-accent: #fbf8f1;
     --shadow: 0 30px 80px -40px rgba(60, 40, 10, 0.35);
-    --c-ask: #4d7a00; --c-code: #0a7c6d; --c-image: #c4481c; --c-video: #b3265f; --c-ideas: #936400; --c-build: #3a4fc9;
+    --c-ask: #406500; --c-code: #08665a; --c-image: #9e3a17; --c-video: #a72459; --c-ideas: #7b5300; --c-build: #394ec6;
     color-scheme: light;
   }
 }
@@ -83,9 +89,9 @@
   --bg: #f3eee3; --bg-2: #ebe5d7; --bg-3: #e2dbcb;
   --surface: rgba(40, 30, 10, 0.035); --surface-2: rgba(40, 30, 10, 0.06);
   --line: rgba(40, 30, 10, 0.1); --line-2: rgba(40, 30, 10, 0.2);
-  --ink: #1b1a16; --ink-2: #5b564c; --ink-3: #6e685e; --on-accent: #fbf8f1;
+  --ink: #1b1a16; --ink-2: #5b564c; --ink-3: #645f56; --on-accent: #fbf8f1;
   --shadow: 0 30px 80px -40px rgba(60, 40, 10, 0.35);
-  --c-ask: #4d7a00; --c-code: #0a7c6d; --c-image: #c4481c; --c-video: #b3265f; --c-ideas: #936400; --c-build: #3a4fc9;
+  --c-ask: #406500; --c-code: #08665a; --c-image: #9e3a17; --c-video: #a72459; --c-ideas: #7b5300; --c-build: #394ec6;
   color-scheme: light;
 }
 
@@ -158,7 +164,6 @@ body.overlay-open .top, body:has(dialog[open]) .top { -webkit-app-region: no-dra
 :root[data-theme='light'] :is(.brand-mark, .ob-mark) { background: #0e0d0b url('/icons/atelier-v2-192.png') center / 124% no-repeat; }
 @media (prefers-color-scheme: light) { :root:not([data-theme='dark']) :is(.brand-mark, .ob-mark) { background: #0e0d0b url('/icons/atelier-v2-192.png') center / 124% no-repeat; } }
 body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
-@keyframes spin { to { rotate: 330deg; } }
 .top-right { display: flex; align-items: center; gap: 4px; }
 .icon-btn {
   display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 12px;
@@ -214,14 +219,6 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 .tile-desc { color: var(--ink-2); font-size: 14px; margin: 8px 0 0; max-width: 32ch; }
 .tile-try { font: 400 12px/1.45 var(--mono); color: var(--accent); margin-top: 14px; opacity: 0.85; }
 .tile-try::before { content: '→ '; }
-.tile-glyph {
-  position: absolute; right: -30px; bottom: -30px; width: 150px; height: 150px; border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); opacity: 0.6; pointer-events: none;
-  transition: scale 0.6s var(--ease);
-}
-.tile-glyph::after { content: ''; position: absolute; inset: 28px; border-radius: 50%; border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent); }
-.tile:nth-child(1) .tile-glyph { width: 280px; height: 280px; right: -60px; bottom: -80px; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 16%, transparent), transparent); }
-.tile:hover .tile-glyph { scale: 1.12; }
 
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
@@ -269,9 +266,9 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
   border: 2px solid var(--line-2); border-top-color: var(--accent);
   animation: turn 0.8s linear infinite;
 }
-@keyframes turn { to { rotate: 360deg; } }             /* full turn; `spin` (330deg) stays for .brand-mark only */
+@keyframes turn { to { rotate: 360deg; } }             /* full turn: the spinner, Send's stop ring, the mic while it transcribes */
 @keyframes breathe { 50% { opacity: 0.35; } }           /* reduced-motion stand-in */
-@keyframes pulse { 50% { opacity: 0.25; scale: 0.7; } } /* still used by #micBtn */
+@keyframes pulse { 50% { opacity: 0.25; scale: 0.7; } } /* the busy .brand-mark and the listening #micBtn (v114: `spin`, which no rule used, is gone) */
 .status { display: inline-flex; align-items: center; gap: 10px; font: 500 12px/1 var(--mono); color: var(--ink-2); letter-spacing: 0.04em; }
 .status .tick { margin-left: -4px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .status .tick:empty { display: none; }
@@ -378,7 +375,6 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 @media (hover: none) { .shot-acts { opacity: 1; translate: 0; } }
 .shot-acts .mini { background: color-mix(in srgb, #0e0d0b 72%, transparent); color: #ece6d9; backdrop-filter: blur(10px); }
 .shot-acts .mini:hover { background: #0e0d0b; }
-.shot-acts .mini.accent { background: var(--accent); color: #0e0d0b; }
 .shot.vid .shot-acts { top: 8px; bottom: auto; left: auto; } /* keep Save off the native video controls */
 .shots.multi .shot-acts [data-act="canva"] { display: none; } /* 2-up cells: Save/expand/Animate/Edit/Variation fill the row at desktop widths; Canva stays one tap away in the viewer toolbar (#viewerCanva) */
 
@@ -508,7 +504,7 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 40%, var(--line-2)); box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.65), 0 0 0 4px color-mix(in srgb, var(--accent) 9%, transparent); }
 .composer.drag { border-style: dashed; border-color: var(--accent); }
-.composer.drag::after { content: 'Drop images or a video'; position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; border-radius: inherit; pointer-events: none; background: color-mix(in srgb, var(--bg-2) 88%, transparent); font: 500 11px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }
+.composer.drag::after { content: 'Drop photos, a video or files'; position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; border-radius: inherit; pointer-events: none; background: color-mix(in srgb, var(--bg-2) 88%, transparent); font: 500 11px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }
 
 /* mode tabs */
 .modes {
@@ -628,13 +624,24 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 .att button { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 50%; background: rgba(0, 0, 0, 0.7); color: #fff; display: grid; place-items: center; }
 .att button svg { width: 12px; height: 12px; }
 /* v113: an attached document (PDF, Word, Excel…) in the composer, and on the turn that sent it */
-.att-file { width: auto; max-width: min(260px, 100%); height: 58px; padding: 8px 34px 8px 12px; display: grid; grid-template-rows: auto auto auto; align-content: center; background: var(--surface-2); }
+.att-file { width: auto; max-width: min(260px, 100%); height: 58px; background: var(--surface-2); }
+/* v114: the chip itself is a button that opens what Atelier read from the file; the × beside it keeps the .att button look.
+   The !important takes off the wider touch area studio.css gives every .att button: here it would cover the ×. */
+.att .att-file-open { position: static; width: 100%; height: 100%; min-width: 0; padding: 8px 34px 8px 12px; border-radius: 11px; background: none; color: inherit; display: grid; grid-template-rows: auto auto auto; align-content: center; place-items: normal; text-align: left; }
+.att .att-file-open::after { content: none !important; }
+.att .att-file-open:disabled { cursor: progress; }
+.att .att-file-open:not(:disabled):hover .att-file-name, .file-pill:hover { text-decoration: underline; text-underline-offset: 3px; }
+.att .att-file-open:focus-visible, .file-pill:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
 .att-file[data-status="reading"] { opacity: 0.7; }
 .att-file-kind { font: 600 9px/1.3 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
 .att-file-name { font-size: 13px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .att-file-meta { font: 500 10px/1.3 var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prompt-files { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 16px; }
-.file-pill { max-width: 100%; padding: 6px 10px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-pill { max-width: 100%; padding: 6px 10px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); color: inherit; font: inherit; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+/* v114: what Atelier read from a file, as plain text */
+.file-peek .sheet-body { min-height: 0; gap: 12px; }
+.file-peek h2 { overflow-wrap: anywhere; }
+.file-peek-text { margin: 0; flex: 1 1 auto; min-height: 120px; max-height: 56dvh; overflow: auto; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); font: 12px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; user-select: text; -webkit-user-select: text; }
 .file-pill b { font: 600 9px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); margin-right: 6px; }
 .att-note { flex: 1 0 120px; min-width: 0; font: 500 10px/1.5 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
 /* composer video chip: poster (film glyph while reading / when the browser can't decode it), length, read + upload meter */
@@ -667,7 +674,9 @@ body.busy .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
 .search {
   width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; outline: 0; margin-bottom: 10px;
 }
-.search:focus { border-color: var(--line-2); }
+/* v114: the box has no outline, so its border is the focus ring. It was --line-2, one faint step up from the resting
+   border; opening Threads on a desktop focuses this box, and nothing showed where the keyboard was. */
+.search:focus { border-color: var(--accent); }
 .thread-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; flex: 1; }
 .thread-group { font: 500 10px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); padding: 16px 10px 8px; }
 .thread {
@@ -932,6 +941,8 @@ dialog[open] > .toast { position: absolute; left: 50%; bottom: 16px; max-width: 
 .mem-list li small { font: 400 10px/1.8 var(--mono); color: var(--ink-3); flex: none; }
 .mem-list li button { flex: none; opacity: 0.4; color: var(--ink-2); width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; }
 .mem-list li button:hover { opacity: 1; background: var(--surface-2); }
+.mem-list li.idle span { color: var(--ink-3); } /* v114: a fact past the ones a prompt carries */
+.mem-list li.idle::before { background: var(--line-2); }
 .mem-list li button svg { width: 13px; height: 13px; }
 .src-list { list-style: none; margin: 10px 0 0; padding: 0; font: 400 11.5px/1.7 var(--mono); color: var(--ink-3); }
 .src-list li { overflow-wrap: anywhere; }
@@ -971,8 +982,12 @@ dialog[open] > .toast { position: absolute; left: 50%; bottom: 16px; max-width: 
 .conn-info { grid-area: 1 / 3; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font: 400 11px/1.5 var(--mono); color: var(--ink-3); overflow-wrap: anywhere; }
 .conn-state { font-weight: 500; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; }
 .conn.on .conn-state { color: var(--c-ask); }
-.conn > .chip, .conn > .conn-acts { grid-area: 1 / 4; justify-self: end; }
-.conn-acts { display: flex; flex-wrap: wrap; gap: 6px; } /* a row with two actions (Browser: Get extension, Open pages unasked) */
+.conn > .chip { grid-area: 1 / 4; justify-self: end; }
+/* A row with several actions (Approvals: two; Browser: up to three) gives them a line of their own under the status:
+   the first free row, across the info and action columns. In column 4 the group took its full width before the status
+   text got any, so three buttons left the text no room at all in the 600px sheet (v114). One button stays in column 4. */
+.conn > .conn-acts { grid-area: auto / 3 / auto / -1; justify-self: start; }
+.conn-acts { display: flex; flex-wrap: wrap; gap: 6px; }
 a.chip { text-decoration: none; display: inline-flex; align-items: center; }
 .conn .accts { grid-area: 2 / 3 / auto / -1; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .acct { display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; height: 28px; padding: 0 10px 0 11px; border: 1px solid var(--line-2); border-radius: 99px; background: var(--surface); font: 500 12px/1 var(--mono); color: var(--ink); }

@@ -16,6 +16,11 @@ export const DAILY_UPLOADS = 10; // video clips a tester may start per UTC day (
 export const OVERRUN = 4;
 const MINUTE = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 const STATE_TTL = 10 * MINUTE, STALE = 15 * MINUTE, TICK = 10 * MINUTE, SESSION_TTL = 30 * DAY, RETAIN = 90 * DAY, JOB_TTL = 7 * DAY;
+// A Gemini Omni clip's job row is kept as long as the clip can be edited: Google keeps an interaction 55 days, and the
+// app offers Edit for 54 (public/app.js OMNI_KEEP_MS). The row is what says whose clip it is (and what it was priced
+// at). v114: it went with every other job after 7 days, and a tester's edit of their own clip was then refused as
+// someone else's. Upload sessions, upload slots and Gemini files keep JOB_TTL: Google drops a file after 48 hours.
+export const OMNI_JOB_TTL = 55 * DAY;
 // A deleted tester's second pass (forgetTester, alarm): this long after Delete data, well past every isolate's 60 s
 // identity cache (auth.js CACHE_MS) and any request of theirs let in before it. With the 10-minute alarm it runs 10-20
 // minutes after the delete.
@@ -89,6 +94,15 @@ const CLIENT_ERROR_COLUMNS = ['ALTER TABLE client_errors ADD COLUMN verified INT
 const str = (v, max) => (typeof v === 'string' ? v : '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
 const parseSubs = (v) => { try { const a = JSON.parse(v); return Array.isArray(a) ? a.filter((s) => SUB.test(s)) : []; } catch { return []; } };
 const intIn = (v, lo, hi) => Number.isSafeInteger(v) && v >= lo && v <= hi;
+// A refused setting, as the owner's Testers panel toasts it: in the panel's own names and in dollars. v114: it named the
+// column and its bound in micro-dollars ("day_limit must be a whole number from 0 to 100000000 (micro-dollars).").
+const SETTING = Object.freeze({ day_limit: 'The daily limit', month_limit: 'The monthly limit', pool_limit: 'The monthly pool' });
+const usd = (micros) => `$${(micros / 1e6).toLocaleString('en-US')}`;
+function settingError(k, v) {
+  if (k === 'cap') return `Spots must be a whole number from 0 to ${MAX.cap.toLocaleString('en-US')}.`;
+  if (Number.isSafeInteger(v) && v > MAX[k]) return `${SETTING[k]} can’t go above ${usd(MAX[k])}.`;
+  return `${SETTING[k]} must be a whole number of micro-dollars, ${usd(0)} to ${usd(MAX[k])}.`; // an API caller's: the panel sends whole amounts above $0
+}
 
 export class Ledger extends DurableObject {
   #syncEnv;
@@ -275,7 +289,7 @@ export class Ledger extends DurableObject {
     const t = this.#tester(sub);
     return t && t.revoked_at == null ? this.#allowance(sub) : null;
   }
-  // Reservations older than 15 minutes (aborted streams, crashed isolates, unpolled Veo jobs) settle at the full amount.
+  // Reservations older than 15 minutes (aborted streams, crashed isolates, unpolled Omni clips) settle at the full amount.
   expireStale() {
     return this.#tx(() => {
       const stale = this.#rows('SELECT id, amount FROM reservations WHERE created_at <= ?', this.clock() - STALE);
@@ -291,7 +305,7 @@ export class Ledger extends DurableObject {
       if (testersOn(this.#syncEnv)) this.#run('DELETE FROM sessions WHERE exp <= ?', now);
       else this.#run('DELETE FROM sessions');
       this.#run('DELETE FROM oauth_state WHERE exp <= ?', now);
-      this.#run('DELETE FROM jobs WHERE created_at <= ?', now - JOB_TTL);
+      this.#run("DELETE FROM jobs WHERE created_at <= ? AND (kind != 'omni' OR created_at <= ?)", now - JOB_TTL, now - OMNI_JOB_TTL);
       // ...and a refused sign-in goes 7 days after the attempt, whether or not the owner ever looked at it.
       this.#lastRefused(now);
       const d = new Date(now), keep = monthKey(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - OWNER_SPEND_MONTHS + 1, 1));
@@ -344,7 +358,7 @@ export class Ledger extends DurableObject {
     await this.storage.setAlarm(Date.now() + TICK);
   }
 
-  // ── ownership of upstream jobs (upload sessions, Gemini files, Veo operations) ──
+  // ── ownership of upstream jobs (upload sessions, Gemini files, Gemini Omni interactions) ──
   // → {ok: true, slot} | {ok: false, scope: 'signin' | 'paused' | 'day', resetsAt?}: may this tester start another clip
   // upload? The check and the slot it takes are one atomic step, so parallel starts can't all pass the count.
   uploadGate(sub) {
@@ -363,13 +377,17 @@ export class Ledger extends DurableObject {
   }
   // Gives back an upload slot whose start failed (nothing was created at Google).
   dropSlot(sub, slot) { this.#run("DELETE FROM jobs WHERE upstream_id = ? AND sub = ? AND kind = 'upload_slot'", String(slot), String(sub)); return true; }
-  // Records an upstream id for a tester; the first owner keeps it. extra: {reservation, actual} for a Veo operation.
+  // Records an upstream id for a tester; the first owner keeps it. extra: {reservation, actual} for a Gemini Omni clip
+  // (actual: its price without the margin, which finishJob settles at when no usage is reported; see jobActual).
   addJob(sub, id, kind, extra = {}) {
     this.#run('INSERT OR IGNORE INTO jobs (upstream_id, sub, kind, created_at, reservation, actual) VALUES (?, ?, ?, ?, ?, ?)',
       String(id), String(sub), String(kind), this.clock(), extra.reservation ?? null, Number.isSafeInteger(extra.actual) ? extra.actual : null);
     return true;
   }
   ownsJob(sub, id) { return Boolean(this.#row('SELECT 1 AS y FROM jobs WHERE upstream_id = ? AND sub = ?', String(id), String(sub))); }
+  // → the price recorded at addJob for a tester's own job (µ$, no margin), or null: not theirs, or none recorded. An Omni
+  // edit is held at the length of the clip it edits, and this price is what says how long that clip is (router.js, v114).
+  jobActual(sub, id) { return this.#row('SELECT actual FROM jobs WHERE upstream_id = ? AND sub = ?', String(id), String(sub))?.actual ?? null; }
   // A video job (a Gemini Omni interaction) finished: settle its reservation at the video's price when one was produced,
   // else at $0. actual: the cost from the provider's reported usage, when it reported one (else the price recorded at
   // addJob). Idempotent.
@@ -586,7 +604,7 @@ export class Ledger extends DurableObject {
         }
         out.preview_subs = JSON.stringify([...new Set(v)]);
       } else if (Object.hasOwn(MAX, k)) {
-        if (!intIn(v, 0, MAX[k])) return { ok: false, error: `${k} must be a whole number from 0 to ${MAX[k]}${k === 'cap' ? '' : ' (micro-dollars)'}.` };
+        if (!intIn(v, 0, MAX[k])) return { ok: false, error: settingError(k, v) };
         out[k] = String(v);
       } else return { ok: false, error: `Unknown setting "${String(k).slice(0, 40)}".` };
     }

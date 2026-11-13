@@ -160,9 +160,13 @@ export const isSub = (s) => typeof s === 'string' && /^[\w-]{1,128}$/.test(s); /
 export function configBody({ cap, day, month, pool }) {
   const dollars = (v) => { const n = Number(String(v).trim()); return String(v).trim() && Number.isFinite(n) && n > 0 ? Math.round(n * 1e6) : null; };
   const c = Number(String(cap).trim());
-  if (!Number.isInteger(c) || c < 0 || c > 1000) return { error: 'Spots must be a whole number from 0 to 1,000.' };
+  // An emptied Spots field is not zero spots: Number('') is 0, and saving it closed every spot without a word (v114).
+  if (!String(cap).trim() || !Number.isInteger(c) || c < 0 || c > 1000) return { error: 'Spots must be a whole number from 0 to 1,000.' };
   const body = { cap: c, day_limit: dollars(day), month_limit: dollars(month), pool_limit: dollars(pool) };
   if (!body.day_limit || !body.month_limit || !body.pool_limit) return { error: 'Limits must be dollar amounts above $0.' };
+  // The Ledger's own ceilings (src/tester/ledger.js MAX), said here in dollars before the request is made (v114).
+  if (body.day_limit > 100 * 1e6) return { error: 'The daily limit can’t go above $100.' };
+  if (body.month_limit > 1000 * 1e6) return { error: 'The monthly limit can’t go above $1,000.' };
   if (body.pool_limit > 1000 * 1e6) return { error: 'The monthly pool can’t go above $1,000.' };
   if (body.day_limit > body.month_limit) return { error: 'The daily limit can’t be more than the monthly one.' };
   return { body };

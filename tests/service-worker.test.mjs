@@ -9,7 +9,7 @@ const LAZY = JSON.parse(source.match(/const LAZY = (\[[^\]]*\]);/)[1].replace(/'
 function setup({ offline = false, hit = new Response('cached'), keys = [], net = null, timers = setTimeout } = {}) {
   const handlers = {}, deleted = [], fetched = [], cached = [], waited = [];
   const cache = { match: async () => hit, put: async (key, response) => cached.push(key), addAll: async list => cached.push(...list), keys: async () => [...new Set(cached)] };
-  vm.runInNewContext(source, { URL, Response, setTimeout: timers, location: { origin: 'https://atelier.test' },
+  vm.runInNewContext(source, { URL, Response, TextDecoder, setTimeout: timers, location: { origin: 'https://atelier.test' },
     self: { addEventListener: (name, fn) => handlers[name] = fn, clients: { claim: async () => {} }, skipWaiting: async () => {} },
     caches: { open: async () => cache, keys: async () => keys, delete: async k => deleted.push(k) },
     fetch: async req => { fetched.push(req); if (offline) throw new Error('offline'); return net ? net(req) : new Response('network'); },
@@ -31,8 +31,62 @@ test('offline navigation uses cached legal page and uncached assets fail predict
   const s = setup({ offline: true }); assert.equal(await (await s.dispatch('/privacy', {mode:'navigate'})).text(), 'cached');
   const empty = setup({ offline: true, hit: null }); assert.equal((await empty.dispatch('/app.js')).type, 'error');
 });
+// A page of this version: it loads this version's app.js (what the worker looks for before it keeps a page as '/').
+const PAGE = `<!doctype html><script src="/app.js?v=${VERSION.slice('atelier-v'.length)}" type="module"></script>`;
 test('online navigation prefers the current server response', async () => {
-  const s = setup(); assert.equal(await (await s.dispatch('/', {mode:'navigate'})).text(), 'network'); assert.ok(s.cached.includes('/'));
+  const s = setup({ net: () => new Response(PAGE) }); assert.equal(await (await s.dispatch('/', {mode:'navigate'})).text(), PAGE); assert.ok(s.cached.includes('/'));
+});
+// v114 (review, modules #1 and #8): one cache holds one version. After a deploy, the worker still in charge kept the new
+// page as '/' and refreshed its own ?v=<n> files with the new bodies, and an offline launch mixed the two.
+test('a page of another version is passed on but never kept; a file at this version’s ?v= address is never fetched again once cached', async () => {
+  const next = PAGE.replace(/\?v=\d+/, '?v=99999');
+  const s = setup({ net: () => new Response(next) });
+  assert.equal(await (await s.dispatch('/', { mode: 'navigate' })).text(), next, 'the browser still gets the new page');
+  await Promise.all(s.waited);
+  assert.ok(!s.cached.includes('/'), 'but this version’s cache keeps its own shell');
+  assert.equal(await (await s.dispatch('/index.html', { mode: 'navigate' })).text(), next);
+  assert.ok(!s.cached.includes('/'));
+  // The legal pages are kept whatever they say (they load no versioned script).
+  const legal = setup({ net: () => new Response('<h1>Privacy</h1>') });
+  await (await legal.dispatch('/privacy', { mode: 'navigate' })).text(); await Promise.all(legal.waited);
+  assert.ok(legal.cached.includes('/privacy'));
+  const v = `?v=${VERSION.slice('atelier-v'.length)}`;
+  const hit = setup();
+  assert.equal(await (await hit.dispatch(`/app.js${v}`)).text(), 'cached');
+  assert.ok(await hit.dispatch(`/context.js${v}`)); // (the rig's cached Response is one object: its body reads once)
+  await Promise.all(hit.waited);
+  assert.deepEqual([hit.fetched.length, hit.cached.length, hit.waited.length], [0, 0, 0], 'no request, no refresh');
+  // Not cached yet (a module first used after install): fetched once, and kept.
+  const miss = setup({ hit: null });
+  assert.equal(await (await miss.dispatch(`/app.js${v}`)).text(), 'network');
+  assert.deepEqual([miss.fetched.length, miss.cached.length], [1, 1]);
+  // Another version's address, an unversioned file and the manifest still refresh as before.
+  const other = setup();
+  assert.equal(await (await other.dispatch('/app.js?v=1')).text(), 'cached');
+  assert.ok(await other.dispatch('/vendor/marked.js'));
+  await Promise.all(other.waited);
+  assert.equal(other.fetched.length, 2);
+  // Offline with nothing cached: an error, as before.
+  assert.equal((await setup({ offline: true, hit: null }).dispatch(`/app.js${v}`)).type, 'error');
+});
+test('a page load the server answers with its own error opens from the cached shell; other answers pass as they are', async () => {
+  for (const status of [500, 502, 503, 520]) {
+    const s = setup({ net: () => new Response('<h1>Error</h1>', { status }) });
+    assert.equal(await (await s.dispatch('/', { mode: 'navigate' })).text(), 'cached', String(status));
+    assert.ok(!s.cached.includes('/'), 'the error page is never kept');
+  }
+  // Nothing cached: the server's page is all there is.
+  const bare = setup({ hit: null, net: () => new Response('down', { status: 503 }) });
+  const r = await bare.dispatch('/', { mode: 'navigate' });
+  assert.deepEqual([r.status, await r.text()], [503, 'down']);
+  // A 404 or a 403 challenge is the server's answer, not an outage.
+  for (const status of [403, 404]) {
+    const s = setup({ net: () => new Response('no', { status }) });
+    assert.equal((await s.dispatch('/tos', { mode: 'navigate' })).status, status);
+  }
+  // Only pages: a file that answers 500 is not swapped (cache-first already served the cached one).
+  const file = setup({ hit: null, net: () => new Response('boom', { status: 500 }) });
+  assert.equal((await file.dispatch('/vendor/marked.js')).status, 500);
 });
 // v98: a relaunch on a phone sat on a blank screen for minutes: the page's headers had arrived and its body never did.
 // A page now waits NAV_WAIT_MS for the whole response, then opens from the cached shell.
@@ -51,9 +105,9 @@ test('a page whose body stalls after the headers never reaches the app half-open
   assert.ok(!s.cached.includes('/'), 'a half-read page is never cached');
 });
 test('a page that arrives in time is passed on whole with its status and headers; a redirect goes through untouched', async () => {
-  const s = setup({ net: () => new Response('fresh', { status: 200, headers: { 'content-security-policy': "default-src 'self'" } }) });
+  const s = setup({ net: () => new Response(PAGE, { status: 200, headers: { 'content-security-policy': "default-src 'self'" } }) });
   const r = await s.dispatch('/', { mode: 'navigate' });
-  assert.equal(await r.text(), 'fresh'); assert.equal(r.headers.get('content-security-policy'), "default-src 'self'"); assert.ok(s.cached.includes('/'));
+  assert.equal(await r.text(), PAGE); assert.equal(r.headers.get('content-security-policy'), "default-src 'self'"); assert.ok(s.cached.includes('/'));
   const redirect = Response.redirect('https://atelier.test/privacy', 302);
   const t = setup({ net: () => redirect });
   assert.equal(await t.dispatch('/privacy', { mode: 'navigate' }), redirect);
