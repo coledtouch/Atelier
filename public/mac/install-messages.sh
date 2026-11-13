@@ -19,11 +19,12 @@ mkdir -p "$DIR"
 curl -fsSL "$ORIGIN/mac/atelier-messages-host.js" -o "$DIR/atelier-messages-host.js.new"
 mv "$DIR/atelier-messages-host.js.new" "$DIR/atelier-messages-host.js"
 
-cat > "$DIR/atelier-messages-host" <<EOF
-#!/bin/sh
-exec /usr/bin/osascript -l JavaScript "$DIR/atelier-messages-host.js"
-EOF
-chmod 755 "$DIR/atelier-messages-host"
+# What Chrome starts is the helper itself, with osascript as its interpreter line. It used to be a two-line sh script
+# that ran osascript, and macOS then held /bin/sh responsible for reading chat.db: Full Disk Access for osascript (or
+# for Chrome) changed nothing, and reading texts was refused (v125).
+{ printf '%s\n' '#!/usr/bin/osascript -l JavaScript'; cat "$DIR/atelier-messages-host.js"; } > "$DIR/atelier-messages-host.new"
+chmod 755 "$DIR/atelier-messages-host.new"
+mv "$DIR/atelier-messages-host.new" "$DIR/atelier-messages-host"
 
 registered=0
 for browser in "Google/Chrome" "Google/Chrome Beta" "Google/Chrome Canary" "Chromium"; do
@@ -47,10 +48,9 @@ cat <<'EOF'
 Atelier Messages helper installed.
 
 Two macOS permissions are left:
-  1. Reading texts: System Settings → Privacy & Security → Full Disk Access → turn on osascript and Google Chrome.
+  1. Reading texts: System Settings → Privacy & Security → Full Disk Access → turn on osascript.
      To add osascript, run:  open -R /usr/bin/osascript   and drag the selected file into that list.
-     Then quit Chrome (Cmd-Q) and reopen it.
-  2. Sending: the first time Atelier sends a text, macOS asks to let Chrome control Messages. Click OK.
+  2. Sending: the first time Atelier sends a text, macOS asks to let osascript control Messages. Click Allow.
 
 For SMS (green bubbles), turn on Text Message Forwarding for this Mac on your iPhone:
 Settings → Apps → Messages → Text Message Forwarding.
