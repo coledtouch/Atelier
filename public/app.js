@@ -33,7 +33,7 @@ import { renderAppErrors, loadAppErrors } from './app-errors.js?v=131';
 import { HUMANIZER } from './humanizer.js?v=131';
 import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=131';
 import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=131';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite } from './days.js?v=131';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, stepDay, tabFlows, earlierCut } from './days.js?v=131';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -249,6 +249,8 @@ const S = {
   tester: null, // a LinkedIn tester (GET /api/tester/me, see setTester); null for the owner and signed-out visitors
   settings: mergeDeep(structuredClone(DEFAULT_SETTINGS), migrateSettings(LS.get('settings', {}))),
   opts: globalOpts(),
+  day: dayKey(Date.now()), // Today (renderDay): the local day shown, 'YYYY-MM-DD'
+  view: 'all', // 'all' (the day's prompts across flows) or the id of the flow shown, which is then S.thread
 };
 // The composer's last choices (LS 'opts'): what a new flow, or a thread with no choices of its own, starts from.
 function globalOpts() {
@@ -598,6 +600,7 @@ function syncApplied({ open } = {}) {
 // that end up out of order (rare) redraw everything. The reading position is kept either way.
 function patchStream({ replaced = [], added = [], removed = [] } = {}) {
   if (!replaced.length && !added.length && !removed.length) return;
+  if (S.view === 'all') return; // All shows the day's prompts, not this conversation: threadsArrived redraws them
   const near = stage.scrollHeight - stage.scrollTop - stage.clientHeight < 120, top = stage.scrollTop;
   const entries = S.thread.entries, byId = new Map(entries.map((e) => [e.id, e]));
   for (const id of removed) if (!byId.has(id)) stream.querySelector(`:scope > .entry[data-id="${CSS.escape(id)}"]`)?.remove();
@@ -612,12 +615,14 @@ function patchStream({ replaced = [], added = [], removed = [] } = {}) {
     const e = byId.get(id);
     if (!e || entryEl(e)) continue;
     const i = entries.indexOf(e);
+    if (i < streamFrom) continue; // in the flow's earlier part, folded under the Earlier bar
     stream.insertBefore(renderEntry(e, i), entries.slice(i + 1).map(entryEl).find(Boolean) || null);
   }
-  const lis = [...stream.querySelectorAll(':scope > .entry')];
-  if (lis.length !== entries.length || lis.some((li, k) => li.dataset.id !== entries[k].id)) renderThread();
-  else lis.forEach((li, k) => { const n = $('.rail-num', li), v = String(k + 1).padStart(2, '0'); if (n && n.textContent !== v) n.textContent = v; });
-  welcome.classList.toggle('gone', entries.length > 0);
+  // Only the entries from streamFrom are on screen (Today shows the day's part of a flow); numbers count the whole flow.
+  const lis = [...stream.querySelectorAll(':scope > .entry')], shown = entries.slice(streamFrom);
+  if (lis.length !== shown.length || lis.some((li, k) => li.dataset.id !== shown[k].id)) renderThread();
+  else lis.forEach((li, k) => { const n = $('.rail-num', li), v = String(streamFrom + k + 1).padStart(2, '0'); if (n && n.textContent !== v) n.textContent = v; });
+  welcome.classList.add('gone');
   if (near) scrollDown(true, true); else stage.scrollTop = top;
 }
 // Threads copied in after the boot stopped waiting (it waits 2 s): refresh whichever list is showing them.
@@ -626,6 +631,7 @@ function threadsArrived() {
   renderRecentThreads();
   if (!$('#threadsDrawer').hidden) renderThreads();
   if (!$('#libraryDrawer').hidden) renderLibrary();
+  refreshDay();
 }
 // Settings → Your data: "Bring over older conversations" shows only while the old database still needs bringing over.
 function syncMigrateBtn() { const b = $('#migrateBtn'); if (b) b.hidden = !migrationPending(); }
@@ -662,8 +668,205 @@ function setFlow(thread, kind) {
   else DB.put(thread).catch(storageError);
   renderFlowTabs();
 }
-// The Today page's flow tabs: drawn again when a flow's kind changes. Nothing draws them yet.
+// A new flow's kind (ruling R3): once its first answer is in, the fast helper sorts it as the Threads list's By group
+// does (thread-spaces.js), and the answer becomes its flow unless he picked a kind first, or a group by hand. One small
+// request per new flow; the title prompt is unchanged.
+async function guessFlow(thread) {
+  const picked = () => Boolean(thread.flow) || spaceByHand(threadSpaces, thread.id);
+  if (!feat('helpers') || !thread || picked()) return;
+  try {
+    const raw = await completeChat({ model: modelFor('fast'), role: 'fast', max_tokens: 200, temperature: 0, extra: noThink, messages: spaceRequest([thread], GROUPS, ME.bio) });
+    const [kind] = parseSpaces(raw, 1, GROUPS);
+    if (kind && !picked() && !accountReloading && await DB.get(thread.id)) setFlow(thread, kind);
+  } catch (err) { console.warn('[atelier] flow kind', err); }
+}
+
+// ───────────────────────── Today ─────────────────────────
+// The home screen is a day (S.day): its flows as tabs (All first, then the flows touched that day, most recent first, then
+// + Flow), and either All, the day's prompts across flows (newest at the bottom), or one flow's conversation (S.view is
+// its id and S.thread is that flow). In All, S.thread is the flow the composer's In: picker names: a send goes there and
+// shows it (intoFlow), so a turn never goes out with a mix of flows. null there means a new flow.
+let dayCache = null, daySeq = 0; // every saved thread, as last read (allThreads); null until the first read
+let streamFrom = 0, earlierOpen = null; // the first entry the open flow shows; the flow whose earlier part is shown too
+const flowColor = (kind) => (GROUPS.groups.some((g) => g.key === kind) ? `var(--flow-${kind})` : 'var(--flow-none)');
+const flowName = (t) => t?.title || 'New flow';
+// The threads Today draws from: the last read, with the open flow as it is on screen (saved or not yet).
+function dayPool() {
+  const rows = (dayCache || []).filter((t) => t.id !== S.thread?.id);
+  if (S.thread) rows.push(S.thread);
+  return rows;
+}
+const isToday = () => S.day === dayKey(Date.now());
+// Everything Today shows: the day bar, the tabs, the picker and All or the flow. Drawn now from the last read, then again
+// once the threads are read.
+function renderDay() {
+  renderThread(); // the flow's conversation, or nothing in All
+  if (dayCache) paintDay();
+  refreshDay();
+}
+async function refreshDay(known) {
+  const seq = ++daySeq, rows = await allThreads(known);
+  if (seq !== daySeq || accountReloading) return;
+  // The store is held by another tab: what came back is short. It is drawn again from the rows once they arrive.
+  if (rows.busy) { rows.late.then((saved) => { if (seq === daySeq) refreshDay(saved); }); if (!rows.length) return; }
+  dayCache = rows;
+  paintDay();
+}
+function paintDay() {
+  paintDayBar(); paintTabs(); paintPicker();
+  renderTimeline();
+}
+// A flow's title or kind changed (setFlow, nameThread): its tab and the picker now, the rest once read again.
 function renderFlowTabs() {
+  paintTabs(); paintPicker();
+  refreshDay();
+}
+const dayDate = (key) => { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d); };
+const dayKeys = () => { const days = dayList(dayPool()).map((d) => d.day), today = dayKey(Date.now()); return days.includes(today) ? days : [...days, today]; };
+function paintDayBar() {
+  const d = dayDate(S.day), sameYear = d.getFullYear() === new Date().getFullYear();
+  $('#dayDateText').textContent = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', ...(!sameYear && { year: 'numeric' }) });
+  $('#dayDate').setAttribute('aria-label', `${isToday() ? 'Today, ' : ''}${d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', ...(!sameYear && { year: 'numeric' }) })}. Open your days.`);
+  const days = dayKeys();
+  $('#dayPrev').disabled = !stepDay(days, S.day, -1);
+  $('#dayNext').disabled = !stepDay(days, S.day, 1);
+}
+function paintTabs() {
+  const box = $('#flowTabs'), had = box.contains(document.activeElement);
+  const flows = tabFlows(dayPool(), S.day, S.view === 'all' ? null : S.thread);
+  const tab = (t) => `<button type="button" role="tab" class="flow-tab" data-view="${esc(t.id)}" aria-selected="${S.view === t.id}" tabindex="${S.view === t.id ? 0 : -1}" style="--flow:${flowColor(kindOf(t, threadSpaces))}" title="${esc(flowName(t))}"><i class="flow-dot" aria-hidden="true"></i><span>${esc(flowName(t))}</span></button>`;
+  box.innerHTML = `<button type="button" role="tab" class="flow-tab flow-tab-all" data-view="all" aria-selected="${S.view === 'all'}" tabindex="${S.view === 'all' ? 0 : -1}"><span>All</span></button>${flows.map(tab).join('')}`;
+  const sel = $('[aria-selected="true"]', box);
+  if (!sel) return;
+  if (had) sel.focus({ preventScroll: true });
+  // keep the chosen tab in view in the sideways row (never scrollIntoView: that would scroll the conversation too)
+  const l = sel.offsetLeft, r = l + sel.offsetWidth;
+  if (l < box.scrollLeft || r > box.scrollLeft + box.clientWidth) box.scrollLeft = Math.max(0, l - 24);
+}
+function paintPicker() {
+  $('#flowPick').style.setProperty('--flow', S.thread ? flowColor(kindOf(S.thread, threadSpaces)) : 'var(--flow-none)');
+  $('#flowPickName').textContent = flowName(S.thread);
+}
+// All: the day's prompts across flows, oldest first, each with its flow's chip and time; a row opens its flow there.
+// An empty today shows the welcome's starters under one line; an empty flow shows that line alone.
+function renderTimeline() {
+  const box = $('#timeline'), all = S.view === 'all';
+  const rows = all ? dayTimeline(dayPool(), S.day) : [], empty = all && dayCache !== null && !rows.length;
+  box.hidden = !rows.length;
+  $('#dayEmpty').hidden = all ? !(empty && isToday()) : Boolean(S.thread?.entries.length);
+  welcome.classList.add('in-day'); // the date and the starters stay; the greeting gives way to the day bar
+  if (all) welcome.classList.toggle('gone', !(empty && isToday()));
+  box.innerHTML = rows.map(({ thread: t, entry: e, at }) => {
+    const kind = kindOf(t, threadSpaces), g = GROUPS.groups.find((x) => x.key === kind);
+    return `<li><button type="button" class="tl-row" data-flow="${esc(t.id)}" data-entry="${esc(e.id)}" style="--flow:${flowColor(kind)}" title="${esc(flowName(t))}"><span class="tl-time">${new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span><span class="flow-chip"><i class="flow-dot" aria-hidden="true"></i><span>${esc(g?.short || flowName(t))}</span></span><span class="tl-prompt">${esc(String(e.prompt || '').slice(0, 300))}</span></button></li>`;
+  }).join('');
+  if (rows.length && stickToBottom) scrollDown();
+}
+// Which of All and the flow's conversation shows (renderThread draws the conversation, renderTimeline the rest).
+function paintView() {
+  const all = S.view === 'all';
+  stage.dataset.view = all ? 'all' : 'flow';
+  stream.hidden = all;
+  $('#composer').classList.toggle('in-all', all); // a folded composer keeps In: in All (studio.css)
+  welcome.classList.add('in-day');
+  if (all && dayCache === null) welcome.classList.add('gone'); // until the first read says whether the day is empty
+  if (!all) { $('#timeline').hidden = true; $('#dayEmpty').hidden = Boolean(S.thread?.entries.length); }
+}
+function paintEarlier() {
+  const n = S.view !== 'all' && S.thread ? streamFrom : 0, bar = $('#earlierBar');
+  bar.hidden = !n;
+  if (n) $('button', bar).textContent = `Earlier in this flow · ${n}`;
+}
+// Leaving the open flow for another view of the day (+ Flow, All, ◀ ▶, In:): a flush, as openThread and startFresh do.
+function flushOpen() { persist(true, { flush: true }); }
+// The flow a turn goes into. All is a view only: from it a turn goes into the flow the In: picker names (submit makes a
+// new one when it names none), and that flow is shown before the turn is added, so its answer streams where it belongs.
+function intoFlow() {
+  if (S.view === S.thread.id) return;
+  S.view = S.thread.id; earlierOpen = null;
+  renderDay();
+}
+// A flow's tab, a timeline row (entry: scrolled to it), or the picker in a flow.
+async function openFlow(id, entry = null) {
+  await openThread(id);
+  if (entry && S.thread?.id === id) requestAnimationFrame(() => showEntry(entry)); // after openThread's scroll to the end
+}
+// + Flow: an empty flow of its own, shown as a tab until something is sent in it. It is saved only then (persist skips
+// a thread with no entries), so leaving it leaves no empty tab behind.
+function newFlow() {
+  flushOpen();
+  stopReading({ disarm: true });
+  S.thread = newThread(); S.view = S.thread.id; earlierOpen = null;
+  openFlowOpts(S.thread);
+  $('#activityStatus').textContent = '';
+  renderDay(); renderOptions();
+  input.placeholder = MODES[S.mode].ph;
+  input.focus({ preventScroll: true });
+}
+// The All tab. The flow open before stays the one In: names (its choices stay in the composer); an empty new flow goes.
+function showAll() {
+  if (S.view === 'all') return;
+  flushOpen();
+  if (S.thread && !S.thread.entries.length) { S.thread = null; openFlowOpts(null); renderOptions(); }
+  S.view = 'all'; earlierOpen = null;
+  renderDay();
+  requestAnimationFrame(scrollDay);
+}
+function scrollDay() { if (S.view === 'all' && $('#timeline').hidden) stage.scrollTo({ top: 0, behavior: 'instant' }); else scrollDown(true, true); }
+// ◀ ▶: the day before or after that has anything (today always counts). A day opens on All.
+function stepToDay(dir) {
+  const to = stepDay(dayKeys(), S.day, dir);
+  if (!to) return;
+  flushOpen();
+  if (S.thread && !S.thread.entries.length) { S.thread = null; openFlowOpts(null); renderOptions(); }
+  S.day = to; S.view = 'all'; earlierOpen = null;
+  renderDay();
+  requestAnimationFrame(scrollDay);
+}
+// A timeline row: its flow, scrolled to that turn (under the header), which flashes once.
+function showEntry(id) {
+  const li = stream.querySelector(`:scope > .entry[data-id="${CSS.escape(id)}"]`);
+  if (!li) return scrollDown(true, true);
+  stickToBottom = false;
+  stage.scrollTop += li.getBoundingClientRect().top - ($('.top').getBoundingClientRect().bottom + 12);
+  li.classList.remove('entry-flash'); void li.offsetWidth; li.classList.add('entry-flash');
+  $('.prompt', li)?.focus({ preventScroll: true });
+}
+// In: in All only changes where the next turn goes (and loads that flow's choices); in a flow it opens the one picked.
+async function pickFlow(id) {
+  if (!id) return newFlow();
+  if (id === S.thread?.id) return;
+  if (S.view !== 'all') return openFlow(id);
+  const t = liveThreads.get(id) || recoverThread(await DB.get(id));
+  if (!t || accountReloading) return toast('That flow is no longer on this device.', { error: true });
+  flushOpen();
+  S.thread = t; openFlowOpts(t); renderOptions(); paintPicker(); paintTabs();
+}
+let closeFlowMenu = null;
+function openFlowMenu() {
+  if (closeFlowMenu) return closeFlowMenu();
+  const btn = $('#flowPick'), flows = tabFlows(dayPool(), S.day, S.thread);
+  const menu = document.createElement('div');
+  menu.className = 'attach-menu flow-menu'; menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', 'Send to flow');
+  menu.innerHTML = flows.map((t) => `<button type="button" role="menuitemradio" aria-checked="${t === S.thread}" data-flow="${esc(t.id)}" style="--flow:${flowColor(kindOf(t, threadSpaces))}"><i class="flow-dot" aria-hidden="true"></i><span>${esc(flowName(t))}</span></button>`).join('')
+    + `<button type="button" role="menuitemradio" aria-checked="${!S.thread}" data-flow="" class="flow-menu-new">+ New flow</button>`;
+  $('.dock-inner').append(menu); // anchored in the dock like the attach menu, so it moves with it
+  btn.setAttribute('aria-expanded', 'true');
+  const onDown = (e) => { if (!menu.contains(e.target) && !btn.contains(e.target)) closeFlowMenu(); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); closeFlowMenu(); btn.focus(); return; }
+    if (!menu.contains(document.activeElement)) return;
+    if (e.key === 'Tab') { e.preventDefault(); closeFlowMenu(); btn.focus(); return; }
+    const items = $$('button', menu), i = items.indexOf(document.activeElement);
+    const to = e.key === 'ArrowDown' ? (i + 1) % items.length : e.key === 'ArrowUp' ? (i - 1 + items.length) % items.length : e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : -1;
+    if (to >= 0) { e.preventDefault(); items[to].focus(); }
+  };
+  closeFlowMenu = () => { menu.remove(); btn.setAttribute('aria-expanded', 'false'); document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey, true); closeFlowMenu = null; };
+  setTimeout(() => document.addEventListener('pointerdown', onDown));
+  document.addEventListener('keydown', onKey, true); // capture: Esc must not reach the global stopAll()
+  ($('[aria-checked="true"]', menu) || $('button', menu)).focus({ preventScroll: true });
+  menu.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; closeFlowMenu(); pickFlow(b.dataset.flow).catch(storageError); };
+  menu.addEventListener('focusout', (e) => { if (e.relatedTarget && !menu.contains(e.relatedTarget) && e.relatedTarget !== btn) closeFlowMenu?.(); });
 }
 // flush: a save made on the way out of a thread (opening another, New, leaving the app), in case a change is still
 // waiting. It writes as any save does, but it only stamps the thread "now" when something was waiting (persistDue) or
@@ -1696,9 +1899,13 @@ function renderThread() {
     }
   }
   stream.innerHTML = '';
-  const has = S.thread?.entries.length;
-  welcome.classList.toggle('gone', !!has);
-  if (has) S.thread.entries.forEach((e, i) => stream.append(renderEntry(e, i)));
+  if (S.view !== 'all' && S.view !== S.thread?.id) S.view = S.thread ? S.thread.id : 'all';
+  // Today: All shows the day's prompts instead (renderTimeline). A flow shows its part of the day (from its first entry
+  // on S.day), the rest folded under the Earlier bar; numbers still count the whole flow.
+  const flow = S.view === 'all' ? null : S.thread;
+  streamFrom = flow && earlierOpen !== flow.id ? earlierCut(flow, S.day) : 0;
+  if (flow) { welcome.classList.add('gone'); flow.entries.slice(streamFrom).forEach((e, k) => stream.append(renderEntry(e, streamFrom + k))); }
+  paintEarlier(); paintView();
   updateKeyState();
   Sync.showNote(); // owner thread sync: "N items in this thread are still downloading" over the open thread
 }
@@ -2301,6 +2508,7 @@ async function submit(textArg, modeArg, extra = {}) {
 
   if (!S.thread) S.thread = newThread();
   if (!S.thread.opts) saveFlowOpts(); // the flow keeps the choices its first turn here was sent with
+  intoFlow(); // from All: the flow the In: picker names, shown before the turn is added
   // The turn's files, cut to the one budget they share. A file with no room left goes as a name only: the chip said so
   // before Send (renderAttachments), the sent turn says so, and so does this toast (v114: it used to be silent).
   const fitted = docs.length ? fitFiles(docs, fileBudget()) : [], out = fitted.filter((f, i) => leftOut(f) && docs[i].text);
@@ -2356,6 +2564,7 @@ async function planTasks(text, signal) {
 }
 async function runTasks(original, tasks, untrusted = '', spoken = '') {
   if (!S.thread) S.thread = newThread();
+  intoFlow();
   if (!S.thread.title) S.thread.title = original.slice(0, 64);
   const group = uid();
   const entries = tasks.map((t, i) => ({
@@ -2462,7 +2671,7 @@ async function run(e) {
     releaseRun(); Sync.kick('settled');
     if (thread && thread === S.thread) { persist(true); renderOptions(); }
     autoReadDone(e, thread); // a spoken request's answer reads aloud (Settings → Read aloud)
-    if (thread?.entries.length === 1 && !e.error) nameThread(e, thread);
+    if (thread?.entries.length === 1 && !e.error) { nameThread(e, thread); guessFlow(thread); }
     if (!e.error && !e.group) learnFrom(e, thread);
     if (S.tester) refreshTesterSoon(); // reservations settle after the stream: show the settled numbers
     else if (e.kind === 'image' || e.kind === 'video') refreshSpendSoon(); // the owner's month moved: an open Spending readout follows
@@ -3585,7 +3794,7 @@ async function nameThread(e, thread) {
   if (!feat('helpers')) return; // the title stays the prompt's first words
   try {
     const t = helperAnswer(await completeChat({ model: modelFor('fast'), role: 'fast', max_tokens: 800, temperature: 0.3, extra: noThink, messages: [{ role: 'system', content: SYS.title() }, { role: 'user', content: e.prompt }] }), 'title', 8);
-    if (t && t.length < 60 && thread && !manualTitles.has(thread.id) && !accountReloading && await DB.get(thread.id)) { thread.title = t.replace(/^["'#\s]+|["'.\s]+$/g, ''); await DB.put(thread); renderRecentThreads(); }
+    if (t && t.length < 60 && thread && !manualTitles.has(thread.id) && !accountReloading && await DB.get(thread.id)) { thread.title = t.replace(/^["'#\s]+|["'.\s]+$/g, ''); await DB.put(thread); renderRecentThreads(); renderFlowTabs(); }
   } catch {}
 }
 
@@ -5094,13 +5303,45 @@ async function renderRecentThreads(known) {
 }
 async function openThread(id) {
   persist(true, { flush: true });
-  const t = liveThreads.get(id) || recoverThread(await DB.get(id));
+  const t = (S.thread?.id === id && S.thread) || liveThreads.get(id) || recoverThread(await DB.get(id)); // the one on screen as it is
   if (!t || accountReloading) return toast('That thread is no longer on this device. Refresh the list.', { error: true });
   if (t.id !== S.thread?.id) stopReading({ disarm: true });
-  S.thread = t; openFlowOpts(t); renderThread(); closeDrawers(); renderOptions();
+  S.thread = t; openFlowOpts(t);
+  // Today shows it as its tab: its part of the day, or all of it when it has nothing that day (opened from the list)
+  S.view = t.id; earlierOpen = earlierCut(t, S.day) >= t.entries.length ? t.id : null;
+  renderDay(); closeDrawers(); renderOptions();
   LS.set(workspaceKey('lastFlow'), t.id);
   requestAnimationFrame(() => scrollDown(true, true));
 }
+// Today's controls (renderDay above): tabs, + Flow, ◀ ▶, the date and search (the Threads list for now), Earlier, All's rows, In:.
+$('#flowTabs').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[role="tab"]'); if (!b) return;
+  if (b.dataset.view === 'all') showAll(); else if (b.dataset.view !== S.view) openFlow(b.dataset.view).catch(storageError);
+});
+$('#flowTabs').addEventListener('keydown', (ev) => { // arrows move between tabs; Enter or Space opens one
+  const tabs = $('[role="tab"]', $('#flowTabs')), i = tabs.indexOf(document.activeElement);
+  const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[ev.key];
+  if (i < 0 || to === undefined) return;
+  ev.preventDefault();
+  const t = tabs[(to + tabs.length) % tabs.length];
+  tabs.forEach((b) => { b.tabIndex = b === t ? 0 : -1; });
+  t.focus();
+});
+$('#newFlowBtn').onclick = newFlow;
+$('#dayPrev').onclick = () => stepToDay(-1);
+$('#dayNext').onclick = () => stepToDay(1);
+$('#dayDate').onclick = () => $('#threadsBtn').click();
+$('#daySearch').onclick = () => { $('#threadsBtn').click(); $('#threadSearch').focus({ preventScroll: true }); };
+$('#earlierBar').addEventListener('click', () => {
+  if (!S.thread) return;
+  const first = stream.querySelector(':scope > .entry'), top = first?.getBoundingClientRect().top;
+  earlierOpen = S.thread.id; renderThread();
+  const same = first && stream.querySelector(`:scope > .entry[data-id="${CSS.escape(first.dataset.id)}"]`);
+  if (same) stage.scrollTop += same.getBoundingClientRect().top - top; // the turn that was first stays where it was
+  $('.prompt', stream)?.focus({ preventScroll: true }); // the bar is gone: focus goes to the first turn
+});
+$('#timeline').addEventListener('click', (ev) => { const b = ev.target.closest('[data-flow]'); if (b) openFlow(b.dataset.flow, b.dataset.entry).catch(storageError); });
+$('#flowPick').onclick = openFlowMenu;
 $('#recentThreads').addEventListener('click', (ev) => { const b = ev.target.closest('[data-recent-thread]'); if (b) openThread(b.dataset.recentThread).catch(storageError); });
 $('#firstUseGoals').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-start-mode]'); if (!b) return;
@@ -5110,7 +5351,7 @@ $('#firstUseGoals').addEventListener('click', (ev) => {
 });
 
 // Everyday controls stay visible; the full model/options strip is one tap away.
-$('#composerControls').insertAdjacentHTML('afterbegin', '<div class="essential-options" id="essentialOptions" aria-label="Prompt options"></div>');
+$('#flowPick').insertAdjacentHTML('afterend', '<div class="essential-options" id="essentialOptions" aria-label="Prompt options"></div>');
 let optionsOpen = LS.get('composerOptionsOpen', false) === true;
 function setOptionsOpen(on) {
   optionsOpen = Boolean(on); LS.set('composerOptionsOpen', optionsOpen);
@@ -5372,7 +5613,7 @@ $('#threadMenuForm').addEventListener('submit', async (ev) => {
     if (!t) throw new Error('This thread is no longer on this device.');
     manualTitles.add(id); t.title = title; t.updatedAt = Date.now(); await DB.put(t);
     if (S.thread?.id === id) S.thread.title = title;
-    $('#threadMenuDialog').close(); renderThreads(); renderRecentThreads(); toast('Thread renamed');
+    $('#threadMenuDialog').close(); renderThreads(); renderRecentThreads(); refreshDay(); toast('Thread renamed');
   } catch (err) { $('#threadMenuError').textContent = netText(err); }
   finally { if (b) b.disabled = false; }
 });
@@ -5390,7 +5631,7 @@ async function deleteSavedThread(id) {
   pinnedThreads.delete(id); LS.set(workspaceKey('pinnedThreads'), [...pinnedThreads]);
   forgetSpace(id);
   if (wasOpen) startFresh();
-  renderThreads(); renderRecentThreads(); $('#threadMenuDialog').close();
+  renderThreads(); renderRecentThreads(); refreshDay(); $('#threadMenuDialog').close();
 }
 // The thread's group, chosen by hand (kept at once, no Save needed): Automatic hands it back to the sorter.
 function paintThreadSpace() {
@@ -7672,8 +7913,9 @@ function startFresh() {
   stopReading({ disarm: true });
   S.thread = null;
   openFlowOpts(null);
+  S.day = dayKey(Date.now()); S.view = 'all'; earlierOpen = null; // Today, with In: on a new flow
   $('#activityStatus').textContent = '';
-  renderThread();
+  renderDay();
   renderWelcome();
   renderOptions();
   LS.set(workspaceKey('lastFlow'), null);
@@ -7945,6 +8187,7 @@ $('#qlTest')?.addEventListener('click', async () => {
 // Video Remix (public/remix-app.js): every app.js function it uses is passed in here.
 async function addRemixEntry(e) { // a revision: same path as submit's tail (push, render, persist, run)
   if (!S.thread) S.thread = newThread();
+  intoFlow();
   S.thread.entries.push(e); welcome.classList.add('gone'); stream.append(renderEntry(e)); scrollDown(true); persist(true);
   await run(e);
 }
@@ -8026,8 +8269,9 @@ window.atelierBoot?.started();
   const lastId = lsHas(workspaceKey('lastFlow')) ? LS.get(workspaceKey('lastFlow'), null) : LS.get(workspaceKey('lastThread'), null);
   if (lastId && !shared) {
     const t = await Promise.race([DB.get(lastId).catch(() => null), sleep(1500).then(() => null)]);
-    if (t && Date.now() - t.updatedAt < 6 * 36e5) { S.thread = recoverThread(t); openFlowOpts(S.thread); renderThread(); renderOptions(); requestAnimationFrame(() => scrollDown(true, true)); }
+    if (t && Date.now() - t.updatedAt < 6 * 36e5) { S.thread = recoverThread(t); openFlowOpts(S.thread); S.view = S.thread.id; renderOptions(); requestAnimationFrame(() => scrollDown(true, true)); }
   }
+  renderDay(); // Today: the resumed flow, else the day's All
   remix.boot().catch((err) => console.warn('[atelier] remix resume', err)); // reads rx:ops once, resumes polling, prunes rx:*
   // Build app data of threads no longer on this device (in Recently deleted, deleted on another device): kept 30 days from
   // when this device first finds the thread gone, so a restore brings it back, then deleted (appdata.js prune).

@@ -36,6 +36,25 @@ export function daySlice(t, day) {
   return { earlier: entriesOf(t).filter((e) => entryTime(e) < first).length, entries };
 }
 
+/**
+ * The flows a day's tabs show: those with something on `day`, the most recently active first, and the open flow in front
+ * when it is not one of them (a new flow not saved yet, or one opened from an earlier day). The open flow is always the
+ * record on screen (`open`), never a stored copy of it.
+ */
+export function tabFlows(threads, day, open = null) {
+  const pool = threads.filter((t) => t && t.id !== open?.id);
+  if (open) pool.push(open);
+  const list = flowsOn(pool, day);
+  return open && !list.includes(open) ? [open, ...list] : list;
+}
+
+/** Where a flow's part of `day` starts in its conversation: its first entry on that day, or its end when it has none. */
+export function earlierCut(t, day) {
+  const on = new Set(daySlice(t, day).entries);
+  const i = entriesOf(t).findIndex((e) => on.has(e));
+  return i < 0 ? entriesOf(t).length : i;
+}
+
 /** Every entry of the day across flows, oldest first. */
 export function dayTimeline(threads, day) {
   const rows = [];

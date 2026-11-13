@@ -448,6 +448,21 @@
 
   <main id="stage">
     <div class="connection-banner" id="connectionBanner" role="status" hidden>You’re offline. You can browse saved threads; reconnect to create.</div>
+    <!-- Today (app.js renderDay): the day shown, its flows as tabs, and All, the day's prompts across flows -->
+    <nav class="day-bar" id="dayBar" aria-label="Day">
+      <button type="button" class="day-date" id="dayDate" title="Your days"><span id="dayDateText"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <span class="day-steps">
+        <button type="button" class="icon-btn day-step" id="dayPrev" aria-label="Previous day" title="Previous day"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <button type="button" class="icon-btn day-step" id="dayNext" aria-label="Next day" title="Next day"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+      </span>
+      <button type="button" class="day-search" id="daySearch" aria-label="Search days" title="Search days"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><span>Search days</span></button>
+    </nav>
+    <div class="flow-strip">
+      <div class="flow-tabs" id="flowTabs" role="tablist" aria-label="Flows"></div>
+      <button type="button" class="flow-new" id="newFlowBtn" title="Start a new flow">+ Flow</button>
+    </div>
+    <p class="day-empty" id="dayEmpty" hidden>Nothing yet today. Ask anything below.</p>
+    <ol class="timeline" id="timeline" aria-label="The day across flows" hidden></ol>
     <section id="welcome" class="welcome">
       <p class="eyebrow" id="dateLine"></p>
       <h1 class="greeting"><span id="greetWord">Good evening</span><span class="greet-name" id="greetName"></span>.<br /><em>What are we making?</em></h1>
@@ -469,6 +484,7 @@
       <p class="legal-links"><a href="/privacy">Privacy</a> · <a href="/tos">Terms</a></p>
     </section>
     <div id="syncNote" class="sync-note-bar" role="status" hidden></div>
+    <div class="earlier-bar" id="earlierBar" hidden><button type="button" class="earlier-btn">Earlier in this flow</button></div>
     <ol class="stream" id="stream" aria-label="Conversation"></ol>
     <div class="sr-only" id="activityStatus" role="status" aria-live="polite"></div>
     <div class="sr-only" id="lookupStatus" role="status" aria-live="polite"></div>
@@ -507,6 +523,7 @@
           </button>
         </div>
         <div class="composer-controls" id="composerControls">
+          <button class="composer-control flow-pick" id="flowPick" type="button" aria-haspopup="menu" aria-expanded="false" title="The flow this goes into"><span class="flow-pick-in">In:</span><i class="flow-dot" aria-hidden="true"></i><span class="flow-pick-name" id="flowPickName">New flow</span><svg class="control-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
           <button class="composer-control" id="optionsToggle" type="button" aria-expanded="false" aria-controls="options"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg><span>Options</span><svg class="control-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
           <button class="composer-control" id="contextBtn" type="button" aria-haspopup="dialog" aria-controls="contextDialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5zM9 9h6M9 13h4"/></svg><span>Context</span></button>
         </div>

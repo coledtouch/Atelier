@@ -206,6 +206,63 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
 .conn-status-label { display: inline-block; margin-left: 6px; color: var(--ink-3); font: 400 10px/1.5 var(--sans); }
 .conn-status-label.attention { color: var(--c-video); }
 
+/* ── Today (app.js renderDay): the day bar, flow tabs, All's timeline, the Earlier bar and the composer's In: ──
+   Flow colours: one token per flow kind (thread-spaces.js color), made from the mode palette. The --c-* tokens already
+   switch between the dark and light themes (app.css), so each flow colour does too: bright on dark, deep on light, and
+   4.5:1 or better as chip text on either background. LinkedIn mixes two of them so no mode owns it. */
+:root {
+  --flow-personal: var(--c-ask); --flow-kid: var(--c-ideas); --flow-coen: var(--c-image); --flow-edgeball: var(--c-build);
+  --flow-work: var(--c-code); --flow-linkedin: color-mix(in srgb, var(--c-build) 55%, var(--c-code)); --flow-apps: var(--c-video);
+  --flow-none: var(--ink-3);
+}
+.day-bar { display: flex; align-items: center; gap: 4px; max-width: 860px; margin: 0 auto 8px; }
+.day-date { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 10px 0 4px; border-radius: 10px; color: var(--ink); font: 400 28px/1 var(--serif); letter-spacing: -0.01em; }
+.day-date svg { width: 14px; height: 14px; color: var(--ink-3); }
+.day-date:hover { background: var(--surface-2); }
+.day-steps { display: inline-flex; gap: 2px; }
+.day-step { width: 36px; height: 36px; border-radius: 10px; color: var(--ink-2); }
+.day-step svg { width: 16px; height: 16px; }
+.day-search { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; margin-left: auto; padding: 0 13px; border: 1px solid var(--line); border-radius: 99px; color: var(--ink-2); font: 500 12px/1 var(--sans); }
+.day-search svg { width: 14px; height: 14px; }
+.day-search:hover { color: var(--ink); background: var(--surface-2); }
+.flow-strip { display: flex; align-items: flex-start; gap: 6px; max-width: 860px; margin: 0 auto 20px; }
+.flow-tabs { position: relative; display: flex; flex-wrap: wrap; gap: 6px; flex: 0 1 auto; min-width: 0; }
+.flow-tab { --flow: var(--flow-none); display: inline-flex; align-items: center; gap: 7px; max-width: 240px; min-height: 34px; padding: 0 13px; border: 1px solid var(--line); border-radius: 99px; color: var(--ink-2); font: 500 12px/1 var(--sans); transition: background .2s, border-color .2s, color .2s; }
+.flow-tab > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-tab:hover { color: var(--ink); background: var(--surface-2); }
+.flow-tab[aria-selected='true'] { color: var(--ink); border-color: color-mix(in srgb, var(--flow) 55%, var(--line)); background: color-mix(in srgb, var(--flow) 13%, transparent); }
+.flow-tab-all[aria-selected='true'] { border-color: var(--line-2); background: var(--surface-2); }
+.flow-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--flow, var(--flow-none)); }
+.flow-new { flex: none; min-height: 34px; padding: 0 13px; border: 1px dashed var(--line-2); border-radius: 99px; color: var(--ink-2); font: 500 12px/1 var(--sans); }
+.flow-new:hover { color: var(--ink); border-style: solid; background: var(--surface-2); }
+.day-empty { max-width: 860px; margin: 6px auto 26px; color: var(--ink-2); font: 400 24px/1.3 var(--serif); }
+.welcome.in-day { padding-top: 0; }
+.welcome.in-day :is(.eyebrow, .greeting, .welcome-copy) { display: none; } /* the day bar holds the date; the starters stay */
+.timeline { max-width: 860px; margin: 0 auto; padding: 0; list-style: none; }
+.timeline > li + li { border-top: 1px solid var(--line); }
+.tl-row { --flow: var(--flow-none); display: grid; grid-template-columns: 62px auto minmax(0, 1fr); align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 10px 8px; border-radius: 10px; text-align: left; color: var(--ink); }
+.tl-row:hover { background: var(--surface-2); }
+.tl-time { color: var(--ink-3); font: 400 11px/1 var(--mono); }
+.flow-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 160px; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--flow) 35%, var(--line)); border-radius: 99px; background: color-mix(in srgb, var(--flow) 10%, transparent); color: var(--flow); font: 500 11px/1.2 var(--sans); }
+.flow-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 1.45; }
+.earlier-bar { max-width: 860px; margin: 0 auto 4px; }
+.earlier-btn { width: 100%; min-height: 40px; border: 1px dashed var(--line-2); border-radius: 12px; color: var(--ink-2); font: 500 12px/1 var(--sans); }
+.earlier-btn:hover { color: var(--ink); background: var(--surface-2); }
+.entry-flash { animation: entryFlash 1.6s var(--ease) both; }
+@keyframes entryFlash { 0%, 35% { background: color-mix(in srgb, var(--accent) 9%, transparent); } 100% { background: transparent; } }
+.flow-pick { --flow: var(--flow-none); flex: none; max-width: 260px; min-width: 0; }
+.flow-pick-in { color: var(--ink-3); }
+.flow-pick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.flow-menu { max-height: min(50vh, 360px); overflow-y: auto; }
+.flow-menu button { display: flex; align-items: center; gap: 9px; }
+.flow-menu button > span { overflow: hidden; text-overflow: ellipsis; }
+.flow-menu button[aria-checked='true'] { background: var(--surface-2); }
+.flow-menu .flow-menu-new { color: var(--ink-2); }
+/* A folded composer (phones) in All keeps In: on show, so a send never goes to a flow he can't see */
+#composer.compact.in-all > .composer-controls { display: flex; padding-top: 0; }
+#composer.compact.in-all > .composer-controls > :not(#flowPick) { display: none; }
+
 /* ═══ RESPONSIVE TAIL — studio.css loads after app.css, so rules here beat app.css and studio base at equal specificity. Order: 1100 → 760 → 640 → 480 → pointer:coarse → hover:none → max-height:500 → keyboard (html.kb-*) → reduced-motion. Append to the matching block; never add @media blocks elsewhere. ═══ */
 @media (min-width: 1100px) {
   .studio-menu-btn { display: none; }
@@ -324,6 +381,22 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
 }
 /* phones: stacked tabs (icon over label, equal widths); drop hint text */
 @media (max-width: 640px) {
+  /* Today: one sideways row of flow tabs (+ Flow stays in reach at its end); All's rows put the prompt under its chip */
+  .day-bar { margin-bottom: 2px; }
+  .day-date { font-size: 23px; }
+  .day-search { width: 40px; padding: 0; justify-content: center; }
+  .day-search > span { display: none; }
+  .flow-strip { align-items: center; margin-bottom: 14px; }
+  .flow-tabs { flex: 1 1 auto; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .flow-tabs::-webkit-scrollbar { display: none; }
+  .flow-tab { flex: none; max-width: 180px; min-height: 40px; }
+  .flow-new { min-height: 40px; }
+  .tl-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'chip time' 'prompt prompt'; row-gap: 6px; }
+  .tl-time { grid-area: time; }
+  .flow-chip { grid-area: chip; justify-self: start; }
+  .tl-prompt { grid-area: prompt; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
+  .day-empty { font-size: 21px; }
+  .flow-pick { flex: 1 1 100%; max-width: none; justify-content: flex-start; }
   .mode, .mode[aria-selected='true'] { flex: 1 0 0; flex-direction: column; height: 48px; gap: 5px; padding: 0 3px; min-width: 0; font-size: 10px; }
   .mode svg { width: 15px; height: 15px; }
   .mode-ink { height: 48px; }
@@ -434,6 +507,9 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
   .lk-thumb { width: 64px; height: 64px; }
 }
 @media (pointer: coarse) {
+  .flow-tab, .flow-new, .day-search, .earlier-btn { min-height: 44px; } /* Today's controls: full touch height */
+  .day-step { width: 44px; height: 44px; }
+  .day-search { min-width: 44px; }
   .composer-control { min-height: 44px; }
   .welcome-all-threads { min-height: 44px; }
   .thread-tools > button { width: 44px; min-height: 44px; }
