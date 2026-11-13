@@ -8,30 +8,31 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=112';
-import * as Sync from './sync.js?v=112';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=112';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=112';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=112';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=112';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=112';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=112';
-import { initLookup } from './lookup.js?v=112';
-import { createRemix } from './remix-app.js?v=112';
-import { sendMode, looksLikeQuestion } from './remix.js?v=112';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=112';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=112';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=112';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=112';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=112';
-import * as ClaudeImport from './claude-import.js?v=112';
-import { createFeedback } from './feedback.js?v=112';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=112';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=112';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=112';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=112';
-import { HUMANIZER } from './humanizer.js?v=112';
-import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=112';
+import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=113';
+import * as Sync from './sync.js?v=113';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=113';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=113';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=113';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY } from './context.js?v=113';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=113';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=113';
+import { initLookup } from './lookup.js?v=113';
+import { createRemix } from './remix-app.js?v=113';
+import { sendMode, looksLikeQuestion } from './remix.js?v=113';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=113';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=113';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=113';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=113';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=113';
+import * as ClaudeImport from './claude-import.js?v=113';
+import { createFeedback } from './feedback.js?v=113';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=113';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=113';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=113';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=113';
+import { HUMANIZER } from './humanizer.js?v=113';
+import { docKind, officeText, clipText, fitFiles, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=113';
+import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=113';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -242,6 +243,7 @@ const S = {
   busy: false,
   ctrl: null,
   attachments: [],
+  files: [], // v113: documents in the composer, read into text (addDocs)
   video: null, // the composer's video (session-only: File, blob: URL, clip upload) — see attachVideo
   tester: null, // a LinkedIn tester (GET /api/tester/me, see setTester); null for the owner and signed-out visitors
   settings: mergeDeep(structuredClone(DEFAULT_SETTINGS), migrateSettings(LS.get('settings', {}))),
@@ -640,7 +642,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '112';
+const APP_BUILD = '113';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -1617,6 +1619,7 @@ function renderEntry(e, i = S.thread.entries.indexOf(e)) {
       ${e.via === 'assist' ? '<p class="task-of">From Atelier Assist</p>' : ''}
       <h2 class="prompt" title="Click to expand">${esc(e.prompt)}</h2>
       ${e.images?.length ? `<div class="prompt-thumbs">${e.images.map((s) => `<img src="${esc(s)}" alt="attachment" />`).join('')}</div>` : ''}
+      ${e.files?.length ? `<div class="prompt-files">${e.files.map((f) => `<span class="file-pill"><b>${esc(KIND_LABEL[f.kind] || 'File')}</b> ${esc(f.name)}</span>`).join('')}</div>` : ''}
       ${e.video ? videoThumb(e) : ''}
       <div class="out"></div>
       <div class="actions"></div>
@@ -2137,7 +2140,14 @@ async function submit(textArg, modeArg, extra = {}) {
   const video = textArg == null && !extra.entry ? S.video : null;
   if (video?.status === 'reading') { toast('Still reading the video — one moment'); return; }
   const images = video ? [] : extra.images ?? S.attachments.map((a) => a.src);
-  if (!text && !images.length && !video) { input.focus(); return; }
+  // v113: the composer's documents, read into text (addDocs). Only a composer send takes them, like its video.
+  const ownSend = textArg == null && !extra.entry;
+  const held = ownSend ? S.files || [] : [];
+  if (held.some((f) => f.status === 'reading')) { toast('Still reading the file — one moment'); return; }
+  const docs = !video ? held.filter((f) => f.status === 'ready').map(({ name, kind, text: t, cut, pages }) => ({ name, kind, text: t, cut: Boolean(cut), ...(pages && { pages }) })) : [];
+  if (!text && !images.length && !video && !docs.length) { input.focus(); return; }
+  if (docs.length && mode !== 'ask' && mode !== 'code') { mode = 'ask'; setMode('ask'); } // files are read in Ask (or Code)
+  if (!text && docs.length) text = docs.length > 1 ? 'Summarize these files.' : 'Summarize this file.';
   const route = video ? sendMode(mode, true, remixOn()) : mode; // 'remix' only in Video mode with Labs → Remix on
   if (!text && route === 'remix') { await remix.composer.gate('', video, S.thread); return; } // shake + "Tell Atelier what to change"
   if (!text && video) text = 'What happens in this video?';
@@ -2174,7 +2184,7 @@ async function submit(textArg, modeArg, extra = {}) {
   // Never for marked text (a link, a share, or a button on a marked entry): the planner would read a stranger's words as
   // the owner's request and start up to 4 paid jobs (Video, Image) at once with the saved options and no price on screen.
   // A marked turn goes out as one Ask turn instead (v89 review, money-marked-text-splits-into-paid-tasks).
-  if (mode === 'ask' && !untrusted && !images.length && !video && !extra.entry && !extra.images && !extra.launch && feat('helpers') && MULTI_HINT.test(text) && MULTI_JOIN.test(text)) {
+  if (mode === 'ask' && !untrusted && !images.length && !video && !docs.length && !extra.entry && !extra.images && !extra.launch && feat('helpers') && MULTI_HINT.test(text) && MULTI_JOIN.test(text)) {
     if (textArg == null) { input.value = ''; autosize(); }
     const ctrl = new AbortController(); running.add(ctrl); setBusy();
     const tasks = await planTasks(text, ctrl.signal).catch(() => null).finally(() => { running.delete(ctrl); setBusy(); hideToast(); });
@@ -2183,7 +2193,7 @@ async function submit(textArg, modeArg, extra = {}) {
   }
 
   if (!S.thread) S.thread = newThread();
-  const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(untrusted && { untrusted }), ...(untrusted && !textMark && { untrustedFiles: true }), ...(extra.via === 'assist' && { via: 'assist' }), ...(said && { spoken: said }), ...(textArg != null && { composed: true }), ...extra.entry };
+  const e = { id: uid(), kind: mode, prompt: text, images, createdAt: Date.now(), pending: true, params: structuredClone(S.opts[mode]), ...(video && { video: storedVideo(video, video.clip?.file) }), ...(docs.length && { files: fitFiles(docs) }), ...(untrusted && { untrusted }), ...(untrusted && !textMark && { untrustedFiles: true }), ...(extra.via === 'assist' && { via: 'assist' }), ...(said && { spoken: said }), ...(textArg != null && { composed: true }), ...extra.entry };
   delete e.images_;
   // Video mode after Edit on an Omni clip (the chip shows it): this prompt edits that clip. Once only.
   if (mode === 'video' && omniEdit && !video && !images.length && !extra.entry && route !== 'remix' && videoModel(e.params.model)?.omni) {
@@ -2207,6 +2217,7 @@ async function submit(textArg, modeArg, extra = {}) {
     if (video.clip) clipJobs.set(e.id, video.clip);
     S.video = null; renderOptions();
   }
+  if (docs.length) { S.files = []; renderAttachments(); } // (S.files only empties for a send that took them)
   if (!extra.images) { S.attachments = []; renderAttachments(); } // a caller's own images (Look up's ask: none) leave the composer's photos waiting
   syncRunwayHint();
   welcome.classList.add('gone');
@@ -3868,7 +3879,7 @@ input.addEventListener('keydown', (ev) => {
 });
 // While something is running, the button stops everything — unless you've typed a new prompt,
 // in which case it sends (tasks can run side by side).
-const hasDraft = () => Boolean(input.value.trim() || S.attachments.length || S.video);
+const hasDraft = () => Boolean(input.value.trim() || S.attachments.length || S.files.length || S.video);
 // ── quick launch (public/launch.js): the source note, armed buttons, the send hold and the device-local draft ──
 const PLATFORM = detectPlatform(navigator); // 'ios' | 'android' | 'desktop'
 const STANDALONE = () => isStandalone(window);
@@ -4014,7 +4025,7 @@ let closeAttachMenu = null;
 $('#attachBtn').onclick = () => {
   if (closeAttachMenu) return closeAttachMenu();
   if (S.video) return toast('One video per message — remove it to attach something else');
-  if (S.attachments.length >= MAX_ATT) return toast(`${MAX_ATT} images max — remove one first`);
+  if (S.attachments.length >= MAX_ATT && S.files.length >= MAX_FILES) return toast('That’s as many attachments as one message holds — remove one first');
   const accts = TOOLS.services?.gmailAccounts;
   if (!accts?.length) { if (!accts) loadTools(); return $('#fileInput').click(); } // never await before .click(): WebKit drops the gesture
   const btn = $('#attachBtn');
@@ -4120,15 +4131,19 @@ function attNote(n) {
 }
 const MIXED = 'A message can carry photos or one video — remove the current attachment first';
 async function addFiles(list, { from = '' } = {}) {
-  const files = [...list];
+  const every = [...list];
+  // v113: documents (PDF, Word, Excel, PowerPoint, text, code) are read here into text (addDocs). Never from a share.
+  const docs = from === 'share' ? [] : every.filter((f) => !isVideoFile(f) && !String(f.type).startsWith('image/') && docKind(f.name, f.type));
+  const files = every.filter((f) => !docs.includes(f));
+  if (docs.length) { await addDocs(docs); if (!files.length) return; }
   const vids = files.filter(isVideoFile), imgs = files.filter((f) => f.type.startsWith('image/'));
   if (vids.length) {
-    if (S.attachments.length || S.video) return toast(MIXED);
+    if (S.attachments.length || S.video || S.files.length) return toast(MIXED);
     if (vids.length > 1 || imgs.length) toast('Attached the first video — one video per message');
     return attachVideo(vids[0], { deferClip: from === 'share', from }); // a share (maybe a drive-by POST) never uploads before Send
   }
   const room = MAX_ATT - S.attachments.length;
-  if (!imgs.length) return toast('Only images and videos can be attached', { error: true });
+  if (!imgs.length) return toast(docs.length ? 'Skipped files Atelier can’t read' : 'Atelier reads photos, videos, PDFs, Word, Excel, PowerPoint and text files', { error: true });
   if (S.video) return toast(MIXED);
   if (room <= 0) return toast(`${MAX_ATT} images max — remove one first`);
   for (const f of imgs.slice(0, room)) {
@@ -4139,14 +4154,83 @@ async function addFiles(list, { from = '' } = {}) {
     S.attachments.push({ src: await shrinkDataUrl(raw, 1280, 1280), ...(from === 'share' && { from }) }); // a shared photo marks its turn (submit)
   }
   if (imgs.length > room) toast(`Added ${room} — ${MAX_ATT} images max`);
-  else if (imgs.length < files.length) toast('Skipped files that aren’t images');
+  else if (imgs.length < files.length) toast('Skipped files Atelier can’t read');
   if (S.mode === 'ideas' || S.mode === 'build') setMode('ask');
   renderAttachments();
   input.focus();
 }
+// ── composer documents (S.files, v113): each read on this device into text (files.js; PDFs with pdf.js) ──
+const DOC_MIXED = 'A message can carry files or one video — remove the video first';
+async function addDocs(list) {
+  if (S.video) return toast(DOC_MIXED);
+  const room = MAX_FILES - S.files.length;
+  if (room <= 0) return toast(`${MAX_FILES} files max — remove one first`);
+  if (!chatMode()) setMode('ask');
+  for (const f of list.slice(0, room)) {
+    const kind = docKind(f.name, f.type), name = f.name || 'file';
+    if (kind === 'old') { toast(`${name}: save it as .docx, .xlsx, .pptx or PDF, then attach it again`, { error: true }); continue; }
+    if (f.size > FILE_MAX_BYTES) { toast(`${name} is over 50 MB — too big to read here`, { error: true }); continue; }
+    const doc = { id: uid(), name, kind, status: 'reading', text: '' };
+    S.files.push(doc); renderAttachments();
+    try { Object.assign(doc, await readDoc(f, kind), { status: 'ready' }); }
+    catch (err) { if (S.files.includes(doc)) S.files.splice(S.files.indexOf(doc), 1); toast(`${name}: ${err?.message || 'couldn’t read it'}`, { error: true }); }
+    renderAttachments();
+  }
+  if (list.length > room) toast(`Added ${room} — ${MAX_FILES} files max`);
+  input.focus();
+}
+async function readDoc(f, kind) {
+  if (kind === 'pdf') return pdfDoc(f);
+  const raw = kind === 'text' ? await f.text() : officeText(kind, new Uint8Array(await f.arrayBuffer()), await loadFflate());
+  if (kind === 'text' && raw.slice(0, 8000).includes('\u0000')) throw new Error('that isn’t a text file');
+  return { ...clipText(raw), chars: raw.length };
+}
+let pdfReady;
+const loadPdf = () => (pdfReady ??= import('/vendor/pdf.js').then((m) => { m.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.js'; return m; }).catch((err) => { pdfReady = null; throw err; }));
+// A PDF's text layer, page by page. A scanned PDF has none: its first pages go in as photos instead (pdfShots).
+async function pdfDoc(f) {
+  let pdfjs;
+  try { pdfjs = await loadPdf(); } catch { throw new Error('couldn’t load the PDF reader — check your connection'); }
+  let task, doc;
+  try { task = pdfjs.getDocument({ data: new Uint8Array(await f.arrayBuffer()), isEvalSupported: false }); doc = await task.promise; }
+  catch (err) { throw new Error(err?.name === 'PasswordException' ? 'that PDF has a password — remove it, then attach it again' : 'couldn’t open that PDF'); }
+  try {
+    const pages = [];
+    let size = 0;
+    for (let i = 1; i <= doc.numPages && size < FILE_CHARS; i++) {
+      const page = await doc.getPage(i);
+      const tc = await page.getTextContent();
+      const t = tc.items.map((it) => (it.str || '') + (it.hasEOL ? '\n' : ' ')).join('').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim();
+      pages.push(`--- Page ${i} ---\n${t}`); size += t.length;
+    }
+    const letters = pages.join('').replace(/--- Page \d+ ---|\s/g, '').length;
+    if (letters < 30 * pages.length) {
+      const shots = await pdfShots(doc, MAX_ATT - S.attachments.length);
+      if (shots) toast(`That PDF is scanned. Its first ${shots === 1 ? 'page is' : `${shots} pages are`} attached as images.`);
+      return { text: shots ? `[A scanned PDF with ${doc.numPages} pages and no text layer. Its first ${shots} pages are attached as images.]` : '[A scanned PDF with no text layer.]', cut: false, pages: doc.numPages, chars: 0 };
+    }
+    const all = pages.join('\n\n'), { text, cut } = clipText(all);
+    return { text, cut: cut || pages.length < doc.numPages, pages: doc.numPages, chars: all.length };
+  } finally { await Promise.resolve(task.destroy?.()).catch(() => {}); } // the loading task frees the document and its worker
+}
+async function pdfShots(doc, room) {
+  let n = 0;
+  for (let i = 1; i <= Math.min(doc.numPages, room); i++) {
+    const page = await doc.getPage(i);
+    const base = page.getViewport({ scale: 1 }), vp = page.getViewport({ scale: Math.min(2, 1600 / Math.max(base.width, base.height)) });
+    const c = document.createElement('canvas');
+    c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+    await page.render({ canvas: c, canvasContext: c.getContext('2d'), viewport: vp }).promise;
+    S.attachments.push({ src: await shrinkDataUrl(c.toDataURL('image/jpeg', 0.85), 1280, 1280) }); n++;
+  }
+  if (n) renderAttachments();
+  return n;
+}
+const docMeta = (f) => (f.status === 'reading' ? 'Reading…' : [f.pages ? `${f.pages} ${f.pages === 1 ? 'page' : 'pages'}` : '', f.chars ? `${f.chars >= 1000 ? `${Math.round(f.chars / 1000)}k` : f.chars} characters` : '', f.cut ? 'first part sent' : ''].filter(Boolean).join(' · '));
+const fileChip = (f, i) => `<div class="att att-file" data-status="${esc(f.status)}"><span class="att-file-kind">${esc(KIND_LABEL[f.kind] || 'File')}</span><span class="att-file-name" title="${esc(f.name)}">${esc(f.name)}</span><span class="att-file-meta">${esc(docMeta(f))}</span><button type="button" data-f="${i}" aria-label="Remove ${esc(f.name)}">${ICON.x}</button></div>`;
 function renderAttachments() {
   const n = S.attachments.length, box = $('#attachments'), refocus = document.activeElement?.matches('#attachments [data-video]');
-  box.innerHTML = S.video ? videoChip(S.video) : S.attachments.map((a, i) => `<div class="att"><img src="${esc(a.src)}" alt="Attached image ${i + 1}" /><button type="button" data-i="${i}" aria-label="Remove image ${i + 1}">${ICON.x}</button></div>`).join('') + (n ? `<span class="att-note">${esc(attNote(n))}</span>` : '');
+  box.innerHTML = S.video ? videoChip(S.video) : S.files.map(fileChip).join('') + S.attachments.map((a, i) => `<div class="att"><img src="${esc(a.src)}" alt="Attached image ${i + 1}" /><button type="button" data-i="${i}" aria-label="Remove image ${i + 1}">${ICON.x}</button></div>`).join('') + (n ? `<span class="att-note">${esc(attNote(n))}</span>` : '');
   if (refocus) $('[data-video]', box)?.focus({ preventScroll: true }); // the chip is rebuilt once the video has been read
   syncPlaceholder(); syncDock(); setBusy(); renderContextChips();
 }
@@ -4237,6 +4321,12 @@ function paintChip() {
 }
 $('#attachments').addEventListener('click', (ev) => {
   if (ev.target.closest('button[data-video]')) { clearComposerVideo(); if (ev.detail === 0) $('#attachBtn').focus(); return; }
+  const fb = ev.target.closest('button[data-f]');
+  if (fb) {
+    S.files.splice(+fb.dataset.f, 1); renderAttachments();
+    if (ev.detail === 0) ($(`#attachments button[data-f="${Math.min(+fb.dataset.f, S.files.length - 1)}"]`) || $('#attachBtn')).focus();
+    return;
+  }
   const b = ev.target.closest('button[data-i]');
   if (b) {
     S.attachments.splice(+b.dataset.i, 1); renderAttachments();
@@ -4607,6 +4697,7 @@ $('#essentialOptions').addEventListener('change', (ev) => {
 document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog" id="contextDialog" aria-labelledby="contextTitle"><div class="sheet-body"><header class="sheet-head"><h2 id="contextTitle">Your <em>context</em></h2><button type="button" class="icon-btn" data-context-close aria-label="Close context">${ICON.x}</button></header><p class="hint">What Atelier can use for your next prompt. Earlier messages in this thread provide conversation context.</p><div id="contextDetails"></div><div class="sheet-foot"><button type="button" class="chip" data-context-profile>Manage profile &amp; memory</button><button type="button" class="btn-primary" data-context-close>Done</button></div></div></dialog>`);
 function renderContextChips() {
   const chips = [], o = S.opts[S.mode] || S.opts.ask, writing = S.mode === 'ask' && o.voice;
+  if (S.files.length) chips.push(`${S.files.length} ${S.files.length === 1 ? 'file attached' : 'files attached'}`);
   if (S.attachments.length) chips.push(`${S.attachments.length} ${S.attachments.length === 1 ? 'image attached' : 'images attached'}`);
   if (S.video) chips.push('Video attached');
   if (writing) chips.push('Your writing style');

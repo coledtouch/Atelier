@@ -15,6 +15,9 @@ export const VENDOR = Object.freeze([
   ['fflate.js', 'fflate/umd/index.js'],
   ['mediabunny.js', 'mediabunny/dist/bundles/mediabunny.min.mjs'],
   ['mediabunny.LICENSE.txt', 'mediabunny/LICENSE'],
+  ['pdf.js', 'pdfjs-dist/legacy/build/pdf.min.mjs'], // v113: reading attached PDFs (lazy, app.js loadPdf)
+  ['pdf.worker.js', 'pdfjs-dist/legacy/build/pdf.worker.min.mjs'],
+  ['pdf.LICENSE.txt', 'pdfjs-dist/LICENSE'],
 ]);
 const root = new URL('../', import.meta.url);
 const vendored = (f) => new URL(`public/vendor/${f}`, root);
