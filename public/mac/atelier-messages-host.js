@@ -4,10 +4,11 @@
 // (read-only) and osascript for sending. install-messages.sh puts it in ~/Library/Application Support/Atelier and
 // registers it for one extension id only. Chrome starts it for each request: one message in, one answer out.
 //
-// It needs two macOS permissions, both asked of Google Chrome (the app that starts it): Full Disk Access to read
-// chat.db, and Automation → Messages to send.
+// It needs two macOS permissions, both for osascript, the program macOS holds responsible (the installer makes this
+// file the thing Chrome starts, with osascript as its interpreter line): Full Disk Access to read chat.db, and
+// Automation → Messages to send.
 
-const HOST_VERSION = '1.0.8';
+const HOST_VERSION = '1.0.9';
 const LIMITS = { recent: 50, read: 100, text: 2000, chat: 200 };
 const APPLE_EPOCH_MS = 978307200000; // 2001-01-01, where Messages counts its dates from
 
@@ -208,7 +209,9 @@ function friendlyError(raw) {
   if (/authorization denied|unable to open database|operation not permitted|not authorized to access/i.test(s)) {
     // 1.0.7 (v123): macOS checks the helper's own program (/usr/bin/osascript), not Chrome: the owner's Chrome had
     // Full Disk Access and reading was still refused. What macOS said goes along, so the next refusal explains itself.
-    return `Atelier’s helper can’t read Messages yet. In System Settings → Privacy & Security → Full Disk Access, turn on osascript (add /usr/bin/osascript) and Google Chrome, then quit and reopen Chrome. macOS said: ${s.trim().replace(/\s+/g, ' ').slice(0, 160)}`;
+    // 1.0.9 (v125): shorter, with the file's path left out, so the reason at the end ("authorization denied") is not
+    // cut off where the error is shown. The fix is osascript alone: the installer now starts the helper as osascript.
+    return `Atelier’s helper can’t read Messages yet. In System Settings → Privacy & Security → Full Disk Access, turn on osascript. If it is on, run the Messages setup command again. macOS said: ${s.trim().replace(/"[^"]*"/g, 'chat.db').replace(/\s+/g, ' ').slice(0, 80)}`;
   }
   if (/-1743|not allowed to send Apple events|Not authorized to send Apple events/i.test(s)) {
     return 'Chrome can’t control Messages yet. Allow it in System Settings → Privacy & Security → Automation, then try again.';

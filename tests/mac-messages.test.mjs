@@ -98,7 +98,7 @@ test('helper: the errors a person can fix say how; anything else passes through,
   assert.match(H.friendlyError('execution error: Not authorized to send Apple events to Messages. (-1743)'), /Automation/);
   assert.equal(H.friendlyError('x'.repeat(900)).length, 300);
   assert.equal(H.friendlyError(''), 'The Messages helper failed.');
-  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.8' });
+  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.9' });
   assert.throws(() => H.handle({ op: 'delete' }), /Unknown Messages action/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: '  ' }), /Pass to and text/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: 'x'.repeat(2001) }), /over 2000/);
@@ -128,7 +128,7 @@ test('helper: a send without Full Disk Access goes to the address as given; read
   assert.deepEqual(rig.calls.map(([tool]) => tool), ['sqlite3', 'osascript', 'sqlite3'], 'the lookup was tried once, then the send, then one look for its outcome (chat.db can’t be read: the send stands)');
   assert.deepEqual(rig.handle({ op: 'send', to: 'pat@example.com', text: 'hi' }), { sent: true, to: 'pat@example.com' });
   // reading can't do without chat.db
-  assert.match(rig.handle({ op: 'recent' }).threw, /^Atelier’s helper can’t read Messages yet\. In System Settings → Privacy & Security → Full Disk Access, turn on osascript \(add \/usr\/bin\/osascript\) and Google Chrome, then quit and reopen Chrome\. macOS said: Error: unable to open database .*authorization denied$/);
+  assert.match(rig.handle({ op: 'recent' }).threw, /^Atelier’s helper can’t read Messages yet\. In System Settings → Privacy & Security → Full Disk Access, turn on osascript\. If it is on, run the Messages setup command again\. macOS said: Error: unable to open database chat\.db: authorization denied$/);
   assert.match(rig.handle({ op: 'read', chat: '+16175550142' }).threw, /Full Disk Access/);
   assert.equal(rig.sent().length, 2, 'and a read never sends');
   // a lookup that fails any other way is no reason to drop the send either
@@ -160,7 +160,11 @@ test('installer: macOS only, a real extension id, and the helper registered for 
   assert.match(INSTALL, /grep -Eq '\^\[a-p\]\{32\}\$' \|\| fail/);
   assert.match(INSTALL, /"allowed_origins": \["chrome-extension:\/\/\$ID\/"\]/);
   assert.match(INSTALL, /HOST_NAME="ai\.ciprari\.atelier\.messages"/);
-  assert.match(INSTALL, /exec \/usr\/bin\/osascript -l JavaScript "\$DIR\/atelier-messages-host\.js"/);
+  // v125: what Chrome starts is the helper itself with osascript as its interpreter line, never a sh script that runs
+  // osascript: macOS held /bin/sh responsible for reading chat.db, and no Full Disk Access the owner granted applied.
+  assert.match(INSTALL, /\n\{ printf '%s\\n' '#!\/usr\/bin\/osascript -l JavaScript'; cat "\$DIR\/atelier-messages-host\.js"; \} > "\$DIR\/atelier-messages-host\.new"\nchmod 755 "\$DIR\/atelier-messages-host\.new"\nmv "\$DIR\/atelier-messages-host\.new" "\$DIR\/atelier-messages-host"\n/);
+  assert.doesNotMatch(INSTALL, /^exec |\n#!\/bin\/sh\nexec /m, 'no shell in between');
+  assert.match(INSTALL, /"path": "\$DIR\/atelier-messages-host",/);
   assert.match(INSTALL, /Full Disk Access/);
   const attrs = readFileSync(new URL('../.gitattributes', import.meta.url), 'utf8');
   assert.match(attrs, /^public\/mac\/\* text eol=lf$/m, 'a Windows checkout still deploys LF');
@@ -382,8 +386,8 @@ test('helper 1.0.7: a number that last refused iMessage gets a text message; SMS
   assert.match(look, /m\.service = 'iMessage' AND m\.error = 0 AND \(m\.is_from_me = 0 OR m\.is_delivered = 1\)\), 0\)\) AS refused;$/);
 });
 
-test('installer 1.0.7: reading texts needs Full Disk Access for osascript, and says how to add it', () => {
-  assert.match(INSTALL, /\nTwo macOS permissions are left:\n {2}1\. Reading texts: System Settings → Privacy & Security → Full Disk Access → turn on osascript and Google Chrome\.\n {5}To add osascript, run: {2}open -R \/usr\/bin\/osascript {3}and drag the selected file into that list\.\n/);
+test('installer: reading texts needs Full Disk Access for osascript alone, and says how to add it', () => {
+  assert.match(INSTALL, /\nTwo macOS permissions are left:\n {2}1\. Reading texts: System Settings → Privacy & Security → Full Disk Access → turn on osascript\.\n {5}To add osascript, run: {2}open -R \/usr\/bin\/osascript {3}and drag the selected file into that list\.\n {2}2\. Sending: the first time Atelier sends a text, macOS asks to let osascript control Messages\. Click Allow\.\n/);
   assert.doesNotMatch(INSTALL, /\r/);
 });
 
@@ -392,9 +396,20 @@ test('installer 1.0.7: reading texts needs Full Disk Access for osascript, and s
 test('helper 1.0.8: an error worded once stays as it is, so what macOS said reaches the user', () => {
   const raw = 'Error: unable to open database "/Users/cole/Library/Messages/chat.db": authorization denied';
   const once = H.friendlyError(raw);
-  assert.match(once, /macOS said: Error: unable to open database .*authorization denied$/);
+  assert.match(once, /macOS said: Error: unable to open database chat\.db: authorization denied$/);
+  assert.ok(once.length < 250, 'short enough that the reason at the end is not cut off where it is shown (1.0.9)');
   assert.equal(H.friendlyError(once), once, 'the reply to Chrome words it again: no change');
   assert.ok(once.length <= 400, 'inside what the extension passes on');
   const auto = H.friendlyError('execution error: Not authorized to send Apple events to Messages. (-1743)');
   assert.equal(H.friendlyError(auto), auto);
+});
+
+// v125 (helper 1.0.9): macOS's log on the owner's Mac named the program it held responsible for reading chat.db:
+// responsible_path=/bin/sh, the two-line script the installer wrote to start osascript. Denied.
+test('helper 1.0.9: the helper is a script osascript runs directly; a hashbang line on top still parses', () => {
+  const launcher = `#!/usr/bin/osascript -l JavaScript\n${HOST}`;
+  const ctx = vm.createContext({});
+  assert.doesNotThrow(() => new vm.Script(launcher, { filename: 'atelier-messages-host' }).runInContext(ctx));
+  assert.equal(JSON.parse(JSON.stringify(vm.runInContext('handle({ op: "ping" })', ctx))).version, '1.0.9');
+  assert.match(HOST, /\nif \(typeof ObjC !== 'undefined'\) main\(\);\n?$/, 'main runs under osascript only');
 });
