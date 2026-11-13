@@ -118,7 +118,7 @@ test('the manifest is fetched network-first (cache only offline); other shell fi
 // Video Remix: the render engine and the vendored Mediabunny (689 KB) are never precached, but once fetched they are
 // served from the cache like the shell (so a cut works offline after the first one).
 test('LAZY files are not in the install list, and are cached on first use', async () => {
-  assert.deepEqual(LAZY, ['/remix-render.js', '/vendor/mediabunny.js']);
+  assert.deepEqual(LAZY, ['/remix-render.js', '/vendor/mediabunny.js', '/vendor/pdf.js', '/vendor/pdf.worker.js']);
   const s = setup(); let done;
   s.handlers.install({ waitUntil: (p) => done = p }); await done;
   for (const p of LAZY) assert.ok(!s.cached.some((u) => String(u).split('?')[0] === p), `${p} isn't precached`);

@@ -1,7 +1,7 @@
-import { validVideo } from './video.js?v=112';
-import { validRemix, recoverRemix } from './remix.js?v=112';
-import { SPOKEN_FROM } from './readaloud.js?v=112';
-import { TAINTS } from './context.js?v=112';
+import { validVideo } from './video.js?v=113';
+import { validRemix, recoverRemix } from './remix.js?v=113';
+import { SPOKEN_FROM } from './readaloud.js?v=113';
+import { TAINTS } from './context.js?v=113';
 
 const KINDS = new Set(['ask', 'code', 'image', 'video', 'ideas', 'build']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -55,6 +55,8 @@ export function validateBackup(data) {
       if (e.group) assert(text(e.from));
       if (e.video != null) assert(validVideo(e.video)); // poster + frames as image data URLs; the video itself is never stored
       if (e.videoOf != null) assert(safeId(e.videoOf));
+      // v113: attached documents, read on the device into text (files.js); the text goes into prompts (context.js filesBlock).
+      if (e.files != null) assert(Array.isArray(e.files) && e.files.length <= 10 && e.files.every(f => record(f) && text(f.name) && text(f.text) && (f.kind == null || (text(f.kind) && /^[a-z]{1,8}$/.test(f.kind))) && (f.cut == null || typeof f.cut === 'boolean') && (f.pages == null || Number.isSafeInteger(f.pages))));
       if (e.remix != null) assert(validRemix(e.remix)); // Video Remix: shots, ops, blob keys and posters are checked
       if (e.remixOf != null) assert(safeId(e.remixOf));
       if (e.refineOf != null) assert(safeId(e.refineOf)); // Build: the version this one changed (builds.js)

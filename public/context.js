@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=112';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=113';
 
 export const CHAT_KINDS = ['ask', 'code'];
 // Earlier turns replayed (chat answers and notes alike): every one while a thread has fewer than HISTORY_TURNS +
@@ -96,12 +96,28 @@ export function sentTag(x) {
   const s = typeof x?.sent === 'string' ? x.sent.replace(/[[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, SENT_MAX).trim() : '';
   return s ? `[Sent ${s}]` : '';
 }
+// v113: the documents attached to a turn (x.files, read on the device: files.js), as one block of text that goes in
+// front of the turn's own words, in this turn and every replay of it. Synced and restored entries are only shape-checked
+// (data-safety), so names are flattened and a closing tag inside a file's text can't end its block early.
+const FILE_NAME_MAX = 120;
+const fileName = (n) => String(n || 'file').replace(/["<>\r\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, FILE_NAME_MAX) || 'file';
+export function filesBlock(x) {
+  const files = Array.isArray(x?.files) ? x.files.filter((f) => f && typeof f.text === 'string') : [];
+  return files.map((f) => {
+    const kind = typeof f.kind === 'string' && /^[a-z]{1,8}$/.test(f.kind) ? ` type="${f.kind}"` : '';
+    const body = f.text.replace(/<\/attached_file/gi, '</attached-file');
+    const cut = f.cut ? '\n[The file is longer. Only this first part was included.]' : '';
+    return `<attached_file name="${fileName(f.name)}"${kind}>\n${body || '[No text could be read from this file.]'}${cut}\n</attached_file>`;
+  }).join('\n\n');
+}
 // A user turn's content with x's send time in front: a first line for text, a first text part for content parts.
+// Its attached documents' text (filesBlock) comes right after the time, before the words that ask about them.
 export function withSent(content, x) {
-  const tag = sentTag(x);
-  if (!tag) return content;
-  if (typeof content === 'string') return `${tag}\n${content}`;
-  return Array.isArray(content) ? [{ type: 'text', text: tag }, ...content] : content;
+  const tag = sentTag(x), docs = filesBlock(x);
+  if (!tag && !docs) return content;
+  const head = [tag, docs].filter(Boolean).join('\n');
+  if (typeof content === 'string') return `${head}${docs ? '\n\n' : '\n'}${content}`;
+  return Array.isArray(content) ? [{ type: 'text', text: head }, ...content] : content;
 }
 
 // ── which remembered facts a system prompt carries ──
@@ -291,7 +307,7 @@ export function mediaTurn(prompt, ctx, { cap = CTX_IMAGES, sees = true } = {}) {
 //            and it ranks last, so it is the reason only when it is the only one: with any other, Claude history waits too.
 // Own words (typed, pasted, dictated, a keyed launch), your own photos, and what your accounts returned (mail, Slack,
 // Drive…) never taint: asking before every read in an inbox thread is the cost this avoids.
-export const TAINTS = Object.freeze(['share', 'link', 'web', 'browser', 'import', 'legacy', 'claude']);
+export const TAINTS = Object.freeze(['share', 'link', 'web', 'browser', 'file', 'import', 'legacy', 'claude']);
 // v56 (2026-10-02) began marking link and share turns (e.untrusted); entries made before the next day may be unmarked shares.
 export const MARKS_SINCE = Date.UTC(2026, 9, 3);
 // v84 began marking photos and videos that came with a share (never marked before): an entry with photos or a video
@@ -324,6 +340,8 @@ export function ownTaint(x) {
   if (!x || typeof x !== 'object') return '';
   let why = markOf(x.untrusted);
   if (x.imported) why = worseTaint(why, 'import');
+  // v113: an attached document is outside text too (a PDF from anywhere can carry words aimed at the assistant).
+  if (Array.isArray(x.files) && x.files.length) why = worseTaint(why, 'file');
   // An imported Claude chat keeps claude.ai's dates: it is Claude text, never 'legacy' (which would hold back Claude history).
   if (x.via === 'claude') return worseTaint(why, 'claude');
   if (Number.isFinite(x.createdAt) && (x.createdAt < MARKS_SINCE || (hasMedia(x) && x.createdAt < MEDIA_MARKS_SINCE))) why = worseTaint(why, 'legacy');
@@ -366,6 +384,7 @@ const TAINT_NOTES = Object.freeze({
   web: 'This thread holds web search results, and a page can try to steer the assistant. So reading your accounts waits for your OK. Start a new thread to skip this.',
   browser: 'The assistant read a web page or someone else’s GitHub content in this thread. That text can try to steer it. So reading your accounts waits for your OK. Start a new thread to skip this.',
   claude: 'This thread holds text from your Claude chats, which can include pasted or web text. So reading your accounts waits for your OK. Start a new thread to skip this.',
+  file: 'This thread holds an attached file, and its text can try to steer the assistant. So reading your accounts waits for your OK. Start a new thread to skip this.',
   import: 'This thread was restored from a backup file, so reading your accounts waits for your OK. Start a new thread to skip this.',
   legacy: 'This thread is older than Atelier’s check for shared text and photos. So reading your accounts waits for your OK. Start a new thread to skip this.',
   page: 'Asked after reading a web page or someone else’s GitHub content in this answer. That text can try to steer the assistant. So reading your accounts now waits for your OK.',

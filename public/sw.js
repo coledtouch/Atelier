@@ -6,20 +6,20 @@
 // One step does all three:  node scripts/bump-version.mjs <n>
 //   (the same by hand: sed -i -E "s/atelier-v[0-9]+'/atelier-v<n>'/" public/sw.js && sed -i -E "s/\?v=[0-9]+/?v=<n>/g" public/index.html public/*.js)
 // tests/service-worker.test.mjs fails if they disagree or a module the app loads isn't precached at its ?v= URL.
-const VERSION = 'atelier-v112';
+const VERSION = 'atelier-v113';
 const V = VERSION.slice('atelier-v'.length);
 // Modules are listed at the exact ?v=<n> URLs they are imported by (PATHS drops the query for the fetch guard below).
 // No '/index.html': the live site answers it with a redirect to '/' (see install below), and '/' is the same page.
 const SHELL = ['/', `/app.css?v=${V}`, `/studio.css?v=${V}`, `/app.js?v=${V}`,
   `/data-safety.js?v=${V}`, `/sync.js?v=${V}`, `/sync-merge.js?v=${V}`, `/video.js?v=${V}`, `/runway.js?v=${V}`, `/omni.js?v=${V}`, `/xai.js?v=${V}`, `/spend.js?v=${V}`, `/tester.js?v=${V}`, `/context.js?v=${V}`, `/usage.js?v=${V}`, `/launch.js?v=${V}`, `/lookup.js?v=${V}`, `/readaloud.js?v=${V}`, `/dictate.js?v=${V}`, `/viewport.js?v=${V}`, `/builds.js?v=${V}`, `/appdata.js?v=${V}`, `/claude-import.js?v=${V}`, `/claude-worker.js?v=${V}`,
   `/remix.js?v=${V}`, `/remix-cuts.js?v=${V}`, `/remix-shots.js?v=${V}`, `/remix-graph.js?v=${V}`, `/remix-store.js?v=${V}`, `/remix-draw.js?v=${V}`, `/remix-app.js?v=${V}`, `/remix.css?v=${V}`,
-  `/feedback.js?v=${V}`, `/feedback.css?v=${V}`, `/app-errors.js?v=${V}`, `/humanizer.js?v=${V}`, `/thread-spaces.js?v=${V}`,
+  `/feedback.js?v=${V}`, `/feedback.css?v=${V}`, `/app-errors.js?v=${V}`, `/humanizer.js?v=${V}`, `/thread-spaces.js?v=${V}`, `/files.js?v=${V}`,
   '/manifest.webmanifest', '/vendor/marked.js', '/vendor/purify.js', '/vendor/highlight.js',
   '/vendor/fflate.js', '/icons/atelier-v2-32.png', '/icons/atelier-v2-180.png', '/icons/atelier-v2-192.png', '/icons/atelier-v2-512.png', '/icons/atelier-v2-maskable-512.png', '/icons/atelier-mark-96.png',
   '/privacy', '/tos', '/legal.css'];
 // Cached on first use, not at install: the render engine and Mediabunny (689 KB, 177 KB gzip) only load when a clip is
-// attached in Video mode with Remix on, or a remix is cut.
-const LAZY = ['/remix-render.js', '/vendor/mediabunny.js'];
+// attached in Video mode with Remix on, or a remix is cut. pdf.js (v113, 1.8 MB) only loads when a PDF is attached.
+const LAZY = ['/remix-render.js', '/vendor/mediabunny.js', '/vendor/pdf.js', '/vendor/pdf.worker.js'];
 const PATHS = [...SHELL.map(u => u.split('?')[0]), '/index.html', ...LAZY]; // '/index.html' is answered from '/'
 // Share target (manifest share_target: POST multipart to /share). The payload waits in its own Cache Storage bucket,
 // which activate() never deletes (it isn't 'atelier-v*'); the page takes it from /?share=<id> (launch.js takeShare)

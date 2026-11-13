@@ -396,10 +396,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=112" />
-  <link rel="stylesheet" href="/studio.css?v=112" />
-  <link rel="stylesheet" href="/feedback.css?v=112" />
-  <link rel="stylesheet" href="/remix.css?v=112" />
+  <link rel="stylesheet" href="/app.css?v=113" />
+  <link rel="stylesheet" href="/studio.css?v=113" />
+  <link rel="stylesheet" href="/feedback.css?v=113" />
+  <link rel="stylesheet" href="/remix.css?v=113" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -490,10 +490,10 @@
         <p class="hint composer-src" id="composerSrc" hidden></p>
         <div class="composer-row" id="promptPanel" role="tabpanel" aria-label="Ask prompt">
           <button class="icon-btn subtle composer-mode" id="composerModeBtn" type="button" aria-expanded="true" aria-controls="modes composerControls"></button>
-          <button class="icon-btn subtle" id="attachBtn" type="button" aria-label="Attach image or video" title="Attach image or video">
+          <button class="icon-btn subtle" id="attachBtn" type="button" aria-label="Attach a file" title="Attach photos, a video, PDFs, Word, Excel, PowerPoint or text files">
             <svg viewBox="0 0 24 24"><path d="M21 12.5 12.6 21a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>
           </button>
-          <input type="file" id="fileInput" accept="image/*,video/*" multiple hidden />
+          <input type="file" id="fileInput" accept="image/*,video/*,.pdf,.docx,.xlsx,.xlsm,.pptx,.doc,.xls,.ppt,.txt,.md,.csv,.tsv,.json,.jsonl,.xml,.html,.htm,.yaml,.yml,.log,.rtf,.srt,.vtt,.js,.mjs,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.cs,.php,.sh,.sql,.css,.ics,.vcf,application/pdf,text/*" multiple hidden />
           <textarea id="input" rows="1" placeholder="Ask anything…" autocomplete="off" enterkeyhint="send" aria-label="Prompt" aria-describedby="composerSrc"></textarea>
           <button class="icon-btn subtle" id="micBtn" type="button" aria-pressed="false" aria-label="Dictate" title="Dictate" data-state="idle">
             <svg class="i-mic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
@@ -927,6 +927,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=112" type="module"></script>
+  <script src="/app.js?v=113" type="module"></script>
 </body>
 </html>
