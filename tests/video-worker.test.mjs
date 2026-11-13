@@ -364,3 +364,30 @@ test('v115: Gemini gets its tool-call signatures back; any other provider never 
   assert.equal('extra_content' in sent, false, 'another provider: dropped');
   assert.deepEqual(sent.function, messages[1].tool_calls[0].function);
 });
+
+// v118: Claude was busy mid-run, the run fell back to Gemini, and Gemini refused the next round with 400: the tool call
+// Claude made had no thought signature.
+test('v118: a run that falls back to Gemini sends Google’s placeholder on calls another model made', async () => {
+  const messages = [
+    { role: 'user', content: 'test signing into the building portal' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'browser_tabs', arguments: '{}' } }, { id: 'c2', type: 'function', function: { name: 'browser_read', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'c1', content: '[]' },
+    { role: 'tool', tool_call_id: 'c2', content: '' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'c3', type: 'function', function: { name: 'browser_open', arguments: '{}' }, extra_content: { google: { thought_signature: 'cmVhbA==' } } }] },
+    { role: 'tool', tool_call_id: 'c3', content: '{}' },
+  ];
+  const ok = () => new Response('data: {"choices":[{"index":0,"delta":{"content":"done"}}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+  calls = [];
+  mockFetch([[/\/chat\/completions$/, ok]]);
+  assert.equal((await chat(makeEnv(), { model: 'gemini:gemini-3.8-flash', stream: true, messages })).status, 200);
+  const sent = JSON.parse(calls[0].body).messages;
+  assert.deepEqual(sent[1].tool_calls[0].extra_content, { google: { thought_signature: 'skip_thought_signature_validator' } }, 'the first of Claude’s calls');
+  assert.equal('extra_content' in sent[1].tool_calls[1], false, 'Gemini signs only the first of parallel calls');
+  assert.deepEqual(sent[4].tool_calls[0].extra_content, { google: { thought_signature: 'cmVhbA==' } }, 'Gemini’s own signature is kept as it is');
+  assert.equal('extra_content' in messages[1].tool_calls[0], false, 'the app’s copy is untouched');
+  // Back to another provider: the placeholder never leaves for anyone else.
+  calls = [];
+  mockFetch([[/\/chat\/completions$/, ok]]);
+  await chat(makeEnv(), { model: 'moonshotai/kimi-k3', stream: true, messages });
+  assert.ok(JSON.parse(calls[0].body).messages.every((m) => !m.tool_calls || m.tool_calls.every((c) => !('extra_content' in c))));
+});
