@@ -8,31 +8,31 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=125';
-import * as Sync from './sync.js?v=125';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=125';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=125';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=125';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY, mergeProfile, factsInUse, FACTS_IN_PROMPT } from './context.js?v=125';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=125';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=125';
-import { initLookup } from './lookup.js?v=125';
-import { createRemix } from './remix-app.js?v=125';
-import { sendMode, looksLikeQuestion } from './remix.js?v=125';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=125';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=125';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=125';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=125';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=125';
-import * as ClaudeImport from './claude-import.js?v=125';
-import { createFeedback } from './feedback.js?v=125';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=125';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=125';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=125';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=125';
-import { HUMANIZER } from './humanizer.js?v=125';
-import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=125';
-import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=125';
+import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=126';
+import * as Sync from './sync.js?v=126';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=126';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=126';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=126';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY, mergeProfile, factsInUse, FACTS_IN_PROMPT } from './context.js?v=126';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=126';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=126';
+import { initLookup } from './lookup.js?v=126';
+import { createRemix } from './remix-app.js?v=126';
+import { sendMode, looksLikeQuestion } from './remix.js?v=126';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=126';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=126';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=126';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=126';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=126';
+import * as ClaudeImport from './claude-import.js?v=126';
+import { createFeedback } from './feedback.js?v=126';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=126';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=126';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=126';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=126';
+import { HUMANIZER } from './humanizer.js?v=126';
+import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=126';
+import { groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=126';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -652,7 +652,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '125';
+const APP_BUILD = '126';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -2646,7 +2646,7 @@ const EXT = { ready: false, version: null, pending: new Map() };
 // it ships: MIN_EXT is extension/manifest.json's version (tests/extension.test.mjs keeps them equal, and
 // scripts/check-bump.mjs makes every change to extension/ raise that version). 1.3.3: sign-in codes, ID numbers and a
 // password shown as text are refused too.
-const MIN_EXT = '1.4.4';
+const MIN_EXT = '1.4.5';
 const olderExt = (v) => { const a = String(v || '0').split('.').map((n) => Number(n) || 0), b = MIN_EXT.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== b[i]) return (a[i] || 0) < b[i]; return false; };
 window.addEventListener('message', (ev) => {
   if (ev.source !== window || ev.origin !== location.origin) return;
@@ -2749,7 +2749,7 @@ const BROWSER_TOOLS = [
   ['browser_elements', 'See page controls', false, 'List the clickable / typeable elements on a tab, each with an element number to use with browser_click and browser_type.', { tabId: B_TAB }, ['tabId']],
   ['browser_click', 'Click in your browser', true, 'Click an element on a page.', { tabId: B_TAB, element: B_EL, why: { type: 'string', description: 'What this click does, in plain words' } }, ['tabId', 'element', 'why']],
   ['browser_type', 'Type in your browser', true, 'Type text into a field (never passwords or payment details — those are refused). Set submit to press Enter / submit the form after typing.', { tabId: B_TAB, element: B_EL, text: { type: 'string', description: 'Text to enter' }, submit: { type: 'boolean', description: 'Submit after typing' }, why: { type: 'string', description: 'What this does, in plain words' } }, ['tabId', 'element', 'text', 'why']],
-  ['browser_signin', 'Sign in with saved password', true, 'Sign in on a tab showing a sign-in form, with the password Chrome already saved for that site. Chrome fills it; you never see it. Use this instead of asking the user for a password. It fails if Chrome has none saved. The result names the account it used.', { tabId: B_TAB, account: { type: 'string', description: 'The saved user name or email to sign in as, when the user named one or Chrome may hold several. Leave out to use Chrome’s first.' }, why: { type: 'string', description: 'Which site and why, in plain words' } }, ['tabId', 'why']],
+  ['browser_signin', 'Sign in with saved password', true, 'Sign in on a tab showing a sign-in form, with the password Chrome already saved for that site. Chrome fills it; you never see it. Use this instead of asking the user for a password. It fails if Chrome has none saved. The result names the account it used.', { tabId: B_TAB, account: { type: 'string', description: 'The saved user name or email the user asked for, in their own words. Never guess one: leave it out, and the user picks from Chrome’s list.' }, why: { type: 'string', description: 'Which site and why, in plain words' } }, ['tabId', 'why']],
   ['browser_show', 'Show a tab', false, 'Bring a tab to the front so the user can see it.', { tabId: B_TAB }, ['tabId']],
 ].map(([name, label, write, desc, props, required]) => ({
   type: 'function',
@@ -3126,7 +3126,7 @@ function renderSteps(e) {
       return `<div class="approve-card" data-step="${st.id}">
         <div class="ac-head"><span class="svc">${SERVICE_ICON[st.service] || '•'}</span><b>${esc(st.label)}</b><span class="ac-tag">needs your OK</span></div>
         ${st.service === 'browser' && st.confirm ? `<p class="ac-target">${st.args?.url ? `Loads <b>${esc(urlHost(st.args.url))}</b> in your browser, signed in as you — anything in the address reaches that site.<br><span>${esc(st.args.url)}</span>` : `${BROWSER_READS[st.name] || BROWSER_READS.browser_read}${st.moved ? ` That tab has changed since it was read. It now shows <b>${esc(st.moved)}</b>.` : ''}`}</p>`
-          : st.name === 'browser_signin' ? `<p class="ac-target">${st.target?.url ? `Signs in on <b>${esc(urlHost(st.target.url))}</b> with the password Chrome saved. Atelier never sees it. If Chrome shows its list of saved logins on that tab, click yours.<br><span>${esc(st.target.url)}</span>` : '<b>Couldn’t find that tab — decline unless you’re sure.</b>'}</p>`
+          : st.name === 'browser_signin' ? `<p class="ac-target">${st.target?.url ? `Signs in on <b>${esc(urlHost(st.target.url))}</b> with the password Chrome saved. Atelier never sees it. If Chrome doesn’t fill it, click the user name field on that tab and pick your login.<br><span>${esc(st.target.url)}</span>` : '<b>Couldn’t find that tab — decline unless you’re sure.</b>'}</p>`
           : st.service === 'browser' ? `<p class="ac-target">${st.target && !st.target.error ? `${esc(st.target.tag)}${st.target.type ? ` (${esc(st.target.type)})` : ''} <b>“${esc(st.target.label || 'unlabeled')}”</b> on <b>${esc(st.target.page || '')}</b><br><span>${esc(st.target.url || '')}</span>` : '<b>Couldn’t read the target element — decline unless you’re sure.</b>'}</p>`
           : writesMail(st.name) ? `<p class="ac-target">${from ? `From: <b>${esc(from)}</b>` : '<b>Couldn’t tell which Gmail account this uses — decline unless you’re sure.</b>'}</p>` : ''}
         ${taintNote(st.taint) ? `<p class="ac-target ac-why">${esc(taintNote(st.taint))}</p>` : st.afterWeb ? '<p class="ac-target">Asked after a web search. A web page can try to steer the assistant. So every account read or change now waits for your OK.</p>' : ''}
