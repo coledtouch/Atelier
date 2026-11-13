@@ -36,7 +36,7 @@ const MAX_SHOWN_TEXT = 2000; // characters of the text to type shown in the conf
 // lets a page loaded for a read draw itself.
 // front: the pause after a sign-in tab comes forward. pick: how long a sign-in waits for the user to click their login in
 // Chrome's list when the keys didn't pick it, looking every poll (1.4.3, v120).
-const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800, front: 400, pick: 30_000, poll: 500, bar: 900 };
+const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800, front: 400, pick: 30_000, poll: 500, bar: 900, gm: 8000 };
 // After a click or typing request is declined, closed or left unanswered, further ones from the same path (this
 // browser's Atelier tab, or another device through the relay) are refused without a window for a while: 30 s, doubling
 // with each refusal in a row (at most 10 min); an Allow resets it. A hijacked page can't keep stealing the focus.
@@ -472,6 +472,93 @@ async function messagesHost(msg) {
   return r.result;
 }
 
+// ── Personal texts through Google Messages for web (1.4.6, v131) ──
+// The owner's personal Android phone has no helper like the Mac's. Google Messages pairs a phone with a browser tab
+// (messages.google.com/web), and that page marks its parts with data-e2e-* names: the conversation list, each message,
+// the box to type in and the send button. This reads and sends through that tab, in the browser where it is paired.
+// Reading a conversation opens it there, which marks it read on the phone too. A send asks like a text from the Mac.
+const GM_URL = 'https://messages.google.com/web/*';
+const GM_NOT_OPEN = 'Google Messages isn’t open in this browser. Open messages.google.com/web here and pair the phone.';
+const GM_NOT_PAIRED = 'Google Messages isn’t paired in this browser. Open messages.google.com/web here and pair the phone.';
+const GM_NO_CHAT = 'No Google Messages conversation matches that. Use a chat id or name from personal_texts_recent.';
+const GM_NOT_SENT = 'Google Messages didn’t take the text, so it isn’t known whether it was sent. Look at that tab before trying again.';
+function pageGMessages(op, arg = {}) {
+  const clean = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const rows = () => [...document.querySelectorAll('a[data-e2e-conversation]')];
+  const idOf = (a) => String(a.getAttribute('href') || '').split('/').pop();
+  const nameOf = (a) => clean(a.querySelector('[data-e2e-conversation-name]')?.innerText, 80);
+  if (op === 'state') return { paired: !/\/web\/(welcome|authentication)/.test(location.pathname), list: rows().length };
+  if (op === 'recent') {
+    return rows().slice(0, arg.limit).map((a) => ({
+      chat: idOf(a), name: nameOf(a), last: clean(a.querySelector('[data-e2e-conversation-snippet]')?.innerText, 200),
+      at: clean(a.querySelector('mws-relative-timestamp')?.innerText, 40), unread: a.getAttribute('data-e2e-is-unread') === 'true',
+    }));
+  }
+  // The conversation asked for: by its id, its exact name, a phone number (last 10 digits), then a part of its name.
+  if (op === 'open') {
+    const want = clean(arg.chat, 200), low = want.toLowerCase(), digits = want.replace(/\D/g, '');
+    const all = rows();
+    const hit = all.find((a) => idOf(a) === want) || all.find((a) => nameOf(a).toLowerCase() === low)
+      || (digits.length >= 7 && !/[a-z]/i.test(want) ? all.find((a) => nameOf(a).replace(/\D/g, '').endsWith(digits.slice(-10))) : null)
+      || (low.length >= 3 ? all.find((a) => nameOf(a).toLowerCase().includes(low)) : null);
+    if (!hit) return { error: 'none' };
+    hit.click();
+    return { chat: idOf(hit), name: nameOf(hit) };
+  }
+  if (op === 'messages') {
+    const here = String(location.pathname).split('/').pop();
+    if (here !== arg.chat) return { ready: false };
+    const list = [...document.querySelectorAll('mws-message-wrapper')];
+    if (!list.length) return { ready: false };
+    const name = clean(document.querySelector('[data-e2e-header-title]')?.innerText, 80);
+    return {
+      ready: true, name,
+      messages: list.slice(-arg.limit).map((w) => {
+        const said = String(w.querySelector('mws-text-message-part')?.getAttribute('aria-label') || '');
+        const when = /\b(?:Sent|Received) on (.+?)\.(?: |$)/.exec(said)?.[1] || '';
+        const text = clean(w.querySelector('[data-e2e-text-message-content]')?.innerText, 2000) || (w.querySelector('[data-e2e-message-image], mws-image-message-part') ? '(image)' : '(attachment)');
+        return { from: w.getAttribute('is-outgoing') === 'true' ? 'me' : name || 'them', at: clean(when, 60), text };
+      }),
+    };
+  }
+  if (op === 'outgoing') return { n: document.querySelectorAll('mws-message-wrapper[is-outgoing="true"]').length, here: String(location.pathname).split('/').pop() };
+  if (op === 'type') {
+    const box = document.querySelector('[data-e2e-message-input-box]');
+    if (!box) return { error: 'box' };
+    if (clean(box.innerText, 10)) return { error: 'draft' }; // a draft the user left there is never sent along
+    box.focus();
+    document.execCommand('insertText', false, String(arg.text));
+    return { typed: clean(box.innerText, 4000) === clean(arg.text, 4000) };
+  }
+  if (op === 'send') {
+    const btn = document.querySelector('[data-e2e-send-text-button]');
+    if (!btn || btn.disabled) return { error: 'button' };
+    btn.click();
+    return { clicked: true };
+  }
+  return null;
+}
+async function gmTab() {
+  const tabs = await chrome.tabs.query({ url: GM_URL });
+  const tab = tabs.find((t) => /\/web\/conversations/.test(t.url || '')) || tabs[0];
+  if (!tab) throw new Error(GM_NOT_OPEN);
+  const page = (op, arg) => withTimeout(inPage(tab.id, pageGMessages, [op, arg]), TIMING.read, NOT_RESPONDING);
+  const st = await page('state');
+  if (!st?.paired) throw new Error(GM_NOT_PAIRED);
+  return { tab, page };
+}
+// Opens a conversation in that tab and waits for its messages to show.
+async function gmOpen(page, chat, limit) {
+  const hit = await page('open', { chat });
+  if (!hit || hit.error) throw new Error(GM_NO_CHAT);
+  for (let waited = 0; waited < TIMING.gm; waited += TIMING.poll) {
+    const got = await page('messages', { chat: hit.chat, limit });
+    if (got?.ready) return { ...hit, name: got.name || hit.name, messages: got.messages };
+    await sleep(TIMING.poll);
+  }
+  return { ...hit, messages: [] }; // a conversation with nothing in it yet, or one slow to load
+}
+
 // ── commands ── (ctx.via: 'local' for the Atelier tab in this browser, 'remote' for the relay; ctx.approved: the
 // owner approved this step in Atelier)
 const COMMANDS = {
@@ -666,6 +753,45 @@ const COMMANDS = {
     }
     throw new Error('Unknown Messages action.');
   },
+  // Personal texts through Google Messages for web in this browser: op recent / read / send (see pageGMessages).
+  async gmessages(args = {}, ctx = {}) {
+    const op = String(args.op || '');
+    if (op === 'recent') {
+      const { page } = await gmTab();
+      return { conversations: (await page('recent', { limit: clampInt(args.limit, 1, 50, 20) })) || [] };
+    }
+    if (op === 'read') {
+      const chat = String(args.chat || '').trim().slice(0, 200);
+      if (!chat) throw new Error('Pass chat: a chat id or a name from personal_texts_recent.');
+      const { page } = await gmTab();
+      const got = await gmOpen(page, chat, clampInt(args.limit, 1, 100, 30));
+      return { chat: got.chat, name: got.name, messages: got.messages };
+    }
+    if (op === 'send') {
+      if (ctx.approved !== true) throw new Error(SEND_NEEDS_APPROVAL);
+      const to = String(args.to || '').trim().slice(0, 200), text = String(args.text ?? '');
+      if (!to || !text.trim()) throw new Error('Pass to (a chat id or a name from personal_texts_recent) and text.');
+      if (text.length > MAX_SMS) throw new Error(`That text is over ${MAX_SMS} characters.`);
+      const { page } = await gmTab();
+      // The conversation is found first, so the confirmation names who gets the text, never just what was asked for.
+      const got = await gmOpen(page, to, 1);
+      await confirmFirst('sms', { to: got.name || to, text }, ctx.via);
+      const before = await page('outgoing');
+      if (before?.here !== got.chat) throw new Error(GM_NOT_SENT); // the tab moved to another conversation meanwhile
+      const typed = await page('type', { text });
+      if (typed?.error === 'draft') throw new Error('That conversation has a draft in its box, so nothing was sent. Ask the user to clear it.');
+      if (!typed?.typed) throw new Error(GM_NOT_SENT);
+      const sent = await page('send');
+      if (!sent?.clicked) throw new Error(GM_NOT_SENT);
+      for (let waited = 0; waited < TIMING.gm; waited += TIMING.poll) {
+        await sleep(TIMING.poll);
+        const now = await page('outgoing');
+        if (now?.here === got.chat && now.n > before.n) return { sent: true, to: got.name || to, chat: got.chat, via: 'Google Messages' };
+      }
+      throw new Error(GM_NOT_SENT);
+    }
+    throw new Error('Unknown personal texts action.');
+  },
   async show({ tabId }) {
     const t = await chrome.tabs.update(tabId, { active: true });
     await chrome.windows.update(t.windowId, { focused: true });
@@ -732,7 +858,7 @@ function scheduleReconnect() {
   setTimeout(connectRelay, 1000 * 2 ** retry); // 2s … 64s
 }
 // Commands the server may send (pairing/status are local-only).
-const REMOTE_COMMANDS = ['tabs', 'read', 'open', 'elements', 'describe', 'click', 'type', 'signin', 'messages', 'show'];
+const REMOTE_COMMANDS = ['tabs', 'read', 'open', 'elements', 'describe', 'click', 'type', 'signin', 'messages', 'gmessages', 'show'];
 
 // Local-only: pairing handed over by the Atelier page on this computer.
 COMMANDS.pair = async ({ token, origin }) => {

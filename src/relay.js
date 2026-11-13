@@ -14,7 +14,7 @@ const COMMAND_TIMEOUT_MS = 90_000;
 // (extension/background.js) checks open and read once more.
 export function relayNeedsApproval(cmd, args) {
   if (cmd === 'click' || cmd === 'type' || cmd === 'signin' || cmd === 'open') return true;
-  if (cmd === 'messages') return args?.op === 'send';
+  if (cmd === 'messages' || cmd === 'gmessages') return args?.op === 'send';
   return cmd === 'read' && Boolean(args?.url);
 }
 
@@ -23,6 +23,9 @@ export function relayNeedsApproval(cmd, args) {
 const DEVICES = ['mac', 'win', 'linux', 'other'];
 const deviceFromAgent = (agent) => (/Macintosh|Mac OS X/i.test(agent) ? 'mac' : /Windows/i.test(agent) ? 'win' : /Linux|CrOS/i.test(agent) ? 'linux' : 'other');
 const deviceOf = (ws) => { const a = ws.deserializeAttachment?.() || {}; return DEVICES.includes(a.device) ? a.device : deviceFromAgent(a.agent || ''); };
+
+// What a browser with no Google Messages tab, or an unpaired one, answers (extension/background.js GM_NOT_OPEN / GM_NOT_PAIRED).
+const NO_GM_TAB = /^Google Messages isn’t (open|paired) in this browser/;
 
 function timingSafe(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
@@ -105,19 +108,30 @@ export class Relay extends DurableObject {
       const ws = this.browser(cmd);
       if (!ws && cmd === 'messages' && this.browser()) return Response.json({ ok: false, error: 'Your Mac isn’t connected, and texts go through it. Open Atelier in Chrome on the Mac, then try again.' }, { status: 503 });
       if (!ws) return Response.json({ ok: false, error: 'Your computer’s browser isn’t connected — make sure the computer is on and Chrome is open.' }, { status: 503 });
-      const id = crypto.randomUUID();
-      const reply = new Promise((resolve) => {
-        const timer = setTimeout(() => { this.pending.delete(id); resolve({ ok: false, error: 'Your computer didn’t respond in time.' }); }, COMMAND_TIMEOUT_MS);
-        this.pending.set(id, { resolve, timer });
-      });
-      try {
-        ws.send(JSON.stringify({ id, cmd, args, approved: approved === true })); // the extension checks it again
-      } catch {
-        const p = this.pending.get(id);
-        if (p) { clearTimeout(p.timer); this.pending.delete(id); }
-        return Response.json({ ok: false, error: 'Lost the connection to your computer.' }, { status: 503 });
+      // Personal texts (gmessages, v131) live in whichever browser has Google Messages paired, and nothing here knows
+      // which. Each connected computer is asked, newest first, until one doesn't answer that it has no such tab. A
+      // browser without it sends nothing and changes nothing. Every other command goes to the one connection chosen.
+      const order = cmd === 'gmessages' ? this.ctx.getWebSockets('browser').slice().reverse() : [ws];
+      let last = null;
+      for (const sock of order) {
+        const id = crypto.randomUUID();
+        const reply = new Promise((resolve) => {
+          const timer = setTimeout(() => { this.pending.delete(id); resolve({ ok: false, error: 'Your computer didn’t respond in time.' }); }, COMMAND_TIMEOUT_MS);
+          this.pending.set(id, { resolve, timer });
+        });
+        try {
+          sock.send(JSON.stringify({ id, cmd, args, approved: approved === true })); // the extension checks it again
+        } catch {
+          const p = this.pending.get(id);
+          if (p) { clearTimeout(p.timer); this.pending.delete(id); }
+          last = { lost: true };
+          continue;
+        }
+        last = await reply;
+        if (!(cmd === 'gmessages' && last.ok === false && NO_GM_TAB.test(last.error || ''))) return Response.json(last);
       }
-      return Response.json(await reply);
+      if (last?.lost) return Response.json({ ok: false, error: 'Lost the connection to your computer.' }, { status: 503 });
+      return Response.json(last);
     }
 
     return new Response('Not found', { status: 404 });
