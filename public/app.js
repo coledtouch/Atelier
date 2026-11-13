@@ -33,7 +33,7 @@ import { renderAppErrors, loadAppErrors } from './app-errors.js?v=131';
 import { HUMANIZER } from './humanizer.js?v=131';
 import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=131';
 import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=131';
-import { kindOf, cleanFlow, flowHint, flowOpts } from './days.js?v=131';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite } from './days.js?v=131';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -372,7 +372,9 @@ function mergeDeep(a, b) {
   return a;
 }
 const saveSettings = () => LS.set('settings', S.settings);
-const saveOpts = () => { LS.set('opts', S.opts); saveFlowOpts(); }; // the global last choice, and the open flow's own
+// A change to one mode's choices (S.mode unless named): saved into the open flow, and that mode's slice only into the global
+// last choices, without the flow's kind defaults (days.js globalOptsWrite). Other modes' global choices stay as they were.
+const saveOpts = (mode = S.mode) => { if (S.opts[mode]) LS.set('opts', globalOptsWrite(LS.get('opts', {}), mode, S.opts[mode], S.thread?.flow?.kind)); saveFlowOpts(); };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const sleep = (ms, signal) => new Promise((res, rej) => {
   const t = setTimeout(res, ms);
@@ -656,7 +658,7 @@ function setFlow(thread, kind) {
   const flow = cleanFlow({ kind });
   if (!thread || !flow) return;
   thread.flow = flow;
-  if (thread === S.thread) { if (!thread.opts) openFlowOpts(thread); persist(); }
+  if (thread === S.thread) { if (!thread.opts) { openFlowOpts(thread); saveFlowOpts(); renderOptions(); } persist(); }
   else DB.put(thread).catch(storageError);
   renderFlowTabs();
 }
@@ -3713,7 +3715,7 @@ stream.addEventListener('click', async (ev) => {
       if (!e.omni?.id) return;
       clearComposerVideo();
       setMode('video');
-      if (!videoModel(S.opts.video.model)?.omni) { S.opts.video.model = OMNI_ID; saveOpts(); }
+      if (!videoModel(S.opts.video.model)?.omni) { S.opts.video.model = OMNI_ID; saveOpts('video'); }
       const p = String(e.prompt || 'this clip');
       omniEdit = { id: e.omni.id, at: e.omni.at, label: `‘${p.length > 22 ? `${p.slice(0, 21)}…` : p}’` };
       renderOptions();
@@ -3753,13 +3755,13 @@ stream.addEventListener('click', async (ev) => {
     case 'app-copy': return copy(e.app.html);
     case 'app-refine': // refine THIS version: it becomes the head (Restore) when it isn't already
       if (composerTarget(S.thread.entries)?.id !== e.id && restoreBase(e)) { persist(true); Sync.kick('edit'); repaintBuilds(); }
-      setMode('build'); S.opts.build.refine = true; renderOptions();
+      setMode('build'); S.opts.build.refine = true; saveOpts('build'); renderOptions();
       return input.focus();
     case 'ver-restore': {
       if (!restoreBase(e)) return;
       const n = buildVersion(e)?.n;
       persist(true); Sync.kick('edit'); repaintBuilds();
-      setMode('build'); S.opts.build.refine = true; renderOptions();
+      setMode('build'); S.opts.build.refine = true; saveOpts('build'); renderOptions();
       toast(`Restored v${n || ''} — your next change applies to it. Later versions stay in the thread.`);
       const line = entryEl(e) && $('[data-act="ver-show"]', entryEl(e));
       return (line || input).focus({ preventScroll: true });
@@ -4072,7 +4074,7 @@ $('#options').addEventListener('click', (ev) => {
   const rh = ev.target.closest('[data-runway-hint]');
   if (rh) {
     const hadFocus = document.activeElement === rh; // Enter or Space on it: the chip goes away with the re-render
-    S.opts.video.model = rh.dataset.runwayHint; renderOptions(); saveOpts(); // (renderOptions snaps HD/length for Runway)
+    S.opts.video.model = rh.dataset.runwayHint; renderOptions(); saveOpts('video'); // (renderOptions snaps HD/length for Runway)
     const model = hadFocus && $('[data-opt="model"]', $('#options'));
     if (model) { model.focus({ preventScroll: true }); revealInStrip(model.closest('.opt')); } // where it was: the model it picked
     toast(`Video model: ${VIDEO_MODELS.find((m) => m.id === rh.dataset.runwayHint)?.label || 'Runway'}`);
@@ -5184,7 +5186,7 @@ $('#contextDialog').addEventListener('click', (ev) => {
 });
 $('#contextDialog').addEventListener('change', (ev) => {
   const t = ev.target.closest('[data-context-toggle]');
-  if (t) { S.opts.ask[t.dataset.contextToggle] = t.checked; saveOpts(); renderOptions(); }
+  if (t) { S.opts.ask[t.dataset.contextToggle] = t.checked; saveOpts('ask'); renderOptions(); }
   if (ev.target.id === 'contextToolAccess') { const o = S.opts[S.mode]; o.accountAccess = ev.target.value; o.tools = ev.target.value === 'always'; saveOpts(); renderOptions(); }
 });
 $('#bento').addEventListener('click', (ev) => {

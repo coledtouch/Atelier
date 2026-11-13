@@ -100,3 +100,19 @@ export function flowOpts(t, base, baseMode, clean = (o) => o) {
   const { mode = 'ask', ...defaults } = structuredClone(KIND_DEFAULTS[kind] || {});
   return { opts: overlay(base, defaults), mode };
 }
+
+/**
+ * The global choices (LS 'opts') after a change to one mode's choices in a flow: `stored` with `slice` laid over its
+ * `mode`, and nothing else touched (other modes keep the global values, not this flow's). Keys the flow's kind sets by
+ * default (linkedin's ask.voice) stay as stored: they belong to the flow, never to every later chat. Returns a new object.
+ */
+export function globalOptsWrite(stored, mode, slice, kind) {
+  const out = isObj(stored) ? structuredClone(stored) : {};
+  if (!isObj(slice)) return out;
+  const was = isObj(out[mode]) ? out[mode] : {};
+  const own = structuredClone(slice);
+  const d = KIND_DEFAULTS[kind]?.[mode];
+  if (isObj(d)) for (const k of Object.keys(d)) { if (k in was) own[k] = was[k]; else delete own[k]; }
+  out[mode] = { ...was, ...own };
+  return out;
+}

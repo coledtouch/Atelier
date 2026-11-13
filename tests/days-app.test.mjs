@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { kindOf, cleanFlow, flowHint, flowOpts, KIND_DEFAULTS } from '../public/days.js';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, KIND_DEFAULTS } from '../public/days.js';
 import { groupsFor } from '../public/thread-spaces.js';
 
 // Days and flows, the app.js half (Task 5): each flow keeps its own kind and composer choices, a retried turn is
@@ -95,7 +95,7 @@ test('flowOpts: own choices, else the kind defaults over the global ones, else t
 });
 
 test('opts are saved per flow: every save of S.opts or S.mode goes through saveFlowOpts', () => {
-  assert.match(constExpr('saveOpts'), /LS\.set\('opts', S\.opts\);\s*saveFlowOpts\(\);/, 'saveOpts keeps the global last choice and saves the flow’s');
+  assert.match(constExpr('saveOpts'), /\(mode = S\.mode\) => \{ if \(S\.opts\[mode\]\) LS\.set\('opts', globalOptsWrite\(LS\.get\('opts', \{\}\), mode, S\.opts\[mode\], S\.thread\?\.flow\?\.kind\)\); saveFlowOpts\(\); \}/, 'saveOpts writes one mode’s slice to the global choices and saves the flow’s');
   const setMode = fnSource('setMode');
   assert.match(setMode, /if \(!load\) \{ LS\.set\('mode', k\); saveFlowOpts\(\); \}/, 'a chosen mode is saved; a loaded one is not');
   assert.equal(APP.match(/LS\.set\('opts'/g).length, 1, 'one save path for opts');
@@ -154,12 +154,12 @@ test('newThread(flow) and setFlow(thread, kind)', () => {
 
   const log = [];
   const w = { S: { thread: null }, cleanFlow, persist: () => log.push('persist'), DB: { put: (t) => { log.push(['put', t.id]); return Promise.resolve(); } },
-    storageError: () => {}, openFlowOpts: (t) => log.push(['open', t.id]), renderFlowTabs: () => log.push('tabs') };
+    storageError: () => {}, openFlowOpts: (t) => log.push(['open', t.id]), saveFlowOpts: () => log.push('save'), renderOptions: () => log.push('draw'), renderFlowTabs: () => log.push('tabs') };
   lift(w, 'setFlow');
   const open = { id: 'o', entries: [] }; w.S.thread = open;
   w.setFlow(open, 'linkedin');
   assert.deepEqual(open.flow, { kind: 'linkedin' });
-  assert.deepEqual(log, [['open', 'o'], 'persist', 'tabs'], 'no choices yet: the kind’s defaults load');
+  assert.deepEqual(log, [['open', 'o'], 'save', 'draw', 'persist', 'tabs'], 'no choices yet: the kind’s defaults load, are kept by the flow and drawn');
   log.length = 0; open.opts = { mode: 'ask' };
   w.setFlow(open, 'coen');
   assert.deepEqual(log, ['persist', 'tabs'], 'its own choices stay');
@@ -193,4 +193,37 @@ test('days.js is imported like thread-spaces.js and precached', () => {
   // thread.opts never syncs: sync only carries title, flow and entries
   const merge = readFileSync(new URL('../public/sync-merge.js', import.meta.url), 'utf8');
   assert.doesNotMatch(merge, /\.opts\b/);
+});
+
+test('globalOptsWrite: one mode’s slice reaches the global choices, never a kind’s defaults or other modes', () => {
+  const stored = { ask: { model: '', think: false, voice: false, web: false }, image: { aspect: '1:1' } };
+  // a chip change in a linkedin flow (voice came from the kind's defaults): web goes global, voice stays as stored
+  const out = globalOptsWrite(stored, 'ask', { model: '', think: false, voice: true, web: true }, 'linkedin');
+  assert.deepEqual(out.ask, { model: '', think: false, voice: false, web: true });
+  assert.deepEqual(out.image, { aspect: '1:1' }, 'other modes keep the global values');
+  assert.equal(stored.ask.web, false, 'a new object');
+  // nothing stored for the default key: it is left out, so the built-in default holds
+  assert.deepEqual(globalOptsWrite({}, 'ask', { voice: true, web: true }, 'linkedin'), { ask: { web: true } });
+  // any other kind, or no flow: the whole slice
+  assert.equal(globalOptsWrite(stored, 'ask', { voice: true }, 'coen').ask.voice, true);
+  assert.equal(globalOptsWrite(stored, 'ask', { voice: true }, undefined).ask.voice, true);
+  // only the named mode: a flow's choices for other modes never copy over
+  assert.deepEqual(globalOptsWrite(stored, 'build', { refine: false }, ''), { ...stored, build: { refine: false } });
+  // a junk stored value or slice
+  assert.deepEqual(globalOptsWrite('junk', 'ask', { web: true }), { ask: { web: true } });
+  assert.deepEqual(globalOptsWrite(stored, 'ask', null), stored);
+});
+
+test('every change to S.opts is saved: Refine, Omni, Runway and the Context toggle name their mode', () => {
+  // each line that assigns into a named mode's S.opts saves that mode on the same line; an S.mode one saves within ten lines
+  const all = APP.split('\n');
+  const at = all.map((l, i) => (/S\.opts(\.\w+|\[[^\]]+\])(\.\w+|\[[^\]]+\])? = /.test(l) ? i : -1)).filter((i) => i >= 0);
+  assert.ok(at.length >= 7, 'found the assignments');
+  for (const i of at) {
+    const l = all[i], named = l.match(/S\.opts\.(ask|code|image|video|ideas|build)\b/);
+    if (named) assert.ok(l.includes(`saveOpts('${named[1]}')`), `saves ${named[1]}: ${l.trim().slice(0, 120)}`);
+    else assert.match(all.slice(i, i + 10).join('\n'), /saveOpts\(\)/, `saves: ${l.trim().slice(0, 120)}`);
+  }
+  // the two Refine paths save after refine is set, so a flow switch keeps it
+  assert.equal(APP.split("setMode('build'); S.opts.build.refine = true; saveOpts('build'); renderOptions();").length - 1, 2);
 });
