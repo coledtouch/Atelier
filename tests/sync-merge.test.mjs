@@ -1305,6 +1305,24 @@ test('flow on an empty thread does not push', async () => {
   assert.deepEqual([legacy.flow, legacy.dirty], [null, false]);
 });
 
+test('an invalid local flow is never sent, so it never clears the server’s', async () => {
+  const synced = { ...newRecord(), rev: 4, title: 'Thread t1', titleRev: 1, flow: KID, flowRev: 2 };
+  for (const bad of [{ kind: 'A B' }, 'kid', { kind: 'kid', color: 1 }, { kind: 'kid', extra: true }]) {
+    const plan = await planPush({ thread: thread('t1', [ask('e1', 1)], { flow: bad }), record: synced });
+    assert.deepEqual([plan.flow, plan.dirty], [null, true], JSON.stringify(bad)); // the entry still goes up
+    assert.equal('flow' in pushBodies(plan)[0], false);
+    const quiet = await planPush({ thread: thread('t1', [], { flow: bad }), record: synced });
+    assert.deepEqual([quiet.flow, quiet.dirty], [null, false], JSON.stringify(bad));
+    const fresh = await planPush({ thread: thread('t2', [ask('e1', 1)], { flow: bad }), record: null });
+    assert.equal(fresh.flow, null, JSON.stringify(bad));
+  }
+  // a pull with no news doesn't mark it for a push either
+  const doc = applyPush(await docOf('t1', [ask('e1', 1)]), flowBody({ v: KID, base: 0 }), NOW).doc;
+  const rec = { ...(await recordFor(doc)), flow: KID, flowRev: doc.flowRev };
+  const plan = await planPull({ local: thread('t1', [ask('e1', 1)], { title: '', flow: { kind: 'A B' } }), record: rec, remote: viewOf(doc), uid });
+  assert.equal(plan.push, false);
+});
+
 test('a record from before flows: a pull of an old document neither pushes nor touches the thread', async () => {
   const doc = await docOf('t1', [ask('e1', 1)], { title: { v: 'Thread t1', base: 0 } });
   delete doc.flow; delete doc.flowRev;

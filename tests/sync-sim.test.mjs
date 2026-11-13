@@ -11,7 +11,7 @@
 // device, tester-mode threads, offline periods, the server losing a document) with R2 and network faults (failed
 // compare-and-swaps, rate limits, lost responses, dropped connections) and user edits landing mid-request. After every
 // round all devices quiesce, and the invariants are checked (every open copy, in either tab, must match IndexedDB):
-//   1. every device holds identical threads (ids, entry ids, order, content minus transient keys, titles);
+//   1. every device holds identical threads (ids, entry ids, order, content minus transient keys, titles, flows);
 //   2. every version of an entry ever written survives somewhere, or was replaced by a later version made on top of
 //      it, or was in a thread its device deleted, or was cleared from a device before it was ever pushed;
 //   3. no pending or transient state ever reached the server, and no request was refused as invalid (400/422);
@@ -304,7 +304,9 @@ async function simulate(seed) {
     forbidden.push([tid, eid, marker, dev.running]); // never pushed while the run lock is held
     await put(dev, t);
   }
-  async function rename(dev, t) { t.title = `title ${++seq}`; await put(dev, t); }
+  // a rename sometimes retags the thread too (Days and Flows: the flow syncs like the title)
+  const FLOWS = [{ kind: 'kid' }, { kind: 'linkedin', color: '#0a66c2' }, { kind: 'coen', color: '#c2410c' }];
+  async function rename(dev, t) { t.title = `title ${++seq}`; if (chance(0.4)) t.flow = structuredClone(pick(FLOWS)); await put(dev, t); }
   async function canva(dev) {
     clock.t += 1000;
     if (dev.open?.id === 'canva-imports' || dev.frozen.has('canva-imports')) return;
@@ -389,7 +391,7 @@ async function simulate(seed) {
       e.text = newVersion(parent);
       return put2(dev, tab.open);
     }
-    if (editable && r < 0.8) { label(`rename ${tab.open.id}`); tab.open.title = `title ${++seq}`; return put2(dev, tab.open); }
+    if (editable && r < 0.8) { label(`rename ${tab.open.id}`); tab.open.title = `title ${++seq}`; if (chance(0.4)) tab.open.flow = structuredClone(pick(FLOWS)); return put2(dev, tab.open); }
     label(`hidden ${tab.open.id}`); // visibilitychange → persist(true): its copy is saved (whatever it holds)
     await put2(dev, tab.open);
     if (chance(0.5)) tab.open = null;
@@ -485,7 +487,7 @@ async function simulate(seed) {
   }
 
   // ── invariants ──
-  const contentOf = (t) => t && { title: t.title, entries: t.entries.map((e) => canonical(strip(e))) };
+  const contentOf = (t) => t && { title: t.title, flow: t.flow ?? null, entries: t.entries.map((e) => canonical(strip(e))) };
   function threadsOf(dev) {
     const out = new Map();
     for (const [id, t] of dev.db.m) if (!testerTids.has(id)) out.set(id, id === dev.open?.id ? dev.open : t);
@@ -609,4 +611,76 @@ test(`three devices, ${SEEDS} seeds × ${ROUNDS} rounds of random work with faul
   assert.ok(totals.versions > SEEDS * ROUNDS * 5, JSON.stringify(totals));
   assert.ok(totals.threads > SEEDS, JSON.stringify(totals));
   assert.ok(totals.trash > 0 && totals.blobs > 0 && totals.media > 0, JSON.stringify(totals));
+});
+
+// ── Days and Flows: a v131 client (it knows nothing of flow) next to a current one ──
+test('two devices, one v131-shaped, keep the flow', async () => {
+  const clock = { t: T0 };
+  const r2 = fakeR2();
+  const env = { SYNC_BUCKET: r2, SYNC_QUOTA_BYTES: '53687091200' };
+  SYNC_TIMING.now = () => clock.t; SYNC_TIMING.sleep = async () => {}; SYNC_TIMING.jitter = () => 0;
+  const posts = [];
+  const make = (name, old) => {
+    const dev = { name, old, n: 0, db: memDb(() => assert.fail(`${name} removed a thread`)), store: memoryStore(), locks: fakeLocks() };
+    dev.engine = createSync({
+      db: dev.db, store: dev.store, locks: dev.locks, channel: null,
+      apiHeaders: () => ({ 'content-type': 'application/json', 'x-app-pass': 'pw' }),
+      isOwner: () => true, isTester: () => false, hasTesterTraces: () => false, idle: (fn) => setImmediate(fn),
+      getOpen: () => null, isLive: () => false, onAsk: () => {}, onApplied: () => {},
+      fetch: async (url, init = {}) => {
+        const u = new URL(url, 'https://atelier.test');
+        const method = init.method || 'GET', path = u.pathname.slice('/api/sync/'.length);
+        let body = init.body;
+        if (method === 'POST' && path.startsWith('thread/')) {
+          const b = JSON.parse(body);
+          if (old) delete b.flow; // v131 never sends a flow
+          posts.push({ dev: name, flow: b.flow });
+          body = JSON.stringify(b);
+        }
+        const headers = new Headers(init.headers || {});
+        if (body != null) headers.set('content-length', String(typeof body === 'string' ? Buffer.byteLength(body) : body.byteLength));
+        const res = await handleSync(workerRequest(u, { method, headers, body }), env, u, u.pathname.slice('/api/'.length));
+        assert.ok(res.status !== 400 && res.status !== 422, `${name} ${method} ${path} → ${res.status}`);
+        return res;
+      },
+      now: () => clock.t, uid: () => `${name}k${++dev.n}`, timers: NO_TIMERS,
+      online: () => true, visible: () => true, toast: () => {}, random: () => 0.5,
+    });
+    // v131's app saves the thread it has, and that object never carries a flow
+    dev.put = async (t) => { const c = structuredClone(t); if (old) delete c.flow; await dev.engine.saveThread(c); dev.engine.noteWrite([c.id], [c]); };
+    dev.get = (id) => dev.db.m.get(id);
+    return dev;
+  };
+  const sync = async (dev) => { for (let i = 0; i < 4; i++) { await dev.engine.run({ pull: true }); await tick(); if (!dev.engine.busy()) return; } };
+  const ask = (id, at, text = `answer ${id}`) => ({ id, kind: 'ask', prompt: `prompt ${id}`, createdAt: at, text });
+  const now = make('now', false), old = make('old', true);
+  await now.db.put({ id: 't1', title: 'Homework', createdAt: T0, updatedAt: T0, entries: [ask('e1', T0)] });
+  for (const d of [now, old]) { await d.engine.verified(); await tick(); await sync(d); }
+  // the current device tags the thread
+  await now.put({ ...now.get('t1'), flow: { kind: 'kid', color: '#c2410c' } });
+  await sync(now);
+  const doc = () => r2.json('t/t1.json');
+  assert.deepEqual(doc().flow, { kind: 'kid', color: '#c2410c' });
+  // the old device keeps working in the thread: new turns, an edit, a rename — none of it carries a flow
+  clock.t += 60_000; await sync(old);
+  const o = structuredClone(old.get('t1'));
+  delete o.flow;
+  o.entries.push(ask('e2', T0 + 2, 'from v131'));
+  o.entries[0].text = 'edited on v131';
+  o.title = 'Homework, week 2';
+  clock.t += 1000; o.updatedAt = clock.t;
+  await old.put(o);
+  await sync(old);
+  assert.ok(posts.some((p) => p.dev === 'old' && p.flow === undefined), 'the old device pushed without a flow');
+  assert.deepEqual(doc().flow, { kind: 'kid', color: '#c2410c' }, 'the server kept the flow');
+  assert.deepEqual(doc().entries.map((e) => e.id), ['e1', 'e2']);
+  // the current device takes the old one's work and keeps its flow; nothing goes back and forth
+  clock.t += 60_000; await sync(now);
+  const t = now.get('t1');
+  assert.deepEqual([t.title, t.flow, t.entries.map((e) => e.text)], ['Homework, week 2', { kind: 'kid', color: '#c2410c' }, ['edited on v131', 'from v131']]);
+  const n = posts.length;
+  clock.t += 60_000; await sync(now); await sync(old); await sync(now);
+  assert.equal(posts.length, n, 'both devices are quiet');
+  assert.deepEqual(doc().flow, { kind: 'kid', color: '#c2410c' });
+  for (const d of [now, old]) d.engine.stop();
 });

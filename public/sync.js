@@ -49,7 +49,7 @@
 import {
   FORMAT, MEDIA_SYNC, MEDIA_HELD, TRANSIENT, syncId, validDate, isRev, sha256hex, utf8, utf8Length, fromBase64, base64Length, jsonClone, dehydrate,
   hydrate, mediaKinds, gateHeld, refsOf, refValue, reborn, bornOf, forkEntry, checkView, checkPulledEntry, newRecord, planPull, planPush, pushBodies,
-  planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder, fullPrint, blobKind, LIMITS,
+  planPushResult, applyPlan, quickPrint, snapOf, sameSnap, entryOrder, fullPrint, blobKind, LIMITS, canonical, validFlow,
 } from './sync-merge.js?v=131';
 import { validateBackup } from './data-safety.js?v=131';
 
@@ -339,7 +339,10 @@ const testerMarked = (t) => Array.isArray(t?.entries) && t.entries.some((e) => e
 // (entryOrder: createdAt, fork, id) — as a pull places it (sync-merge buildSlots) — instead of after its neighbour. A
 // copy holding an entry the source lacks (a run that outlived a delete and a re-import, an unsaved turn) then still
 // ends in that order, so it never drifts from what the other devices show.
-export function patchInPlace(target, source, ids = [], removed = [], { title = false, prints = null, keep = (e) => e.pending, exact = false, sorted = false } = {}) {
+// A thread's flow as one comparable string (none and an invalid one alike: an invalid flow never syncs).
+const flowKey = (t) => canonical(validFlow(t?.flow) ? t.flow : null);
+
+export function patchInPlace(target, source, ids = [], removed = [], { title = false, flow = false, prints = null, keep = (e) => e.pending, exact = false, sorted = false } = {}) {
   const info = { replaced: [], added: [], removed: [], skipped: [], closed: false };
   const src = new Map((source?.entries || []).map((e) => [e.id, e]));
   const changedHere = (cur, next) => prints && Object.prototype.hasOwnProperty.call(prints, cur.id) && quickPrint(cur) !== prints[cur.id] && (!next || quickPrint(cur) !== quickPrint(next));
@@ -371,6 +374,7 @@ export function patchInPlace(target, source, ids = [], removed = [], { title = f
     info.added.push(id);
   }
   if (title && typeof source?.title === 'string') target.title = source.title;
+  if (flow) { if (source?.flow != null) target.flow = jsonClone(source.flow); else delete target.flow; } // a copy: never shared with the source
   if (Number.isFinite(source?.updatedAt)) target.updatedAt = Math.max(target.updatedAt || 0, source.updatedAt);
   return info;
 }
@@ -577,7 +581,7 @@ export function createSync(deps = {}) {
   const inboundOf = (id) => [...inbound.keys()].filter((k) => k.startsWith(`${id}/`)).length;
 
   // ── this tab's open thread, kept in step with IndexedDB ──
-  // seen: per thread object, each entry's snapshot (snapOf) and the title as this tab last knew them to match
+  // seen: per thread object, each entry's snapshot (snapOf), the title and the flow (flowKey) as this tab last knew them to match
   // IndexedDB — taken when this tab loaded the thread (wrapDb.get) or saved it (wrapDb.put), and after every refresh.
   // refreshOpen is a three-way merge against it: what only IndexedDB changed (another tab's save, this engine's merge)
   // is taken in; what only this copy changed (not saved yet) stays.
@@ -587,7 +591,7 @@ export function createSync(deps = {}) {
   function snapThread(t) {
     const snaps = new Map();
     for (const e of t.entries) if (e && typeof e === 'object' && syncId(e.id)) snaps.set(e.id, snapOf(e));
-    return { snaps, title: t.title };
+    return { snaps, title: t.title, flow: flowKey(t) };
   }
   // wrapDb: a thread object read from IndexedDB (noteRead: what IndexedDB holds), or about to be written there by this
   // tab's app (noteSaving: what it will hold once that write commits — until then the snapshot is marked saving and
@@ -642,7 +646,7 @@ export function createSync(deps = {}) {
   //   copy holding an entry IndexedDB lacks still matches every device's order (one this copy removed and hasn't saved
   //   yet stays removed).
   //   In this copy only: removed elsewhere → removed, unless changed here.
-  // merge: {ids, removed, prints, title} a sync merge just wrote. One of those this copy changed meanwhile is left alone
+  // merge: {ids, removed, prints, title, flow} a sync merge just wrote. One of those this copy changed meanwhile is left alone
   // and reported in skipped (its record goes back, so that change meets the server's as an edit); for a copy with no
   // seen, its print from before the merge decides (prints). → patchInPlace's info plus changed, or null (not open here).
   function refreshOpen(id, merge = null) {
@@ -691,9 +695,13 @@ export function createSync(deps = {}) {
     for (const eid of S.keys()) if (!O.has(eid) && (mIds.has(eid) || !B?.has(eid))) take.push(eid);
     let title = false;
     if (typeof s.title === 'string' && o.title !== s.title) title = merge?.title ? !base || o.title === base.title : Boolean(base) && o.title === base.title;
-    const info = take.length || drop.length || title ? patchInPlace(o, s, take, drop, { title, keep, exact: true, sorted: true }) : { replaced: [], added: [], removed: [], skipped: [], closed: false };
+    // the flow, the same way: taken only when this copy hasn't changed it since it last matched IndexedDB
+    const oFlow = flowKey(o), sFlow = flowKey(s);
+    let flow = false;
+    if (oFlow !== sFlow) flow = merge?.flow ? !base || oFlow === base.flow : Boolean(base) && oFlow === base.flow;
+    const info = take.length || drop.length || title || flow ? patchInPlace(o, s, take, drop, { title, flow, keep, exact: true, sorted: true }) : { replaced: [], added: [], removed: [], skipped: [], closed: false };
     info.skipped.push(...skipped);
-    info.changed = Boolean(info.replaced.length || info.added.length || info.removed.length || title);
+    info.changed = Boolean(info.replaced.length || info.added.length || info.removed.length || title || flow);
     // What this copy now has in common with IndexedDB; an entry kept as it is here keeps what it last matched.
     const snaps = new Map(), got = new Set([...info.replaced, ...info.added]);
     for (const e of o.entries) {
@@ -702,7 +710,7 @@ export function createSync(deps = {}) {
       else if (got.has(e.id)) snaps.set(e.id, snapOf(e));
       else if (B?.has(e.id)) snaps.set(e.id, B.get(e.id));
     }
-    seenOf.set(o, { snaps, title: o.title === s.title ? s.title : base?.title });
+    seenOf.set(o, { snaps, title: o.title === s.title ? s.title : base?.title, flow: flowKey(o) === sFlow ? sFlow : base?.flow });
     return info;
   }
   // Another tab (or this tab, from a copy other than the open one) saved these threads: the open one is refreshed.
@@ -946,7 +954,7 @@ export function createSync(deps = {}) {
           safe(() => onApplied({ threadIds: [c.t], open: { replaced: [], added: [], removed: [], skipped: [], closed: true } }));
           continue;
         }
-        const info = await refreshOpen(c.t, { ids: Array.isArray(c.e) ? c.e : [], removed: Array.isArray(c.removed) ? c.removed : [], prints: c.prints && typeof c.prints === 'object' ? c.prints : null, title: Boolean(c.title) });
+        const info = await refreshOpen(c.t, { ids: Array.isArray(c.e) ? c.e : [], removed: Array.isArray(c.removed) ? c.removed : [], prints: c.prints && typeof c.prints === 'object' ? c.prints : null, title: Boolean(c.title), flow: Boolean(c.flow) });
         if (info?.skipped.length) post({ rollback: { t: c.t, ids: info.skipped } });
         safe(() => onApplied({ threadIds: [c.t], open: info }));
       } else safe(() => onApplied({ threadIds: [c.t], open: null }));
@@ -1521,7 +1529,7 @@ export function createSync(deps = {}) {
     await setRec(id, rec);
     if (plan.push && !closed) await markDirty(id);
     if (out.replaced.length) safe(() => dropThumbs(out.replaced));
-    const touchedHere = out.added.length || out.replaced.length || out.removed.length || plan.title != null || closed;
+    const touchedHere = out.added.length || out.replaced.length || out.removed.length || plan.title != null || plan.flow !== undefined || closed;
     if (closed && plan.removeThread) serverAt = 0; // deleted elsewhere: Recently deleted's count is read again this cycle
     if (touchedHere || plan.changed) {
       let info = null;
@@ -1530,14 +1538,14 @@ export function createSync(deps = {}) {
           if (plan.removeThread) toast(COPY.openDeleted);
           info = { replaced: [], added: [], removed: [], skipped: [], closed: true };
         } else {
-          info = await refreshOpen(id, { ids: [...out.added, ...out.replaced], removed: out.removed, prints, title: plan.title != null });
+          info = await refreshOpen(id, { ids: [...out.added, ...out.replaced], removed: out.removed, prints, title: plan.title != null, flow: plan.flow !== undefined });
           if (info?.skipped.length) await rollback(id, info.skipped, before);
         }
       }
       safe(() => onApplied({ threadIds: [id], open: info }));
       recent.set(id, before);
       if (recent.size > 20) recent.delete(recent.keys().next().value);
-      post({ changed: [{ t: id, e: [...out.added, ...out.replaced], removed: out.removed, closed, deleted: Boolean(closed && plan.removeThread), title: plan.title != null, prints }] });
+      post({ changed: [{ t: id, e: [...out.added, ...out.replaced], removed: out.removed, closed, deleted: Boolean(closed && plan.removeThread), title: plan.title != null, flow: plan.flow !== undefined, prints }] });
     }
     return out;
   }
@@ -1765,7 +1773,7 @@ export function createSync(deps = {}) {
       await uploadBlobs(plan, id);
       // What's left waits on blobs the server won't take now (quota / refused): it's re-marked when that changes, so
       // the thread isn't pushed again and again for nothing.
-      if (!plan.entries.length && !plan.title) { await clearDirty(id, s0); return; }
+      if (!plan.entries.length && !plan.title && !plan.flow) { await clearDirty(id, s0); return; }
       let replan = false;
       for (const body of pushBodies(plan)) {
         // Note what is about to go up: if the answer is lost, the next merge recognises the server's copy as ours.
@@ -1827,7 +1835,7 @@ export function createSync(deps = {}) {
     for (let attempt = 0; attempt < SYNC_CLIENT.replanTries; attempt++) {
       const { thread, locked } = await readLocked(id, lockedIds);
       const p = await planPushResult({
-        thread, record: recs.get(id) || null, sent: plan.sent, title: body.title || null, res, now: now(), uid, locked, hashOf: hasher(id),
+        thread, record: recs.get(id) || null, sent: plan.sent, title: body.title || null, flow: body.flow || null, res, now: now(), uid, locked, hashOf: hasher(id),
         quarantined: (eid, h) => qKeys.has(`${id}/${eid}/${h}`), parked: (eid, h) => inbound.get(`${id}/${eid}`)?.h === h, live: liveIn(id, thread, locked),
       });
       if (p.pull) pullAfter.add(id);
@@ -2073,8 +2081,9 @@ export function createSync(deps = {}) {
     return marked;
   }
   // Cheap signs a synced thread may hold something the server lacks: written since this device last checked it, or an
-  // entry or title its record doesn't know. (The hashed plan then decides; the daily scan checks everything.)
+  // entry, title or flow its record doesn't know. (The hashed plan then decides; the daily scan checks everything.)
   const maybeChanged = (t, rec) => !Number.isFinite(rec.at) || t.updatedAt > rec.at || (typeof t.title === 'string' && t.title !== rec.title)
+    || (rec.flow === undefined ? t.flow != null : flowKey(t) !== canonical(rec.flow ?? null))
     || t.entries.some((e) => e && !Object.prototype.hasOwnProperty.call(rec.e || {}, e.id) && !gateHeld(mediaKinds(e), media));
   function scheduleScan(quick = false) {
     if (T.scan || stopped) return;
@@ -2409,7 +2418,7 @@ export function createSync(deps = {}) {
       const heldHere = thread.entries.some((e) => e && (e.pending === true || locked.has(e.id) || gateHeld(mediaKinds(e), media)));
       if (!heldHere && !rec?.held && !upHeld.has(id) && cfg.firstDone && rec?.rev > 0 && !dirty.has(id) && !maybeChanged(thread, rec)) continue;
       const plan = await planPush({ thread, record: rec, locked, media, hashOf: hasher(id), holdBlobs });
-      r.changes += plan.entries.length + (plan.title ? 1 : 0);
+      r.changes += plan.entries.length + (plan.title ? 1 : 0) + (plan.flow ? 1 : 0);
       for (const h of plan.held) if (MEDIA_HELD_SET.has(h.reason)) r.media++; else r.other++;
       r.other += plan.waiting.length;
     }
@@ -2485,7 +2494,7 @@ export function createSync(deps = {}) {
       for (const c of copies) {
         if (only) break;
         const plan = await planPush({ thread: c, record: r, locked: await pushLocks(), media, hashOf: hasher(id), holdBlobs });
-        only = Boolean(plan.entries.length || plan.title || plan.held.length || plan.waiting.length);
+        only = Boolean(plan.entries.length || plan.title || plan.flow || plan.held.length || plan.waiting.length);
       }
       if (only) { kept++; continue; }
       await db.del(id);
