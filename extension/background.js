@@ -34,7 +34,9 @@ const MAX_SHOWN_TEXT = 2000; // characters of the text to type shown in the conf
 // helper: the longest wait for the Messages helper on a Mac. A text can so take confirm + helper, 75 s: more than
 // those 60 s, so Atelier has to give a text 90 s, as the relay gives every command (v114). render: the pause that
 // lets a page loaded for a read draw itself.
-const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800, front: 400 };
+// front: the pause after a sign-in tab comes forward. pick: how long a sign-in waits for the user to click their login in
+// Chrome's list when the keys didn't pick it, looking every poll (1.4.3, v120).
+const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800, front: 400, pick: 20_000, poll: 500 };
 // After a click or typing request is declined, closed or left unanswered, further ones from the same path (this
 // browser's Atelier tab, or another device through the relay) are refused without a window for a while: 30 s, doubling
 // with each refusal in a row (at most 10 min); an Allow resets it. A hijacked page can't keep stealing the focus.
@@ -360,7 +362,7 @@ chrome.windows.onRemoved.addListener((windowId) => { if (asking && asking.window
 // Since 1.4.1 (v114) it also reports whether that field is still on the page afterwards, so a form that never went
 // anywhere is not called submitted.
 const NO_LOGIN_FORM = 'No sign-in form with a password field on that tab. Open the sign-in page first.';
-const NO_SAVED = 'Chrome didn’t fill a saved password on this page, so nothing was submitted. Ask the user to sign in, or to save the password in Chrome first.';
+const NO_SAVED = 'Chrome didn’t fill a saved password on this page, so nothing was submitted. If Chrome lists saved logins there, the user can click theirs on the next try. Otherwise ask the user to sign in, or to save the password in Chrome first.';
 const NO_SIGNIN_BUTTON = 'Atelier Browser couldn’t tell which button signs in on that page, so nothing was submitted. Ask the user to sign in.';
 const SIGNIN_UNKNOWN = 'The tab stopped answering while the sign-in form was being sent. It isn’t known whether it went through. Look at that tab before trying again.';
 const FILLED = 'Chrome filled the password it had saved. Atelier never saw it.';
@@ -555,6 +557,8 @@ const COMMANDS = {
     await sleep(TIMING.front);
     const target = { tabId };
     let used = '';
+    let mac = false;
+    try { mac = (await chrome.runtime.getPlatformInfo()).os === 'mac'; } catch { /* the keys go as on Windows */ }
     try { await chrome.debugger.attach(target, '1.3'); } catch (err) {
       throw new Error(`Atelier Browser couldn’t take control of that tab (${err?.message || err}). Ask the user to sign in.`);
     }
@@ -565,9 +569,13 @@ const COMMANDS = {
         await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
         await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
       };
+      // On a Mac the key goes with the Mac's own key code as well (1.4.3, v120): Chrome's list of saved logins ignored
+      // the keys there, so nothing was picked.
+      const native = mac ? { ArrowDown: 125, Enter: 36 } : {};
       const key = async (k, vk) => {
-        await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: vk });
-        await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: vk });
+        const n = native[k] ?? vk;
+        await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: n });
+        await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: n });
       };
       // The Enter that sends the form is a keyDown carrying its character: that gives the page a keypress, and a form
       // is sent on keypress. The rawKeyDown above carries none, so the page saw a key go down and the form stayed where
@@ -602,6 +610,9 @@ const COMMANDS = {
           await sleep(250);
           await key('Enter', 13);
           await sleep(TIMING.fill);
+          // Still empty: Chrome's list may be showing and not taking the keys. The user can click their login in it; the
+          // form is sent once Chrome fills it, within TIMING.pick (1.4.3, v120). The Enter guard stays on meanwhile.
+          for (let waited = 0; waited < TIMING.pick && !(await filled()); waited += TIMING.poll) await sleep(TIMING.poll);
         } finally { await inPage(tabId, pageLogin, ['unguard']).catch(() => {}); }
       }
       if (!(await filled())) throw new Error(pick ? NO_SUCH_ACCOUNT : NO_SAVED);

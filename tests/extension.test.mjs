@@ -1055,8 +1055,8 @@ test('confirm page: the tick is sent only with an Allow, and the page carries th
   assert.match(js, /port\.postMessage\(\{ answer: choice, \.\.\.\(always \? \{ always: true \} : \{\}\) \}\)/);
 });
 
-test('manifest: version 1.4.2, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
-  assert.equal(SOURCE_MANIFEST.version, '1.4.2');
+test('manifest: version 1.4.3, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
+  assert.equal(SOURCE_MANIFEST.version, '1.4.3');
   assert.ok(SOURCE_MANIFEST.description.length <= 132);
   assert.ok(Number(SOURCE_MANIFEST.minimum_chrome_version) >= 116);
 });
@@ -1069,8 +1069,8 @@ test('the app asks for the extension build it ships: MIN_EXT is the manifest ver
   const min = /const MIN_EXT = '([\d.]+)';/.exec(APP)?.[1];
   assert.equal(min, SOURCE_MANIFEST.version, 'public/app.js MIN_EXT = extension/manifest.json version');
   const olderExt = new Function(`const MIN_EXT = '${min}'; return ${/\nconst olderExt = ([^\n]+);\n/.exec(APP)[1]};`)();
-  for (const v of ['1.4.0', '1.3.10', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
-  for (const v of [min, '1.4.2', '1.10.0', '2.0.0']) assert.equal(olderExt(v), false, v);
+  for (const v of ['1.4.2', '1.4.0', '1.3.10', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
+  for (const v of [min, '1.4.3', '1.10.0', '2.0.0']) assert.equal(olderExt(v), false, v);
   assert.match(APP, /if \(olderExt\(d\.version\)\) setTimeout\(\(\) => toast\(`Atelier Browser has an update \(v\$\{MIN_EXT\}\)/);
 });
 
@@ -1083,7 +1083,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
   const prod = packExtension();
   const files = unzipSync(prod.zip);
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  assert.equal(manifest.version, '1.4.2');
+  assert.equal(manifest.version, '1.4.3');
   assert.deepEqual(manifest.content_scripts.map((c) => c.matches), [['https://atelier.ciprari.ai/*']]);
   assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
   assert.ok(!/localhost|127\.0\.0\.1/.test(strFromU8(files['manifest.json'])));
@@ -1092,7 +1092,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
 
   const dev = packExtension({ dev: true });
   assert.deepEqual(dev.manifest.content_scripts[0].matches, ['https://atelier.ciprari.ai/*', 'http://localhost:8787/*']);
-  assert.equal(dev.manifest.version, '1.4.2');
+  assert.equal(dev.manifest.version, '1.4.3');
   assert.deepEqual(SOURCE_MANIFEST.content_scripts[0].matches, dev.manifest.content_scripts[0].matches, 'the source keeps localhost for Load unpacked');
 });
 
@@ -1203,7 +1203,7 @@ const keysSent = (h) => h.cdp.filter(([m, p]) => m === 'Input.dispatchKeyEvent' 
 function signinRig(opts, storage = { noAsk: true }) {
   const page = loginPage(opts);
   const h = loadBackground({ pages: { 7: page }, storage });
-  h.run('TIMING.fill = 0; TIMING.front = 0');
+  h.run('TIMING.fill = 0; TIMING.front = 0; TIMING.pick = 0; TIMING.poll = 1');
   return { h, page };
 }
 
@@ -1660,8 +1660,47 @@ test('sign-in 1.4.2: an account Chrome has no login for submits nothing', async 
   assert.deepEqual(h.cdp.at(-1), ['detach', 7]);
 });
 
-test('app 1.4.2: browser_signin takes an account, and the app asks for extension 1.4.2', () => {
+test('app 1.4.2: browser_signin takes an account, and the app asks for extension 1.4.3 (v120)', () => {
   const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /The result names the account it used\.', \{ tabId: B_TAB, account: \{ type: 'string'/);
-  assert.match(app, /const MIN_EXT = '1\.4\.2';/);
+  assert.match(app, /const MIN_EXT = '1\.4\.3';/);
+});
+
+// ── 1.4.3 (v120): on the owner's Mac, Chrome showed its list of two saved logins, and the ArrowDown + Enter never picked
+// one. The keys now carry the Mac's own key codes too, and the sign-in waits for the user to click their login.
+test('sign-in 1.4.3: on a Mac the keys carry the Mac key codes', async () => {
+  const { h } = signinRig({ fill: 'pick' });
+  h.os = 'mac';
+  const r = await h.local('signin', { tabId: 7 });
+  assert.ok(r.ok, r.error);
+  const sent = h.cdp.filter(([m, p]) => m === 'Input.dispatchKeyEvent' && p.type === 'rawKeyDown').map(([, p]) => [p.key, p.windowsVirtualKeyCode, p.nativeVirtualKeyCode]);
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['ArrowDown', 40, 125], ['Enter', 13, 36]]);
+  const win = signinRig({ fill: 'pick' });
+  await win.h.local('signin', { tabId: 7 });
+  assert.deepEqual(win.h.cdp.filter(([m, p]) => m === 'Input.dispatchKeyEvent' && p.type === 'rawKeyDown').map(([, p]) => p.nativeVirtualKeyCode), [40, 13]);
+});
+
+test('sign-in 1.4.3: when the keys pick nothing, the user’s own click in Chrome’s list is waited for, then the form goes', async () => {
+  const { h, page } = signinRig({ fill: 'never' });
+  h.run('TIMING.pick = 5000; TIMING.poll = 5');
+  setTimeout(() => { page.pw.value = 'picked-by-hand'; }, 40); // the user clicks their login in Chrome's list
+  const r = await h.local('signin', { tabId: 7 });
+  assert.ok(r.ok, r.error);
+  assert.equal(r.result.signedIn, 'submitted');
+  assert.equal(page.submitted, 1);
+  assert.deepEqual(page.enters.map((e) => e.guarded), [true], 'the page’s Enter was held while waiting');
+  assert.equal(page.listeners.length, 0, 'and the guard is off afterwards');
+  assert.doesNotMatch(JSON.stringify(r), /picked-by-hand/);
+  // Nobody clicks: nothing is sent, and the answer says the user can pick on the next try.
+  const none = signinRig({ fill: 'never' });
+  const r2 = await none.h.local('signin', { tabId: 7 });
+  assert.match(r2.error, /If Chrome lists saved logins there, the user can click theirs on the next try\./);
+  assert.equal(none.page.submitted, 0);
+});
+
+test('app 1.4.3: a sign-in step gets 90 s, and its card tells the user to click their login', () => {
+  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /step\.name === 'browser_signin' \? 90000 : 60000/);
+  assert.match(app, /If Chrome shows its list of saved logins on that tab, click yours\./);
+  assert.match(BACKGROUND, /pick: 20_000, poll: 500 \};/, '20 s for the click, well inside the app’s 90 s');
 });
