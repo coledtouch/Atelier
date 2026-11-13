@@ -3,8 +3,9 @@
 //   rx:ops                 [{entryId, threadId, shotId, op, startedAt, model, seconds, res, tester}] — the shots this
 //                          device started and still has to collect (≤ 50). Boot reads only this key, never DB.all().
 //   rx:job:<entry>         {threadId, at, shots: {id: {state, op, uri, error, resetsAt, retryAt, queuedSince, blobKey,
-//                          bytes, poster, at, …}}} — the job registry's own copy of shot state (the source of truth
-//                          while the thread is closed).
+//                          bytes, poster, at, take, …}}} — the job registry's own copy of shot state (the source of truth
+//                          while the thread is closed). take (v114): the cost key ('model|seconds|res') a finished
+//                          take was filmed as; it stays here and never goes into the thread (remix-app.js otherTake).
 //   rx:shot:<entry>:<id>   {blob, at, threadId, bytes} — a filmed shot (video/mp4)
 //   rx:img:<entry>:<id>    {blob, …} — a screenshot an image layer uses
 //   rx:src:<entry>         {blob, …} — the source video File (owner ≤ 500 MB, tester ≤ 200 MB)

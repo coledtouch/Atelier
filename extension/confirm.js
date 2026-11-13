@@ -43,6 +43,7 @@ function render(i) {
   $('href').textContent = el.href ? `Link to ${el.href}` : '';
   if (typing || texting) {
     $('typed').hidden = false;
+    $('typedTitle').textContent = texting ? 'Text to send' : 'Text to type'; // 1.4.1: a text message had the typing heading
     $('text').textContent = i.text || '(nothing: the field is cleared)';
     if (i.more > 0) { $('more').hidden = false; $('more').textContent = `…and ${i.more} more characters.`; }
   }
@@ -62,6 +63,7 @@ function countdown() {
 function setLive(on) {
   live = on;
   $('allow').setAttribute('aria-disabled', on ? 'false' : 'true');
+  $('always')?.setAttribute('aria-disabled', on ? 'false' : 'true'); // "Don't ask again" follows Allow (see its click below)
 }
 // (Re)start the wait before Allow can be used; it only runs while this window has focus.
 function arm() {
@@ -104,6 +106,10 @@ $('allow').addEventListener('click', (ev) => {
   if (ev.isTrusted && live && (pressedLive || ev.detail === 0)) answer('allow');
   pressedLive = false;
 });
+// "Don't ask again" takes a tick only while Allow can be chosen. A click meant for something else, landing on its label
+// as the window appeared, used to tick it: the Allow that followed a second later then switched asking off for good
+// (1.4.1, v114). Such a press restarts the wait like any other, and the box stays as it was.
+$('always')?.addEventListener('click', (ev) => { if (!live) ev.preventDefault(); });
 $('deny').addEventListener('click', () => answer('deny'));
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape') { ev.preventDefault(); answer('deny'); }

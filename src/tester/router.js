@@ -10,6 +10,7 @@ import {
   PriceError, chatWorstCase, chatActual, imageCost, imageActual, veoCost, omniActual, maxTokensWithin, ttsWorstCase, ttsReserved, ttsActual,
 } from './prices.js';
 import { shapeOmni, omniCreate, omniGet, omniVideo, omniCancel, omniFail, readBody as readOmniBody, validId as omniId, OmniError, OMNI_PRICE_ID } from '../omni.js';
+import { isGatewayStatus } from '../spend.js';
 import { handleTts, TTS_VOICES, TTS_VOICE_IDS, ttsPriceId } from '../tts.js';
 import { handleTranscribe, STT_MODELS } from '../transcribe.js';
 import { TESTER_STT_MODELS, sttWorstCase, sttActual } from './prices.js';
@@ -51,6 +52,8 @@ const utf8 = (s) => new TextEncoder().encode(s).length;
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 
 const tooLarge = (what) => fail(413, 'tester_too_large', `${what} is too large for a tester request — start a new thread or attach less.`);
+// One chat turn over LIMITS.chatText with no history in it (shapeMessages).
+const turnTooLong = () => fail(413, 'tester_too_large', 'This message is too long for one tester request. Send a shorter file, or paste the part you need.');
 const badRequest = (error) => fail(400, 'bad_request', error);
 const notTesterModel = (why = 'That model isn’t part of the tester set.') => fail(403, 'tester_model', why);
 const notYours = () => fail(403, 'tester_owner', 'That belongs to another tester session.');
@@ -94,7 +97,11 @@ async function reserve(c, amount, words) {
   const settle = (actual) => {
     if (done) return done;
     done = c.stub.settle(r.id, actual).then((s) => {
-      if (s?.charged > s.reserved) console.warn('tester call cost more than its reservation', c.path, s.reserved, '→', s.charged); // an estimate gap
+      // The Ledger records at most OVERRUN x the reservation. v114: when the provider's report passes that, the log
+      // names the whole reported cost beside what was recorded (it used to print only the clipped figure, so the part
+      // nobody is charged for was invisible). Route and micro-dollars only: never who, never what was sent.
+      if (s && Number.isFinite(actual) && Math.ceil(actual) > s.charged) console.warn('tester call cost more than the Ledger records', c.path, 'reserved', s.reserved, 'recorded', s.charged, 'reported', Math.ceil(actual));
+      else if (s?.charged > s.reserved) console.warn('tester call cost more than its reservation', c.path, s.reserved, '→', s.charged); // an estimate gap
       return s;
     }, (err) => { console.warn('tester settle failed', String(err?.message || err).slice(0, 120)); return null; });
     waitUntil(done);
@@ -257,8 +264,16 @@ function shapeMessages(list, provider) {
   }
   if (!messages.some((m) => m.role === 'user')) return { error: badRequest('Nothing to send') };
   // Spec §6 / A7b: text size and the token estimate leave the base64 image bytes out (images are priced per image).
-  const textBytes = utf8(JSON.stringify(messages, (k, v) => (k === 'url' && typeof v === 'string' ? '' : v)));
-  if (textBytes > LIMITS.chatText) return { error: tooLarge('This conversation') };
+  const textOnly = (k, v) => (k === 'url' && typeof v === 'string' ? '' : v);
+  const textBytes = utf8(JSON.stringify(messages, textOnly));
+  if (textBytes > LIMITS.chatText) {
+    // v114: when the newest turn is over the cap without any history (one long attached file, cut on the device by its
+    // characters, can be: a Chinese, Japanese or Korean one is three bytes a character), a new thread can't help and one
+    // file can't be attached in part, so the refusal says what can be done. Otherwise it is the replayed history.
+    const turn = messages.findLast((m) => m.role === 'user');
+    const alone = utf8(JSON.stringify([...messages.filter((m) => m.role === 'system'), turn], textOnly));
+    return { error: alone > LIMITS.chatText ? turnTooLong() : tooLarge('This conversation') };
+  }
   return { messages, images, videos: [...videos], textBytes };
 }
 
@@ -504,10 +519,14 @@ async function metered(c, provider, path, body, cost, actualOf) {
   if (!key) return noProvider(c.up, provider);
   const mtr = await reserve(c, cost);
   if (mtr.res) return mtr.res;
+  let unreachable = false;
   const res = await c.up.forward(`${cfg.base}/${path}`, {
     method: 'POST', headers: { ...cfg.auth(key), 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(body),
-  });
-  if (!res.ok) { await mtr.settle(0); return withHeaders(res, mtr.headers); }
+  }, () => { unreachable = true; });
+  // The provider's own refusal bills nothing: $0. No answer at all, or a gateway's 502, 504 or 52x, can't rule out that
+  // the images were made and billed, so the reservation stands, as the owner's record keeps its quote (worker.js
+  // handlePassthrough, spend.js isGatewayStatus). v114: both used to be refunded in full, and a retry was free.
+  if (!res.ok) { await mtr.settle(unreachable || isGatewayStatus(res.status) ? mtr.amount : 0); return withHeaders(res, mtr.headers); }
   const text = await res.text().catch(() => null);
   let actual = mtr.amount;
   try { actual = actualOf(JSON.parse(text)); } catch {}
@@ -607,9 +626,17 @@ async function geminiImage(c) {
 // A tester's start: 720p or 1080p, 4/6/8 s, priced at its worst case (prices.js perSecond × seconds × 1.25) and reserved
 // before Google is called. The reservation settles when this tester's status check sees the interaction finish: at the
 // reported usage (omniActual) when there is a video, else at $0 (a filtered or failed video isn't billed). An edit
-// (previous) must name the tester's own earlier interaction. Duration is sent as asked; no retry without it.
+// (previous) must name the tester's own earlier interaction. A new clip's duration is sent as asked; no retry without it.
+// An edit is sent no duration: it is filmed at the length of the clip it edits, whatever seconds the request names
+// (the app sends its current length setting with every start). So an edit is held at the longer of the two (v114: it
+// was held at the seconds asked for, and an edit of a 6 s clip that named 4 s was metered a third short whenever its
+// finish was never polled or reported no usage).
 const omniJob = (id) => `omni:${id}`;
 const omniOut = (res, allowance) => withHeaders(res, allowanceHeader(allowance));
+// A clip's recorded price (jobs.actual: µ$, no margin) → its length in seconds, at most: what that price buys at the
+// cheapest per-second rate a tester resolution has. Exact at 720p, the only resolution under the $1.00 cap today; a
+// dearer resolution's clip reads longer than it is, never shorter.
+const omniSecondsOf = (price) => Math.ceil(price / Math.min(...LIMITS.videoResolutions.map((resolution) => veoCost({ model: OMNI_PRICE_ID, seconds: 1, resolution, margin: false }))));
 async function omniStart(c) {
   if (!TESTER_VIDEO_MODELS.includes(OMNI_PRICE_ID)) return notTesterModel();
   const key = c.env.GEMINI_API_KEY;
@@ -620,18 +647,27 @@ async function omniStart(c) {
     shaped = shapeOmni(b, { resolutions: LIMITS.videoResolutions, durations: LIMITS.videoDurations, maxSeconds: LIMITS.videoSeconds });
   } catch (err) { return err instanceof OmniError && err.status === 413 ? tooLarge('This video request') : omniFail(err); }
   if (shaped.previous && !(await c.stub.ownsJob(c.who.sub, omniJob(shaped.previous)))) return notYours();
-  const cost = veoCost({ model: OMNI_PRICE_ID, seconds: shaped.seconds, resolution: shaped.resolution });
+  // The seconds this start is held at: an edit's are its earlier clip's when that is the longer (a row with no recorded
+  // price, which addJob never writes for a clip, counts as the longest tester clip).
+  let seconds = shaped.seconds;
+  if (shaped.edit) {
+    const earlier = await c.stub.jobActual(c.who.sub, omniJob(shaped.previous));
+    seconds = Math.max(seconds, earlier > 0 ? omniSecondsOf(earlier) : LIMITS.videoSeconds);
+  }
+  const cost = veoCost({ model: OMNI_PRICE_ID, seconds, resolution: shaped.resolution });
   if (cost > VEO_CALL_RESERVE_CAP) return refused({ scope: 'call' }, 'One tester video can cost at most $1.00 — pick a shorter clip or 720p.');
   const mtr = await reserve(c, cost);
   if (mtr.res) return mtr.res;
   let made;
   try { made = await omniCreate(key, shaped.body); }
   catch (err) {
-    // A refusal (an HTTP answer) bills nothing; an unreachable Google may still have started it: the reservation stands.
-    await mtr.settle(err instanceof OmniError && err.code !== 'omni_unreachable' && err.code !== 'omni_failed' ? 0 : mtr.amount);
+    // Google's own refusal bills nothing. No answer, a garbled one or a gateway's (502, 504, 52x: err.gateway) may still
+    // have started the clip: the reservation stands, as the owner's quote does (src/omni.js settleRefused). v114: a
+    // gateway's answer used to be refunded.
+    await mtr.settle(err instanceof OmniError && err.code !== 'omni_unreachable' && err.code !== 'omni_failed' && !err.gateway ? 0 : mtr.amount);
     return withHeaders(omniFail(err), mtr.headers);
   }
-  await c.stub.addJob(c.who.sub, omniJob(made.id), 'omni', { reservation: mtr.id, actual: veoCost({ model: OMNI_PRICE_ID, seconds: shaped.seconds, resolution: shaped.resolution, margin: false }) });
+  await c.stub.addJob(c.who.sub, omniJob(made.id), 'omni', { reservation: mtr.id, actual: veoCost({ model: OMNI_PRICE_ID, seconds, resolution: shaped.resolution, margin: false }) });
   return json({ id: made.id, status: made.status, seconds: shaped.seconds, pollAfterMs: 10_000 }, 200, mtr.headers);
 }
 async function omniStatusRoute(c) {

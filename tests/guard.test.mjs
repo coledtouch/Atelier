@@ -231,6 +231,42 @@ test('the alarm deletes a network’s record 15 minutes after its last failure (
   assert.equal(G.shim.db.prepare('SELECT COUNT(*) AS n FROM wrong').get().n, 0);
 });
 
+// v114 review [LOW, privacy]: once only a burned clearance was left, alarm() armed for its expiry (up to 30 days out), and
+// #armAlarm took any pending alarm for early enough. A network's record written after that stayed until the next guess or
+// that far alarm, not for the 15 minutes the privacy page gives it.
+test('a wrong guess while only a burned clearance’s alarm is pending moves the alarm up: the network’s record still goes after 15 minutes', async () => {
+  const { env, G } = makeEnv({ testers: false });
+  let now = Date.now();
+  G.guard.clock = () => now;
+  const count = (table) => G.shim.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+  const cookie = clearanceOf(await me(env, { pass: RIGHT, ip: '198.51.100.40' }));
+  assert.equal((await me(env, { pass: 'nope', ip: '198.51.100.40', cookie })).status, 401, 'a signed-in device mistypes the passcode once: its clearance is burned');
+  assert.equal(count('burned'), 1);
+  now += GUARD.windowMs + 61_000;
+  await G.guard.alarm();
+  assert.deepEqual([count('nets'), count('wrong'), count('burned')], [0, 0, 1]);
+  const far = G.shim.alarm();
+  assert.ok(far > now + 29 * 86_400_000, 'only the burned clearance is left: the alarm waits for the day it would have expired');
+  // any wrong guess, from any network, now leaves a record of that network
+  let alarms = 0;
+  const setAlarm = G.shim.ctx.storage.setAlarm;
+  G.shim.ctx.storage.setAlarm = async (t) => { alarms++; return setAlarm(t); };
+  assert.equal((await me(env, { pass: 'nope', ip: '203.0.113.77' })).status, 401);
+  assert.equal(count('nets'), 1);
+  const near = G.shim.alarm();
+  assert.ok(near > now && near <= now + GUARD.windowMs + 2000, `the alarm moves up to when that record can go (${Math.round((near - now) / 60_000)} min from now)`);
+  assert.equal(alarms, 1);
+  // with the near alarm set, more guesses scan and set nothing (as before)
+  for (let i = 0; i < 3; i++) await me(env, { pass: 'nope', ip: '203.0.113.78' });
+  assert.equal(alarms, 1);
+  assert.equal(G.shim.alarm(), near);
+  // 15 minutes after the last failure the records are gone, and the burned clearance's alarm is armed again
+  now += GUARD.windowMs + 1000;
+  await G.guard.alarm();
+  assert.deepEqual([count('nets'), count('wrong'), count('burned')], [0, 0, 1]);
+  assert.equal(G.shim.alarm(), far);
+});
+
 test('the tester cookie is still cleared when the owner’s clearance is set on the same answer (tester access off)', async () => {
   const { env } = makeEnv({ testers: false });
   const r = await me(env, { pass: RIGHT, cookie: `${COOKIE}=${'a'.repeat(43)}` });
@@ -330,7 +366,7 @@ test('POST /api/clearance/end removes the clearance, even next to the right pass
   }
   assert.equal((await api(env, 'clearance/end', { method: 'GET' })).status, 405);
   const APP = (await read('public/app.js'));
-  assert.match(APP, /if \(hadPasscode && !s\.passcode\) fetch\('\/api\/clearance\/end', \{ method: 'POST' \}\)\.catch\(\(\) => \{\}\);/);
+  assert.match(APP, /if \(hadPasscode && !s\.passcode\) \{ fetch\('\/api\/clearance\/end', \{ method: 'POST' \}\)\.catch\(\(\) => \{\}\); LS\.set\('outReason', 'ownerout'\); \}/);
   assert.match(APP, /else await fetch\('\/api\/clearance\/end', \{ method: 'POST' \}\)\.catch\(\(\) => \{\}\); \/\/ \.\.\.and the owner's passcode-guard clearance/);
   assert.match(await read('public/privacy.html'), /Clearing the passcode in Settings, or Clear this device, removes it\./);
 });

@@ -68,7 +68,9 @@ const headersFor = (apiHeaders, json) => {
   if (json) h.set('content-type', 'application/json'); else h.delete('content-type');
   return h;
 };
-async function send(deps, path, { method = 'GET', body, timeout = XAI_TIMING.request } = {}) {
+// read(r) (the download): reads the answer's body in here, so the time cap and Stop hold until its last byte, and
+// send() resolves with what read returns. Read after send() had returned, a clip came down with neither (v114).
+async function send(deps, path, { method = 'GET', body, timeout = XAI_TIMING.request, read = null } = {}) {
   const f = deps.fetch || globalThis.fetch;
   const ctrl = new AbortController(), outer = deps.signal;
   let late = false;
@@ -77,7 +79,11 @@ async function send(deps, path, { method = 'GET', body, timeout = XAI_TIMING.req
   if (outer?.aborted) { clearTimeout(timer); throw abortError(); }
   outer?.addEventListener('abort', ab, { once: true });
   try {
-    return await f(`/api/xai/${path}`, { method, signal: ctrl.signal, headers: headersFor(deps.apiHeaders, body !== undefined), body: body === undefined ? undefined : JSON.stringify(body) });
+    const r = await f(`/api/xai/${path}`, { method, signal: ctrl.signal, headers: headersFor(deps.apiHeaders, body !== undefined), body: body === undefined ? undefined : JSON.stringify(body) });
+    if (!read) return r;
+    const out = await read(r);
+    if (outer?.aborted) throw abortError(); // readJson swallows a Stop that cut its body short, so look again
+    return out;
   } catch (err) {
     if (outer?.aborted && !late) throw abortError();
     throw fail(0, late ? 'Atelier took too long to answer — check your connection.' : 'Couldn’t reach Atelier — the connection dropped.', { late });
@@ -136,7 +142,6 @@ export async function xaiVideo(body, { apiHeaders, signal, onStatus, onId, resum
     for (;;) {
       if (!first) await sleep(Math.max(XAI_TIMING.poll, failures ? Math.min(60_000, XAI_TIMING.poll * 2 ** failures) : 0), signal);
       first = false;
-      if (now() > end) throw fail(504, 'Grok is still working on this after 20 minutes. Tap Try again to keep waiting. It won’t start a new video.', { code: 'xai_slow', resumable: true });
       let r;
       try {
         r = await send(deps, `video/status/${encodeURIComponent(id)}`);
@@ -148,20 +153,35 @@ export async function xaiVideo(body, { apiHeaders, signal, onStatus, onId, resum
         continue;
       }
       failures = 0;
-      if (!s.done) { say(Number.isInteger(s.progress) && s.progress > 0 ? `Filming with Grok · ${s.progress}%` : 'Filming with Grok'); continue; }
+      if (!s.done) {
+        // The 20 minutes end the wait only when a poll has just said "not done". Tested before the poll, a wait the phone
+        // froze past them (the app in the background) reported "still working" on a clip that had finished (v114).
+        if (now() > end) throw fail(504, 'Grok is still working on this after 20 minutes. Tap Try again to keep waiting. It won’t start a new video.', { code: 'xai_slow', resumable: true });
+        say(Number.isInteger(s.progress) && s.progress > 0 ? `Filming with Grok · ${s.progress}%` : 'Filming with Grok');
+        continue;
+      }
       if (s.video) break;
       throw fail(s.filtered ? 400 : 500, s.error || 'Grok couldn’t make this video.', { code: s.filtered ? 'xai_filtered' : 'xai_failed' });
     }
     say('Downloading');
     for (let tries = 0; ; tries++) {
-      const r = await send(deps, `video/file/${encodeURIComponent(id)}`, { timeout: XAI_TIMING.download });
+      // A download request that gets no answer at all (the connection dropped, a phone woke up, the time ran out) can
+      // be tried again: the clip is made and paid for. Unmarked, Try again started and paid for a second one (v114).
+      // The clip is read inside send(): XAI_TIMING.download caps the whole download, and Stop ends it at once. Read
+      // after send() had let go of both, Stop did nothing while it came down and a stalled download never ended (v114).
+      let r = null, got;
+      try { got = await send(deps, `video/file/${encodeURIComponent(id)}`, { timeout: XAI_TIMING.download, read: async (res) => { r = res; return res.ok ? { blob: await res.blob() } : { j: await readJson(res) }; } }); }
+      catch (err) {
+        if (err?.name === 'AbortError') throw err; // Stop: the catch below keeps the clip for Try again
+        if (r?.ok) throw fail(0, 'The Grok video download dropped — tap Try again (it won’t make a new video).', { resumable: true });
+        throw Object.assign(err, { resumable: true });
+      }
       if (!r.ok) {
-        const err = errorFrom(r, await readJson(r), `Downloading the Grok video failed (${r.status}).`);
+        const err = errorFrom(r, got.j, `Downloading the Grok video failed (${r.status}).`);
         if (err.code === 'xai_not_ready' && tries < XAI_TIMING.notReady) { await sleep(XAI_TIMING.poll, signal); continue; }
         throw Object.assign(err, { resumable: err.status !== 404 && err.code !== 'xai_too_large' });
       }
-      let blob;
-      try { blob = await r.blob(); } catch { throw fail(0, 'The Grok video download dropped — tap Try again (it won’t make a new video).', { resumable: true }); }
+      const { blob } = got;
       if (!blob.size) throw fail(502, 'xAI sent back an empty video — try again.', { resumable: true });
       const paid = Number(r.headers.get('x-xai-usd'));
       return { id, blob: /^video\/(mp4|webm)$/.test(blob.type) ? blob : new Blob([blob], { type: 'video/mp4' }), seconds: s.seconds || seconds, usd: Number.isFinite(paid) && paid >= 0 ? paid : (typeof s.usd === 'number' ? s.usd : quote) };

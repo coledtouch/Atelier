@@ -549,7 +549,10 @@ test('Undo (or Redo, or pasting it back after a cut) that brings link / share te
 
 test('text made from a marked entry carries its mark: an idea’s Expand / Build / Image, To app, Vary, and Look up’s ask on its words', async () => {
   for (const act of ['idea-ask', 'idea-image']) assert.match(APP, new RegExp("case '" + act + "': \\{[^\\n]*\\{ untrusted: e\\.untrusted \\}\\); \\}"), act);
-  for (const act of ['idea-build', 'to-build']) assert.match(APP, new RegExp("case '" + act + "':[^\\n]*\\{ untrusted: e\\.untrusted, entry: \\{ params:"), act);
+  assert.match(APP, /case 'idea-build':[^\n]*\{ untrusted: e\.untrusted, entry: \{ params:/, 'idea-build');
+  // To app also marks an answer about an attached file (v114, app-1 #5): the file's words can steer it as a link's can.
+  assert.match(APP, /case 'to-build':[^\n]*\{ untrusted: e\.untrusted \|\| \(e\.files\?\.length \? 'share' : ''\), entry: \{ params:/, 'to-build');
+  assert.match(APP, /This one came from text in a link, a share, a file or a backup\./);
   assert.match(APP, /return submit\(e\.prompt, 'image', \{ untrusted: e\.untrusted, entry: \{ params:/, 'vary');
   assert.match(APP, /ask: \(prompt, from\) => submit\(prompt, 'ask', \{ images: \[\], untrusted: markOfEntry\(from\) \}\),/);
   assert.match(fnSource('lookupPrefill'), /const mark = markOfEntry\(from\);\n  if \(mark && !composerFrom\) setMark\(mark\);/);
@@ -1380,9 +1383,23 @@ function guardRig(thread) {
   const vars = { location: LOC, document: { createElement: (tag) => ({ tag, className: '', textContent: '' }) }, madeHere: new WeakSet(), guardedLinks: new WeakMap(), S: { thread }, threadTaint, entryTaint: (x) => (x?.untrusted ? 'share' : x?.web ? 'web' : ''), worseTaint, ...NS() };
   vars.readSomething = evalIn(vars, `return (${constSource('readSomething').replace(/^readSomething = /, '').replace(/;$/, '')});`);
   vars.$$ = (sel, root) => { vars.selected = sel; return root.links; };
-  Object.assign(vars, lift(vars, 'linkRisk', 'guardLinks', 'openGuardedLink', 'dropSvgHref'));
+  Object.assign(vars, lift(vars, 'linkRisk', 'guardLinks', 'openGuardedLink', 'dropSvgHref', 'namesSite'));
   return vars;
 }
+// v114 (app-1 #9): the site is left off a link only when the link's own words name that very site.
+test('guardLinks: words that merely contain the host do not count as naming it', () => {
+  const v = guardRig({ entries: [] });
+  for (const [text, host, named] of [
+    ['paypal.com/reset', 'pal.com', false], ['apple.com', 'le.com', false], ['pal.com.evil.example', 'pal.com', false], ['my-pal.com', 'pal.com', false], ['www.pal.com', 'pal.com', false],
+    ['pal.com/reset', 'pal.com', true], ['https://pal.com/reset', 'pal.com', true], ['Reset at PAL.COM.', 'pal.com', true], ['see (docs.example.com)', 'docs.example.com', true],
+    ['https://docs.example.com:8443/x', 'docs.example.com:8443', true], ['paypal.com or pal.com', 'pal.com', true], ['Write to bob@example.com', 'bob@example.com', true], ['Standup', 'calendar.google.com', false], ['', 'pal.com', false], ['x', '', false],
+  ]) assert.equal(v.namesSite(text, host), named, `${JSON.stringify(text)} / ${host}`);
+  const e = { id: 'e', kind: 'ask', createdAt: CLEAN };
+  const spoof = anchor('https://pal.com/reset', 'paypal.com/reset'), honest = anchor('https://pal.com/reset', 'pal.com/reset');
+  v.guardLinks({ links: [spoof, honest] }, e, { entries: [e] });
+  assert.deepEqual(spoof.kids.map((k) => k.textContent), [' (pal.com)'], 'the real site is shown after the borrowed name');
+  assert.deepEqual(honest.kids, []);
+});
 const EXFIL = 'https://exfil.example/d?c=482913&s=Bank';
 test('guardLinks: after an account read, a link the model wrote shows its site and asks first; one copied from a tool result opens as before', () => {
   // the review's probe: a stranger's mail steered an inbox summary to end with a link carrying a code it read

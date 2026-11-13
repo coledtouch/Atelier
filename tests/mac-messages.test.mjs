@@ -78,11 +78,19 @@ test('helper: the text and the destination go to osascript as arguments, never i
   const evil = '"; do shell script "rm -rf ~" --';
   const args = H.sendArgs(evil, 'iMessage;-;+16175550142');
   assert.deepEqual(JSON.parse(JSON.stringify(args.slice(-2))), [evil, 'iMessage;-;+16175550142']);
-  const script = args.slice(0, -2).filter((a, i) => i % 2 === 1).join('\n');
+  // "--" ends osascript's options, so the text can never be read as one (1.0.1): "- milk" and "-5 out here" used to
+  // fail with "illegal option", and "-e <line>" became a line of the script.
+  assert.equal(args.at(-3), '--');
+  for (const dashed of ['- milk\n- eggs', '-5 out here', '-e do shell script "id"', '--', '-']) {
+    const a = H.sendArgs(dashed, '+16175550142');
+    assert.deepEqual(JSON.parse(JSON.stringify(a.slice(-3))), ['--', dashed, '+16175550142'], dashed); // (the helper runs in its own realm)
+  }
+  const script = args.slice(0, -3).filter((a, i) => i % 2 === 1).join('\n');
+  assert.match(script, /if \(count of argv\) > 2 and item 1 of argv is "--" then set argv to rest of argv\nset t to item 1 of argv\nset dest to item 2 of argv/);
   assert.doesNotMatch(script, /rm -rf/);
   assert.match(script, /send t to chat id dest/);
   assert.match(script, /service type = iMessage[\s\S]*service type = SMS/);
-  assert.ok(args.slice(0, -2).every((a, i) => (i % 2 === 0 ? a === '-e' : true)));
+  assert.ok(args.slice(0, -3).every((a, i) => (i % 2 === 0 ? a === '-e' : true)));
 });
 
 test('helper: the errors a person can fix say how; anything else passes through, short', () => {
@@ -90,10 +98,55 @@ test('helper: the errors a person can fix say how; anything else passes through,
   assert.match(H.friendlyError('execution error: Not authorized to send Apple events to Messages. (-1743)'), /Automation/);
   assert.equal(H.friendlyError('x'.repeat(900)).length, 300);
   assert.equal(H.friendlyError(''), 'The Messages helper failed.');
-  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.0' });
+  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.1' });
   assert.throws(() => H.handle({ op: 'delete' }), /Unknown Messages action/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: '  ' }), /Pass to and text/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: 'x'.repeat(2001) }), /over 2000/);
+});
+
+// handle() with the macOS side played: run() answers for sqlite3 and osascript, and every call is kept.
+function hostRig(answer) {
+  const calls = [];
+  const ctx = vm.createContext({});
+  vm.runInContext(HOST, ctx);
+  ctx.$ = { NSHomeDirectory: () => ({ js: '/Users/cole' }) };
+  ctx.run = (path, args) => { calls.push([path.split('/').pop(), JSON.parse(JSON.stringify(args))]); return { code: 0, out: '', err: '', ...answer(path.split('/').pop(), args) }; };
+  const handle = (msg) => { try { return JSON.parse(JSON.stringify(ctx.handle(msg))); } catch (err) { return { threw: String(err.message) }; } };
+  return { handle, calls, sent: () => calls.filter(([tool]) => tool === 'osascript').map(([, args]) => args.slice(-3)) };
+}
+const NO_ACCESS = { code: 1, err: 'Error: unable to open database "/Users/cole/Library/Messages/chat.db": authorization denied' };
+
+// v114 review (tools #6): the send looked the conversation up in chat.db first, and without Full Disk Access that
+// lookup failed and took the send with it, though the setup says sending only needs Automation.
+test('helper: a send without Full Disk Access goes to the address as given; reading still says what is missing', () => {
+  const rig = hostRig((tool) => (tool === 'sqlite3' ? NO_ACCESS : {}));
+  assert.deepEqual(rig.handle({ op: 'send', to: '+16175550142', text: 'On my way' }), { sent: true, to: '+16175550142' });
+  assert.deepEqual(rig.sent(), [['--', 'On my way', '+16175550142']], 'one send, to the number the owner approved');
+  assert.deepEqual(rig.calls.map(([tool]) => tool), ['sqlite3', 'osascript'], 'the lookup was tried once, then the send');
+  assert.deepEqual(rig.handle({ op: 'send', to: 'pat@example.com', text: 'hi' }), { sent: true, to: 'pat@example.com' });
+  // reading can't do without chat.db
+  assert.match(rig.handle({ op: 'recent' }).threw, /^Chrome can’t read Messages yet\. Give Google Chrome Full Disk Access/);
+  assert.match(rig.handle({ op: 'read', chat: '+16175550142' }).threw, /Full Disk Access/);
+  assert.equal(rig.sent().length, 2, 'and a read never sends');
+  // a lookup that fails any other way is no reason to drop the send either
+  const odd = hostRig((tool) => (tool === 'sqlite3' ? { out: 'not json' } : {}));
+  assert.deepEqual(odd.handle({ op: 'send', to: '+16175550142', text: 'x' }), { sent: true, to: '+16175550142' });
+});
+
+test('helper: with chat.db readable a send goes to the conversation that number has; a chat id needs no lookup; a failed send is a failure', () => {
+  const found = hostRig((tool) => (tool === 'sqlite3' ? { out: '[{"chat":"SMS;-;+16175550142"}]' } : {}));
+  assert.deepEqual(found.handle({ op: 'send', to: '(617) 555-0142', text: 'On my way' }), { sent: true, to: 'SMS;-;+16175550142' });
+  assert.deepEqual(found.sent(), [['--', 'On my way', 'SMS;-;+16175550142']]);
+  assert.match(found.calls[0][1].at(-1), /c\.chat_identifier LIKE '%6175550142'/, 'looked up by the number’s last ten digits');
+  const none = hostRig(() => ({}));
+  assert.deepEqual(none.handle({ op: 'send', to: '+16175550142', text: 'x' }), { sent: true, to: '+16175550142' }, 'no conversation yet: the number as given');
+  const chat = hostRig((tool) => (tool === 'sqlite3' ? NO_ACCESS : {}));
+  assert.deepEqual(chat.handle({ op: 'send', to: 'iMessage;+;chat8291', text: 'x' }), { sent: true, to: 'iMessage;+;chat8291' });
+  assert.deepEqual(chat.calls.map(([tool]) => tool), ['osascript'], 'a chat id is sent to as it is');
+  // Messages refused (no Automation yet): nothing claims the text was sent
+  const refused = hostRig((tool) => (tool === 'osascript' ? { code: 1, err: 'execution error: Not authorized to send Apple events to Messages. (-1743)' } : NO_ACCESS));
+  assert.match(refused.handle({ op: 'send', to: '+16175550142', text: 'x' }).threw, /^Chrome can’t control Messages yet\./);
+  assert.equal(refused.sent().length, 1, 'tried once, never twice');
 });
 
 test('installer: macOS only, a real extension id, and the helper registered for that id alone', () => {

@@ -8,14 +8,14 @@
 // Money rules kept here: nothing billable starts before an Approve tap (filmQueue only starts shots whose approval key
 // matches their cost key); a shot whose start may have reached the provider ('unknown') needs a fresh approval; global
 // Stop never touches filming; a reload never starts anything new (boot only polls ops it finds in rx:ops).
-import * as R from './remix.js?v=113';
-import { cutsFrom } from './remix-cuts.js?v=113';
-import { advanceShot, shotRequest, firstFrameShape } from './remix-shots.js?v=113';
-import { buildGraph } from './remix-graph.js?v=113';
-import { createRemixStore, keys as rxKeys, SOURCE_MAX } from './remix-store.js?v=113';
-import { cardThumb, padFrameAt, grabFrame, canvasToDataUrl, ensureFonts, makeCanvas, composeFrame } from './remix-draw.js?v=113';
-import { frameAt as graphFrameAt } from './remix-graph.js?v=113';
-import { videoParts, planFor, noteFor, fmtDur } from './video.js?v=113';
+import * as R from './remix.js?v=114';
+import { cutsFrom } from './remix-cuts.js?v=114';
+import { advanceShot, shotRequest, firstFrameShape, pollShot, classify, pollDelay, SHOT_TIMING } from './remix-shots.js?v=114';
+import { buildGraph } from './remix-graph.js?v=114';
+import { createRemixStore, keys as rxKeys, SOURCE_MAX } from './remix-store.js?v=114';
+import { cardThumb, padFrameAt, grabFrame, canvasToDataUrl, ensureFonts, makeCanvas, composeFrame } from './remix-draw.js?v=114';
+import { frameAt as graphFrameAt } from './remix-graph.js?v=114';
+import { videoParts, planFor, noteFor, fmtDur } from './video.js?v=114';
 
 export const PLACEHOLDER = 'How should we remix it?'; // one line on a 360 px phone (the composer note and chips carry the rest)
 export const COPY = Object.freeze({
@@ -23,12 +23,17 @@ export const COPY = Object.freeze({
   cantCut: 'Can’t cut this video in this browser. Export it as MP4 (H.264) or open Atelier in Chrome',
   hdr: 'HDR video will look flat when cut — export as SDR for best colour',
   checking: 'Checking the video for editing',
+  stillChecking: 'Still checking the video — one moment',
   choose: 'Choose Revise or New clip first',
-  stop: 'Shots already started still finish at the provider and are billed',
   paused: 'Paused while Atelier was in the background — continuing',
   testerKeepOpen: 'Keep Atelier open while it films (1–6 min). If it’s closed for more than 15 min, the full reserve is charged.',
   free: 'Cards, text, covers, previews and cutting are free.',
+  previewAfter: 'Preview after the shots are filmed',
+  modelFilmed: 'Filmed with this model. To use another, change the prompt, then tap Refilm.',
+  modelBusy: 'This shot is at the provider. Its model can’t change now.',
 });
+// A send is held while the clip is still being checked, but never for longer than this after it was attached (v114).
+export const CHECK_HOLD_MS = 15_000;
 export const FOOTAGE_CHOICES = Object.freeze(['ask', 'off', 8, 12, 24]);
 export const PLAN_EST_USD = 0.03; // a Gemini Flash watch of a ≤ 1 min clip (the cost card says ≈)
 export const REVISE_EST_USD = 0.005;
@@ -156,7 +161,7 @@ export function createRemix(deps) {
   const toast = deps.toast || (() => {});
   const ApiError = deps.ApiError || class extends Error { constructor(status, msg) { super(msg); this.status = status; } };
   let renderMod = null;
-  const loadRender = () => (renderMod ||= (deps.loadRender ? Promise.resolve(deps.loadRender()) : import('./remix-render.js?v=113')).catch((err) => { renderMod = null; throw err; }));
+  const loadRender = () => (renderMod ||= (deps.loadRender ? Promise.resolve(deps.loadRender()) : import('./remix-render.js?v=114')).catch((err) => { renderMod = null; throw err; }));
 
   const probes = new WeakMap(); // composer video → {status, info, caps, error}
   const files = new Map(); // entryId → source File (this session)
@@ -173,10 +178,15 @@ export function createRemix(deps) {
   const jobs = new HeldMap(); // entryId → {threadId, timer, busy, stopped, forget}
   const renders = new HeldMap(); // entryId → {ctrl, preview, paused, fraction, etaMs}
   const cutUrls = new Map(); // entryId → blob: URL of the finished cut
+  const cutOwner = new Map(); // entryId → the thread that URL belongs to (forgetThread revokes a deleted thread's)
   const cutAway = new Set(); // entryIds whose finished cut isn't on this device (session only: never written to the entry)
-  const shotUrls = new Map(); // blobKey → blob: URL (check phase players)
+  // One blob: URL for the viewer at a time (a preview, or a shot being played). v114: a preview's URL was never revoked,
+  // and a shot's was cached by its blob key, so Play after a refilm still showed the first take. Each open now gets a
+  // URL made from the bytes just read, and the one before it is revoked then: the viewer has moved on from it.
+  let viewerUrl = null;
+  const viewerUrlFor = (blob) => { if (viewerUrl) URLs.revokeObjectURL?.(viewerUrl); return (viewerUrl = URLs.createObjectURL(blob)); };
   const local = new Map(); // blobKey → true | false (is the blob on this device)
-  const thumbs = new Map(); // `${entry}:${id}` → data URL
+  const thumbs = new Map(); // `${entry}:${beat}:${what it shows}` → data URL (thumbSig)
   const choices = new Map(); // threadId → {entryId, choice: 'revise' | 'new'}
   const composerOpts = { footage: 'ask', model: R.DEFAULT_SHOT_MODEL, keep: true };
   const statusAt = new Map(); // entryId → last status write (ms)
@@ -242,11 +252,12 @@ export function createRemix(deps) {
     /** A clip was attached in Video mode: read its codec, size, rotation, HDR and whether it decodes (no spend). */
     attached(v) {
       if (!v?.file || probes.has(v)) return;
-      const p = { status: 'reading', info: null, caps: null, error: null };
+      const p = { status: 'reading', info: null, caps: null, error: null, at: now() };
       probes.set(v, p);
       loadRender().then(async (m) => {
         const info = await m.probeSource(v.file);
-        const caps = await m.capabilities({ out: R.outputSize(info, m.platformOf?.() || 'desktop'), kbps: R.targetKbps(info), fps: fpsFor(info.fps) });
+        // rotation 0: the probe's width and height are already upright (v114, see newRemix)
+        const caps = await m.capabilities({ out: R.outputSize({ ...info, rotation: 0 }, m.platformOf?.() || 'desktop'), kbps: R.targetKbps(info), fps: fpsFor(info.fps) });
         Object.assign(p, { status: 'ready', info, caps });
       }).catch((err) => { Object.assign(p, { status: 'error', error: String(err?.message || err) }); })
         .finally(() => { deps.paintChip?.(); deps.renderOptions?.(); });
@@ -261,11 +272,14 @@ export function createRemix(deps) {
       const m = R.shotModel(composerOpts.model);
       const noVeo = t && S?.tester?.features?.video === false;
       const q = deps.inputValue && R.looksLikeQuestion(deps.inputValue()) ? '<button class="chip" data-ask-about>Ask about it instead</button>' : '';
+      // v114: the probe found no audio track in the attached clip: there is no soundtrack to keep (newRemix plans it so)
+      const silent = probes.get(S?.video)?.info?.hasAudio === false;
       return `<div class="rx-opts">${q}`
         + (noVeo ? '<span class="opt-note keep">New footage: Off (not in your plan)</span>'
           : `<button class="chip" data-rx-opt="footage" aria-label="New footage: ${esc(footageLabel(composerOpts.footage))} (tap to change)">New footage: ${esc(footageLabel(composerOpts.footage))} ▾</button>`
           + (composerOpts.footage === 'off' ? '' : `<button class="chip" data-rx-opt="model">New shots: ${esc(m?.label || 'Gemini Omni')} ▾</button>`))
-        + `<button class="chip${composerOpts.keep ? ' on' : ''}" data-rx-opt="keep" aria-pressed="${composerOpts.keep}">♪ Keep soundtrack</button>`
+        + (silent ? '<span class="opt-note keep">No soundtrack in this clip</span>'
+          : `<button class="chip${composerOpts.keep ? ' on' : ''}" data-rx-opt="keep" aria-pressed="${composerOpts.keep}">♪ Keep soundtrack</button>`)
         + `<span class="opt-note keep">You approve the plan and any cost before filming · ${t ? 'planning reserves ≤ $0.11' : `planning ≈ ${Math.round(PLAN_EST_USD * 100)}¢`}</span>`
         + (q ? '' : '<button class="chip" data-ask-about>Ask about it</button>') + '</div>';
     },
@@ -299,6 +313,11 @@ export function createRemix(deps) {
       if (!String(text || '').trim()) { deps.shake?.(); toast(COPY.empty); return 'empty'; }
       const p = probes.get(video);
       if (video?.clipOnly || p?.info?.canDecode === false || p?.status === 'error') { toast(COPY.cantCut, { error: true }); return 'held'; }
+      // v114: a clip still being checked holds the send too (as app.js does while it reads the frames). The check above
+      // needs the probe's answer, and newRemix takes the frame rate, bitrate and audio from it: a send in that window
+      // skipped the can't-decode hold, and planning and shots were paid for before the cut found out. Not for long: a
+      // probe with no answer after CHECK_HOLD_MS lets the send through, as before. A clip never probed isn't held.
+      if (p?.status === 'reading' && now() - p.at < CHECK_HOLD_MS) { toast(COPY.stillChecking); return 'held'; }
       return 'ok';
     },
     /** Video mode, no clip: → null (film a new clip), 'hold' (choose first), or {revise: true, entry}. */
@@ -317,16 +336,24 @@ export function createRemix(deps) {
   function newRemix(video, text) {
     const p = probes.get(video), info = p?.info || {};
     const footage = composerOpts.footage;
+    // v114: only a probe that found no audio track counts (null: not probed yet). `audio` is the codec, and is null for
+    // a track in another codec too. A silent clip has no soundtrack to keep in sync, so it is never planned in keep
+    // mode (which cuts footage until the picture is as long as the soundtrack).
+    const silent = info.hasAudio === false;
     return {
       v: R.REMIX_V, phase: 'plan', rev: 0,
       source: {
         name: video?.name || info.name || 'video', size: video?.size || info.size || 0,
         duration: info.duration || video?.duration || 0, width: info.width || video?.width || 0, height: info.height || video?.height || 0,
-        fps: info.fps || 30, rotation: info.rotation || 0, vcodec: info.vcodec || null, vkbps: info.vkbps || null,
-        audio: info.audio ?? null, hdr: Boolean(info.hdr), stored: false,
+        // v114: rotation is always 0. The width and height here are upright already (the probe's display size, or the
+        // <video> element's), and remix.js outputSize and cropFor swap them again for a 90° or 270° tag: a portrait
+        // phone clip was cut as landscape and its new shots were filmed 16:9. The cut needs no tag (the renderer turns
+        // each decoded frame by the track's own rotation). migrateRemix zeroes the tag in remixes saved before this.
+        fps: info.fps || 30, rotation: 0, vcodec: info.vcodec || null, vkbps: info.vkbps || null,
+        audio: info.audio ?? null, hasAudio: info.hasAudio ?? null, hdr: Boolean(info.hdr), stored: false,
       },
       // tester: shot lengths snap only to what a tester's per-call cap allows (Omni 4 s / 6 s at 720p)
-      opts: { footage, maxNew: R.footageCap(footage, text), model: R.shotModelId(composerOpts.model) || R.DEFAULT_SHOT_MODEL, res: '720p', fit: 'adjacent', audioMode: composerOpts.keep ? 'keep' : 'follow_cuts', shotModels: {}, ...(tester() ? { tester: true } : {}) },
+      opts: { footage, maxNew: R.footageCap(footage, text), model: R.shotModelId(composerOpts.model) || R.DEFAULT_SHOT_MODEL, res: '720p', fit: 'adjacent', audioMode: composerOpts.keep && !silent ? 'keep' : 'follow_cuts', shotModels: {}, ...(tester() ? { tester: true } : {}) },
       cuts: null, plan: null, issues: [], shots: {}, assets: {}, approval: null, spent: { planUsd: 0 }, export: null,
     };
   }
@@ -482,11 +509,46 @@ export function createRemix(deps) {
     const syncLeft = next.audio.mode === 'keep' && D ? lay.duration - D : 0;
     const sync = Math.abs(syncLeft) > 1 / fps + 1e-6 ? [{ level: 'block', id: null, msg: `Picture is ${Math.abs(Math.round(syncLeft * 10) / 10)} s ${syncLeft > 0 ? 'longer' : 'shorter'} than the soundtrack — tap Fit` }] : [];
     const shots = R.initShots(next, { model: r.opts.model, res: r.opts.res }, r.shots);
+    // filmed shots this edit sent back to idle (their length, model or resolution changed), with what they were filmed as
+    const retake = Object.entries(shots).filter(([id, s]) => s.state === 'idle' && r.shots?.[id]?.state === 'ready').map(([id]) => [id, R.costKey({ ...r.shots[id], model: R.shotModelId(r.shots[id].model) || r.shots[id].model })]);
+    for (const [id, key] of retake) marking.set(`${e.id}:${id}`, key); // in the same step as the entry: a tick in between reads it
     e.remix = { ...r, plan: next, shots, issues: [...n.issues.filter((i) => i.level !== 'fix'), ...extra, ...R.syncIssues(next, lay), ...sync].slice(0, 100), rev: (r.rev || 0) + 1 };
     if (r.phase === 'done' || r.phase === 'check') e.remix.phase = 'review';
+    if (retake.length) await markTakes(e.id, retake);
     store.draftSave(e.id, draftOf(e)).catch(() => {});
     deps.persist?.();
     deps.repaint?.(e);
+  }
+  // ── a shot's take in the job store (v114) ──
+  // The job store keeps each shot's latest take, and the film tick lays it over the entry. Fine-tune can send a filmed
+  // shot back to idle (a new length, model or resolution: remix.js initShots) while the job store still says 'ready':
+  // the tick then put that old take back, so Approve filmed nothing and the old footage returned as Ready under the new
+  // length and price. A finished take now carries the cost key it was filmed as (`take`, in the job store only); one
+  // that doesn't match what the shot is now is left out of the merge and doesn't stop a new start (otherTake). It still
+  // comes back, free, when an edit returns the shot to what was filmed.
+  const marking = new Map(); // `${entry}:${shot}` → a take's cost key, from the edit until the job store holds it (markTakes)
+  const otherTake = (entryId, id, rec, shot) => {
+    if (rec?.state !== 'ready') return false;
+    const take = typeof rec.take === 'string' ? rec.take : marking.get(`${entryId}:${id}`);
+    return typeof take === 'string' && take !== R.costKey(shot);
+  };
+  // A job-store shot record without its own bookkeeping (at, take), which never goes into the thread.
+  const takeOf = (rec) => { const { at, take, ...rest } = rec; void at; void take; return rest; };
+  // What a new take starts from: nothing of the one it replaces (its bytes are overwritten when the new one lands).
+  const RETAKE = Object.freeze({ state: 'idle', op: undefined, uri: undefined, tries: undefined, error: undefined, startedAt: undefined, progress: undefined, blobKey: undefined, bytes: undefined, filmedKey: undefined, poster: undefined, take: undefined });
+  /**
+   * list: [[shotId, costKey]] of filmed shots an edit just sent back to idle: the job store's take of each gets its mark
+   * (a take filmed before v114 has none; a newer one got it when it landed). Until that is written, `marking` answers.
+   */
+  async function markTakes(entryId, list) {
+    if (wiped) return;
+    try {
+      const rec = await store.jobGet(entryId);
+      for (const [id, key] of list) {
+        if (rec?.shots?.[id]?.state === 'ready' && typeof rec.shots[id].take !== 'string') await store.jobPatch(entryId, id, { take: key });
+        marking.delete(`${entryId}:${id}`); // the job store answers from here on
+      }
+    } catch (err) { console.warn('[atelier] remix take', err); } // not written: `marking` keeps answering for this session
   }
   /** The picture's and the soundtrack's lengths for the sync line. */
   function syncLine(r) {
@@ -576,14 +638,16 @@ export function createRemix(deps) {
     let again = null;
     try {
       const e = await loadEntry(job.threadId, entryId);
-      if (!e) { jobs.delete(entryId); return; }
+      if (!e) { again = await tickGone(entryId, job); return; }
       const r = e.remix;
       const resets = Object.entries(job.resets || {});
       job.resets = {};
       for (const [id, p] of resets) { const x = r.shots?.[id]; if (x) await applyShot(entryId, id, p, { op: x.op, model: x.model, seconds: x.seconds, res: x.res }); }
       const rec = await store.jobGet(entryId);
-      for (const [id, s] of Object.entries(rec?.shots || {})) if (r.shots?.[id]) { const { at, ...rest } = s; void at; Object.assign(r.shots[id], rest); }
       R.migrateRemix(r, { keepOps: true }); // a pre-Omni remix: Veo model ids → Omni (advanceShot expires a Veo op, everywhere)
+      // The job store's copy of each shot goes over the entry's, except a take filmed as something the shot no longer is
+      // (otherTake compares cost keys, so the model ids are migrated first; the job store holds no model).
+      for (const [id, s] of Object.entries(rec?.shots || {})) { const x = r.shots?.[id]; if (x && !otherTake(entryId, id, s, x)) Object.assign(x, takeOf(s)); }
       const t = now();
       const startIds = job.stopped || job.forget || r.phase !== 'film' || !filmAllowed() ? [] : R.filmQueue(r, { tester: tester(), now: t });
       const liveIds = Object.entries(r.shots || {}).filter(([, s]) => s.enabled !== false && (s.state === 'filming' || s.state === 'downloading')).map(([id]) => id);
@@ -596,7 +660,9 @@ export function createRemix(deps) {
             // Another tab may have started this shot since the merge above: the job store (shared IndexedDB) is read
             // again inside the cross-tab start lock, and only a shot still idle (or queued) there is started.
             const cur = (await store.jobGet(entryId))?.shots?.[id];
-            if (cur && !['idle', 'queued'].includes(cur.state)) { const { at, ...rest } = cur; void at; Object.assign(s, rest); return; }
+            const replaced = otherTake(entryId, id, cur, s); // a finished take of what this shot was before an edit: no claim on this start
+            if (cur && !['idle', 'queued'].includes(cur.state) && !replaced) { Object.assign(s, takeOf(cur)); return; }
+            if (replaced) { await store.jobPatch(entryId, id, RETAKE, job.threadId ?? undefined); marking.delete(`${entryId}:${id}`); }
           }
           let request;
           if (starting) {
@@ -611,8 +677,14 @@ export function createRemix(deps) {
             request,
           }, { ...s });
           if (patch && !wiped) {
+            // v114: the shot's bytes are on this device now. A shot synced from another device and refilmed here kept
+            // reading "isn't on this device" (hydrate only asks once per blob key). Set before applyShot repaints.
+            if (patch.state === 'ready') local.set(rxKeys.shot(entryId, id), true);
             await applyShot(entryId, id, patch, { op: s.op, model: s.model, seconds: s.seconds, res: s.res });
-            if (patch.state === 'ready') posterFor(entryId, id).catch(() => {});
+            if (patch.state === 'ready') {
+              await store.jobPatch(entryId, id, { take: R.costKey(s) }, job.threadId ?? undefined).catch(() => {}); // what it was filmed as (otherTake)
+              posterFor(entryId, id).catch(() => {});
+            }
           }
         };
         await (starting ? startLock(entryId, step) : step());
@@ -632,12 +704,60 @@ export function createRemix(deps) {
       } else if (queuedAt.length) again = Math.max(1000, Math.min(...queuedAt) - now());
       else {
         jobs.delete(entryId);
-        if (job.forget) await store.dropEntry(entryId);
+        if (job.forget) { await store.dropEntry(entryId); forgetEntry(entryId); }
       }
     } finally {
       job.busy = false;
       if (again != null && jobs.get(entryId) === job) schedule(entryId, again);
     }
+  }
+  /**
+   * A tick whose entry can't be loaded. v114: the job was dropped here without a poll while its op stayed in rx:ops. An
+   * entry with an op is never pruned, so its source video and shots stayed on the device for good, and every start
+   * resumed the job and dropped it again.
+   * The thread is gone (deleted here: job.forget; or its record is gone: deleted on another device, or in an earlier
+   * session): the shots this device started are still checked, from the job store alone, until the provider is done
+   * with them (a tester's reserve settles on that status check). Nothing is downloaded and nothing new starts. Then,
+   * deleted here: every rx:* file of the entry goes, as the delete warning says. Otherwise only its op goes: the entry
+   * is no longer held back from prune, which drops it at the next start by its own rule (the thread is gone).
+   * The thread is still there without the entry: nothing is dropped, and the op stays for the next start to try again
+   * (as before), until the provider no longer keeps the shot.
+   * → ms until the next check, or null: the job is over.
+   */
+  async function tickGone(entryId, job) {
+    const threadGone = job.forget || Boolean(job.threadId && typeof deps.DB?.get === 'function' && !(await deps.DB.get(job.threadId)));
+    if (!threadGone) {
+      const ops = (await store.opsAll()).filter((o) => o.entryId === entryId);
+      if (ops.length && ops.every((o) => now() - (Number(o.startedAt) || 0) > SHOT_TIMING.expireAfter) && !wiped) await store.opsRemove(entryId);
+      jobs.delete(entryId);
+      return null;
+    }
+    const rec = await store.jobGet(entryId), t = now();
+    job.settled ||= new Set(); // shots a check here has seen finish
+    let oldest = null;
+    for (const [id, s] of Object.entries(rec?.shots || {})) {
+      // 'downloading': a check already saw it finish. An op nothing can follow, or one past the provider's keep time: over.
+      if (s?.state !== 'filming' || job.settled.has(id) || !R.isLiveOp(s.op) || (Number(s.startedAt) > 0 && t - s.startedAt > SHOT_TIMING.expireAfter)) continue;
+      let p;
+      try { p = classify(await pollShot({ fetch: deps.fetch, apiHeaders: deps.apiHeaders, onResponse: deps.noteAllowance }, s.op), t); }
+      catch (err) { p = classify(err, t); }
+      if (p && p.state !== 'filming') job.settled.add(id);
+      else oldest = Math.min(oldest ?? Infinity, Number(s.startedAt) || t); // still filming, or a check that didn't get through: ask again
+    }
+    if (wiped) return null;
+    if (oldest != null) return pollDelay(oldest, t);
+    jobs.delete(entryId);
+    if (job.forget) { await store.dropEntry(entryId); forgetEntry(entryId); }
+    else await store.opsRemove(entryId);
+    return null;
+  }
+  /** What this session still holds for an entry whose files are gone (its thread was deleted): object URLs are revoked. */
+  function forgetEntry(id) {
+    const u = cutUrls.get(id);
+    if (u) URLs.revokeObjectURL?.(u);
+    cutUrls.delete(id); cutOwner.delete(id); cutAway.delete(id); files.delete(id); analyses.delete(id); statusAt.delete(id);
+    for (const k of [...thumbs.keys()]) if (k.startsWith(`${id}:`)) thumbs.delete(k);
+    for (const k of [...local.keys()]) if (k.startsWith(`rx:shot:${id}:`)) local.delete(k);
   }
   /** Web Locks (shared by every tab of this origin) around a start; without them the re-read in tick still narrows it. */
   function startLock(entryId, fn) {
@@ -668,14 +788,9 @@ export function createRemix(deps) {
     const poster = await draw.canvasToDataUrl(c, 0.7);
     if (typeof poster === 'string' && poster.length <= 60_000 && SAFE_IMG.test(poster)) await applyShot(entryId, id, { poster });
   }
-  function stopCollecting(e) {
-    const job = jobs.get(e.id);
-    if (job) { if (job.timer) clearT(job.timer); jobs.delete(e.id); }
-    for (const [id, s] of Object.entries(e.remix.shots || {})) {
-      if (LIVE.has(s.state) || s.state === 'queued') applyShot(e.id, id, { state: 'failed', error: `Stopped collecting — ${COPY.stop.toLowerCase()}` }).catch(() => {});
-    }
-    toast(COPY.stop);
-  }
+  // v114: stopCollecting and its 'rx-stop-collect' action are gone. No button ever sent that action, and the function
+  // could not hold back shots a running tick had already picked to start (it never set job.stopped). A real stop has
+  // to keep the job alive to collect what already started, and check job.stopped before each start.
   /** Retry one shot: failed/filtered/expired/missing go back to idle under the same approval; unknown needs a new one. */
   function retryShot(e, id, { anyway = false } = {}) {
     const r = e.remix, s = r.shots?.[id];
@@ -728,7 +843,9 @@ export function createRemix(deps) {
     delete r.needSource; delete r.renderError;
     const ctrl = new AbortController();
     const threadId = threadOf(e); // the user may switch threads while it cuts
-    const job = { ctrl, preview, paused: false, fraction: 0, etaMs: null, prevPhase: r.phase };
+    // v114: 'cut' with no cut running here is a leftover (see bodyHtml). This one starts from the review state, so a
+    // Cancel or an error goes back to a card that has buttons.
+    const job = { ctrl, preview, paused: false, fraction: 0, etaMs: null, prevPhase: r.phase === 'cut' ? 'review' : r.phase };
     renders.set(e.id, job);
     if (!preview) { r.phase = 'cut'; deps.repaint?.(e); }
     else toast('Rendering a quick preview…');
@@ -767,13 +884,12 @@ export function createRemix(deps) {
         onProgress: (p) => { job.fraction = p.fraction; job.etaMs = p.etaMs; setStatus(e, cutStatus(job)); },
       });
       if (preview) {
-        const url = URLs.createObjectURL(res.blob);
-        deps.openViewer?.({ title: 'Preview · half size', video: url });
+        deps.openViewer?.({ title: 'Preview · half size', video: viewerUrlFor(res.blob) });
         return res;
       }
       await store.putBlob(rxKeys.cut(e.id), res.blob, { threadId });
       const old = cutUrls.get(e.id); if (old) URLs.revokeObjectURL?.(old);
-      cutUrls.set(e.id, URLs.createObjectURL(res.blob));
+      cutUrls.set(e.id, URLs.createObjectURL(res.blob)); cutOwner.set(e.id, threadId);
       cutAway.delete(e.id);
       r.export = { path: res.path, mime: res.mime, bytes: res.bytes, w: res.w, h: res.h, fps: res.fps, seconds: res.seconds, kbps: res.kbps, at: now(), fonts, ...(res.poster && SAFE_IMG.test(res.poster) && res.poster.length < 120_000 ? { poster: res.poster } : {}) };
       r.phase = 'done';
@@ -787,9 +903,11 @@ export function createRemix(deps) {
       if (err?.name === 'AbortError') { if (!job.paused && !preview) r.phase = job.prevPhase; }
       else {
         console.warn('[atelier] remix cut', err);
-        if (!preview) r.phase = job.prevPhase === 'cut' ? 'check' : job.prevPhase;
-        r.renderError = String(err?.message || err).slice(0, 300);
-        if (preview) toast(r.renderError, { error: true });
+        const msg = String(err?.message || err).slice(0, 300);
+        // v114: a preview that can't run says so in a toast only. It used to leave the red card too, whose Try again
+        // starts a full cut, and that card stayed through Approve and filming.
+        if (preview) toast(msg, { error: true });
+        else { r.phase = job.prevPhase; r.renderError = msg; }
       }
       return null;
     } finally {
@@ -800,7 +918,12 @@ export function createRemix(deps) {
     }
   }
   const cutStatus = (job) => `Cutting · ${Math.round((job.fraction || 0) * 100)}%${job.etaMs != null ? ` · about ${fmtDur(Math.max(1, Math.round(job.etaMs / 1000))) || `${Math.round(job.etaMs / 1000)} s`} left` : ''}`;
-  function cancelCut(e) { const j = renders.get(e.id); if (j) { j.paused = false; j.ctrl.abort(); } }
+  function cancelCut(e) {
+    const j = renders.get(e.id);
+    if (j) { j.paused = false; j.ctrl.abort(); return; }
+    // v114: no cut is running here (a Cancel painted before a reload did nothing): put the saved phase right
+    if (e.remix.phase === 'cut') { e.remix.phase = 'review'; deps.persist?.(); deps.repaint?.(e); }
+  }
   // Hidden mid-cut: stop (WebCodecs throttles in the background) and start again from frame 0 when visible — free.
   function onVisibility() {
     if (!doc) return;
@@ -831,8 +954,9 @@ export function createRemix(deps) {
     if (cutUrls.has(e.id)) return cutUrls.get(e.id);
     const b = await cutBlob(e);
     if (!b) return null;
+    if (cutUrls.has(e.id)) return cutUrls.get(e.id); // two paints asked at once: one URL, not a second that is never revoked
     const u = URLs.createObjectURL(b);
-    cutUrls.set(e.id, u);
+    cutUrls.set(e.id, u); cutOwner.set(e.id, threadOf(e));
     return u;
   }
   async function saveCut(e) {
@@ -934,19 +1058,25 @@ export function createRemix(deps) {
     if (e.error) return deps.errorBox ? deps.errorBox(e) : `<p class="rx-error">${esc(e.error)}</p>`;
     if (!r.plan) return `<p class="rx-note">The plan didn’t arrive — tap Try again.</p>`;
     const job = renders.get(e.id);
+    const cutting = Boolean(job && !job.preview);
+    // v114: phase 'cut' saved with no cut running here (the tab was closed or discarded mid-cut, or the cut runs on
+    // another device) was a dead end: 'Cutting' for ever, and a Cancel that found no job. It reads as 'review' now, whose
+    // card works out by itself whether shots still need Approve or the cut is free. Display only: a paint never rewrites
+    // the entry (a synced copy would be pushed back); cut() and Cancel put the saved phase right.
+    const phase = r.phase === 'cut' && !cutting ? 'review' : r.phase;
     let h = '';
-    if (r.phase === 'cut' || (job && !job.preview)) h += `<div class="rx-cutting" role="status">${statusHtml(job ? cutStatus(job) : 'Cutting', null)}<button class="chip" data-act="rx-cancel-cut">Cancel</button></div>`;
-    if (r.phase === 'done' && cutAway.has(e.id)) h += `<div class="rx-callout"><p>The finished cut isn’t on this device — cut it again here (free).</p><button class="chip" data-act="rx-cut">Cut it · free</button></div>`;
-    else if (r.phase === 'done') h += doneHtml(e);
+    if (cutting) h += `<div class="rx-cutting" role="status">${statusHtml(cutStatus(job), null)}<button class="chip" data-act="rx-cancel-cut">Cancel</button></div>`;
+    if (phase === 'done' && cutAway.has(e.id)) h += `<div class="rx-callout"><p>The finished cut isn’t on this device — cut it again here (free).</p><button class="chip" data-act="rx-cut">Cut it · free</button></div>`;
+    else if (phase === 'done') h += doneHtml(e);
     h += storyHtml(e);
     if (r.needSource) h += `<div class="rx-callout"><p>Attach the original video again to finish the cut — ${esc(r.source?.name || 'video')} · ${esc(fmtDur(r.source?.duration) || '')}${r.source?.size ? ` · ${(r.source.size / 1048576).toFixed(1)} MB` : ''}</p><button class="chip" data-act="rx-attach-source">Attach</button></div>`;
     if (r.renderError) h += `<div class="rx-callout bad"><p>${esc(r.renderError)}</p><button class="chip" data-act="rx-cut">Try again</button><button class="chip" data-act="rx-plan-json">Download plan (.json)</button></div>`;
     // 'film' with no job here and no shot live (the tab closed between Approve and the first start, or every shot
     // ended): offer the review card again — Approve or Retry is a tap; nothing restarts by itself.
-    const filming = r.phase === 'film' && (jobs.has(e.id) || shotsLive(r.shots));
-    if (r.phase === 'review' || (r.phase === 'film' && !filming)) h += costHtml(e);
+    const filming = phase === 'film' && (jobs.has(e.id) || shotsLive(r.shots));
+    if (phase === 'review' || (phase === 'film' && !filming)) h += costHtml(e);
     if (filming) h += `<p class="rx-film">${statusHtml(filmStatus(r), null)}</p><p class="rx-note">${tester() ? esc(COPY.testerKeepOpen) : 'You can leave — Atelier collects the shots when you’re back.'}</p>`;
-    if (r.phase === 'check') h += `<div class="rx-cost"><p class="rx-cost-head">Ready to cut</p><p class="rx-note">${esc(COPY.free)}</p><div class="rx-cost-acts"><button class="rx-primary" data-act="rx-cut">Cut it · free</button><button class="chip" data-act="rx-preview">Preview · free</button></div></div>`;
+    if (phase === 'check') h += `<div class="rx-cost"><p class="rx-cost-head">Ready to cut</p><p class="rx-note">${esc(COPY.free)}</p><div class="rx-cost-acts"><button class="rx-primary" data-act="rx-cut">Cut it · free</button><button class="chip" data-act="rx-preview">Preview · free</button></div></div>`;
     return h;
   }
   const filmStatus = (r) => {
@@ -964,10 +1094,11 @@ export function createRemix(deps) {
     let h = `<section class="rx-story"><h3 class="rx-title">${esc(plan.title)}</h3>${plan.summary ? `<p class="rx-summary">${esc(plan.summary)}</p>` : ''}`;
     if (general.length) h += `<ul class="rx-issues">${general.map((i) => `<li class="rx-issue ${esc(i.level)}">${esc(i.msg)}</li>`).join('')}</ul>`;
     h += '<ol class="rx-beats">';
+    const clips = new Map(plan.timeline.map((c) => [c.id, c]));
     for (const row of rows) {
       const s = row.shot ? r.shots?.[row.shot] : null;
-      const thumbKey = `${e.id}:${row.id}`;
-      h += `<li class="rx-beat rx-${esc(row.type)}" data-id="${esc(row.id)}"><button class="rx-thumb" data-act="rx-frame" data-id="${esc(row.id)}" aria-label="See beat ${row.n}">${thumbs.has(thumbKey) ? `<img src="${esc(thumbs.get(thumbKey))}" alt="" />` : '<span class="rx-thumb-ph" aria-hidden="true"></span>'}</button>`
+      const sig = thumbSig(clips.get(row.id), plan.style?.accent), thumbKey = `${e.id}:${row.id}:${sig}`;
+      h += `<li class="rx-beat rx-${esc(row.type)}" data-id="${esc(row.id)}"><button class="rx-thumb" data-act="rx-frame" data-id="${esc(row.id)}" data-sig="${esc(sig)}" aria-label="See beat ${row.n}">${thumbs.has(thumbKey) ? `<img src="${esc(thumbs.get(thumbKey))}" alt="" />` : '<span class="rx-thumb-ph" aria-hidden="true"></span>'}</button>`
         + `<div class="rx-beat-text"><p class="rx-beat-title"><span class="rx-n">${row.n}</span>${esc(row.title)}</p><p class="rx-beat-sub">${esc(row.sub)}${row.drift ? ` · plays ${Math.abs(Math.round(row.drift * 10) / 10)} s ${row.drift > 0 ? 'after' : 'before'} its sound` : ''}</p>`;
       for (const i of row.issues) h += `<p class="rx-issue ${esc(i.level)}">${esc(i.msg)}</p>`;
       if (s) h += shotHtml(e, row.shot, s);
@@ -1019,7 +1150,7 @@ export function createRemix(deps) {
       + (lines ? `<ul class="rx-lines">${lines}</ul>` : '') + money
       + `<p class="rx-note">${esc(total.text)}</p><p class="rx-note">${esc(COPY.free)}</p>`
       + `<div class="rx-cost-acts"><button class="rx-primary" data-act="${shotsToFilm ? 'rx-approve' : 'rx-cut'}"${block || (shotsToFilm && !cost.canApprove) ? ' disabled' : ''}>${primary}</button>`
-      + `<button class="chip" data-act="rx-preview"${shotsToFilm ? ' disabled title="Preview after the shots are filmed"' : ''}>Preview · free</button><button class="chip" data-act="rx-finetune">Fine-tune</button><button class="chip ghost" data-act="rx-revise">Revise with Gemini…</button></div></div>`;
+      + `<button class="chip" data-act="rx-preview"${shotsToFilm ? ` disabled title="${esc(COPY.previewAfter)}"` : ''}>Preview · free</button><button class="chip" data-act="rx-finetune">Fine-tune</button><button class="chip ghost" data-act="rx-revise">Revise with Gemini…</button></div></div>`;
   }
   function doneHtml(e) {
     const r = e.remix, x = r.export || {};
@@ -1046,10 +1177,14 @@ export function createRemix(deps) {
     }
   }
   let thumbQueue = Promise.resolve();
-  // A thumbnail is patched into the painted story in place: a repaint is keyed (paintKey) and would skip it.
-  function fillThumb(e, id, url) {
+  // v114: a thumbnail is cached by what it shows: a card's words, backdrop and accent, or a kept clip's in point. It
+  // was cached by beat id alone, so after a Fine-tune edit the story kept the first picture for the rest of the session.
+  const thumbSig = (c, accent) => (c?.type === 'card' ? R.fnv1a(JSON.stringify([c.lines || [], c.backdrop || null, accent || ''])) : c?.type === 'source' ? String(c.src_in) : '');
+  // A thumbnail is patched into the painted story in place: a repaint is keyed (paintKey) and would skip it. Only into
+  // the beat as it is painted now (data-sig): a picture that finished late for an earlier edit is not shown.
+  function fillThumb(e, id, sig, url) {
     const b = doc?.querySelector?.(`.entry[data-id="${cssId(e.id)}"] .rx-thumb[data-id="${cssId(id)}"]`);
-    if (!b || b.querySelector('img') || typeof url !== 'string' || !SAFE_IMG.test(url)) return;
+    if (!b || b.dataset?.sig !== sig || b.querySelector('img') || typeof url !== 'string' || !SAFE_IMG.test(url)) return;
     const img = doc.createElement('img'); img.src = url; img.alt = ''; b.replaceChildren(img);
   }
   function thumbsFor(e) {
@@ -1057,10 +1192,12 @@ export function createRemix(deps) {
       const r = e.remix;
       const lay = R.layout(r.plan, r.source);
       const file = await sourceFile(e);
+      const shown = new Set();
       for (const it of lay.items) {
-        const key = `${e.id}:${it.id}`;
-        if (thumbs.has(key)) continue;
         const c = r.plan.timeline.find((x) => x.id === it.id);
+        const sig = thumbSig(c, r.plan.style?.accent), key = `${e.id}:${it.id}:${sig}`;
+        shown.add(key);
+        if (thumbs.has(key)) continue;
         try {
           if (it.type === 'card') {
             const bd = c.backdrop?.kind !== 'brand' && file ? await draw.grabFrame(file, c.backdrop.t, { maxEdge: 320 }) : null;
@@ -1068,9 +1205,11 @@ export function createRemix(deps) {
           } else if (it.type === 'source' && file) {
             thumbs.set(key, await draw.canvasToDataUrl(await draw.grabFrame(file, it.mediaIn + 0.05, { maxEdge: 160 }), 0.72));
           } else continue;
-          fillThumb(e, it.id, thumbs.get(key));
+          fillThumb(e, it.id, sig, thumbs.get(key));
         } catch { /* thumbnails are best-effort */ }
       }
+      // one picture per beat: what an edit replaced goes, so a long Fine-tune session doesn't keep them all
+      for (const k of [...thumbs.keys()]) if (k.startsWith(`${e.id}:`) && !shown.has(k)) thumbs.delete(k);
     });
     return thumbQueue;
   }
@@ -1103,9 +1242,7 @@ export function createRemix(deps) {
     const s = e.remix.shots?.[id];
     const b = s?.blobKey ? await store.getBlob(s.blobKey) : null;
     if (!b) { toast('This shot isn’t on this device', { error: true }); return; }
-    let u = shotUrls.get(s.blobKey);
-    if (!u) shotUrls.set(s.blobKey, (u = URLs.createObjectURL(b)));
-    deps.openViewer?.({ title: `Shot ${id}`, video: u });
+    deps.openViewer?.({ title: `Shot ${id}`, video: viewerUrlFor(b) }); // from the bytes just read: a refilm plays the new take
   }
 
   // ─────────── Fine-tune sheet ───────────
@@ -1157,10 +1294,12 @@ export function createRemix(deps) {
       } else {
         const s = plan.shots.find((x) => x.id === c.shot) || {}, st = r.shots?.[c.shot] || {};
         const models = shotChoices({ tester: tester(), runway: Boolean(deps.runwayReady?.()) });
+        const lock = models.length > 1 ? modelLock(st) : ''; // one model to pick from: nothing to lock or explain
         body = `<label class="rx-f"><span>Uses (s into the shot)</span>${num(c.id, 'use_in', c.use_in)}${num(c.id, 'use_out', c.use_out)}</label>`
           + `<label class="rx-f"><span>Prompt</span><textarea rows="3" maxlength="${R.LIMITS.promptMax}" data-f="prompt" data-id="${esc(c.shot)}" data-key="${esc(c.shot)}-pr">${esc(s.prompt || '')}</textarea></label>`
           + `<label class="rx-f"><span>Camera</span><select data-f="camera" data-id="${esc(c.shot)}">${['static', 'push_in', 'pan', 'tilt', 'orbit', 'handheld'].map((k) => `<option${s.camera === k ? ' selected' : ''}>${k}</option>`).join('')}</select></label>`
-          + `<label class="rx-f"><span>Model</span><select data-f="model" data-id="${esc(c.shot)}">${models.map((m) => `<option value="${esc(m.id)}"${st.model === m.id ? ' selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>`
+          + `<label class="rx-f"><span>Model</span><select data-f="model" data-id="${esc(c.shot)}"${lock ? ' disabled' : ''}>${models.map((m) => `<option value="${esc(m.id)}"${st.model === m.id ? ' selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>`
+          + (lock ? `<p class="rx-note">${esc(lock)}</p>` : '')
           + `<label class="rx-f rx-check"><input type="checkbox" data-f="skip" data-id="${esc(c.shot)}"${st.enabled === false ? ' checked' : ''} /> Skip this shot</label>`
           + `<button type="button" class="chip" data-card-instead data-id="${esc(c.shot)}">Use a card instead</button>`;
       }
@@ -1175,18 +1314,27 @@ export function createRemix(deps) {
       rows += `<details class="rx-row rx-${esc(c.type)}" data-id="${esc(c.id)}"${open}><summary>${esc(c.id)} · ${esc(c.type === 'source' ? 'Keep' : c.type === 'card' ? 'Card' : 'New shot')}</summary><div class="rx-row-body">${body}${layers}</div></details>`;
     }
     const issues = (r.issues || []).filter((i) => i.level !== 'fix').map((i) => `<li class="rx-issue ${esc(i.level)}">${esc(i.msg)}</li>`).join('');
+    const toFilm = R.planCost(r).lines.length > 0; // v114: as on the cost card, no preview while shots are unfilmed
     return `<div class="sheet-body rx-sheet-body"><header class="sheet-head"><h2 id="rxSheetTitle">Fine-tune</h2><button type="button" class="chip" data-close>Done</button></header>`
       + `<div class="rx-strip" aria-hidden="true"><div class="rx-blocks">${strip}</div><div class="rx-ticks">${ticks}</div></div>`
       + `<p class="rx-sync${sync.ok ? '' : ' off'}">${esc(sync.text)}${sync.ok ? '' : ' <button type="button" class="chip" data-fit>Fit</button>'}</p>`
       + (issues ? `<ul class="rx-issues">${issues}</ul>` : '')
       + `<div class="rx-rows">${rows}</div>`
-      + `<footer class="sheet-foot"><button type="button" class="chip" data-preview>Preview whole cut · free</button><button type="button" class="btn-primary" data-close>Done</button></footer></div>`;
+      + `<footer class="sheet-foot"><button type="button" class="chip" data-preview${toFilm ? ` disabled title="${esc(COPY.previewAfter)}"` : ''}>Preview whole cut · free</button><button type="button" class="btn-primary" data-close>Done</button></footer></div>`;
   }
+  // v114: a shot's model can change only while none of its footage exists. Picking another model for a filmed shot (or
+  // one that is filming, or made and waiting to be collected) only changed its label and the price in "so far": the old
+  // footage stayed. → why it is locked (shown under the select), or ''.
+  const modelLock = (s) => (s?.state === 'ready' ? COPY.modelFilmed : LIVE.has(s?.state) || R.resumeOf(s) ? COPY.modelBusy : '');
   async function onSheetClick(ev) {
     const e = sheetEntry, t = ev.target;
     if (!e) return;
     if (t.closest('[data-close]')) { sheet.close(); return; }
-    if (t.closest('[data-preview]')) { sheet.close(); cut(e, { preview: true }); return; }
+    if (t.closest('[data-preview]')) {
+      // the button is disabled then; a sheet painted before a shot went back to idle may still offer it
+      if (R.planCost(e.remix).lines.length) { toast(COPY.previewAfter); return; }
+      sheet.close(); cut(e, { preview: true }); return;
+    }
     if (t.closest('[data-fit]')) { await editPlan(e, () => {}, { fit: true }); renderSheet(); return; }
     const step = t.closest('[data-step]');
     if (step) {
@@ -1209,7 +1357,12 @@ export function createRemix(deps) {
       const s = r.shots?.[id];
       if (!s) return;
       if (f === 'skip') s.enabled = !t.checked;
-      else { const m = R.shotModel(t.value); if (!m) return; s.model = m.id; s.res = m.res.includes(s.res) ? s.res : m.res[0]; r.opts.shotModels = { ...(r.opts.shotModels || {}), [id]: { model: s.model, res: s.res } }; }
+      else {
+        // the select is disabled for such a shot; a sheet painted before it was filmed may still offer it
+        const lock = modelLock(s);
+        if (lock) { toast(lock); renderSheet(); return; }
+        const m = R.shotModel(t.value); if (!m) return; s.model = m.id; s.res = m.res.includes(s.res) ? s.res : m.res[0]; r.opts.shotModels = { ...(r.opts.shotModels || {}), [id]: { model: s.model, res: s.res } };
+      }
       await editPlan(e, () => {});
       renderSheet(); return;
     }
@@ -1249,7 +1402,6 @@ export function createRemix(deps) {
       case 'rx-cut': cut(e); return true;
       case 'rx-preview': cut(e, { preview: true }); return true;
       case 'rx-cancel-cut': cancelCut(e); return true;
-      case 'rx-stop-collect': stopCollecting(e); return true;
       case 'rx-retry-shot': retryShot(e, id); return true;
       case 'rx-retry-anyway': retryShot(e, id, { anyway: true }); return true;
       case 'rx-card-instead': await cardInstead(e, id); return true;
@@ -1310,13 +1462,18 @@ export function createRemix(deps) {
   }
   /**
    * The thread was deleted: keep polling live shots (so a tester's reserve settles at actual), then drop the bytes;
-   * every other rx:* file of that thread goes now.
+   * every other rx:* file of that thread goes now. The entry can't be loaded from here on: its job runs on the job
+   * store alone (tickGone).
    */
   async function forgetThread(threadId) {
     for (const j of jobs.values()) if (j.threadId === threadId) j.forget = true;
     choices.delete(threadId);
     if (!threadId || wiped) return;
-    try { await store.dropThread(threadId, { keep: [...jobs.keys()] }); } catch (err) { console.warn('[atelier] remix forget', err); }
+    try {
+      const dropped = await store.dropThread(threadId, { keep: [...jobs.keys()] });
+      // v114: what this session still held for the thread's entries goes too (a cut's blob: URL kept its MP4 alive)
+      for (const id of new Set([...dropped, ...[...cutOwner].filter(([, t]) => t === threadId).map(([id]) => id)])) forgetEntry(id);
+    } catch (err) { console.warn('[atelier] remix forget', err); }
   }
   /** Settings → Clear this device: stop every job and cut, and write nothing to rx:* again (kvClear runs next). */
   function wipe() {
@@ -1324,11 +1481,14 @@ export function createRemix(deps) {
     for (const [id, j] of [...jobs]) { if (j.timer) clearT(j.timer); jobs.delete(id); }
     for (const [id, j] of [...renders]) { j.paused = false; try { j.ctrl.abort(); } catch {} renders.delete(id); }
     store.draftCancel?.();
+    // v114: the object URLs this session made go as well (the last preview or played shot, and every cut)
+    for (const u of [viewerUrl, ...cutUrls.values()]) if (u) URLs.revokeObjectURL?.(u);
+    viewerUrl = null; cutUrls.clear(); cutOwner.clear();
   }
 
   return {
     composer, newRemix, keepSource, plan, revise, paint, onAct, boot, cutting, activeThreads, deleteWarning, forgetThread, wipe,
     // for the Fine-tune sheet, tests and the browser check
-    approve, cut, editPlan, retryShot, cardInstead, stopCollecting, tick, startJob, store, _jobs: jobs, _renders: renders,
+    approve, cut, editPlan, retryShot, cardInstead, tick, startJob, store, _jobs: jobs, _renders: renders,
   };
 }

@@ -7,7 +7,7 @@ import { hasVideoPart, geminiNativeChat, handleVideoApi, VIDEO_NEEDS_GEMINI } fr
 import { toolList, runTool, GOOGLE_SCOPES, saveGoogleAccount, removeGoogleAccount, addTokenAccount, removeTokenAccount, googleTokenFor,
   CANVA_ID, CANVA_MAX_IMAGE, CanvaError, canvaConfigured, canvaAuthUrl, canvaTakeState, canvaCompleteAuth, removeCanvaAccount, canvaSendImage,
   canvaListDesigns, canvaDesignFormats, canvaImport, canvaFetchFile } from './tools.js';
-import { identify, handleLinkedIn, signedOut, fail, readCookie, clearSession, COOKIE, ALLOWED_ORIGINS } from './tester/auth.js';
+import { identify, handleLinkedIn, signedOut, sessionBusy, fail, readCookie, clearSession, COOKIE, ALLOWED_ORIGINS } from './tester/auth.js';
 import { testerRouter, testerAdmin, matchTesterRoute } from './tester/router.js';
 import { handleTts } from './tts.js';
 import { handleSync } from './sync.js';
@@ -135,8 +135,12 @@ const testersClosed = () => fail(410, 'tester_closed', 'Tester access is closed.
 // shipped whenever such a client-side rule changes (it must never exceed the shipped build: tests/build-floor.test.mjs).
 // A call without the header (a build from before it, or not the app) isn't refused for that yet: require the header on
 // these routes once every device runs a build that sends it.
-export const MIN_CLIENT_BUILD = 84;
+// 114: v113 added the "file" taint (an attached document is outside text) and v114 the joined profile write below
+// (PUT /api/me). A tab still on an older build knows neither: it would treat a thread that holds a file as clean,
+// and send its whole stale profile over the newer one, approval switches included.
+export const MIN_CLIENT_BUILD = 114;
 const floorRoute = (method, path) => (path === 'chat' && method === 'POST') || path === 'tools' || path.startsWith('tools/') || path === 'relay/cmd'
+  || (path === 'me' && method === 'PUT')
   || ((path.startsWith('sync/') || path.startsWith('tester/sync/')) && method !== 'GET' && method !== 'HEAD');
 export function clientOutdated(req, path) {
   const b = req.headers.get('x-atelier-build');
@@ -472,6 +476,10 @@ async function handleApi(req, env, url) {
   }
   const who = testers ? await identify(req, env, passOk) : { kind: passOk(req, env) ? 'owner' : 'none' };
   if (who.kind === 'tester') return testerRouter(req, env, url, path, who, UPSTREAM);
+  // v114: too many unknown tester cookies from this network in the last minute, so this one wasn't looked up
+  // (tester/auth.js sessionShed). Not "sign in again": that answer clears the cookie, and a real tester on a busy network
+  // would be signed out. With a passcode header the request goes on as the stale case does, to the owner's answer.
+  if (who.busy && !req.headers.get('x-app-pass')) return sessionBusy(path);
   if (who.stale && !req.headers.get('x-app-pass')) return signedOut(); // an ended tester session, not a passcode problem
   if (path === 'feedback') {
     if (who.kind !== 'owner') return json({ error: 'Sign in to send feedback.' }, 401);
@@ -507,7 +515,21 @@ async function handleApi(req, env, url) {
     if (req.method === 'PUT') {
       const text = await req.text();
       if (text.length > 900_000) return json({ error: 'Profile too large' }, 413);
-      try { JSON.parse(text); } catch { return json({ error: 'Bad JSON' }, 400); }
+      let doc;
+      try { doc = JSON.parse(text); } catch { return json({ error: 'Bad JSON' }, 400); }
+      if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return json({ error: 'A profile is a JSON object.' }, 400);
+      // v114: the app joins its copy with the stored one before it writes (public/context.js mergeProfile) and names
+      // the stored copy it joined against (x-me-base: that copy's updatedAt). When another device has written since,
+      // the write is refused with the copy now stored, and the app joins again. Before this, every device sent its
+      // whole profile and the last one won: a tab left open for hours turned "Approve everything" back on after it was
+      // switched off elsewhere, and dropped what other devices had learned. (A read then a write is not one step in
+      // KV; this closes the hours-long window, not the last few milliseconds.)
+      const base = req.headers.get('x-me-base');
+      if (base != null) {
+        const stored = await env.ATELIER_KV.get('me', 'json');
+        const at = Number(stored?.updatedAt) || 0;
+        if (!/^\d{1,16}$/.test(base.trim()) || at > Number(base)) return json({ error: 'The profile changed on another device.', code: 'me_conflict', profile: stored || {} }, 409);
+      }
       await env.ATELIER_KV.put('me', text);
       return json({ ok: true });
     }

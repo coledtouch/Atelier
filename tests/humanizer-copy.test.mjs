@@ -17,7 +17,7 @@ import { problems, htmlText, shownStrings, literals, declarations, sentences, wo
 import { CANONICAL, canonicalText, moduleSource, currentText, lintDrift, lineDiff } from '../scripts/sync-humanizer.mjs';
 import {
   buildHistory, followUpRoute, photoFollowUp, mediaTurn, CTX_IMAGES, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin,
-  worseTaint, withSent, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY,
+  worseTaint, withSent, runStart, memoryAnchor, factsFor, factsInUse, heldForRun, TESTER_HISTORY,
 } from '../public/context.js';
 import { readUsage, addUsage, cacheKey } from '../public/usage.js';
 import { isTesterCode } from '../public/tester.js';
@@ -498,7 +498,7 @@ function rig({ tester = null } = {}) {
     S: { settings: { name: 'Cole', about: '', temperature: 0.5, models: {}, passcode: 'p' }, tester },
     ME: { bio: 'Builds Atelier.', learned: '', memory: [], style: 'Short and plain. Signs off "C".', samples: 'Quick one: can we move Friday to 3? C' },
     TOOLS: { services: { gmail: true }, list: [GMAIL] }, EXT: { ready: false }, REMOTE: { online: false }, claudeChats: 0,
-    factsFor, runStart, memoryAnchor, heldForRun, TESTER_HISTORY, buildHistory, withSent, readUsage, addUsage, cacheKey, threadTaint, ownTaint,
+    factsFor, factsInUse, runStart, memoryAnchor, heldForRun, TESTER_HISTORY, buildHistory, withSent, readUsage, addUsage, cacheKey, threadTaint, ownTaint,
     taintGates, taintNote, readsPage, pageOrigin, worseTaint, followUpRoute, photoFollowUp, mediaTurn, CTX_IMAGES, isTesterCode,
     fetch: async (url, init) => { assert.equal(url, '/api/chat', 'only the mocked chat route'); bodies.push(JSON.parse(init.body)); return reply(); },
     noteAllowance() {}, modelLabel: (m) => m, toast() {}, navigator: { onLine: true }, repaint() {},

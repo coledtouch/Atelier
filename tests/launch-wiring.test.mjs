@@ -36,7 +36,7 @@ function holdRig() {
   const toastEl = { shown: false, msg: '', act: null, contains(x) { return x != null && x === this.act; } };
   const vars = {
     calls, toastEl, timers, sendHold: null, draftT: 0, micSendAfter: false,
-    S: { mode: 'ask', busy: false, attachments: [], video: null },
+    S: { mode: 'ask', busy: false, attachments: [], files: [], video: null },
     NOTES, HOLD_MS,
     hasDraft: () => true, micOn: () => false,
     createHold: (o) => createHold({ ...o, timers }),

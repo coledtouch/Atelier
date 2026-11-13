@@ -131,6 +131,10 @@ export const OMNI_TOKENS_PER_SECOND = Object.freeze({ '360p': 5_792, '720p': 5_7
  * (only WAV says how long it is): 1,000 bytes a second (8 kbit/s). The app records AAC/Opus at 64 kbit/s (8,000 B/s),
  * and speech codecs don't go below ~6 kbit/s. gpt-transcribe bills per second of audio, so such a recording is reserved
  * as its byte length at this rate (120 s at 64 kbit/s: 983 s, $0.074 x 1.25); settle reads the billed seconds.
+ * That holds for speech, not for every file (v114 review): silence in AAC, or Opus with DTX, runs far below this rate,
+ * so a file made for it can play many times longer than its bytes say. The Ledger then records at most OVERRUN x the
+ * reservation and the router logs the whole bill ("tester call cost more than the Ledger records"). Measuring such a
+ * recording first, or sending it to Gemini (which counts it), is the owner's open decision.
  */
 export const STT_MIN_BYTES_PER_SECOND = 1_000;
 
@@ -805,7 +809,8 @@ export function ttsActual(o = {}) {
 // ───────────────────────────── dictation (speech to text) ─────────────────────────────
 /**
  * The seconds a duration-billed dictation (gpt-transcribe) is reserved for: the WAV's own length when it is known,
- * else the recording's bytes at STT_MIN_BYTES_PER_SECOND (a ceiling on how long it can play). Rounded up.
+ * else the recording's bytes at STT_MIN_BYTES_PER_SECOND (how long speech of that size plays at most; not a ceiling for
+ * every file, see there). Rounded up.
  */
 export function sttCeilingSeconds({ seconds = null, bytes = 0 } = {}) {
   if (seconds != null) return Math.max(1, count(seconds, 'seconds'));

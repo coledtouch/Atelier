@@ -396,10 +396,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=113" />
-  <link rel="stylesheet" href="/studio.css?v=113" />
-  <link rel="stylesheet" href="/feedback.css?v=113" />
-  <link rel="stylesheet" href="/remix.css?v=113" />
+  <link rel="stylesheet" href="/app.css?v=114" />
+  <link rel="stylesheet" href="/studio.css?v=114" />
+  <link rel="stylesheet" href="/feedback.css?v=114" />
+  <link rel="stylesheet" href="/remix.css?v=114" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -493,7 +493,7 @@
           <button class="icon-btn subtle" id="attachBtn" type="button" aria-label="Attach a file" title="Attach photos, a video, PDFs, Word, Excel, PowerPoint or text files">
             <svg viewBox="0 0 24 24"><path d="M21 12.5 12.6 21a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>
           </button>
-          <input type="file" id="fileInput" accept="image/*,video/*,.pdf,.docx,.xlsx,.xlsm,.pptx,.doc,.xls,.ppt,.txt,.md,.csv,.tsv,.json,.jsonl,.xml,.html,.htm,.yaml,.yml,.log,.rtf,.srt,.vtt,.js,.mjs,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.cs,.php,.sh,.sql,.css,.ics,.vcf,application/pdf,text/*" multiple hidden />
+          <input type="file" id="fileInput" accept="image/*,video/*,.pdf,.docx,.docm,.doc,.rtf,.odt,.xlsx,.xlsm,.xls,.ods,.pptx,.ppsx,.ppt,.odp,.txt,.md,.csv,.tsv,.json,.jsonl,.xml,.html,.htm,.yaml,.yml,.toml,.ini,.log,.eml,.srt,.vtt,.js,.mjs,.cjs,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.cs,.php,.sh,.ps1,.sql,.css,.scss,.ics,.vcf,application/pdf,text/*" multiple hidden />
           <textarea id="input" rows="1" placeholder="Ask anything…" autocomplete="off" enterkeyhint="send" aria-label="Prompt" aria-describedby="composerSrc"></textarea>
           <button class="icon-btn subtle" id="micBtn" type="button" aria-pressed="false" aria-label="Dictate" title="Dictate" data-state="idle">
             <svg class="i-mic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
@@ -633,8 +633,8 @@
 
       <div class="sheet-scroll" id="settingsScroll">
         <section class="field-group">
-          <h4>Appearance</h4>
-          <div class="seg" id="themeSeg">
+          <h4 id="themeLabel">Appearance</h4>
+          <div class="seg" id="themeSeg" role="radiogroup" aria-labelledby="themeLabel">
             <label><input type="radio" name="theme" value="auto" /> <span>Auto</span></label>
             <label><input type="radio" name="theme" value="dark" /> <span>Dark</span></label>
             <label><input type="radio" name="theme" value="light" /> <span>Paper</span></label>
@@ -689,7 +689,7 @@
         <section class="field-group owner-only">
           <h4>Connections</h4>
           <ul class="conn-list" id="connList"></ul>
-          <p class="hint">Connect an account and Atelier can work in it. It asks you before it sends or changes anything.</p>
+          <p class="hint">Connect an account and Atelier can work in it. It asks before it sends or changes anything, unless you turn that off under Approvals.</p>
         </section>
 
         <section class="field-group">
@@ -794,9 +794,9 @@
           </details>
         </section>
         <section class="field-group">
-          <h4>Look up</h4>
+          <h4 id="lookupLabel">Look up</h4>
           <p class="hint" style="margin-bottom:10px">Select a name or term in a finished answer to see a short Wikipedia summary. Atelier’s server fetches the summary and its preview image, so Wikipedia never sees your device.</p>
-          <div class="seg" id="lookupSeg">
+          <div class="seg" id="lookupSeg" role="radiogroup" aria-labelledby="lookupLabel">
             <label><input type="radio" name="lookup" value="auto" /> <span>Automatic</span></label>
             <label><input type="radio" name="lookup" value="tap" /> <span>On tap</span></label>
             <label><input type="radio" name="lookup" value="off" /> <span>Off</span></label>
@@ -814,7 +814,7 @@
             </div>
           </div>
           <label class="ra-auto"><input type="checkbox" id="readAuto" checked /><span><span class="ra-auto-title">Read answers to spoken requests</span><span class="hint">When you ask out loud, Atelier reads the answer to you. That covers Atelier Assist, Talk and the mic. Stop reading, typing, the mic or a new prompt stops it.</span></span></label>
-          <p class="hint" id="readCaption">AI-generated voice. To make the audio, answer text is sent to OpenAI (Google for Sulafat). Clips stay on this device until you clear it.</p>
+          <p class="hint" id="readCaption">AI-generated voice. To make the audio, answer text is sent to Google. Clips stay on this device until you clear it.</p>
         </section>
         <section class="field-group">
           <h4>Your data</h4>
@@ -927,6 +927,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=113" type="module"></script>
+  <script src="/app.js?v=114" type="module"></script>
 </body>
 </html>

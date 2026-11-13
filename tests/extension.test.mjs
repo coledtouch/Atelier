@@ -1055,8 +1055,8 @@ test('confirm page: the tick is sent only with an Allow, and the page carries th
   assert.match(js, /port\.postMessage\(\{ answer: choice, \.\.\.\(always \? \{ always: true \} : \{\}\) \}\)/);
 });
 
-test('manifest: version 1.4.0, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
-  assert.equal(SOURCE_MANIFEST.version, '1.4.0');
+test('manifest: version 1.4.1, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
+  assert.equal(SOURCE_MANIFEST.version, '1.4.1');
   assert.ok(SOURCE_MANIFEST.description.length <= 132);
   assert.ok(Number(SOURCE_MANIFEST.minimum_chrome_version) >= 116);
 });
@@ -1069,8 +1069,8 @@ test('the app asks for the extension build it ships: MIN_EXT is the manifest ver
   const min = /const MIN_EXT = '([\d.]+)';/.exec(APP)?.[1];
   assert.equal(min, SOURCE_MANIFEST.version, 'public/app.js MIN_EXT = extension/manifest.json version');
   const olderExt = new Function(`const MIN_EXT = '${min}'; return ${/\nconst olderExt = ([^\n]+);\n/.exec(APP)[1]};`)();
-  for (const v of ['1.3.10', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
-  for (const v of [min, '1.4.1', '1.10.0', '2.0.0']) assert.equal(olderExt(v), false, v);
+  for (const v of ['1.4.0', '1.3.10', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
+  for (const v of [min, '1.4.2', '1.10.0', '2.0.0']) assert.equal(olderExt(v), false, v);
   assert.match(APP, /if \(olderExt\(d\.version\)\) setTimeout\(\(\) => toast\(`Atelier Browser has an update \(v\$\{MIN_EXT\}\)/);
 });
 
@@ -1083,7 +1083,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
   const prod = packExtension();
   const files = unzipSync(prod.zip);
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  assert.equal(manifest.version, '1.4.0');
+  assert.equal(manifest.version, '1.4.1');
   assert.deepEqual(manifest.content_scripts.map((c) => c.matches), [['https://atelier.ciprari.ai/*']]);
   assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
   assert.ok(!/localhost|127\.0\.0\.1/.test(strFromU8(files['manifest.json'])));
@@ -1092,7 +1092,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
 
   const dev = packExtension({ dev: true });
   assert.deepEqual(dev.manifest.content_scripts[0].matches, ['https://atelier.ciprari.ai/*', 'http://localhost:8787/*']);
-  assert.equal(dev.manifest.version, '1.4.0');
+  assert.equal(dev.manifest.version, '1.4.1');
   assert.deepEqual(SOURCE_MANIFEST.content_scripts[0].matches, dev.manifest.content_scripts[0].matches, 'the source keeps localhost for Load unpacked');
 });
 
@@ -1123,21 +1123,29 @@ test('productionManifest refuses a manifest that would still reach a local host'
 // ── 1.4.0: sign in with the password Chrome already saved ──
 // A sign-in page. fill: 'click' (Chrome filled on load; the first real click releases it), 'pick' (Chrome fills only
 // once its list is picked with ArrowDown + Enter), 'never' (Chrome has nothing saved for this site).
-function loginPage({ fill = 'click', user = true, submit = true, password = true } = {}) {
+// 1.4.1: buttons = the form's buttons in page order, each { text, type, aria, title, value, shown, disabled, signs }
+// (signs: pressing it sends the form; with no list the page has one <button type="submit">Log in</button> that does).
+// They sit 40 px apart from y 180, so a click's y says which one took it (190, 230, 270, …); page.pressed names them.
+// onEnter: 'send' = the page's own key handler sends the form on an Enter that gives a keypress. stays: the form is
+// sent and the page stays as it was (a real page moves on, and the marks the extension left on its fields go with it).
+function loginPage({ fill = 'click', user = true, submit = true, password = true, buttons: specs, onEnter = '', stays = false, url = 'https://permits.example.gov/login' } = {}) {
   const form = {};
   const box = (top, h = 20) => () => ({ left: 10, top, width: h ? 100 : 0, height: h });
   const mk = (tag, attrs, rect) => { const el = fakeEl({ tag, attrs }); el.getBoundingClientRect = rect; el.form = form; return el; };
   const hidden = mk('INPUT', { type: 'hidden', name: 'csrf' }, box(0, 0));
   const userEl = mk('INPUT', { type: 'email', name: 'email', 'aria-label': 'Email' }, box(100));
   const pw = mk('INPUT', { type: 'password', name: 'password', 'aria-label': 'Password' }, box(140));
-  const btn = mk('BUTTON', { type: 'submit' }, box(180));
-  btn.innerText = 'Log in';
+  const buttons = (specs || (submit ? [{ text: 'Log in', type: 'submit', signs: true }] : [])).map((s, i) => {
+    const attrs = { ...(s.type === undefined ? {} : { type: s.type }), ...(s.aria ? { 'aria-label': s.aria } : {}), ...(s.title ? { title: s.title } : {}) };
+    const el = mk(s.tag || 'BUTTON', attrs, box(180 + 40 * i, s.shown === false ? 0 : 20));
+    return Object.assign(el, { innerText: s.text || '', value: s.value || '', disabled: s.disabled === true, signs: s.signs === true, what: s.text || s.value || s.aria || s.title || `button ${i + 1}` });
+  });
+  const btn = buttons[0];
   const inputs = [hidden, ...(user ? [userEl] : []), ...(password ? [pw] : [])];
-  const buttons = submit ? [btn] : [];
   const all = [...inputs, ...buttons];
   form.querySelectorAll = (sel) => (sel === 'button, input[type=submit]' ? buttons : []);
   const listeners = [];
-  const page = { title: 'Login · Permits', url: 'https://permits.example.gov/login', elements: {}, userEl, pw, btn, listeners, submitted: 0, enters: [] };
+  const page = { title: 'Login · Permits', url, elements: {}, userEl, pw, btn, buttons, listeners, submitted: 0, enters: [], pressed: [] };
   page.window = {
     addEventListener: (type, f) => listeners.push(f),
     removeEventListener: (type, f) => { const i = listeners.indexOf(f); if (i >= 0) listeners.splice(i, 1); },
@@ -1157,6 +1165,9 @@ function loginPage({ fill = 'click', user = true, submit = true, password = true
     },
     getElementById: () => null,
   };
+  // The form is sent. page.onSend lets a test say what the page does then (move to another address, close, hang).
+  const send = () => { page.submitted++; page.onSend?.(); if (!stays) for (const el of all) delete el.attrs['data-atelier-login']; };
+  const press = (b) => { page.pressed.push(b.what); if (b.signs) send(); };
   let listed = false;
   page.onCdp = (method, p) => {
     const up = method === 'Input.dispatchMouseEvent' && p.type === 'mouseReleased';
@@ -1165,11 +1176,21 @@ function loginPage({ fill = 'click', user = true, submit = true, password = true
     if (key === 'ArrowDown' && fill === 'pick') listed = true;
     if (key === 'Enter') {
       // With Chrome's list showing, Chrome takes the Enter; otherwise the page gets it, unless the guard holds it.
+      // A rawKeyDown carries no character, so the page gets a keydown and no keypress: no form is sent by it.
       if (listed) pw.value = 'hunter2';
       else page.enters.push({ guarded: listeners.length > 0 });
       listed = false;
     }
-    if (up && p.y === 190) page.submitted++;
+    // An Enter that carries its character gives the page a keypress. In a form the browser then presses the form's
+    // default button: the first one that submits, shown or not. With no such button and two fields nothing is sent,
+    // unless the page has its own key handler.
+    if (method === 'Input.dispatchKeyEvent' && p.type === 'keyDown' && p.key === 'Enter' && p.text === '\r' && pw.focused) {
+      const first = buttons.find((b) => /^(submit|)$/.test(String(b.attrs.type ?? '').toLowerCase()) && !b.disabled);
+      if (first) press(first);
+      else if (onEnter === 'send') send();
+    }
+    const hit = up ? buttons.find((b) => b.getBoundingClientRect().height > 0 && p.y === b.getBoundingClientRect().top + 10) : null;
+    if (hit) press(hit);
   };
   return page;
 }
@@ -1204,6 +1225,7 @@ test('sign-in: when Chrome only lists the saved login, ArrowDown + Enter picks i
   assert.equal(page.submitted, 1);
   assert.equal(page.listeners.length, 0, 'the guard is removed');
   assert.deepEqual(page.enters, [], 'Chrome took the Enter');
+  assert.equal(r.result.signedIn, 'submitted');
 });
 
 test('sign-in: with nothing saved, nothing is submitted, the stray Enter is held from the page, and the debugger lets go', async () => {
@@ -1217,17 +1239,154 @@ test('sign-in: with nothing saved, nothing is submitted, the stray Enter is held
   assert.deepEqual(h.cdp.at(-1), ['detach', 7]);
 });
 
-test('sign-in: no submit button → Enter in the filled password field; no password field → refused before anything runs', async () => {
-  const one = signinRig({ fill: 'click', submit: false });
+// 1.4.1 (v114 review, tools #4): the Enter was a rawKeyDown, which gives a page no keypress, so the form stayed where it
+// was and the sign-in was still reported as submitted.
+test('sign-in: no submit button → an Enter that carries its character, in the filled password field; no password field → refused before anything runs', async () => {
+  // The page's "button" is a styled div; its own key handler sends the form on Enter.
+  const one = signinRig({ fill: 'click', submit: false, onEnter: 'send' });
   const r = await one.h.local('signin', { tabId: 7 });
   assert.ok(r.ok, r.error);
   assert.equal(one.page.pw.focused, true);
-  assert.deepEqual(keysSent(one.h), ['Enter']);
+  assert.deepEqual(one.h.cdp.filter(([m]) => m === 'Input.dispatchKeyEvent').map(([, p]) => p), [
+    { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' },
+    { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 },
+  ]);
+  assert.deepEqual(keysSent(one.h), [], 'no rawKeyDown: that one is for Chrome’s own list');
+  assert.equal(one.page.submitted, 1, 'the form was sent');
+  assert.equal(r.result.signedIn, 'submitted');
+  assert.match(BACKGROUND, /await key\('ArrowDown', 40\);\r?\n\s+await sleep\(250\);\r?\n\s+await key\('Enter', 13\);/, 'the list pick keeps its rawKeyDown Enter: Chrome’s list takes that one');
   const none = signinRig({ password: false });
   const r2 = await none.h.local('signin', { tabId: 7 });
   assert.match(r2.error, /No sign-in form/);
   assert.deepEqual(none.h.cdp, []);
   assert.equal(none.h.windows.length, 0);
+});
+
+test('sign-in: a form that is still there afterwards is reported as unclear, never as submitted', async () => {
+  // Two fields, no button and no key handler: Enter sends nothing.
+  const none = signinRig({ fill: 'click', submit: false });
+  let r = await none.h.local('signin', { tabId: 7 });
+  assert.ok(r.ok, r.error);
+  assert.equal(none.page.submitted, 0);
+  assert.equal(r.result.signedIn, 'unclear');
+  assert.equal(r.result.note, 'Chrome filled the password it had saved. Atelier never saw it. The sign-in form is still showing, so it isn’t known whether it went through. Look at that tab before trying again.');
+  assert.deepEqual(r.result.now, { title: 'Login · Permits', url: 'https://permits.example.gov/login' });
+  assert.doesNotMatch(JSON.stringify(r), /hunter2/);
+  // The button was pressed and the page kept its form (a wrong password on a page that redraws nothing).
+  const stays = signinRig({ stays: true });
+  r = await stays.h.local('signin', { tabId: 7 });
+  assert.deepEqual(stays.page.pressed, ['Log in']);
+  assert.equal(r.result.signedIn, 'unclear');
+  // The same, but the address changed: the page moved on, so it is submitted. A new #fragment alone is the same page.
+  for (const [to, want] of [['https://permits.example.gov/home', 'submitted'], ['https://permits.example.gov/login#try-again', 'unclear']]) {
+    const moved = signinRig({ stays: true });
+    moved.page.onSend = () => { moved.page.url = to; };
+    r = await moved.h.local('signin', { tabId: 7 });
+    assert.equal(r.result.signedIn, want, to);
+    assert.equal(r.result.now.url, to);
+  }
+  // The page shows a dialog box after the click and answers nothing: what it did is not known.
+  const stuck = signinRig({ stays: true });
+  stuck.h.run('TIMING.read = 30');
+  stuck.page.onSend = () => { stuck.page.hold = new Promise(() => {}); };
+  r = await stuck.h.local('signin', { tabId: 7 });
+  assert.equal(r.result.signedIn, 'unclear');
+  // The tab closed once the form was sent (a sign-in window that shuts itself): an answer, not "No tab with id".
+  const closed = signinRig();
+  closed.page.onSend = () => { delete closed.h.pages[7]; };
+  r = await closed.h.local('signin', { tabId: 7 });
+  assert.ok(r.ok, r.error);
+  assert.deepEqual(r.result, { signedIn: 'unclear', note: 'Chrome filled the password it had saved. Atelier never saw it. That tab then closed, so it isn’t known whether the sign-in went through.' });
+});
+
+test('sign-in: a tab lost while the form is being sent ends with "it isn’t known", and the debugger lets go', async () => {
+  const { h, page } = signinRig();
+  const play = page.onCdp;
+  page.onCdp = (method, p) => {
+    if (method === 'Input.dispatchMouseEvent' && p.type === 'mouseReleased' && p.y === 190) throw new Error('Debugger is not attached to the tab with id: 7.');
+    return play(method, p);
+  };
+  const r = await h.local('signin', { tabId: 7 });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'The tab stopped answering while the sign-in form was being sent. It isn’t known whether it went through. Look at that tab before trying again.');
+  assert.deepEqual(h.cdp.at(-1), ['detach', 7]);
+  // Before that click nothing was sent, so an error there stays a plain one.
+  const early = signinRig();
+  const play2 = early.page.onCdp;
+  early.page.onCdp = (method, p) => {
+    if (method === 'Input.dispatchMouseEvent' && p.y === 110) throw new Error('Debugger is not attached to the tab with id: 7.');
+    return play2(method, p);
+  };
+  const r2 = await early.h.local('signin', { tabId: 7 });
+  assert.equal(r2.ok, false);
+  assert.match(r2.error, /Debugger is not attached/);
+  assert.equal(early.page.submitted, 0);
+});
+
+// 1.4.1 (v114 review, tools #5): the form's first button that submits took the click, and a <button> with no type
+// does: a show-password toggle, "Forgot password?" or "Continue with Google" placed before the real button.
+const signinOn = async (opts, storage) => { const rig = signinRig(opts, storage); return { ...rig, r: await rig.h.local('signin', { tabId: 7 }) }; };
+test('sign-in presses the sign-in button, never a show-password toggle, "Forgot password?" or another provider’s button before it', async () => {
+  const before = [{ aria: 'Show password' }, { text: 'Forgot password?' }, { text: 'Continue with Google' }];
+  // the review's case: every button is a <button> with no type, and the real one comes last
+  let s = await signinOn({ buttons: [...before, { text: 'Sign in', signs: true }] });
+  assert.ok(s.r.ok, s.r.error);
+  assert.deepEqual(s.page.pressed, ['Sign in']);
+  assert.deepEqual(mouseAt(s.h), [[60, 110], [60, 310]], 'the email field, then the fourth button');
+  assert.equal(s.r.result.signedIn, 'submitted');
+  const cases = [
+    ['a button marked type=submit wins, whatever it says', [{ text: 'Continue with Google' }, { text: 'Anmelden', type: 'submit', signs: true }, { text: 'Registrieren' }], 'Anmelden'],
+    ['of two marked type=submit, the one that says sign in', [{ text: 'Suchen', type: 'submit' }, { value: 'Log In', tag: 'INPUT', type: 'submit', signs: true }], 'Log In'],
+    ['"Sign in" before "Sign in with SSO"', [{ text: 'Sign in with SSO' }, { text: 'Sign in', signs: true }], 'Sign in'],
+    ['"Sign in with email" when it is the only one that says so', [{ text: 'Sign in with email', signs: true }, { text: 'Abbrechen', type: 'button' }], 'Sign in with email'],
+    ['the form’s first button with no type, once the toggle is set aside (the browser’s own choice for Enter, as before)', [{ aria: 'Show password' }, { text: 'Anmelden', signs: true }, { text: 'Registrieren' }], 'Anmelden'],
+    ['a toggle named only by its title, or by an icon with an aria-label', [{ title: 'Show password' }, { text: '👁', aria: 'Hide password' }, { text: 'Anmelden', signs: true }], 'Anmelden'],
+    ['a toggle named by its icon font, or as a toggle', [{ text: 'visibility_off' }, { aria: 'Toggle password visibility' }, { text: 'Anmelden', signs: true }, { text: 'Registrieren' }], 'Anmelden'],
+    ['an eye that is a bare icon with no name: the button with words comes first', [{ text: '👁' }, {}, { text: 'Anmelden', signs: true }], 'Anmelden'],
+    ['a bare icon is still pressed when it is the form’s only button', [{ signs: true }], 'button 1'],
+    ['"Forgotten your password?" and "Reset password"', [{ text: 'Forgotten your password?' }, { text: 'Reset password' }, { text: 'Log in', signs: true }], 'Log in'],
+    ['a hidden first button is never clicked', [{ text: 'Log in', type: 'submit', shown: false }, { text: 'Sign in', type: 'button', signs: true }], 'Sign in'],
+  ];
+  for (const [what, buttons, want] of cases) {
+    s = await signinOn({ buttons });
+    assert.ok(s.r.ok, `${what}: ${s.r.error}`);
+    assert.deepEqual(s.page.pressed, [want], what);
+    assert.equal(mouseAt(s.h).length, 2, `${what}: one click on the field, one on the button`);
+  }
+  // A provider's name sets a button aside only away from that provider's own site.
+  s = await signinOn({ url: 'https://github.com/login', buttons: [{ text: 'Sign in to GitHub', signs: true }, { text: 'Cancel' }] });
+  assert.deepEqual(s.page.pressed, ['Sign in to GitHub']);
+  s = await signinOn({ buttons: [{ text: 'Sign in to GitHub' }, { text: 'Sign in', signs: true }] });
+  assert.deepEqual(s.page.pressed, ['Sign in']);
+});
+
+test('sign-in: with no button it can click, Enter is used only where the form’s own default button is not one of those; otherwise the form is left untouched', async () => {
+  // The page's button is a script-driven one (type=button) in words it doesn't know: no click, and Enter sends the form.
+  let s = await signinOn({ buttons: [{ text: 'Weiter', type: 'button' }], onEnter: 'send' });
+  assert.ok(s.r.ok, s.r.error);
+  assert.deepEqual(mouseAt(s.h), [[60, 110]], 'only the field was clicked');
+  assert.deepEqual(s.page.pressed, []);
+  assert.equal(s.page.submitted, 1);
+  assert.equal(s.r.result.signedIn, 'submitted');
+  // A hidden submit button put first so that Enter works: Enter presses it, as it does for a person.
+  s = await signinOn({ buttons: [{ text: 'Senden', type: 'submit', shown: false, signs: true }, { text: 'Weiter', type: 'button' }] });
+  assert.ok(s.r.ok, s.r.error);
+  assert.deepEqual(mouseAt(s.h), [[60, 110]]);
+  assert.deepEqual(s.page.pressed, ['Senden']);
+  // A disabled toggle is not the form's default button, so Enter is safe there too.
+  s = await signinOn({ buttons: [{ aria: 'Show password', disabled: true }, { text: 'Weiter', type: 'button' }], onEnter: 'send' });
+  assert.ok(s.r.ok, s.r.error);
+  assert.equal(s.page.submitted, 1);
+  // "Continue with Google" (or the toggle) is the form's default button and the real one is a styled div or a
+  // script-driven button: a click would press it, and so would Enter. Nothing is asked, clicked or filled.
+  for (const buttons of [[{ text: 'Continue with Google' }], [{ aria: 'Show password' }, { text: 'Weiter', type: 'button' }]]) {
+    s = await signinOn({ buttons }, {});
+    assert.deepEqual(s.r, { ok: false, error: 'Atelier Browser couldn’t tell which button signs in on that page, so nothing was submitted. Ask the user to sign in.' });
+    assert.deepEqual(s.h.cdp, [], 'the debugger never attached');
+    assert.equal(s.h.windows.length, 0, 'no window asked');
+    assert.equal(s.page.pw.value, '', 'nothing was filled');
+    assert.deepEqual(s.page.pressed, []);
+  }
 });
 
 test('sign-in asks first in the extension’s own window, naming the password field; a Deny leaves the tab alone', async () => {
@@ -1319,4 +1478,141 @@ test('messages: the relay may carry it; the manifest asks for nativeMessaging; t
   assert.ok(SOURCE_MANIFEST.permissions.includes('nativeMessaging'));
   assert.match(CONFIRM_JS, /Allow Atelier to send a text\?/);
   assert.match(CONFIRM_JS, /if \(typing \|\| texting\) \{/);
+});
+
+// ── 1.4.1: fixes from the v114 review ──
+// tools #7: a helper that hadn't answered in 30 s read as "didn't answer", and the text still went out once the owner
+// answered macOS's prompt. The agent, told it had failed, sent it again.
+test('messages: a send that gets no answer from the helper says the outcome isn’t known; a helper that never ran sent nothing', async () => {
+  const send = (h) => h.local('messages', { op: 'send', to: '+16175550142', text: 'On my way' }, APP, { approved: true });
+  const h = loadBackground({ storage: { noAsk: true } });
+  assert.equal(h.run('TIMING.helper'), 30_000);
+  h.run('TIMING.helper = 30');
+  h.nativeReply = () => new Promise(() => {}); // osascript sits on macOS's "Chrome wants to control Messages" prompt
+  assert.deepEqual(await send(h), { ok: false, error: 'The Messages helper didn’t answer in time, so it isn’t known whether the text was sent. Check Messages before trying again.' });
+  // a read with no answer is a plain failure: nothing can have gone out
+  assert.deepEqual(await h.local('messages', { op: 'recent' }), { ok: false, error: 'The Messages helper on this computer didn’t answer.' });
+  // the helper ran and went away before it answered: it may have sent first
+  for (const died of ['Native host has exited.', 'Error when communicating with the native messaging host.']) {
+    h.nativeReply = () => { throw new Error(died); };
+    assert.deepEqual(await send(h), { ok: false, error: 'The Messages helper stopped before it answered, so it isn’t known whether the text was sent. Check Messages before trying again.' }, died);
+  }
+  // it never started: nothing was sent, and the note says how to set it up
+  for (const never of ['Specified native messaging host not found.', 'Access to the specified native messaging host is forbidden.', 'Failed to start native messaging host.']) {
+    h.nativeReply = () => { throw new Error(never); };
+    assert.match((await send(h)).error, /^Messages isn’t set up on this computer\./, never);
+  }
+  // the helper's own answer is passed on as it is: it knows whether it sent
+  h.nativeReply = () => ({ ok: false, error: 'Chrome can’t control Messages yet. Allow it in System Settings → Privacy & Security → Automation, then try again.' });
+  assert.match((await send(h)).error, /^Chrome can’t control Messages yet\./);
+  // reads keep the notes they had
+  h.nativeReply = () => { throw new Error('Error when communicating with the native messaging host.'); };
+  assert.match((await h.local('messages', { op: 'recent' })).error, /Set up Messages/);
+  h.nativeReply = () => { throw new Error('Native host has exited.'); };
+  assert.equal((await h.local('messages', { op: 'read', chat: 'x' })).error, 'Native host has exited.');
+});
+
+test('messages: a send fits inside the time the relay and the Atelier tab give it (the confirmation, then the helper)', () => {
+  const worst = loadBackground().run('TIMING.confirm + TIMING.helper');
+  assert.equal(worst, 75_000);
+  const relay = readFileSync(new URL('../src/relay.js', import.meta.url), 'utf8');
+  assert.ok(Number(/const COMMAND_TIMEOUT_MS = ([\d_]+);/.exec(relay)[1].replace(/_/g, '')) > worst, 'the relay waits longer than a send can take');
+  // The Atelier tab on this computer (public/app.js): with less than that, "The browser took too long to respond" could
+  // be said of a text that then goes out.
+  const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const limit = /extCall\('messages', \{ \.\.\.step\.args, op: step\.name\.replace\('messages_', ''\) \}, ([^\n]+?), step\.write \|\| step\.confirm === true \|\| step\.auto === true\)/.exec(app)?.[1];
+  assert.ok(limit, 'app.js runs a Messages step through extCall with a time limit');
+  const given = new Function('step', `return ${limit};`)({ name: 'messages_send', write: true });
+  assert.ok(given > worst, `public/app.js gives messages_send ${given} ms, and a send can take ${worst} ms`);
+});
+
+// tools #8: the tab was closed on the line after the read, so a page Chrome won't let an extension read left it open.
+test('reading a page by its address always closes the tab it opened, and never a tab that was already open', async () => {
+  const h = loadBackground({ pages: { 7: repoPage() } });
+  h.run('TIMING.render = 0');
+  const created = [], removed = [], dead = new Set();
+  let stuck = false;
+  h.ctx.chrome.tabs.create = async ({ url }) => {
+    const id = 90 + created.push(url);
+    h.pages[id] = fakePage({ title: 'Loaded', url });
+    if (stuck) h.pages[id].hold = new Promise(() => {});
+    return { id };
+  };
+  h.ctx.chrome.tabs.remove = async (id) => { removed.push(id); };
+  // Chrome lets no extension script its own error page (a dead host), the Web Store or a PDF.
+  const inject = h.ctx.chrome.scripting.executeScript;
+  h.ctx.chrome.scripting.executeScript = async (o) => { if (dead.has(o.target.tabId)) throw new Error('Frame with ID 0 is showing error page'); return inject(o); };
+  const read = (args) => h.local('read', args, APP, { approved: true });
+  const ok = await read({ url: 'https://example.com/a' });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.result.url, 'https://example.com/a');
+  assert.equal('tabId' in ok.result, false, 'a tab that is gone is not named');
+  assert.deepEqual(removed, [91], 'a page that reads: closed, as before');
+  dead.add(92);
+  assert.deepEqual(await read({ url: 'https://dead.example/' }), { ok: false, error: 'Frame with ID 0 is showing error page' });
+  assert.deepEqual(removed, [91, 92], 'a page that can’t be read: its hidden tab is closed too');
+  // a page that never answers (it opens a dialog box as it loads) held its tab the same way
+  h.run('TIMING.read = 30');
+  stuck = true;
+  assert.deepEqual(await read({ url: 'https://example.com/alert' }), { ok: false, error: 'That page didn’t answer in time, so nothing was read. It may be slow, or showing a dialog box.' });
+  assert.deepEqual(removed, [91, 92, 93]);
+  // a tab that was already open is the user's: it stays, read or not
+  assert.equal((await h.local('read', { tabId: 7 })).result.tabId, 7);
+  dead.add(7);
+  assert.equal((await h.local('read', { tabId: 7 })).ok, false);
+  assert.equal((await read({ tabId: 7, url: 'https://example.com/b' })).ok, false, 'a tabId beside a url reads that tab');
+  assert.deepEqual(removed, [91, 92, 93]);
+  assert.equal(created.length, 3);
+});
+
+// tools #9: the one-second wait guarded Allow only. A click meant for something else, landing on the box's label as
+// the window appeared, ticked it; the Allow a second later then turned asking off for good.
+test('confirm page: "Don’t ask again" takes no tick before Allow can be chosen', async () => {
+  // A real click on the box or its label: the press, then the click. The box flips unless a listener cancels the click.
+  const tick = (p) => {
+    const box = p.els.always;
+    let cancelled = false;
+    p.down(box);
+    box.fire('click', { preventDefault() { cancelled = true; } });
+    if (!cancelled) box.checked = !box.checked;
+    return box.checked === true;
+  };
+  const early = loadConfirmPage(), late = loadConfirmPage();
+  for (const p of [early, late]) p.deliver({ info: { ...INFO, action: 'click', text: undefined, expiresAt: Date.now() + 45_000 } });
+  await new Promise((r) => setTimeout(r, 600));
+  assert.equal(tick(early), false, 'a click that lands on it as the window appears changes nothing');
+  assert.equal(early.els.always.getAttribute('aria-disabled'), 'true', 'and it is shown as locked, like Allow');
+  await until(late.live, 'Allow to unlock');
+  assert.equal(early.live(), false, 'and that press started the wait again, like any other');
+  assert.equal(late.els.always.getAttribute('aria-disabled'), 'false');
+  assert.equal(tick(late), true, 'once Allow can be chosen, a tick is a choice');
+  late.press(late.els.allow);
+  assert.deepEqual(late.answers(), [{ answer: 'allow', always: true }]);
+  await until(early.live, 'Allow to unlock');
+  early.press(early.els.allow);
+  assert.deepEqual(early.answers(), [{ answer: 'allow' }], 'the Allow that follows the stray click turns nothing off');
+  // a keyboard press on the box (a click with detail 0) is held to the same rule
+  const keyed = loadConfirmPage();
+  keyed.deliver({ info: { ...INFO, action: 'click', text: undefined, expiresAt: Date.now() + 45_000 } });
+  let cancelled = false;
+  keyed.key(' ');
+  keyed.els.always.fire('click', { detail: 0, preventDefault() { cancelled = true; } });
+  assert.equal(cancelled, true);
+  assert.match(CONFIRM_HTML, /\.always:has\(input\[aria-disabled="true"\]\) \{ opacity: \.45; cursor: default; \}/);
+});
+
+test('confirm page: the box names everything it covers, and a text message is headed "Text to send"', () => {
+  assert.match(CONFIRM_HTML, /<span>Don’t ask again on this computer\. Atelier then clicks, types, signs in and sends texts here without this window\. Turn it back on in Atelier’s Settings, under Connections\.<\/span>/);
+  // what it covers is what the worker lets through with no window: the four actions that ask
+  for (const action of ['click', 'type', 'signin', 'sms']) assert.match(BACKGROUND, new RegExp(`confirmFirst\\('${action}', `), action);
+  assert.equal(BACKGROUND.match(/confirmFirst\('/g).length, 4, 'a fifth kind of request would need the wording changed');
+  assert.match(CONFIRM_HTML, /<h2 id="typedTitle">Text to type<\/h2>/);
+  const texting = loadConfirmPage();
+  texting.deliver({ info: { action: 'sms', via: 'local', submit: false, text: 'On my way', more: 0, element: { tag: 'message', type: '', label: '+16175550142' }, page: { title: 'Messages', url: '' }, expiresAt: Date.now() + 45_000 } });
+  assert.equal(texting.els.typedTitle.textContent, 'Text to send');
+  assert.equal(texting.els.text.textContent, 'On my way');
+  assert.equal(texting.els.typed.hidden, false);
+  const typing = loadConfirmPage();
+  typing.deliver({ info: { ...INFO, expiresAt: Date.now() + 45_000 } });
+  assert.equal(typing.els.typedTitle.textContent, 'Text to type');
 });

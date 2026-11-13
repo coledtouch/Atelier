@@ -244,7 +244,7 @@ test('client: tester UI is hidden unless /api/health says testers: true (off unt
   // ...except the owner's Testers roster, which stays (and loads) so a tester's erasure request works either way
   assert.match(APP, /if \(S\.settings\.passcode && !S\.tester\) \{ loadSpending\(\); loadTesters\(\); \}/);
   assert.match(APP, /\$\{testersOpen \? '' : '<p class="hint">Tester sign-in is switched off on the server \(TESTERS_ENABLED\)/, 'the panel says access is off');
-  assert.match(APP, /const note = SIGNIN_NOTES\[!testersOpen && TESTER_NOTES\.has\(reason\) \? 'closed' : reason\] \|\| '';/);
+  assert.match(APP, /const noteKey = !testersOpen && TESTER_NOTES\.has\(reason\) \? 'closed' : reason;\n  const note = Object\.hasOwn\(SIGNIN_NOTES, noteKey\) \? SIGNIN_NOTES\[noteKey\] : '';/);
   // a tester device finds out at boot (410 → signed out, “closed”) and mid-session (tester_closed on any call)
   assert.match(APP, /if \(r\.status === 410\) return 'closed';/);
   assert.match(APP, /else if \(err\.code === 'tester_closed'\) testerSignedOut\('closed'\);/);

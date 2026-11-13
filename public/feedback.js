@@ -39,6 +39,9 @@ async function feedbackRequest(url, options) {
     return { response, result };
   } catch (err) {
     if (controller.signal.aborted) throw new Error('Atelier took too long to respond. Try again shortly.');
+    // A request that never reached the server: the browser's own words ("Failed to fetch", "Load failed") were shown
+    // as they came (v114). offline: the form adds that the message is still there.
+    if (err instanceof TypeError) throw Object.assign(new Error('Couldn’t reach Atelier. Check your connection, then try again.'), { offline: true });
     throw err;
   } finally { clearTimeout(timeout); }
 }
@@ -122,7 +125,7 @@ export function createFeedback({ headers = () => ({}), role = () => 'signedout',
       removeScreenshot.hidden = true;
       dialog.close();
       toast('Thanks — your feedback was sent.');
-    } catch (err) { showError(err.message || 'Couldn’t send your feedback. Your message is still here; try again.'); }
+    } catch (err) { showError(err.offline ? `${err.message} Your message is still here.` : err.message || 'Couldn’t send your feedback. Your message is still here; try again.'); }
     finally {
       sending = false;
       send.disabled = false;

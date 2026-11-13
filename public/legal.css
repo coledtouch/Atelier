@@ -1,9 +1,12 @@
+/* The same tokens as app.css, by value: --ink-3 and --accent here are its --ink-3 and --c-ask. v114: --ink-3 was a paler
+   grey of its own (3.6:1 on dark, 3.1:1 on light), and it is the colour of the effective date, which is the version of
+   each page. The light --accent (links) was 4.4:1, and 4.1:1 inside a box. Small text needs 4.5:1. */
 :root {
-  --bg: #0e0d0b; --surface: #161511; --ink: #ece6d9; --ink-2: #a8a295; --ink-3: #6f6a60; --line: rgba(236, 230, 217, 0.12); --accent: #c8f25a;
+  --bg: #0e0d0b; --surface: #161511; --ink: #ece6d9; --ink-2: #a8a295; --ink-3: #9a9488; --line: rgba(236, 230, 217, 0.12); --accent: #c8f25a;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme='dark']) { --bg: #f3eee3; --surface: #ebe5d7; --ink: #1b1a16; --ink-2: #5b564c; --ink-3: #8d877a; --line: rgba(40, 30, 10, 0.12); --accent: #4d7a00; color-scheme: light; }
+  :root:not([data-theme='dark']) { --bg: #f3eee3; --surface: #ebe5d7; --ink: #1b1a16; --ink-2: #5b564c; --ink-3: #645f56; --line: rgba(40, 30, 10, 0.12); --accent: #406500; color-scheme: light; }
 }
 :root[data-theme='dark'] { color-scheme: dark; }
 * { box-sizing: border-box; }

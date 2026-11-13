@@ -184,12 +184,16 @@ export class Guard extends DurableObject {
     const times = [n, w == null ? null : (w + 1) * MINUTE + GUARD.windowMs, b].filter((t) => Number.isFinite(t));
     return times.length ? Math.min(...times) : null;
   }
-  // An alarm already set is never later than a new record's expiry (every new one ends at least a window from now), so
-  // this scans for the next expiry only when none is set: alarm() sets the next one after each run.
+  // A network's record and a minute's count end one window after they are written (give or take a minute), so an alarm
+  // set no later than that is soon enough for a new one and nothing is scanned: alarm() sets the next one after each run.
+  // A later alarm can only be a burned clearance's (up to 30 days out, armed by alarm() when nothing else was left). It
+  // is moved up to the next expiry: before v114 any alarm at all ended this early, so a network's record written while
+  // only a burned clearance was pending stayed until the next guess or that far alarm, not for its 15 minutes.
   async #armAlarm() {
-    if (this.#alarmAt != null) return;
+    const set = this.#alarmAt;
+    if (set != null && set <= this.clock() + GUARD.windowMs + 2 * MINUTE) return;
     const next = this.#nextExpiry();
-    if (next == null) return;
+    if (next == null || (set != null && set <= next + 1000)) return; // nothing to wait for, or the alarm set is the earlier
     this.#alarmAt = next + 1000;
     await this.storage.setAlarm(this.#alarmAt);
   }

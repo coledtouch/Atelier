@@ -258,6 +258,20 @@ test('client: the video runner starts, polls, downloads, and resumes an earlier 
   // a refused start (402) is not resumable and carries the server's words
   const no = async () => reply(402, { error: 'xAI says the account is out of credits', code: 'xai_credits' });
   await assert.rejects(C.xaiVideo({ model: 'grok-imagine-video-1.5', prompt: 'x' }, { fetch: no, sleep: async () => {} }), (e) => e.status === 402 && e.code === 'xai_credits' && !e.resumable);
+  // v114: a download request that gets no answer at all (the connection dropped). The clip is made and paid for, so
+  // the error is resumable and names the clip: Try again fetches it and never starts (and pays for) a second one.
+  const dropped = async (url, init = {}) => {
+    seen.push(`${init.method || 'GET'} ${url}`);
+    if (url === '/api/xai/video/start') return reply(200, { id: 'vid1', seconds: 6, quote: 0.12 });
+    if (url === '/api/xai/video/status/vid1') return reply(200, { status: 'done', done: true, video: true, usd: 0.12 });
+    throw new TypeError('Failed to fetch');
+  };
+  seen.length = 0;
+  await assert.rejects(C.xaiVideo({ model: 'grok-imagine-video-1.5-lite', prompt: 'x' }, { fetch: dropped, sleep: async () => {} }), (e) => e.resumable === true && e.id === 'vid1' && e.name !== 'AbortError');
+  assert.equal(seen.filter((s) => s === 'POST /api/xai/video/start').length, 1);
+  seen.length = 0;
+  await C.xaiVideo({ model: 'grok-imagine-video-1.5-lite', prompt: 'x' }, { fetch: f, sleep: async () => {}, resume: 'vid1' });
+  assert.ok(!seen.includes('POST /api/xai/video/start'), 'Try again after the drop fetches the same clip');
 });
 
 // ── catalogue (app.js) ──

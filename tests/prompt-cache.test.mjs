@@ -12,7 +12,7 @@ import { claudeChat, cacheMin } from '../src/anthropic.js';
 import { geminiSseToOpenAI } from '../src/gemini.js';
 import { chatActual, maxTokensWithin } from '../src/tester/prices.js';
 import {
-  buildHistory, historyDrop, HISTORY_TURNS, HISTORY_BLOCK, TESTER_HISTORY, sentText, sentTag, withSent, runStart, memoryAnchor, factsFor,
+  buildHistory, historyDrop, HISTORY_TURNS, HISTORY_BLOCK, TESTER_HISTORY, sentText, sentTag, withSent, runStart, memoryAnchor, factsFor, factsInUse,
   heldForRun, SESSION_GAP, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, followUpRoute,
   photoFollowUp, mediaTurn, CTX_IMAGES,
 } from '../public/context.js';
@@ -64,7 +64,7 @@ function promptRig({ memory = [], tester = null, vars: more = {} } = {}) {
   const vars = {
     Date: FakeDate, S: { settings: { name: 'Cole', about: '' }, tester }, ME: { bio: 'Builds Atelier.', learned: '', memory },
     TOOLS: { services: { gmail: true, github: true, githubAccounts: [{ label: 'cole' }] }, list: [] }, EXT: { ready: false }, REMOTE: { online: false }, claudeChats: 0,
-    factsFor, runStart, memoryAnchor, heldForRun, TESTER_HISTORY, buildHistory,
+    factsFor, factsInUse, runStart, memoryAnchor, heldForRun, TESTER_HISTORY, buildHistory,
     ...more,
   };
   for (const n of PROMPT_CONSTS) vars[n] = evalIn(vars, `return (${constExpr(n)});`);
@@ -276,6 +276,7 @@ test('run() stamps an Ask / Code turn with its send time before it runs, and a r
     Date: FakeDate, $: () => ({}), MODES: { ask: { label: 'Ask' }, code: { label: 'Code' }, ideas: { label: 'Ideas' } }, running: new Set(), entryRuns: new Map(), runDone: new Map(),
     liveThreads: new Map(), liveRuns: new Map(), Sync: { holdRunLock: () => () => {}, kick() {} }, DB: { put: async () => {} }, sentText,
     runChat: async (e) => { seen.push(e.sent); e.text = 'ok'; }, runIdeas: async (e) => { seen.push(e.sent); },
+    retryPrev: new WeakMap(), // v114: the result a Run again replaces, kept until the new run ends
   };
   const t = { id: 'th', entries: [] };
   vars.S = { thread: t, tester: null };

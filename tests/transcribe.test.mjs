@@ -888,11 +888,12 @@ test('tester: a refused reservation is 402 tester_budget; no key is 503 transcri
 test('tester: a per-tester rate limit (LI_LIMIT, stt:<sub>) answers 429 before anything is reserved, once per request', async () => {
   const { env, L, sub, call } = await tester();
   const keys = [];
-  env.LI_LIMIT = { async limit({ key }) { keys.push(key); return { success: keys.length <= 2 }; } };
+  env.LI_LIMIT = { async limit({ key }) { keys.push(key); return { success: keys.filter((k) => k.startsWith('stt:')).length <= 2 }; } };
   mockFetch([[OPENAI, () => openaiErr(503, 'x')], [GEMINI, () => geminiOk()]]);
   assert.equal((await call(wav(1))).status, 200, 'OpenAI down, Gemini answers: one limiter check for both');
   assert.equal((await call(wav(1))).status, 200);
-  assert.deepEqual(keys, [`stt:${sub}`, `stt:${sub}`]);
+  // v114: plus one session check for a cookie new to this isolate (sess:<network>, src/tester/auth.js), then cached
+  assert.deepEqual(keys, ['sess:unknown', `stt:${sub}`, `stt:${sub}`]);
   L.calls.length = 0;
   const r = await call(wav(1));
   assert.equal(r.status, 429);
@@ -906,7 +907,7 @@ test('tester: a per-tester rate limit (LI_LIMIT, stt:<sub>) answers 429 before a
 test('tester: on a Gemini-only server the rate limit and the allowance come before Gemini’s countTokens', async () => {
   const routes = () => [[COUNT, () => reply(200, { totalTokens: 2_000 })], [GEMINI, () => geminiOk()]];
   const { env, L, sub, call } = await tester({ env: { OPENAI_API_KEY: undefined } });
-  env.LI_LIMIT = { async limit() { return { success: false }; } };
+  env.LI_LIMIT = { async limit({ key }) { return { success: !key.startsWith('stt:') }; } }; // dictation's own key is over; the session check (sess:, v114) is not
   mockFetch(routes());
   L.calls.length = 0;
   const r = await call(MP4);

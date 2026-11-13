@@ -74,6 +74,7 @@ function lifecycle({ passcode = '', tester = null, storedValues, lsValues, crypt
     saveSettings: () => { settings.set('settings', structuredClone(S.settings)); events.push('save-settings'); }, renderWelcome: () => {}, renderYou: () => {}, selectSettings: () => {},
     renderAllowance: () => {}, updateKeyState: () => {}, renderOptions: () => events.push('render-options'),
     renderTesterAccess: () => {}, renderReadAloud: () => {}, retitleReads: () => {}, storageError: (err) => { throw err; },
+    liveThreads: new Map(), // threads still generating (persist: a flush stamps one of these)
   };
   const create = new Function(...Object.keys(deps), `let testerAllow = allowedIds(S.tester), ME = {};
     ${workspaceSource}\n${rawDbSource}\n${persistSource}\n${rolesSource}
@@ -604,10 +605,13 @@ test('key/value data is scoped per workspace; the owner keeps its original unsco
 test('Clear this device on a tester page keeps the owner’s keys, migration flags and older database; the owner’s clears all', () => {
   const keys = ['atelier.settings', 'atelier.opts', 'atelier.tester', 'atelier.meTester', 'atelier.draft', 'atelier.lastThread:tester:person-a', 'atelier.pinnedThreads:tester:person-a',
     'atelier.migratedV3', 'atelier.migrateToastAt', 'atelier.owner', 'atelier.signedIn', 'atelier.me', 'atelier.lastThread', 'atelier.pinnedThreads', 'atelier.lastThread:tester:person-b', 'atelier.lastThread:guest',
-    'atelier.sharedHistoryUnguarded', 'other.app'];
+    'atelier.sharedHistoryUnguarded', 'other.app',
+    // v114: the owner's thread groups and synced-profile base are the owner's too; a tester's own groups carry its scope.
+    'atelier.meBase', 'atelier.threadGroups.owner1', 'atelier.threadGroupsShut', 'atelier.threadGroups.basic1:tester:person-a', 'atelier.threadGroupsShut:tester:person-a', 'atelier.threadGroups.basic1:tester:person-b'];
   const wipes = (workspace, settings = {}) => new Function('workspace', 'LS', `${wipeKeySource}; return wipesKey;`)(workspace, { get: (k, d) => (k === 'settings' ? settings : d) });
   const tester = keys.filter(wipes('tester:person-a'));
-  assert.deepEqual(tester, ['atelier.settings', 'atelier.opts', 'atelier.tester', 'atelier.meTester', 'atelier.draft', 'atelier.lastThread:tester:person-a', 'atelier.pinnedThreads:tester:person-a']);
+  assert.deepEqual(tester, ['atelier.settings', 'atelier.opts', 'atelier.tester', 'atelier.meTester', 'atelier.draft', 'atelier.lastThread:tester:person-a', 'atelier.pinnedThreads:tester:person-a',
+    'atelier.threadGroups.basic1:tester:person-a', 'atelier.threadGroupsShut:tester:person-a']);
   assert.ok(!keys.filter(wipes('tester:person-a', { passcode: 'owner-pass' })).includes('atelier.settings'), 'settings that now hold an owner passcode stay');
   assert.deepEqual(keys.filter(wipes('guest')), ['atelier.settings', 'atelier.opts', 'atelier.tester', 'atelier.meTester', 'atelier.draft', 'atelier.lastThread:guest']);
   assert.deepEqual(keys.filter(wipes('owner')), keys.filter((k) => k.startsWith('atelier.') && k !== 'atelier.sharedHistoryUnguarded'));

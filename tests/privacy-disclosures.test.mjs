@@ -34,7 +34,14 @@ test('the Google section lists every scope the consent screen asks for, each wit
   const rows = new Map([...section.replace(/<wbr>/g, '').matchAll(/<tr><td><code>([^<]+)<\/code><\/td><td>([\s\S]*?)<\/td><\/tr>/g)].map((m) => [m[1], m[2]]));
   assert.deepEqual([...rows.keys()].sort(), [...scopes].sort(), 'one row per scope, no more, no less');
   for (const [scope, what] of rows) assert.ok(text(what).trim().length > 40, `${scope}: says in plain words what it is for`);
-  for (const s of ['gmail.send', 'calendar.events', 'drive.file']) assert.match(rows.get(s), /only after you (review and )?approve it/, `${s} acts only on approval`);
+  // v114: the approval is the default, and each row names the owner's setting that removes it (Settings → Connections →
+  // Approve everything, v106). "Only after you approve it" with no "By default" in front was no longer true.
+  for (const s of ['gmail.send', 'calendar.events', 'drive.file']) {
+    assert.match(rows.get(s), /By default, that happens only after you (review and )?approve it[^.]*\. “Approve everything” removes that step/, `${s} asks by default, and says what turns that off`);
+    assert.doesNotMatch(rows.get(s), /(?<!By default, that happens )only after you (review and )?approve it/, `${s}: no approval promised in every case`);
+  }
+  assert.match(rows.get('gmail.send'), /“Approve everything” removes that step \(see <a href="#approvals">Approvals<\/a>\)\. With that setting off, Atelier never sends email on its own\./);
+  assert.doesNotMatch(rows.get('gmail.send'), /(?<!With that setting off, )Atelier never sends email on its own/, 'never, only while the setting is off');
   assert.match(section, /Only the owner can connect a Google account; testers never can\./);
   assert.match(PRIVACY, /<meta name="description" content="[^"]*Google APIs \(Gmail, Calendar, Drive and Photos\)/);
 });
@@ -61,8 +68,8 @@ test('Cloudflare Web Analytics is disclosed whenever the CSP lets its beacon run
   assert.match(PRIVACY, /<b>At a glance:<\/b>[^<]*cookieless page-view counts/);
 });
 
-test('the legal pages carry the November 3, 2026 effective date (v93: Runway chat videos vs Remix shots, device-local tester data removal)', () => {
-  for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective November 3, 2026<\/p>/);
+test('the legal pages carry the November 13, 2026 effective date (v114: the owner’s approval settings, Messages on a Mac, attached files, saved-password sign-in)', () => {
+  for (const page of [PRIVACY, TOS]) assert.match(page, /<p class="eyebrow">Effective November 13, 2026<\/p>/);
   // the date is the version: both pages say so
   assert.ok(text(PRIVACY).includes('The effective date at the top shows the latest version.'));
   assert.ok(text(TOS).includes('The effective date above shows the current version.'));
@@ -223,6 +230,11 @@ test('Read aloud names the provider the voices really use (src/tts.js): Google o
   assert.doesNotMatch(PRIVACY, /OpenAI and Google \(Read aloud\)/);
   assert.match(AI_CAPTION, /sent to Google\./);
   assert.doesNotMatch(AI_CAPTION, /OpenAI/);
+  // v114: the caption in the markup is the same sentence. Until Settings first opens (renderReadAloud writes it), or if
+  // that render fails, the page shows this one: it named OpenAI long after the OpenAI voices were retired.
+  const settings = /<section class="field-group read-aloud">([\s\S]*?)<\/section>/.exec(await read('public/index.html'))?.[1] || '';
+  assert.equal(/<p class="hint" id="readCaption">([^<]*)<\/p>/.exec(settings)?.[1], AI_CAPTION, 'index.html #readCaption is AI_CAPTION, word for word');
+  assert.doesNotMatch(settings, /OpenAI/, 'Settings → Read aloud names no retired provider');
 });
 
 test('every AI provider the Worker can send prompts to is named as a processor, and xAI (Grok) says owner only and no search', async () => {

@@ -411,17 +411,24 @@ async function backoff(n, retryAfter, signal) {
 }
 
 // Polls GET /api/video/file until ACTIVE → FileRef. Each poll is capped at T.request and at what is left of T.pollMax.
+// Only time the page was running counts against T.pollMax. A phone freezes a backgrounded page while Date.now() keeps
+// running: the wait then ended on its return without one more poll, and uploadClip deleted a clip Gemini had long
+// finished (v114). Every poll and every pause still uses up its own share, so the wait always settles.
 // Throws Error{code:'failed'|'gone'|'timeout'|'http'} or AbortError.
 export async function waitClipActive(name, { apiHeaders, signal, onState } = {}) {
   if (!isFileName(name)) throw failure('gone', 'The uploaded clip isn’t available any more.', { status: 404 });
-  const T = VIDEO_TIMING, end = Date.now() + T.pollMax, late = () => failure('timeout', 'Gemini took too long to prepare the clip.', { status: 504 });
+  const T = VIDEO_TIMING, late = () => failure('timeout', 'Gemini took too long to prepare the clip.', { status: 504 });
+  let end = Date.now() + T.pollMax;
+  // A step that takes `ms` at most while the page runs took much longer: the page was frozen. The extra goes back.
+  const thaw = (t0, ms) => { const over = Date.now() - t0 - ms; if (over > T.poll * 2) end += over; };
   for (;;) {
     let status = 0, j = {};
     const ms = end - Date.now();
     if (ms <= 0) throw late();
-    const t = timed(signal, Math.min(T.request, ms));
+    const cap = Math.min(T.request, ms), t0 = Date.now(), t = timed(signal, cap);
     try { const r = await fetch(`/api/video/file?name=${encodeURIComponent(name)}`, { headers: headersFor(apiHeaders), signal: t.signal }); status = r.status; j = await readJson(r); }
     catch {} finally { t.done(); }
+    thaw(t0, cap);
     if (signal?.aborted) throw abortError();
     if (status === 404 || j.state === 'GONE') throw failure('gone', 'The uploaded clip isn’t available any more (Gemini keeps uploads for 48 hours).', { status: 404 });
     if (status === 200) {
@@ -430,7 +437,9 @@ export async function waitClipActive(name, { apiHeaders, signal, onState } = {})
       if (j.state === 'FAILED') throw failure('failed', typeof j.error === 'string' && j.error ? `Gemini couldn’t process the clip: ${j.error}` : 'Gemini couldn’t process the clip.', { status: 200 });
     } else if (status && status < 500 && status !== 408 && status !== 429) throw errorOf(status, j, `Couldn’t check the clip (${status}).`);
     if (Date.now() + T.poll > end) throw late();
+    const t1 = Date.now();
     await sleep(T.poll, signal);
+    thaw(t1, T.poll);
   }
 }
 

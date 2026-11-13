@@ -9,7 +9,8 @@
 // tests/service-worker.test.mjs fails when the three disagree.
 // Usage: node scripts/bump-version.mjs <N>          (e.g. 53 for atelier-v53)
 import { readFile, writeFile, readdir } from 'node:fs/promises';
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 export const VERSION_RE = /(const VERSION = 'atelier-v)(\d+)(';)/;
 // Same-origin href/src that already carry ?v= (vendor scripts, icons and the manifest have none and are left alone).
@@ -45,7 +46,14 @@ export async function bumpFiles(n, dir = new URL('../public/', import.meta.url))
   return changed;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Run directly, by whatever path leads here (v114). The old test compared the two addresses as written: started
+// through a linked folder they differed, and the script printed nothing, changed nothing and exited 0.
+function isMain() {
+  if (!process.argv[1]) return false;
+  const real = (p) => { const r = realpathSync(p); return process.platform === 'win32' ? r.toLowerCase() : r; };
+  try { return real(process.argv[1]) === real(fileURLToPath(import.meta.url)); } catch { return false; }
+}
+if (isMain()) {
   const n = process.argv[2];
   if (!validN(n)) {
     console.error('Usage: node scripts/bump-version.mjs <N>   (moves sw.js VERSION, index.html ?v=, every module import ?v= and app.js APP_BUILD to N)');

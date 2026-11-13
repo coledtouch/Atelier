@@ -94,5 +94,6 @@ test('app.js: the switches read the profile, write both places, and seed after a
     assert.match(app, new RegExp(`setApproval\\('${k}', on\\);`));
     assert.doesNotMatch(app, new RegExp(`S\\.settings\\.${k} = on;`), k);
   }
-  assert.match(app, /pushMe\(\);\s+seedApprovals\(\);\s+setSync\('synced', true\);/);
+  // v114: a pull joins the two copies first (syncMe, context.js mergeProfile; tests/profile-merge.test.mjs), then seeds.
+  assert.match(app, /const how = await syncMe\(\);\s+if \(how !== 'synced' && how !== 'failed'\) return;\s+seedApprovals\(\);/);
 });

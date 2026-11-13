@@ -37,7 +37,6 @@ button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
 .tile-key { border: 0; padding: 0; font-size: 10px; }
 .tile-desc { margin: 0; font-size: 13px; line-height: 1.55; max-width: 30ch; }
 .tile-try, .tile:nth-child(1) .tile-try { display: block; font: 400 12px/1.5 var(--sans); margin-top: auto; padding-top: 2px; opacity: 1; }
-.tile-glyph { display: none; }
 .legal-links { margin-top: 22px; font-size: 11px; color: var(--ink-3); }
 .legal-links a { color: var(--ink-2); text-underline-offset: 3px; }
 .dock { padding-inline: max(24px, env(safe-area-inset-left)) max(24px, env(safe-area-inset-right)); padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
@@ -442,11 +441,19 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
   /* HIT-44: grow the tap area to ≥44×44 without changing the look. Only for controls whose clip/scroll container
      leaves room (checked: .options pad 6/12, .codeblock-bar 46px tall, .appbar pad 8+3, .lib-filter/.acct unclipped,
      .att once batch 3 drops overflow:hidden, .lib-canva 7px inside its tile and .lib-grid pads 4/6, .lib-from-canva in the
-     unclipped drawer head, .cvc-meta a in the unclipped .cv-confirm). Add selectors to THIS list; never write a second hit-area rule. */
-  :is(.options .chip, .codeblock-bar .mini, .appbar .tabs button, .lib-filter .chip, .acct button, .lib-from-canva, .cvc-meta a, #connList .conn > .chip, #connList .conn-acts > .chip) { position: relative; } /* .att button and .lib-canva are already absolute */
-  :is(.options .chip, .codeblock-bar .mini, .appbar .tabs button, .lib-filter .chip, .acct button, .att button, .lib-from-canva, .lib-canva, .cvc-meta a, #connList .conn > .chip, #connList .conn-acts > .chip)::after {
+     unclipped drawer head, .cvc-meta a in the unclipped .cv-confirm; v114: .context-chip, 26px with 9px of the composer's
+     own padding under it, and .nav-collapse, 34px with 18px of sidebar padding around it). Add selectors to THIS list;
+     never write a second hit-area rule. */
+  :is(.options .chip, .codeblock-bar .mini, .appbar .tabs button, .lib-filter .chip, .acct button, .lib-from-canva, .cvc-meta a, #connList .conn > .chip, #connList .conn-acts > .chip, .context-chip, .nav-collapse) { position: relative; } /* .att button and .lib-canva are already absolute */
+  :is(.options .chip, .codeblock-bar .mini, .appbar .tabs button, .lib-filter .chip, .acct button, .att button, .lib-from-canva, .lib-canva, .cvc-meta a, #connList .conn > .chip, #connList .conn-acts > .chip, .context-chip, .nav-collapse)::after {
     content: ''; position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: max(100%, 44px); height: max(100%, 44px);
   }
+  /* v114: targets the list above missed. These grow for real: each sits in a row with room for it. */
+  .thread-group-btn, .thread-space .chip, .feedback-sheet .sheet-foot .chip, .feedback-remove-shot { min-height: 44px; }
+  /* "Reasoning trace" is one 15px line, and its ::after is the + / − mark, so it takes the .legal-links pattern below:
+     14.5px of padding above and below the line make a tap area 44px tall or more, and the margins give the space back,
+     so nothing moves. */
+  .think summary { padding-block: 14.5px; margin-block: -14.5px; }
   /* iOS zooms the page when a focused text control is under 16px */
   :is(.field input:not([type='range'], [type='checkbox'], [type='radio'], [type='file']), .field textarea, .onboard input, .you-card input, .you-card textarea, .ac-fields input, .ac-fields textarea, .tok-dialog input, .search, #meLearned, #meStyle, .tp-add input) { font-size: 16px; }
   .error-acts .mini { min-height: 44px; }
@@ -498,7 +505,7 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
   /* body sets -webkit-tap-highlight-color: transparent, so give taps their own feedback */
   .thread:active, .mini:active, .icon-btn:active { background: var(--surface-2); }
   .chip:not(.on, .danger):active { border-color: var(--line-2); color: var(--ink); } /* rest bg is already --surface-2; selected/danger chips keep their own tint while pressed */
-  .shot-acts .mini:not(.accent):active { background: #0e0d0b; } /* keep the dark backdrop behind the light icon over images (matches app.css .shot-acts .mini:hover) */
+  .shot-acts .mini:active { background: #0e0d0b; } /* keep the dark backdrop behind the light icon over images (matches app.css .shot-acts .mini:hover) */
   .actions { opacity: 1; } /* beats studio base .85 on touch: there is no hover to reveal it */
   .tile:hover { transform: none; border-color: var(--line); background: var(--surface); }
   .tile:active { transform: scale(0.985); background: var(--surface-2); }
