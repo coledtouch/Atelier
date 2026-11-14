@@ -60,6 +60,15 @@ export const validDate = (v) => Number.isFinite(v) && v >= 0 && v <= 86400000000
 export const isRev = (v) => Number.isSafeInteger(v) && v >= 0;
 // An id usable as a record key: data-safety's safeId minus the names that would reach Object.prototype.
 export const syncId = (v) => typeof v === 'string' && ID_RE.test(v) && !PROTO.has(v);
+// A thread's flow tag {kind, color?}: exactly what days.js cleanFlow returns (kind [a-z0-9-]{1,24}, color a non-empty
+// string ≤ 16, no other keys), so every copy prints the same canonical JSON. Duplicated here: this module imports nothing.
+const FLOW_KIND_RE = /^[a-z0-9-]{1,24}$/;
+export const validFlow = (v) => record(v) && typeof v.kind === 'string' && FLOW_KIND_RE.test(v.kind)
+  && (v.color === undefined || (typeof v.color === 'string' && v.color.length > 0 && v.color.length <= 16))
+  && Object.keys(v).every((k) => k === 'kind' || k === 'color');
+// A fresh copy of a valid flow, null for anything else (null, missing, invalid).
+const flowCopy = (v) => (validFlow(v) ? { kind: v.kind, ...(v.color !== undefined ? { color: v.color } : {}) } : null);
+const sameFlow = (a, b) => canonical(a ?? null) === canonical(b ?? null);
 // Content type of a blob ref's t ('text' or a media type as written in the data: URL), or null if not allowed.
 export function refType(t) {
   if (t === 'text') return TEXT_TYPE;
@@ -343,6 +352,7 @@ export function checkPush(body) {
   if (!record(body) || body.v !== FORMAT || !validDate(body.createdAt) || !Array.isArray(body.entries) || body.entries.length > LIMITS.pushEntries) return badBody('bad_shape');
   if (!(body.born == null || validDate(body.born))) return badBody('bad_shape');
   if (body.title != null && !(record(body.title) && typeof body.title.v === 'string' && body.title.v.length <= LIMITS.title && isRev(body.title.base))) return badBody('bad_shape');
+  if (body.flow != null && !(record(body.flow) && (body.flow.v === null || validFlow(body.flow.v)) && isRev(body.flow.base))) return badBody('bad_shape');
   const ids = new Set();
   for (const e of body.entries) {
     if (!record(e) || typeof e.h !== 'string' || !HASH_RE.test(e.h) || !isRev(e.base) || !validDate(e.createdAt) || !record(e.d)) return badBody('bad_shape', syncId(e?.id) ? { id: e.id } : {});
@@ -369,6 +379,8 @@ export function checkView(view, id) {
     || !validDate(view.createdAt) || !validDate(view.changedAt) || !(view.deletedAt === null || validDate(view.deletedAt))
     || !record(view.gone) || !Object.entries(view.gone).every(([k, r]) => syncId(k) && isRev(r)) || !Array.isArray(view.entries)
     || !(view.born == null || validDate(view.born))) return 'bad_shape';
+  // flow / flowRev: absent on a document from before flows (and from an older server)
+  if ((view.flow != null && !validFlow(view.flow)) || (view.flowRev !== undefined && !isRev(view.flowRev))) return 'bad_shape';
   const ids = new Set();
   for (const e of view.entries) {
     if (!record(e) || !syncId(e.id) || ids.has(e.id) || !isRev(e.rev) || e.rev < 1 || !isRev(e.s) || typeof e.h !== 'string' || !HASH_RE.test(e.h)
@@ -383,7 +395,7 @@ export const checkPulledEntry = (e) => validateDehydrated(e.d);
 // ── server: document merges (pure; src/sync.js wraps them in a compare-and-swap loop) ──
 // born: the server clock when this document was created — its lineage. Revisions only mean something within one
 // lineage: a document the server lost and a device re-created starts again at rev 1 with a new born.
-export const newDoc = (id, createdAt, now) => ({ v: FORMAT, id, createdAt, born: now, title: '', titleRev: 0, rev: 0, changedAt: now, deletedAt: null, gone: {}, entries: [] });
+export const newDoc = (id, createdAt, now) => ({ v: FORMAT, id, createdAt, born: now, title: '', titleRev: 0, flow: null, flowRev: 0, rev: 0, changedAt: now, deletedAt: null, gone: {}, entries: [] });
 export const bornOf = (x) => (validDate(x?.born) ? x.born : 0);
 // Two lineages that are both known and differ (0 = unknown, treated as the same).
 export const reborn = (a, b) => Boolean(a) && Boolean(b) && a !== b;
@@ -406,7 +418,8 @@ export const docMeta = (doc, snap = 0) => ({ v: String(FORMAT), rev: String(doc.
 export function docView(doc, etag, since = null) {
   const full = since == null || since <= 0 || since > doc.rev;
   return {
-    v: FORMAT, id: doc.id, createdAt: doc.createdAt, born: bornOf(doc), title: doc.title, titleRev: doc.titleRev, rev: doc.rev, etag, changedAt: doc.changedAt,
+    v: FORMAT, id: doc.id, createdAt: doc.createdAt, born: bornOf(doc), title: doc.title, titleRev: doc.titleRev,
+    flow: flowCopy(doc.flow), flowRev: isRev(doc.flowRev) ? doc.flowRev : 0, rev: doc.rev, etag, changedAt: doc.changedAt,
     deletedAt: doc.deletedAt, gone: doc.gone, full, entries: (full ? doc.entries : doc.entries.filter((e) => e.s > since)).map(entryView),
   };
 }
@@ -419,7 +432,7 @@ export function docView(doc, etag, since = null) {
 // server lost the thread and a device re-created it), no base means anything here — nothing is replaced (a different
 // version is a conflict, the pusher's restarted rules settle it) and the title applies only to an empty one.
 //   → { doc, changed, error: null | 'too_large', json, changedIds, response: {v, rev, prevRev, changedAt, deletedAt,
-//       revived, title: {v, rev}, accepted, stale, conflicts, dropped} } (the server adds etag)
+//       revived, title: {v, rev}, flow: {v, rev}, accepted, stale, conflicts, dropped} } (the server adds etag)
 export function applyPush(cur, body, now, id = cur?.id) {
   const prevRev = cur ? cur.rev : 0, nextRev = prevRev + 1;
   const foreign = Boolean(cur) && reborn(validDate(body.born) ? body.born : 0, bornOf(cur));
@@ -444,6 +457,11 @@ export function applyPush(cur, body, now, id = cur?.id) {
   if (doc.deletedAt && created) { doc.deletedAt = null; revived = true; }
   const t = body.title;
   if (t && !doc.deletedAt && t.v !== doc.title && ((t.base === doc.titleRev && !foreign) || (doc.title === '' && t.v !== ''))) { doc.title = t.v; doc.titleRev += 1; changed = true; }
+  // flow: the same rule as the title (a body without one, from an older client, leaves it as stored)
+  const f = body.flow, flowNow = flowCopy(doc.flow), flowRev = isRev(doc.flowRev) ? doc.flowRev : 0;
+  if (f && !doc.deletedAt && !sameFlow(f.v, flowNow) && ((f.base === flowRev && !foreign) || (flowNow === null && f.v !== null))) {
+    doc.flow = flowCopy(f.v); doc.flowRev = flowRev + 1; changed = true;
+  }
   if (cur && validDate(body.createdAt) && body.createdAt < doc.createdAt) { doc.createdAt = body.createdAt; changed = true; }
   let json = null, error = null;
   if (changed) {
@@ -456,7 +474,8 @@ export function applyPush(cur, body, now, id = cur?.id) {
     doc: out, changed, error, json, changedIds,
     response: {
       v: FORMAT, rev: out ? out.rev : 0, prevRev, born: bornOf(out), changedAt: out ? out.changedAt : null, deletedAt: out ? out.deletedAt : null, revived,
-      title: { v: out ? out.title : '', rev: out ? out.titleRev : 0 }, accepted, stale, conflicts, dropped,
+      title: { v: out ? out.title : '', rev: out ? out.titleRev : 0 }, flow: { v: flowCopy(out?.flow), rev: isRev(out?.flowRev) ? out.flowRev : 0 },
+      accepted, stale, conflicts, dropped,
     },
   };
 }
@@ -471,7 +490,7 @@ export function newRefs(cur, doc, changedIds) {
 }
 // A rev-aware delete: removes only entries whose stored rev ≤ seen[id] (they go into gone); anything changed since
 // the deleter looked, or never seen, is kept. With no entries left the document becomes a tombstone (deletedAt, title
-// ''), which is kept forever so absence from the index never means "deleted". Repeating it is a no-op.
+// '', flow null), which is kept forever so absence from the index never means "deleted". Repeating it is a no-op.
 export function applyDelete(cur, seen, now) {
   const doc = { ...cur, gone: { ...cur.gone }, entries: [] };
   const removed = [], kept = [];
@@ -482,13 +501,15 @@ export function applyDelete(cur, seen, now) {
   if (!doc.entries.length && !doc.deletedAt) { doc.deletedAt = now; changed = true; }
   if (changed) {
     if (!doc.entries.length && doc.title !== '') { doc.title = ''; doc.titleRev += 1; }
+    if (!doc.entries.length && flowCopy(doc.flow) !== null) { doc.flow = null; doc.flowRev = (isRev(doc.flowRev) ? doc.flowRev : 0) + 1; }
     doc.rev += 1; doc.changedAt = now;
   }
   const out = changed ? doc : cur;
   return { doc: out, changed, removed, kept, deleted: Boolean(out.deletedAt), json: changed ? JSON.stringify(doc) : null };
 }
 // Puts back the trash snapshot's entries that are now absent: out of gone, rev = max(snapshot rev, gone rev) + 1 and
-// s = the new document rev, so every device pulls them again. Restores the title if the current one is empty.
+// s = the new document rev, so every device pulls them again. Restores the title if the current one is empty, and the
+// flow if the current one is null.
 export function applyRestore(cur, snap, now) {
   const nextRev = cur.rev + 1;
   const doc = { ...cur, gone: { ...cur.gone }, entries: [...cur.entries] };
@@ -502,6 +523,7 @@ export function applyRestore(cur, snap, now) {
   }
   if (!restored.length) return { doc: cur, changed: false, restored, error: null, json: null };
   if (!doc.title && typeof snap.title === 'string' && snap.title) { doc.title = snap.title; doc.titleRev += 1; }
+  if (flowCopy(doc.flow) === null && validFlow(snap.flow)) { doc.flow = flowCopy(snap.flow); doc.flowRev = (isRev(doc.flowRev) ? doc.flowRev : 0) + 1; }
   doc.deletedAt = null; doc.rev = nextRev; doc.changedAt = now;
   sortEntries(doc.entries);
   const { json, error } = sealDoc(doc);
@@ -509,9 +531,10 @@ export function applyRestore(cur, snap, now) {
 }
 
 // ── client: records, FileRefs, forks ──
-// The 't:<threadId>' record: { etag, rev, title, titleRev, e: {entryId: {r, f, g, old}}, deleted?, tooLarge?, refetch?,
-// full? }. title null = never synced (the server's title is adopted on the first pull).
-export const newRecord = () => ({ etag: null, rev: 0, title: null, titleRev: 0, e: {} });
+// The 't:<threadId>' record: { etag, rev, title, titleRev, flow?, flowRev, e: {entryId: {r, f, g, old}}, deleted?,
+// tooLarge?, refetch?, full? }. title null = never synced (the server's title is adopted on the first pull); flow
+// undefined (absent) = never synced, since null is a synced value (no flow).
+export const newRecord = () => ({ etag: null, rev: 0, title: null, titleRev: 0, flowRev: 0, e: {} });
 // k of an entry, or of one deleted everywhere that this device still remembers (record.dead): a restore from the trash or
 // a stale tab putting the entry back is then still recognised.
 const kOf = (base, id) => (own(base.e, id) ? base.e[id] : own(base.dead, id) ? base.dead[id] : undefined);
@@ -632,7 +655,8 @@ function buildSlots(local, decisions, inserts) {
 function seen(t) {
   if (!t) return null;
   const entries = [...(t.entries || [])];
-  return { id: t.id, title: t.title, createdAt: t.createdAt, entries, snaps: Object.fromEntries(entries.map((e) => [e.id, snapOf(e)])) };
+  // flow is copied: an in-place edit of the thread's flow object must still make the plan stale
+  return { id: t.id, title: t.title, flow: t.flow == null ? null : jsonClone(t.flow), createdAt: t.createdAt, entries, snaps: Object.fromEntries(entries.map((e) => [e.id, snapOf(e)])) };
 }
 // Everything a plan reports besides its slots. before: the local entries the plan was made from (the client takes
 // portable quickPrints of the ones it replaces or removes, for other tabs, before applying it).
@@ -646,8 +670,9 @@ function finishPlan(local, slots, rec, base, extra) {
   for (const s of slots) if (s.from === 'remote') prevK[s.id] = base.e[s.id] ?? null;
   return {
     slots, snaps, before: local ? local.entries : [], prevK, record: rec, added, replaced, removed, forks: slots.filter((s) => s.from === 'fork').map((s) => s.id),
-    localTitle: local ? local.title : null, ...extra,
-    changed: Boolean(added.length || replaced.length || removed.length || (extra.title != null && extra.title !== local?.title) || (local && extra.createdAt !== local.createdAt)),
+    localTitle: local ? local.title : null, localFlow: local ? local.flow : null, ...extra,
+    changed: Boolean(added.length || replaced.length || removed.length || (extra.title != null && extra.title !== local?.title)
+      || (extra.flow !== undefined && !sameFlow(extra.flow, local?.flow)) || (local && extra.createdAt !== local.createdAt)),
   };
 }
 // Plans merging a pulled thread view into the local thread (null when this device doesn't have it).
@@ -657,9 +682,9 @@ function finishPlan(local, slots, rec, base, extra) {
 //   orphans: ids of pending entries no tab is generating (no run lock anywhere — the client only says so where it can
 //   see every tab's locks): an interrupted run's leftover, decided like a recovered entry instead of holding the whole
 //   thread back for good (a tab's run that outlived a delete can save one, and no tab ever settles it).
-// → { defer: null | 'busy' | 'live', slots, prints, prevK, record, title, createdAt, changedAt, push, removeThread,
-//     changed, added, replaced, removed, forks, localTitle }. Nothing is ever deleted because the server lacks it:
-// remote absence never removes a local entry; only gone does, and only when the local copy is unchanged since k.
+// → { defer: null | 'busy' | 'live', slots, prints, prevK, record, title, flow, createdAt, changedAt, push, removeThread,
+//     changed, added, replaced, removed, forks, localTitle, localFlow } (flow undefined = no change). Nothing is ever
+// deleted because the server lacks it: remote absence never removes a local entry; only gone does, and only when the local copy is unchanged since k.
 export async function planPull({ local = null, record: rec0 = null, remote, now = Date.now(), uid, locked = null, live = false, quarantined = () => false, hashOf = defaultHashOf, orphans = null }) {
   local = seen(local);
   const base = rec0 || newRecord();
@@ -738,13 +763,26 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
   if (remote.titleRev > (base.titleRev || 0) || base.title == null || restarted) { rec.title = remote.title; rec.titleRev = remote.titleRev; }
   const finalTitle = title ?? local?.title ?? '';
   if (!removeThread && rec.title != null && finalTitle !== rec.title) push = true;
+  // flow, as the title: undefined = no change here. A server null never clears a local flow (as an empty title never
+  // clears a title): the local one goes back up. A view from before flows reads as null / 0.
+  const rFlow = flowCopy(remote.flow), rFlowRev = isRev(remote.flowRev) ? remote.flowRev : 0;
+  const flowNews = rFlowRev > (isRev(base.flowRev) ? base.flowRev : 0) || base.flow === undefined || restarted;
+  let flow;
+  if (!local) flow = rFlow ?? undefined;
+  else if (flowNews && rFlow !== null && !sameFlow(rFlow, local.flow)) flow = rFlow;
+  if (flowNews) { rec.flow = rFlow; rec.flowRev = rFlowRev; }
+  // A local copy that lost its flow (the app never clears one) takes the synced one back.
+  if (local && !removeThread && flow === undefined && local.flow == null && rec.flow != null) flow = flowCopy(rec.flow);
+  // what planPush would send: a missing or invalid local flow sends nothing, so it counts as the record's
+  const finalFlow = flow !== undefined ? flow : flowCopy(local?.flow) ?? rec.flow;
+  if (!removeThread && rec.flow !== undefined && !sameFlow(finalFlow, rec.flow)) push = true;
   rec.etag = remote.etag ?? rec.etag; rec.rev = remote.rev; rec.born = bornOf(remote) || rec.born || 0;
   if (removeThread) rec.deleted = { at: remote.deletedAt };
   const createdAt = local ? Math.min(local.createdAt, remote.createdAt) : remote.createdAt;
   // partial: a delta can't settle a local copy that lacks entries the record knows (a stale tab's older copy, say):
   // only the whole thread brings them back. The caller fetches the full view and plans again.
   const partial = Boolean(local) && !remote.full && Object.keys(base.e).some((id) => !L.has(id) && !own(gone, id));
-  const plan = finishPlan(local, slots, rec, base, { id: remote.id, title, createdAt, changedAt: remote.changedAt, push, removeThread, how, partial });
+  const plan = finishPlan(local, slots, rec, base, { id: remote.id, title, flow, createdAt, changedAt: remote.changedAt, push, removeThread, how, partial });
   if (busy) plan.defer = 'busy';
   else if (live && (plan.changed || removeThread)) plan.defer = 'live';
   else plan.defer = null;
@@ -757,7 +795,7 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
 // born: the lineage the bases belong to (0 = unknown; every body carries it, so a server that re-created the thread
 // meanwhile replaces nothing on the say-so of an older lineage's revisions).
 // → { id, skip, entries: [{id, base, createdAt, h, d}], blobs, sent: {id: {h, g, base}}, title: {v, base} | null,
-//     createdAt, born, held: [{id, reason}], waiting: [ids], refetch, bytes, dirty }
+//     flow: {v, base} | null, createdAt, born, held: [{id, reason}], waiting: [ids], refetch, bytes, dirty }
 // holdBlobs(blobs) → a held reason | null: the client keeps an entry here for now because of its blobs (a large video
 // on mobile data waits for Wi-Fi: 'wifi').
 export async function planPush({ thread, record: rec0 = null, locked = null, media = MEDIA_SYNC, hashOf = defaultHashOf, skip = null, holdBlobs = null }) {
@@ -765,13 +803,13 @@ export async function planPush({ thread, record: rec0 = null, locked = null, med
   // A thread without a usable createdAt still syncs: its earliest entry's (the server keeps the minimum anyway).
   const firstAt = Math.min(...(thread.entries || []).map((e) => (validDate(e?.createdAt) ? e.createdAt : Infinity)));
   const createdAt = validDate(thread.createdAt) ? thread.createdAt : Number.isFinite(firstAt) ? firstAt : 0;
-  const out = { id: thread.id, skip, entries: [], blobs: [], sent: {}, title: null, createdAt, born: base.lost ? 0 : bornOf(base), held: [], waiting: [], refetch: Boolean(base.refetch), bytes: 0, dirty: false };
+  const out = { id: thread.id, skip, entries: [], blobs: [], sent: {}, title: null, flow: null, createdAt, born: base.lost ? 0 : bornOf(base), held: [], waiting: [], refetch: Boolean(base.refetch), bytes: 0, dirty: false };
   if (skip) return out;
   const blobs = new Map(), present = new Set();
   // Everything decided about an entry comes from one synchronous look at it: its flags here, its content in hashOf
   // (dehydrate copies the entry before its first await). A retry starting while this plan awaits can't make the
   // snapshot of an interrupted copy look like an ordinary edit. (A custom hashOf must snapshot synchronously too.)
-  const title0 = thread.title;
+  const title0 = thread.title, flow0 = flowCopy(thread.flow);
   for (const e of [...(thread.entries || [])]) {
     present.add(e?.id);
     if (!record(e) || !syncId(e.id) || !validDate(e.createdAt)) { out.held.push({ id: e?.id, reason: 'bad_shape' }); continue; }
@@ -805,12 +843,15 @@ export async function planPush({ thread, record: rec0 = null, locked = null, med
   for (const id of Object.keys(base.e)) if (!present.has(id)) out.refetch = true; // known but missing here: a full pull re-adds it
   const title = typeof title0 === 'string' ? title0.slice(0, LIMITS.title) : '';
   if ((base.title == null || base.lost ? title !== '' : title !== base.title) && (out.entries.length || base.rev > 0)) out.title = { v: title, base: base.lost ? 0 : base.titleRev || 0 };
+  // flow: like the title, but only a set one ever goes up. The app never clears a flow, so a missing or invalid one here
+  // was lost (a stale tab's save, say): a null sent up would clear the server's flow on every device.
+  if (flow0 !== null && (base.flow === undefined || base.lost || !sameFlow(flow0, base.flow)) && (out.entries.length || base.rev > 0)) out.flow = { v: flow0, base: base.lost ? 0 : isRev(base.flowRev) ? base.flowRev : 0 };
   out.blobs = [...blobs.values()];
-  out.dirty = out.entries.length > 0 || out.title !== null;
+  out.dirty = out.entries.length > 0 || out.title !== null || out.flow !== null;
   return out;
 }
-// Splits a push plan's entries into request bodies (≤ maxEntries each, ≤ maxBytes of entry JSON); the title rides on
-// the first; each carries the plan's born when it is known. → [{v, createdAt, born?, title?, entries}]
+// Splits a push plan's entries into request bodies (≤ maxEntries each, ≤ maxBytes of entry JSON); the title and flow
+// ride on the first; each carries the plan's born when it is known. → [{v, createdAt, born?, title?, flow?, entries}]
 export function pushBodies(plan, { maxEntries = LIMITS.pushEntries, maxBytes = LIMITS.pushBody - 512 * KB } = {}) {
   const bodies = [];
   const head = () => ({ v: FORMAT, createdAt: plan.createdAt, ...(validDate(plan.born) && plan.born > 0 ? { born: plan.born } : {}), entries: [] });
@@ -821,10 +862,11 @@ export function pushBodies(plan, { maxEntries = LIMITS.pushEntries, maxBytes = L
     cur.entries.push(e); bytes += n;
   }
   if (plan.title) { if (!bodies.length) bodies.push(head()); bodies[0].title = plan.title; }
+  if (plan.flow) { if (!bodies.length) bodies.push(head()); bodies[0].flow = plan.flow; }
   return bodies;
 }
 // Plans handling one push response (see applyPush) for the thread as it is now. sent: the plan's sent map (h, g per
-// id); title: the {v, base} that was sent, if any. accepted → record; stale → adopt the server copy; conflicts →
+// id); title / flow: the {v, base} that was sent, if any. accepted → record; stale → adopt the server copy; conflicts →
 // resolveEntry; dropped (deleted everywhere) → a real local edit forks to a new id, anything else is removed;
 // prevRev ≠ record.rev → another device wrote too: pull (rev/etag are left for that pull).
 // quarantined(id, h) / parked(id, h): a server version this device already set aside (failed validation) or is still
@@ -833,7 +875,7 @@ export function pushBodies(plan, { maxEntries = LIMITS.pushEntries, maxBytes = L
 // IndexedDB now), so only the accepted revisions are recorded; everything else waits for a pull after the run
 // (deferred: true), and the record's rev stays where it was so that pull still sees those changes.
 // → the same plan shape as planPull, plus pull: boolean and deferred: boolean.
-export async function planPushResult({ thread, record: rec0 = null, sent = {}, title = null, res, now = Date.now(), uid, locked = null, hashOf = defaultHashOf, quarantined = () => false, parked = () => false, live = false }) {
+export async function planPushResult({ thread, record: rec0 = null, sent = {}, title = null, flow = null, res, now = Date.now(), uid, locked = null, hashOf = defaultHashOf, quarantined = () => false, parked = () => false, live = false }) {
   thread = seen(thread);
   const base = rec0 || newRecord();
   const rec = { ...base, e: { ...base.e } };
@@ -856,6 +898,10 @@ export async function planPushResult({ thread, record: rec0 = null, sent = {}, t
     const titleOk = !res.title || res.title.v === ours;
     if (res.title && titleOk && isRev(res.title.rev)) { rec.title = res.title.v; rec.titleRev = res.title.rev; }
     if (!titleOk) deferred = true;
+    const resFlow = record(res.flow) && (res.flow.v === null || validFlow(res.flow.v)) && isRev(res.flow.rev) ? res.flow : null;
+    const flowOk = !res.flow || (resFlow && sameFlow(resFlow.v, flow ? flow.v : base.flow));
+    if (resFlow && flowOk) { rec.flow = flowCopy(resFlow.v); rec.flowRev = resFlow.rev; }
+    if (!flowOk) deferred = true;
     if (!deferred && !restarted && res.prevRev === base.rev && res.etag) { rec.rev = res.rev; rec.etag = res.etag; rec.born = bornOf(res) || rec.born || 0; }
     else pull = true;
     if (!res.deletedAt) delete rec.deleted;
@@ -896,11 +942,18 @@ export async function planPushResult({ thread, record: rec0 = null, sent = {}, t
     if (unchanged && thread.title !== res.title.v && res.title.v !== '') newTitle = res.title.v;
     rec.title = res.title.v; rec.titleRev = res.title.rev;
   }
+  let newFlow; // undefined = no change
+  if (record(res.flow) && (res.flow.v === null || validFlow(res.flow.v)) && isRev(res.flow.rev)) {
+    const unchanged = thread && (flow ? sameFlow(thread.flow, flow.v) : base.flow === undefined || sameFlow(thread.flow, base.flow));
+    const lostHere = Boolean(thread) && thread.flow == null; // the app never clears a flow: this copy lost it
+    if ((unchanged || lostHere) && !sameFlow(thread.flow, res.flow.v) && res.flow.v !== null) newFlow = flowCopy(res.flow.v);
+    rec.flow = flowCopy(res.flow.v); rec.flowRev = res.flow.rev;
+  }
   if (res.prevRev !== base.rev || restarted) pull = true; // a delta pull since base.rev (a full one for a new lineage) picks up both writes
   else if (res.etag) { rec.rev = res.rev; rec.etag = res.etag; rec.born = bornOf(res) || rec.born || 0; }
   if (!res.deletedAt) delete rec.deleted;
   const slots = buildSlots(thread, decisions, inserts);
-  return { ...finishPlan(thread, slots, rec, base, { id: thread?.id, title: newTitle, createdAt: thread?.createdAt, changedAt: res.changedAt, push, removeThread: false, how }), pull, deferred, defer: null };
+  return { ...finishPlan(thread, slots, rec, base, { id: thread?.id, title: newTitle, flow: newFlow, createdAt: thread?.createdAt, changedAt: res.changedAt, push, removeThread: false, how }), pull, deferred, defer: null };
 }
 
 // ── client: applying a plan ──
@@ -954,7 +1007,7 @@ const setFile = (e, file) => {
   if (!record(e?.video)) return;
   if (file) e.video.file = file; else delete e.video.file;
 };
-// Re-checks the plan against the thread (every entry's snapshot and the title; anything changed → {ok: false} and
+// Re-checks the plan against the thread (every entry's snapshot, the title and the flow; anything changed → {ok: false} and
 // nothing is touched: re-plan). Then rebuilds thread.entries IN PLACE from the slots, so the open thread object is
 // never swapped: a replaced entry keeps its object (keys absent remotely are deleted except TRANSIENT ones and the
 // STICKY marks a slot keeps, 'recovered' is cleared, then Object.assign). hydrated: Map(entryId → hydrated remote entry); a remote slot without
@@ -967,6 +1020,7 @@ export function applyPlan(thread, plan, hydrated = new Map()) {
   const snaps = plan.snaps || {};
   if (entries.length !== Object.keys(snaps).length || entries.some((e) => !own(snaps, e.id) || !sameSnap(e, snaps[e.id]))) return { ok: false };
   if (thread && thread.title !== plan.localTitle) return { ok: false };
+  if (thread && !sameFlow(thread.flow, plan.localFlow)) return { ok: false };
   const t = thread || { id: plan.id, title: '', createdAt: plan.createdAt, updatedAt: plan.changedAt || 0, entries: [] };
   const byId = new Map(entries.map((e) => [e.id, e]));
   const rec = { ...plan.record, e: { ...plan.record.e } };
@@ -993,6 +1047,7 @@ export function applyPlan(thread, plan, hydrated = new Map()) {
   }
   t.entries.splice(0, t.entries.length, ...seq);
   if (plan.title != null) t.title = plan.title;
+  if (plan.flow !== undefined) t.flow = plan.flow === null ? null : jsonClone(plan.flow);
   if (Number.isFinite(plan.createdAt)) t.createdAt = plan.createdAt;
   if (plan.changed && Number.isFinite(plan.changedAt)) t.updatedAt = Math.max(t.updatedAt || 0, plan.changedAt);
   if (skipped.length) rec.refetch = true;

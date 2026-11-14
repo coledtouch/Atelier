@@ -3,24 +3,36 @@
 // group key per thread. The answers are kept on this device (localStorage, per account, never synced): { id: key } for
 // the model's answer, with a trailing '!' ('coen!') when the owner chose it in the thread's menu. A choice made by hand
 // is never overwritten.
-// Two sets of groups: the owner's studio has his own (Personal, his two companies, other work, his applications); every
-// other account gets Work and Personal. A set's id is part of the storage key, so changing a set sorts afresh.
+// Two sets of groups: the owner's studio has his own (Personal, Kid, his two companies, other work, LinkedIn, his applications); every
+// other account gets Work, Personal, Kid and LinkedIn. A set's id is part of the storage key: a new set starts from the
+// answers of the one it replaced (PREVIOUS_SET_IDS, carryForward), and its new groups fill in as threads are sorted again.
 // No DOM and no network here, so tests/thread-spaces.test.mjs imports it directly.
 
-const group = (key, label, short, hint) => Object.freeze({ key, label, short, hint });
+// about: what a flow of this kind is about, for the line the run's system prompt gets (days.js flowHint).
+const group = (key, label, short, hint, about) => Object.freeze({ key, label, short, hint, about, color: `--flow-${key}` });
+const KID = group('kid', 'Kid', 'Kid', 'their child: school, homework, activities, gifts, health and things to do together.', 'their kid');
+const LINKEDIN = group('linkedin', 'LinkedIn', 'LinkedIn', 'posts, comments and messages for their LinkedIn, written in their voice.', 'a LinkedIn post in their voice');
 export const GROUP_SETS = Object.freeze({
-  basic: Object.freeze({ id: 'basic1', groups: Object.freeze([
-    group('work', 'Work', 'Work', 'their job or business, clients, colleagues, products they sell, code, marketing and business money.'),
-    group('personal', 'Personal', 'Personal', 'home, family, friends, health, hobbies, travel, personal money, entertainment and curiosity.'),
+  basic: Object.freeze({ id: 'basic2', groups: Object.freeze([
+    group('work', 'Work', 'Work', 'their job or business, clients, colleagues, products they sell, code, marketing and business money.', 'their work'),
+    group('personal', 'Personal', 'Personal', 'home, family, friends, health, hobbies, travel, personal money, entertainment and curiosity.', 'their personal life'),
+    KID,
+    LINKEDIN,
   ]) }),
-  owner: Object.freeze({ id: 'owner1', groups: Object.freeze([
-    group('personal', 'Personal', 'Personal', 'home, family, friends, health, hobbies, travel, personal money, entertainment and curiosity.'),
-    group('coen', 'Work: Coen Construction', 'Coen', 'their construction company, Coen Construction. Jobs, estimates, customers, crews, materials, suppliers, permits and its money.'),
-    group('edgeball', 'Work: Edgeball Strategies', 'Edgeball', 'their company Edgeball Strategies. Its clients, projects, proposals, strategy work and its money.'),
-    group('work', 'Work: other', 'Other work', 'any other job or business matter that names neither company.'),
-    group('apps', 'My Applications', 'My apps', 'software they build themselves, such as Atelier. Features, bugs, code, design, deploys and testers.'),
+  owner: Object.freeze({ id: 'owner2', groups: Object.freeze([
+    group('personal', 'Personal', 'Personal', 'home, family, friends, health, hobbies, travel, personal money, entertainment and curiosity.', 'their personal life'),
+    KID,
+    group('coen', 'Work: Coen Construction', 'Coen', 'their construction company, Coen Construction. Jobs, estimates, customers, crews, materials, suppliers, permits and its money.', 'work for Coen Construction'),
+    group('edgeball', 'Work: Edgeball Strategies', 'Edgeball', 'their company Edgeball Strategies. Its clients, projects, proposals, strategy work and its money.', 'work for Edgeball Strategies'),
+    group('work', 'Work: other', 'Other work', 'any other job or business matter that names neither company.', 'work outside Coen Construction and Edgeball Strategies'),
+    LINKEDIN,
+    group('apps', 'My Applications', 'My apps', 'software they build themselves, such as Atelier. Features, bugs, code, design, deploys and testers.', 'software they build, such as Atelier'),
   ]) }),
 });
+/** The set each set replaced. The new sets only add groups, so the answers (and hand marks) of the old one still fit. */
+export const PREVIOUS_SET_IDS = Object.freeze({ owner2: 'owner1', basic2: 'basic1' });
+/** An earlier set's stored answers → this set's: keys it no longer has are dropped, the rest (with their '!') are kept. */
+export const carryForward = (oldRaw, set) => cleanSpaces(oldRaw, set);
 /** The owner's studio sorts into his groups; a tester or guest account into Work and Personal. */
 export const groupsFor = (workspace) => (workspace === 'owner' ? GROUP_SETS.owner : GROUP_SETS.basic);
 export const SPACE_BATCH = 20; // threads per request

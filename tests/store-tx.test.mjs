@@ -65,6 +65,6 @@ test('app.js: every thread-store write goes through storeTx; the callback writes
   }
   assert.equal((app.match(/db\.transaction\(store, mode\)/g) || []).length, 0, 'no second hand-rolled transaction on the thread store');
   assert.match(app, /if \(saved === null\) \{ out\.busy = true; out\.late = reading; \}\s+return out;/, 'the flag rides on the array that is returned');
-  assert.match(app, /const busyNote = storeBusy \? '[^\n]*Your threads are still loading/);
+  assert.match(app, /const busyNote = storeBusy \? '[^\n]*Your flows are still loading/); // v132: the list counts flows
   assert.match(app, /list\.innerHTML = busyNote \+ h;/);
 });

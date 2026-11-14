@@ -325,8 +325,9 @@ test('app-1 #2: a flush on the way out of a thread saves it but keeps its time, 
   persist(true, { flush: true });
   assert.deepEqual(puts.at(-1), ['t-old', 6_000]);
   // The five ways out flush; everything else saves.
-  for (const line of [/async function openThread\(id\) \{\n  persist\(true, \{ flush: true \}\);/, /function startFresh\(\) \{\n  persist\(true, \{ flush: true \}\);/, /if \(document\.visibilityState === 'hidden'\) \{ persist\(true, \{ flush: true \}\); Sync\.flush\(\); \}/, /const flushed = persist\(true, \{ flush: true \}\);/, /Promise\.resolve\(\)\.then\(\(\) => persist\(true, \{ flush: true \}\)\)/]) assert.match(APP, line);
-  assert.equal(APP.split('persist(true, { flush: true })').length - 1, 5);
+  for (const line of [/async function openThread\(id(?:, day = null)?\) \{\n  persist\(true, \{ flush: true \}\);/, /function startFresh\(\) \{\n  persist\(true, \{ flush: true \}\);/, /if \(document\.visibilityState === 'hidden'\) \{ persist\(true, \{ flush: true \}\); Sync\.flush\(\); \}/, /const flushed = persist\(true, \{ flush: true \}\);/, /Promise\.resolve\(\)\.then\(\(\) => persist\(true, \{ flush: true \}\)\)/,
+    /function flushOpen\(\) \{ keepInDay\(S\.thread\); persist\(true, \{ flush: true \}\); \}/]) assert.match(APP, line); // Today's ways out (+ Flow, All, ◀ ▶, In:) share flushOpen
+  assert.equal(APP.split('persist(true, { flush: true })').length - 1, 6);
 });
 
 // ── app-1 #4: the Threads search ──

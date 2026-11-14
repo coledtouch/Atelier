@@ -396,10 +396,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/app.css?v=133" />
-  <link rel="stylesheet" href="/studio.css?v=133" />
-  <link rel="stylesheet" href="/feedback.css?v=133" />
-  <link rel="stylesheet" href="/remix.css?v=133" />
+  <link rel="stylesheet" href="/app.css?v=134" />
+  <link rel="stylesheet" href="/studio.css?v=134" />
+  <link rel="stylesheet" href="/feedback.css?v=134" />
+  <link rel="stylesheet" href="/remix.css?v=134" />
 </head>
 <body data-mode="ask">
   <a class="skip-link" href="#input">Skip to prompt</a>
@@ -448,6 +448,22 @@
 
   <main id="stage">
     <div class="connection-banner" id="connectionBanner" role="status" hidden>You’re offline. You can browse saved threads; reconnect to create.</div>
+    <!-- Today (app.js renderDay): the day shown, its flows as tabs, and All, the day's prompts across flows -->
+    <nav class="day-bar" id="dayBar" aria-label="Day">
+      <button type="button" class="day-date" id="dayDate" title="Your days"><span id="dayDateText"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <span class="day-steps">
+        <button type="button" class="icon-btn day-step" id="dayPrev" aria-label="Previous day" title="Previous day"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <button type="button" class="icon-btn day-step" id="dayNext" aria-label="Next day" title="Next day"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+      </span>
+      <button type="button" class="day-search" id="daySearch" aria-label="Search days" title="Search days"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><span>Search days</span></button>
+    </nav>
+    <div class="flow-strip">
+      <div class="flow-tabs" id="flowTabs" role="tablist" aria-label="Flows"></div>
+      <button type="button" class="icon-btn flow-more" id="flowMore" aria-haspopup="menu" aria-expanded="false" aria-label="Flow options" title="Flow options" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+      <button type="button" class="flow-new" id="newFlowBtn" title="Start a new flow">+ Flow</button>
+    </div>
+    <p class="day-empty" id="dayEmpty" hidden>Nothing yet today. Ask anything below.</p>
+    <ol class="timeline" id="timeline" aria-label="The day across flows" hidden></ol>
     <section id="welcome" class="welcome">
       <p class="eyebrow" id="dateLine"></p>
       <h1 class="greeting"><span id="greetWord">Good evening</span><span class="greet-name" id="greetName"></span>.<br /><em>What are we making?</em></h1>
@@ -469,6 +485,7 @@
       <p class="legal-links"><a href="/privacy">Privacy</a> · <a href="/tos">Terms</a></p>
     </section>
     <div id="syncNote" class="sync-note-bar" role="status" hidden></div>
+    <div class="earlier-bar" id="earlierBar" hidden><button type="button" class="earlier-btn">Earlier in this flow</button></div>
     <ol class="stream" id="stream" aria-label="Conversation"></ol>
     <div class="sr-only" id="activityStatus" role="status" aria-live="polite"></div>
     <div class="sr-only" id="lookupStatus" role="status" aria-live="polite"></div>
@@ -507,6 +524,7 @@
           </button>
         </div>
         <div class="composer-controls" id="composerControls">
+          <button class="composer-control flow-pick" id="flowPick" type="button" aria-haspopup="menu" aria-expanded="false" title="The flow this goes into"><span class="flow-pick-in">In:</span><i class="flow-dot" aria-hidden="true"></i><span class="flow-pick-name" id="flowPickName">New flow</span><svg class="control-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
           <button class="composer-control" id="optionsToggle" type="button" aria-expanded="false" aria-controls="options"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg><span>Options</span><svg class="control-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
           <button class="composer-control" id="contextBtn" type="button" aria-haspopup="dialog" aria-controls="contextDialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5zM9 9h6M9 13h4"/></svg><span>Context</span></button>
         </div>
@@ -518,20 +536,20 @@
   </footer>
 
   <!-- Threads drawer -->
-  <aside class="drawer left" id="threadsDrawer" role="dialog" aria-modal="true" aria-label="Threads" tabindex="-1" hidden>
+  <aside class="drawer left" id="threadsDrawer" role="dialog" aria-modal="true" aria-label="Days" tabindex="-1" hidden>
     <div class="drawer-head">
-      <h3><em>Threads</em></h3>
+      <h3><em>Days</em></h3>
       <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
-    <p class="drawer-description">Search or reopen a past conversation.</p>
-    <button type="button" class="thread-new" id="drawerNewThread"><span aria-hidden="true">＋</span> New thread</button>
+    <p class="drawer-description">Browse your days, or search every flow.</p>
+    <button type="button" class="thread-new" id="drawerNewThread"><span aria-hidden="true">＋</span> New flow</button>
     <div class="thread-search">
-      <input class="search" id="threadSearch" type="search" placeholder="Search your conversations…" aria-label="Search threads" aria-describedby="threadCount" />
+      <input class="search" id="threadSearch" type="search" placeholder="Search your flows…" aria-label="Search flows" aria-describedby="threadCount" />
       <button type="button" class="icon-btn" id="clearThreadSearch" aria-label="Clear search" hidden>×</button>
     </div>
     <div class="thread-bar">
       <p class="thread-count" id="threadCount" role="status" aria-live="polite"></p>
-      <label class="opt thread-sort"><span class="opt-val" id="threadSortVal" aria-hidden="true">Newest first</span><select id="threadSort" aria-label="Sort threads"><option value="recent">Newest first</option><option value="oldest">Oldest first</option><option value="title">Title, A to Z</option><option value="entries">Longest first</option><option value="space">By group</option></select></label>
+      <label class="opt thread-sort"><span class="opt-val" id="threadSortVal" aria-hidden="true">By day</span><select id="threadSort" aria-label="Sort flows"><option value="days">By day</option><option value="recent">Newest first</option><option value="oldest">Oldest first</option><option value="title">Title, A to Z</option><option value="entries">Longest first</option><option value="space">By group</option></select></label>
     </div>
     <ul class="thread-list" id="threadList"></ul>
   </aside>
@@ -927,6 +945,6 @@
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>
   <script src="/vendor/highlight.js"></script>
-  <script src="/app.js?v=133" type="module"></script>
+  <script src="/app.js?v=134" type="module"></script>
 </body>
 </html>

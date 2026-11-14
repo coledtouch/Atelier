@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { fakeR2, workerRequest } from './fake-r2.mjs';
 import { handleSync, SYNC_TIMING } from '../src/sync.js';
 import {
-  createSync, memoryStore, statusLine, countsLine, sizeText, agoText, forkNote, patchInPlace, COPY, SYNC_CLIENT, wipeText, deviceOnly, bindUi,
+  createSync, memoryStore, flowUnsent, statusLine, countsLine, sizeText, agoText, forkNote, patchInPlace, COPY, SYNC_CLIENT, wipeText, deviceOnly, bindUi,
 } from '../public/sync.js';
 import { canonical, strip, applyPush, sha256hex, entryHash, quickPrint, utf8Length } from '../public/sync-merge.js';
 import { validateBackup, recoverThread } from '../public/data-safety.js';
@@ -539,6 +539,67 @@ test('the open thread is merged in place: same object, new entries spliced in, o
   const last = phone.applied.at(-1);
   assert.deepEqual([last.open.added, last.open.replaced], [['e2'], ['e1']]);
   assert.deepEqual(shape(phone.get('t1')), shape(open), 'and written through');
+});
+
+test('changing only the flow marks the thread dirty and pushes it', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.db.put(thread('t1', [ask('e1', T0)]));
+  await online(pc); await online(phone);
+  assert.equal(w.doc('t1').flow, null);
+  const t = pc.get('t1');
+  await pc.put({ ...t, flow: { kind: 'kid' } }); // same entries, same updatedAt: only the tag moved
+  assert.notEqual(await pc.store.get('d:t1'), undefined, 'marked dirty');
+  const before = w.requests(pc).filter((x) => x.method === 'POST').length;
+  await push(pc);
+  const posts = w.requests(pc).filter((x) => x.method === 'POST').slice(before);
+  assert.equal(posts.length, 1);
+  assert.deepEqual(JSON.parse(posts[0].body).flow, { v: { kind: 'kid' }, base: 0 });
+  assert.deepEqual(w.doc('t1').flow, { kind: 'kid' });
+  assert.equal(await pc.store.get('d:t1'), undefined, 'and clean again');
+  assert.deepEqual([pc.engine.record('t1').flow, pc.engine.record('t1').flowRev], [{ kind: 'kid' }, 1]);
+  // the next cycle sends nothing more
+  await sync(pc);
+  assert.equal(w.requests(pc).filter((x) => x.method === 'POST').length, before + 1);
+  // the other device takes it; a change of colour goes back the other way
+  w.clock.t += MIN; await sync(phone);
+  assert.deepEqual(phone.get('t1').flow, { kind: 'kid' });
+  await phone.put({ ...phone.get('t1'), flow: { kind: 'kid', color: '#c2410c' } });
+  await sync(phone); w.clock.t += MIN; await sync(pc);
+  assert.deepEqual(pc.get('t1').flow, { kind: 'kid', color: '#c2410c' });
+  assert.deepEqual(pc.get('t1').entries.map((e) => e.id), ['e1']);
+  assert.equal(await phone.store.get('d:t1'), undefined);
+  assert.equal(await pc.store.get('d:t1'), undefined);
+});
+
+test('a pulled flow reaches the open tab without losing a local edit', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.db.put(thread('t1', [ask('e1', T0)]));
+  await online(pc); await online(phone);
+  const open = await phone.load('t1');
+  phone.open = open;
+  open.entries.push(ask('e2', T0 + 2, 'typed on the phone, not saved yet'));
+  await pc.put({ ...pc.get('t1'), flow: { kind: 'linkedin' } });
+  await sync(pc);
+  w.clock.t += MIN; await sync(phone);
+  assert.equal(phone.open, open);
+  assert.deepEqual(open.flow, { kind: 'linkedin' }, 'the tab shows the new flow');
+  assert.deepEqual(open.entries.map((e) => e.id), ['e1', 'e2'], 'and keeps its unsaved turn');
+  assert.ok(phone.applied.some((x) => x.open?.changed), 'onApplied told the tab');
+  // the tab's save then keeps both, and both reach the server
+  await phone.put(open);
+  await sync(phone);
+  assert.deepEqual(phone.get('t1').flow, { kind: 'linkedin' });
+  assert.deepEqual(w.doc('t1').flow, { kind: 'linkedin' });
+  assert.deepEqual(w.doc('t1').entries.map((e) => e.id), ['e1', 'e2']);
+  // a flow the tab changed (not saved yet) is never overwritten by an older one from IndexedDB
+  open.flow = { kind: 'kid' };
+  await pc.put({ ...pc.get('t1'), title: 'Renamed on the pc' });
+  await sync(pc); w.clock.t += MIN; await sync(phone);
+  assert.deepEqual([open.title, open.flow], ['Renamed on the pc', { kind: 'kid' }]);
+  await phone.put(open); await sync(phone); w.clock.t += MIN; await sync(pc);
+  assert.deepEqual(pc.get('t1').flow, { kind: 'kid' });
 });
 
 test('a generating thread is not touched until its run settles', async () => {
@@ -1182,6 +1243,85 @@ test('review: an outbox notice survives a marker that never committed — in a f
   assert.equal(timers.fire(SYNC_CLIENT.scanDelayMs), 1, 'the once-a-session quick check is armed');
   await until(() => w.doc('p1').entries.length === 2 && !b.engine.busy(), () => timers.fire(0)); // idle callbacks run
   assert.deepEqual(w.doc('p1').entries.map((e) => e.id), ['q1', 'q2']);
+});
+
+test('review: a stale flowless save on a tagged thread never clears the server’s flow, and the device gets it back', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.put(thread('t1', [ask('e1', T0)], { flow: { kind: 'kid' } }));
+  await online(pc); await online(phone);
+  assert.deepEqual([w.doc('t1').flow, phone.get('t1').flow], [{ kind: 'kid' }, { kind: 'kid' }]);
+  // a v131 tab saves its old open copy (no flow) with a new turn
+  const stale = structuredClone(pc.get('t1')); delete stale.flow; stale.entries.push(ask('e2', T0 + 2, 'from the old tab'));
+  await pc.put(stale);
+  await push(pc);
+  assert.deepEqual(w.doc('t1').entries.map((e) => e.id), ['e1', 'e2']);
+  assert.deepEqual(w.doc('t1').flow, { kind: 'kid' }, 'the server kept the flow');
+  assert.deepEqual(pc.get('t1').flow, { kind: 'kid' }, 'and the push answer put it back here');
+  // the same with nothing else in the save: nothing goes up, and the next pull puts the flow back
+  const bare = structuredClone(pc.get('t1')); delete bare.flow; await pc.put(bare);
+  const posts = w.requests(pc).filter((x) => x.method === 'POST').length;
+  await sync(pc);
+  assert.equal(w.requests(pc).filter((x) => x.method === 'POST').length, posts, 'no push for a lost flow');
+  assert.deepEqual(w.doc('t1').flow, { kind: 'kid' });
+  w.clock.t += MIN; await sync(phone);
+  await phone.put({ ...phone.get('t1'), title: 'Renamed on the phone' }); await sync(phone);
+  w.clock.t += MIN; await sync(pc);
+  assert.deepEqual([pc.get('t1').title, pc.get('t1').flow], ['Renamed on the phone', { kind: 'kid' }]);
+  assert.deepEqual(phone.get('t1').flow, { kind: 'kid' });
+  assert.equal(await pc.store.get('d:t1'), undefined);
+});
+
+test('review: a flow that never synced comes back on Restore', async () => {
+  const w = world();
+  const pc = device(w, 'pc');
+  await pc.put(thread('t1', [ask('e1', T0)], { title: 'Synced' }));
+  await online(pc);
+  pc.offline = true;
+  const t = structuredClone(pc.get('t1')); t.entries.push(ask('e2', T0 + 5000, 'offline work')); t.flow = { kind: 'kid' }; await pc.put(t);
+  await pc.engine.deleteThread('t1');
+  await pc.put(thread('t2', [ask('n1', T0 + 9000, 'never synced')], { title: 'Draft', flow: { kind: 'linkedin', color: '#0a66c2' } }));
+  await pc.engine.deleteThread('t2');
+  pc.offline = false;
+  await sync(pc);
+  assert.ok(w.doc('t1').deletedAt && w.doc('t2').deletedAt);
+  const { items } = await pc.engine.trash();
+  for (const it of items) await pc.engine.restore(it.key);
+  await sync(pc);
+  assert.deepEqual(pc.get('t1').flow, { kind: 'kid' });
+  assert.deepEqual(pc.get('t2').flow, { kind: 'linkedin', color: '#0a66c2' });
+  assert.deepEqual([w.doc('t1').flow, w.doc('t2').flow], [{ kind: 'kid' }, { kind: 'linkedin', color: '#0a66c2' }]);
+});
+
+test('review: only a valid flow the record lacks counts as a change (an invalid or lost one is never sent)', async () => {
+  const KID = { kind: 'kid' };
+  assert.equal(flowUnsent({ flow: KID }, { flow: undefined }), true, 'never synced');
+  assert.equal(flowUnsent({ flow: KID }, { flow: null }), true);
+  assert.equal(flowUnsent({ flow: { kind: 'kid', color: '#c2410c' } }, { flow: KID }), true);
+  assert.equal(flowUnsent({ flow: { kind: 'kid' } }, { flow: KID }), false, 'the same flow');
+  for (const bad of [{ kind: 'A B' }, 'kid', { kind: 'kid', extra: 1 }]) assert.equal(flowUnsent({ flow: bad }, { flow: KID }), false, JSON.stringify(bad));
+  assert.equal(flowUnsent({}, { flow: KID }), false, 'lost');
+  assert.equal(flowUnsent({ flow: null }, { flow: undefined }), false);
+  // and a quick scan leaves such a thread alone: nothing marked, nothing sent
+  const w = world();
+  const db2 = memDb(), store2 = memoryStore();
+  const a = device(w, 'a', { db: db2, store: store2 });
+  await db2.put(thread('p1', [ask('q1', T0)], { flow: KID }));
+  await online(a);
+  await store2.set('cfg', { ...(await store2.get('cfg')), scanAt: w.clock.t });
+  const p = structuredClone(db2.m.get('p1')); p.flow = { kind: 'Not Valid' }; await db2.put(p);
+  a.engine.stop();
+  w.clock.t += MIN;
+  const timers = manualTimers();
+  const b = device(w, 'b', { db: db2, store: store2, timers });
+  await online(b);
+  const posts = w.requests(b).filter((x) => x.method === 'POST').length;
+  assert.equal(timers.fire(SYNC_CLIENT.scanDelayMs), 1);
+  await until(() => !b.engine.busy(), () => timers.fire(0));
+  await settle(b);
+  assert.equal(await store2.get('d:p1'), undefined);
+  assert.equal(w.requests(b).filter((x) => x.method === 'POST').length, posts);
+  assert.deepEqual(w.doc('p1').flow, KID);
 });
 
 test('review: a stalled request is abandoned after its timeout, and Clear this device never hangs on one', async () => {
