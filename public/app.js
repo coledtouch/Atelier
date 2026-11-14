@@ -669,7 +669,7 @@ function setFlow(thread, kind) {
   const flow = cleanFlow({ kind });
   if (!thread || !flow) return;
   thread.flow = flow;
-  if (thread === S.thread) { if (!thread.opts) { openFlowOpts(thread); saveFlowOpts(); renderOptions(); } persist(); }
+  if (thread === S.thread) { if (!thread.opts) { openFlowOpts(thread); saveFlowOpts(); renderOptions(); } persist(false, { keepTime: true }); } // a kind is not activity: it stays where it was in Newest first
   else DB.put(thread).catch(storageError);
   renderFlowTabs();
 }
@@ -695,7 +695,15 @@ async function migrateHandFlows() {
   if (accountReloading) return;
   const live = (t) => (S.thread?.id === t.id ? S.thread : liveThreads.get(t.id) || t); // the record on screen, never a stale copy
   const todo = handFlows(rows.map(live), threadSpaces);
-  for (const { thread, flow } of todo) { thread.flow = flow; await DB.put(thread); }
+  for (const { thread, flow } of todo) {
+    if (accountReloading) return;
+    // A stored row is read again just before the write: reading the whole library can take seconds, and a sync pull or
+    // another tab may have saved a turn into it since. DB.get records what IndexedDB holds, so the save merges with it.
+    const live = S.thread?.id === thread.id ? S.thread : liveThreads.get(thread.id);
+    const cur = live || await DB.get(thread.id);
+    if (!cur || cur.flow != null || !cur.entries?.length) continue;
+    cur.flow = flow; await DB.put(cur);
+  }
   LS.set(flag, true);
   if (todo.length) renderFlowTabs();
 }
@@ -810,9 +818,9 @@ function flushOpen() { persist(true, { flush: true }); }
 // A turn sent in a flow with no kind keeps the sorter's guess (kept on this device until now): it becomes the synced kind.
 function intoFlow() {
   const guess = !S.thread.flow && cleanFlow({ kind: kindOf(S.thread, threadSpaces) });
-  if (guess) { S.thread.flow = guess; renderFlowTabs(); } // saved with the turn (persist)
+  if (guess) S.thread.flow = guess; // saved with the turn (persist)
   const today = dayKey(Date.now());
-  if (S.view === S.thread.id && S.day === today) return;
+  if (S.view === S.thread.id && S.day === today) { if (guess) renderFlowTabs(); return; } // otherwise renderDay below draws it
   earlierOpen = S.view === S.thread.id ? S.thread.id : null;
   S.day = today; S.view = S.thread.id;
   renderDay();
@@ -5666,7 +5674,7 @@ async function sortIntoSpaces(threads, { showing = () => threadSort === 'space' 
 // flow's kind when he picks it in the flow's menu (pickKind) or sends a turn in that flow (intoFlow).
 function sortDay() {
   const day = S.day;
-  if (isToday() || daysSorted.has(day) || !dayCache) return;
+  if (workspace !== 'owner' || isToday() || daysSorted.has(day) || !dayCache) return; // the owner's (spec); others see their hand choices
   daysSorted.add(day);
   return sortIntoSpaces(flowsOn(dayPool(), day).filter((t) => !t.flow), { showing: () => S.day === day && !accountReloading, redraw: paintDay })
     .then((ran) => { if (!ran) daysSorted.delete(day); }); // busy or off: tried again the next time the day shows

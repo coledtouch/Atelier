@@ -161,6 +161,7 @@ test('newThread(flow) and setFlow(thread, kind)', () => {
   w.setFlow(open, 'linkedin');
   assert.deepEqual(open.flow, { kind: 'linkedin' });
   assert.deepEqual(log, [['open', 'o'], 'save', 'draw', 'persist', 'tabs'], 'no choices yet: the kind’s defaults load, are kept by the flow and drawn');
+  assert.match(fnSource('setFlow'), /persist\(false, \{ keepTime: true \}\)/, 'a kind does not move the flow to the top of Newest first');
   log.length = 0; open.opts = { mode: 'ask' };
   w.setFlow(open, 'coen');
   assert.deepEqual(log, ['persist', 'tabs'], 'its own choices stay');
@@ -585,7 +586,8 @@ function migrationRig(rows, spaces, { open = null } = {}) {
   const db = new Map(rows.map((t) => [t.id, structuredClone(t)]));
   const v = { S: { thread: open }, liveThreads: new Map(), threadSpaces: spaces, handFlows, workspaceKey: (k) => `${k}:ws`, accountReloading: false,
     LS: { get: (k, d) => (k in ls ? ls[k] : d), set: (k, x) => { ls[k] = x; } },
-    DB: { all: async () => { reads.n++; return [...db.values()].map((t) => structuredClone(t)); }, put: async (t) => { puts.push(t.id); db.set(t.id, structuredClone(t)); } },
+    DB: { all: async () => { reads.n++; const out = [...db.values()].map((t) => structuredClone(t)); v.afterAll?.(db); return out; },
+      get: async (id) => structuredClone(db.get(id)), put: async (t) => { puts.push(t.id); db.set(t.id, structuredClone(t)); } },
     renderFlowTabs: () => drawn.push('tabs') };
   lift(v, 'migrateHandFlows');
   return { v, db, puts, ls, reads, drawn };
@@ -621,6 +623,18 @@ test('hand choices become synced flows once', async () => {
   await o.v.migrateHandFlows();
   assert.deepEqual(open.flow, { kind: 'coen' });
   assert.equal(o.db.get('a').entries.length, 3, 'the record on screen is the one written');
+  // a turn saved (sync pull, another tab) between the library read and the write survives: the row is read again
+  const late = migrationRig(oldShape(), handSpaces());
+  late.v.afterAll = (store) => { const a = store.get('a'); a.entries.push({ id: 'a9', kind: 'ask', prompt: 'synced meanwhile' }); };
+  await late.v.migrateHandFlows();
+  assert.deepEqual(late.db.get('a').entries.map((e) => e.id), ['a1', 'a2', 'a9'], 'the newer entry is kept');
+  assert.deepEqual(late.db.get('a').flow, { kind: 'coen' });
+  // a flow that arrived meanwhile is not replaced
+  const raced = migrationRig(oldShape(), handSpaces());
+  raced.v.afterAll = (store) => { store.get('a').flow = { kind: 'apps' }; };
+  await raced.v.migrateHandFlows();
+  assert.deepEqual(raced.db.get('a').flow, { kind: 'apps' });
+  assert.deepEqual(raced.puts, []);
   // runs at boot, after Today is drawn, and the flag stays the owner's through a tester's Clear
   assert.match(APP, /\n  renderDay\(\); \/\/ Today[^\n]*\n  migrateHandFlows\(\)\.catch\(/);
   assert.match(constExpr('OWNER_LS_KEEP'), /'flowsMigrated'/);
@@ -630,7 +644,7 @@ test('hand choices become synced flows once', async () => {
 function sortRig({ day, rows, answer, spaces = {} }) {
   const asked = [], drawn = [];
   const S = { day, thread: null, view: 'all' };
-  const v = { S, feat: () => true, spacesBusy: false, spacesFailedAt: 0, daysSorted: new Set(), dayCache: rows, dayPool: () => rows, flowsOn, dayKey,
+  const v = { S, workspace: 'owner', feat: () => true, spacesBusy: false, spacesFailedAt: 0, daysSorted: new Set(), dayCache: rows, dayPool: () => rows, flowsOn, dayKey,
     isToday: () => S.day === dayKey(Date.now()), spaceOf, threadSpaces: spaces, SPACE_BATCH: 20, GROUPS: OWNER, ME: { bio: '' }, spaceRequest, parseSpaces,
     modelFor: () => 'fast', noThink: {}, saveSpaces: () => {}, accountReloading: false, paintDay: () => drawn.push(S.day),
     completeChat: async (o) => { asked.push(o); return answer; },
@@ -650,6 +664,11 @@ test('a guess is not written until a send', async () => {
   const t = sortRig({ day: dayKey(Date.now()), rows, answer: '' });
   await t.v.sortDay();
   assert.equal(t.asked.length, 0);
+  // owner only (spec): a tester's past day asks nothing
+  const tester = sortRig({ day, rows, answer: '1: kid' });
+  tester.v.workspace = 'tester:abc';
+  await tester.v.sortDay();
+  assert.equal(tester.asked.length, 0);
   // a past day: its flows with no kind, in one batch; the answers stay guesses on this device
   const r = sortRig({ day, rows, answer: '1: kid\n2: coen' });
   await r.v.sortDay();
@@ -675,9 +694,11 @@ test('a send writes the guess', async () => {
   const guess = { coen: 'kid' };
   const coen = { id: 'coen', title: 'Hall kitchen', opts: { mode: 'ask' }, entries: [{ id: 'old', kind: 'ask', prompt: 'earlier', createdAt: at(3) }] };
   const S = { mode: 'ask', day: dayKey(at(3)), view: 'coen', thread: coen, video: null, attachments: [], files: [], opts: { ask: {} }, tester: null };
-  const { vars } = sendRig(S, { kindOf, cleanFlow, threadSpaces: guess });
+  let tabs = 0;
+  const { vars, calls } = sendRig(S, { kindOf, cleanFlow, threadSpaces: guess, renderFlowTabs: () => { tabs++; } });
   await vars.submit('Estimate the cabinets');
   assert.deepEqual(coen.flow, { kind: 'kid' }, 'the guess becomes the synced flow');
+  assert.deepEqual([tabs, calls.render.length], [0, 1], 'drawn once (renderDay), not twice');
   // a flow he picked stays; a flow with no guess stays unsorted; already today in the flow, the guess still lands
   const work = { id: 'w', title: 'Invoice', flow: { kind: 'work' }, opts: { mode: 'ask' }, entries: [] };
   S.thread = work; S.view = 'all'; guess.w = 'coen';
@@ -689,8 +710,10 @@ test('a send writes the guess', async () => {
   assert.ok(!('flow' in bare));
   const here = { id: 'h', title: 'Here', opts: { mode: 'ask' }, entries: [] };
   S.thread = here; S.view = 'h'; S.day = dayKey(Date.now()); guess.h = 'personal';
+  tabs = 0; const drawn = calls.render.length;
   await vars.submit('Again');
   assert.deepEqual(here.flow, { kind: 'personal' });
+  assert.deepEqual([tabs, calls.render.length - drawn], [1, 0], 'already there: the tabs alone redraw');
 });
 
 test('the flow tab menu: each kind of the set, the current one checked, then Rename', () => {
