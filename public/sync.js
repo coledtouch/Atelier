@@ -1842,6 +1842,16 @@ export function createSync(deps = {}) {
     throw new Retry('push: blobs still missing');
   }
   async function applyPushResult(id, body, plan, res) {
+    // A turn moved out of this thread while this push of it was on the wire: its delete goes at the revision that landed.
+    if (res?.accepted && typeof res.accepted === 'object') {
+      await store.update(`mv:${id}`, (cur) => {
+        if (!cur?.seen) return undefined;
+        const seen = { ...cur.seen };
+        let more = false;
+        for (const [eid, r] of Object.entries(res.accepted)) if (hasOwn(seen, eid) && Number.isSafeInteger(r) && r > (seen[eid] || 0)) { seen[eid] = r; more = true; }
+        return more ? { ...cur, seen } : undefined;
+      }).catch(warn);
+    }
     for (let attempt = 0; attempt < SYNC_CLIENT.replanTries; attempt++) {
       const { thread, locked } = await readLocked(id, lockedIds);
       const p = await planPushResult({
@@ -2112,7 +2122,7 @@ export function createSync(deps = {}) {
     return { ids: map, refused: false };
   }
   // The turn's entries left fromId for toId ({oldId: idThere}): the server's copies in fromId are deleted once they
-  // landed (sendMoves). A move still waiting to land in fromId (moved on before it got there) now waits on toId.
+  // landed (sendMoves), at the revision this device's last push of each reached there (one still on the wire included). A move still waiting to land in fromId (moved on before it got there) now waits on toId.
   // drop: the source is empty now; it goes from this device as an empty flow does (never saved), with no hide mark, so
   // its tombstone, or a turn someone adds to it on another device, still syncs here.
   async function moveOut(fromId, toId, map, { drop = false } = {}) {
@@ -2122,7 +2132,9 @@ export function createSync(deps = {}) {
     if (!forgotten && pairs.length) {
       const rec = await recOf(fromId);
       const seen = {}, to = {};
-      for (const [a, b] of pairs) { const k = rec?.e?.[a]; if (k && isRev(k.r) && k.r > 0) { seen[a] = k.r; to[a] = [toId, b]; } }
+      // Every moved entry, at the revision the record knows now (0: none yet). A push of it may be on the wire: when it
+      // lands, its revision replaces this one (applyPushResult), and sendMoves waits while one hasn't settled (pend).
+      for (const [a, b] of pairs) { const k = rec?.e?.[a]; seen[a] = k && isRev(k.r) && k.r > 0 ? k.r : 0; to[a] = [toId, b]; }
       if (Object.keys(seen).length) {
         await store.update(`mv:${fromId}`, (cur) => ({
           seen: { ...(cur?.seen || {}), ...seen }, to: { ...(cur?.to || {}), ...to }, sending: Array.isArray(cur?.sending) ? cur.sending : [],
@@ -2158,16 +2170,31 @@ export function createSync(deps = {}) {
       if (!ids.length || !syncId(id) || deleting.has(id)) continue; // a delete of the whole thread covers these
       const src = await localThread(id).catch(() => null);
       const sending = new Set(Array.isArray(m0.sending) ? m0.sending : []), go = [];
+      const revs = {}, none = [];
+      let unsettled = false;
       for (const eid of ids) {
         if (sending.has(eid)) { go.push(eid); continue; } // on the wire before (its answer was lost): sent again
         if (src?.entries?.some?.((e) => e?.id === eid)) continue; // still in the source: the move isn't saved yet
         const [tid, there] = Array.isArray(m0.to?.[eid]) ? m0.to[eid] : [];
         const landed = syncId(tid) && syncId(there) && recs.get(tid)?.e?.[there]?.r > 0;
         const t = landed || !syncId(tid) ? null : await localThread(tid).catch(() => null);
-        if (landed || !t?.entries?.some?.((e) => e?.id === there)) go.push(eid);
+        if (!landed && t?.entries?.some?.((e) => e?.id === there)) continue;
+        // The revision to delete at: the newest this device's pushes reached on the server. A push whose answer never
+        // came (pend) waits for a full read, which tells whether it landed (planPull moving learns its revision) or not.
+        const kx = recs.get(id)?.e?.[eid];
+        if (Array.isArray(kx?.pend) && kx.pend.length) { unsettled = true; continue; }
+        const rev = Math.max(isRev(m0.seen[eid]) ? m0.seen[eid] : 0, isRev(kx?.r) ? kx.r : 0);
+        if (rev > 0) { revs[eid] = rev; go.push(eid); } else none.push(eid); // never reached the server: nothing to delete there
       }
-      if (!go.length) continue;
-      const m = await store.update(k, (cur) => (cur?.seen ? { ...cur, sending: [...new Set([...(cur.sending || []), ...go.filter((x) => hasOwn(cur.seen, x))])] } : undefined));
+      if (unsettled) { const rec = recs.get(id); if (rec && !rec.full) await setRec(id, { ...rec, full: true }); pullAfter.add(id); }
+      if (!go.length && !none.length) continue;
+      const m = await store.update(k, (cur) => {
+        if (!cur?.seen) return undefined;
+        const seen = { ...cur.seen }, to = { ...(cur.to || {}) };
+        for (const x of none) { delete seen[x]; delete to[x]; }
+        for (const [x, r] of Object.entries(revs)) if (hasOwn(seen, x)) seen[x] = Math.max(seen[x] || 0, r);
+        return { ...cur, seen, to, sending: [...new Set([...(cur.sending || []), ...go.filter((x) => hasOwn(seen, x))])] };
+      });
       const out = (m?.sending || []).filter((x) => hasOwn(m.seen, x));
       if (!out.length) continue;
       const seen = Object.fromEntries(out.map((x) => [x, m.seen[x]]));

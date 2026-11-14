@@ -6041,7 +6041,8 @@ $('#moveList').addEventListener('click', (ev) => {
 // Order, so a crash never loses the turn: sync's ids for the target, the target saved, the move recorded, the source saved.
 let moveBusy = false;
 async function moveEntry(fromId, entryId, dest, { undo = true } = {}) {
-  if (moveBusy || accountReloading) return;
+  if (moveBusy) return toast('Still moving. Try again in a moment.');
+  if (accountReloading) return;
   moveBusy = true;
   try {
     const from = await flowById(fromId);
@@ -6054,11 +6055,10 @@ async function moveEntry(fromId, entryId, dest, { undo = true } = {}) {
     const to = dest.thread || (dest.id ? await flowById(dest.id) : newThread({ kind: dest.kind }));
     if (!to) return toast('That flow is no longer on this device.', { error: true });
     if (to.id === from.id) return;
-    const fresh = !to.entries.length && !dest.thread;
     const { ids: rename, refused } = await Sync.moveIds(from.id, to.id, ids, { fixed });
     if (refused) return toast('This remix can’t go back to that flow. It already left it on your other devices.', { error: true });
     const apps = new Map(turn.filter((x) => x.kind === 'build').map((x) => [x.id, appKey(from.id, from.entries, x)]));
-    const r = movedTurn(from, to, entryId, rename);
+    const r = movedTurn(from, to, entryId, rename, { entryTaint, worseTaint, taintedFrom }); // a move never drops taint (days.js moveMarks)
     to.entries = r.to;
     if (!to.title) to.title = String(r.moved[0]?.prompt || '').slice(0, 64) || 'Moved turn';
     to.updatedAt = Date.now();
@@ -6074,7 +6074,6 @@ async function moveEntry(fromId, entryId, dest, { undo = true } = {}) {
       if (key && next && next !== key) copyAppData(key, next).catch((err) => console.warn('[atelier] app data move', err));
     }
     for (const x of ids) moveHints.delete(x);
-    if (fresh) nameThread(r.moved[0], to); // a new flow gets its title as a first send's does (not awaited)
     if (dayCache) { if (drop) dayCache = dayCache.filter((t) => t.id !== from.id); else keepInDay(from); keepInDay(to); }
     if (drop && S.thread === from) { S.thread = to; openFlowOpts(to); if (S.view !== 'all') S.view = to.id; earlierOpen = null; renderOptions(); }
     renderDay({ cached: true }); refreshDay();

@@ -2662,7 +2662,7 @@ test('move: the only turn of a flow empties it; the flow is gone everywhere and 
   assert.deepEqual(idsOf(pc.get('t2')), ['e3', 'e1']);
 });
 
-test('move: an old device pushing its unchanged copy of the old flow does not bring the turn back', async () => {
+test('move: a stale copy of the old flow pushed again (standing in for an old client without the mv: outbox) does not bring the turn back', async () => {
   const w = world();
   const pc = device(w, 'pc'), phone = device(w, 'phone');
   await pc.db.put(thread('t1', [ask('e1', T0), ask('e2', T0 + 1)]));
@@ -2675,4 +2675,95 @@ test('move: an old device pushing its unchanged copy of the old flow does not br
   await sync(phone); await sync(pc);
   assert.deepEqual(idsOf(w.doc('t1')), ['e1', 'e4']);
   for (const d of [pc, phone]) assert.deepEqual(idsOf(d.get('t1')), ['e1', 'e4'], d.name);
+});
+
+// A move while the source's push of that turn is on the wire (the review's race, I1): the "Move to Edgeball?" chip
+// shows as the answer ends, which is when that turn's first push goes out. Whatever revision the server ends up holding
+// from this device, the move deletes it there, so the turn is in one flow only, on every device.
+async function heldPush(w, dev, id) {
+  let release, held = false;
+  const gate = new Promise((r) => { release = r; });
+  dev.before = async (x) => { if (x.method === 'POST' && x.path === `thread/${id}`) { dev.before = null; held = true; await gate; } return null; };
+  const running = push(dev);
+  assert.ok(await until(() => held), 'the push is on the wire');
+  return async () => { release(); await running; };
+}
+test('move race: a new turn moved while its first push to the old flow is on the wire', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.put(thread('t1', [ask('e1', T0)]));
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc); await online(phone);
+  const t = structuredClone(pc.get('t1')); t.entries.push(ask('e2', T0 + 1)); await pc.put(t);
+  const land = await heldPush(w, pc, 't1');
+  assert.equal(pc.engine.record('t1')?.e?.e2?.r, 0, 'not landed yet');
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  await land();
+  w.clock.t += MIN; await sync(pc); await sync(pc); await sync(pc); await sync(phone);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1']);
+  assert.deepEqual(idsOf(w.doc('t2')), ['e3', 'e2']);
+  for (const d of [pc, phone]) {
+    assert.deepEqual(idsOf(d.get('t1')), ['e1'], `${d.name}: not back in the old flow`);
+    assert.deepEqual(idsOf(d.get('t2')), ['e3', 'e2'], d.name);
+  }
+});
+
+test('move race: an edit of a synced turn on the wire when it is moved', async () => {
+  const w = world();
+  const pc = device(w, 'pc');
+  await pc.put(thread('t1', [ask('e1', T0), ask('e2', T0 + 1)]));
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc);
+  const t = structuredClone(pc.get('t1')); t.entries[1].text = 'retried'; w.clock.t += 1000; await pc.put(t);
+  const land = await heldPush(w, pc, 't1');
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  await land();
+  w.clock.t += MIN; await sync(pc); await sync(pc); await sync(pc);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1']);
+  assert.deepEqual(idsOf(pc.get('t1')), ['e1']);
+  assert.deepEqual(pc.get('t2').entries.map((e) => `${e.id}:${e.text}`), ['e3:answer e3', 'e2:retried']);
+});
+
+test('move race: the only turn of a new flow, moved while its first push is on the wire', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc); await online(phone);
+  await pc.put(thread('t1', [ask('e2', T0 + 1)], { title: 'Coen texts' }));
+  const land = await heldPush(w, pc, 't1');
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  await land();
+  w.clock.t += MIN; await sync(pc); await sync(pc); await sync(pc); await sync(phone);
+  assert.ok(w.doc('t1').deletedAt, 'the old flow is gone on the server');
+  for (const d of [pc, phone]) {
+    assert.equal(d.get('t1'), undefined, `${d.name}: no old flow`);
+    assert.deepEqual(idsOf(d.get('t2')), ['e3', 'e2'], d.name);
+  }
+});
+
+test('move race: a push whose answer was lost still has its landed copy deleted', async () => {
+  const w = world();
+  const pc = device(w, 'pc');
+  await pc.put(thread('t1', [ask('e1', T0)]));
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc);
+  const t = structuredClone(pc.get('t1')); t.entries.push(ask('e2', T0 + 1)); await pc.put(t);
+  // the POST lands on the server, but its answer never reaches this device
+  let lost = false;
+  pc.before = async (x) => {
+    if (x.method !== 'POST' || x.path !== 'thread/t1') return null;
+    pc.before = null;
+    const u = new URL(`https://atelier.test/api/sync/${x.path}`), headers = new Headers({ 'content-type': 'application/json', 'x-app-pass': 'pw', 'content-length': String(Buffer.byteLength(x.body)) });
+    await handleSync(workerRequest(u, { method: 'POST', headers, body: x.body }), w.env, u, u.pathname.slice('/api/'.length));
+    lost = true;
+    throw new TypeError('Failed to fetch');
+  };
+  await push(pc).catch(() => {});
+  assert.ok(lost);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1', 'e2'], 'it landed');
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  w.clock.t += MIN; await sync(pc); await sync(pc); await sync(pc);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1']);
+  assert.deepEqual(idsOf(pc.get('t1')), ['e1']);
+  assert.deepEqual(idsOf(pc.get('t2')), ['e3', 'e2']);
 });

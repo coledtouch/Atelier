@@ -1413,7 +1413,7 @@ test('moveEntry: the only turn empties its flow, which goes; Undo brings the flo
   assert.deepEqual(db.get(made).flow, { kind: 'edgeball' }, 'a new flow in that kind');
   assert.equal(db.get(made).title, 'prompt slack');
   assert.ok(log.some((x) => Array.isArray(x) && x[0] === 'out' && x[4] === true), 'dropped through sync');
-  assert.ok(log.includes('name'), 'the new flow is named as a first send names one');
+  assert.ok(!log.includes('name'), 'no late helper write to a flow object the page may since have replaced: the prompt is its title');
   assert.equal(S.thread.id, made, 'the open flow follows the turn');
   await toasts[0][1].action.onClick();
   await settled();
@@ -1465,4 +1465,19 @@ test('move copy passes the humanizer lint and says flow', () => {
   const copy = ['Move', 'Move to…', 'Move to Edgeball?', 'Today', 'Recent', 'New flow', '+ New flow in Edgeball', 'Move this turn to another flow', 'Moved to “Flow edge”', 'Moved back to “Flow coen”',
     'Wait for the answer to finish, then move it.', 'This remix is still filming. Move it once it’s done.', 'This remix can’t go back to that flow. It already left it on your other devices.', 'That flow is no longer on this device.'];
   for (const t of copy) { assert.deepEqual(problems(t), [], t); assert.doesNotMatch(t, /thread/i, t); }
+});
+
+test('moveEntry: a move carries taint both ways, and a tap while a move runs says so', async () => {
+  const { entryTaint, worseTaint } = await import('../public/context.js');
+  const { taintedFrom } = await import('../public/appdata.js');
+  const now = Date.now();
+  const { v, db, toasts } = moveRig({ threads: [T('coen', [E('link', now - 3000, { untrusted: 'share' }), E('follow', now - 2000)]), T('edge', [E('x', now - 9000)])], open: 'coen' });
+  Object.assign(v, { entryTaint, worseTaint, taintedFrom });
+  await v.moveEntry('coen', 'link', { id: 'edge' });
+  assert.equal(db.get('coen').entries[0].ranTaint, 'share', 'the follow-up that may quote it stays marked');
+  assert.ok(APP.includes('movedTurn(from, to, entryId, rename, { entryTaint, worseTaint, taintedFrom })'));
+  v.moveBusy = true;
+  await v.moveEntry('edge', 'link', { id: 'coen' });
+  assert.equal(toasts.at(-1)[0], 'Still moving. Try again in a moment.');
+  assert.deepEqual(problems('Still moving. Try again in a moment.'), []);
 });

@@ -10,7 +10,8 @@
 
 // about: what a flow of this kind is about, for the line the run's system prompt gets (days.js flowHint).
 // words: whole words that name the kind in a question (suggestKind): its name when that is distinctive, and clear
-// keywords (Slack is where Edgeball's work happens). A vague kind (Personal, Kid, Work) lists none.
+// keywords (Slack is where Edgeball's work happens). A vague kind (Personal, Kid, Work) lists none. A word with a capital
+// matches only as written (Slack the app, not slack in a schedule or a cable); a phrase gives the lowercase word its sense.
 const group = (key, label, short, hint, about, words = []) => Object.freeze({ key, label, short, hint, about, words: Object.freeze(words), color: `--flow-${key}` });
 const KID = group('kid', 'Kid', 'Kid', 'their child: school, homework, activities, gifts, health and things to do together.', 'their kid');
 const LINKEDIN = group('linkedin', 'LinkedIn', 'LinkedIn', 'posts, comments and messages for their LinkedIn, written in their voice.', 'a LinkedIn post in their voice', ['linkedin']);
@@ -25,7 +26,7 @@ export const GROUP_SETS = Object.freeze({
     group('personal', 'Personal', 'Personal', 'home, family, friends, health, hobbies, travel, personal money, entertainment and curiosity.', 'their personal life'),
     KID,
     group('coen', 'Work: Coen Construction', 'Coen', 'their construction company, Coen Construction. Jobs, estimates, customers, crews, materials, suppliers, permits and its money.', 'work for Coen Construction', ['coen']),
-    group('edgeball', 'Work: Edgeball Strategies', 'Edgeball', 'their company Edgeball Strategies. Its clients, projects, proposals, strategy work and its money.', 'work for Edgeball Strategies', ['edgeball', 'slack']),
+    group('edgeball', 'Work: Edgeball Strategies', 'Edgeball', 'their company Edgeball Strategies. Its clients, projects, proposals, strategy work and its money.', 'work for Edgeball Strategies', ['edgeball', 'Slack', 'from slack', 'on slack', 'in slack', 'slack message', 'slack messages', 'slack channel', 'slack dm']),
     group('work', 'Work: other', 'Other work', 'any other job or business matter that names neither company.', 'work outside Coen Construction and Edgeball Strategies'),
     LINKEDIN,
     group('apps', 'My Applications', 'My apps', 'software they build themselves, such as Atelier. Features, bugs, code, design, deploys and testers.', 'software they build, such as Atelier', ['atelier']),
@@ -77,9 +78,10 @@ export const labelOf = (set, key) => set.groups.find((g) => g.key === key)?.labe
  * answers only when the open flow has a kind, the question names no word of that kind, and it names exactly one other.
  */
 export function suggestKind(text, current, set) {
-  const s = String(text || '').toLowerCase();
+  const raw = String(text || ''), s = raw.toLowerCase();
   if (!s || !current || !set?.groups) return '';
-  const names = (g) => g.words.some((w) => new RegExp(`(^|[^a-z0-9])${w}(?![a-z0-9])`).test(s));
+  const said = (w) => (/[A-Z]/.test(w) ? new RegExp(`(^|[^A-Za-z0-9])${w}(?![A-Za-z0-9])`).test(raw) : new RegExp(`(^|[^a-z0-9])${w.replace(/ /g, '\\s+')}(?![a-z0-9])`).test(s));
+  const names = (g) => g.words.some(said);
   const hits = set.groups.filter(names).map((g) => g.key);
   if (hits.includes(current)) return '';
   return hits.length === 1 ? hits[0] : '';

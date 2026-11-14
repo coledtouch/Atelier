@@ -1524,3 +1524,20 @@ test('two devices: a moved turn leaves the source and lands in the target everyw
   }
   assert.deepEqual(contentOf(pc.threads.get('edge')), contentOf(phone.threads.get('edge')));
 });
+
+test('planPull with moving: a moved-out version whose push answer was lost is learned; one that never landed stops waiting', async () => {
+  const e1 = ask('e1', 1), e2 = ask('e2', 2);
+  const doc = await docOf('t1', [e1, e2], { title: { v: 'Thread t1', base: 0 } });
+  const full = await recordFor(doc);
+  const h2 = full.e.e2.f;
+  const rec = { ...full, e: { e1: full.e.e1, e2: { r: 0, f: null, g: null, old: [], pend: [h2] } } }; // pushed, answer lost
+  const local = thread('t1', [structuredClone(e1)]);
+  const plan = await planPull({ local, record: rec, remote: viewOf(doc), uid, moving: new Set(['e2']) });
+  assert.deepEqual(plan.slots.map((s) => s.id), ['e1'], 'still not re-added');
+  assert.equal(plan.record.e.e2.r, full.e.e2.r, 'the revision it landed as');
+  assert.equal(plan.record.e.e2.pend, undefined);
+  // the server never got it: a full view settles the wait, and nothing is there to delete
+  const only = await docOf('t1', [e1], { title: { v: 'Thread t1', base: 0 } });
+  const never = await planPull({ local, record: rec, remote: viewOf(only), uid, moving: new Set(['e2']) });
+  assert.deepEqual(never.record.e.e2, { r: 0, f: null, g: null, old: [] });
+});

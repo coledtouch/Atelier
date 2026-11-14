@@ -238,23 +238,53 @@ export function turnIds(t, id) {
  * Moves the turn holding entry `id` from thread `from` to thread `to`. Pure: the threads are not changed.
  * Each entry keeps its id, createdAt and at, so its day stays the same; `rename` ({oldId: newId}) gives a new id to an
  * entry the target already knew under the old one (sync: a turn moved back), as a copy, and its forks follow it.
+ * marks ({entryTaint, worseTaint, taintedFrom}: context.js and appdata.js): a move never drops taint (moveMarks).
  * → { from: the source's entries, to: the target's entries in the order every device sorts them, moved, ids: {old: new} }
  */
-export function moveTurn(from, to, id, rename = {}) {
+export function moveTurn(from, to, id, rename = {}, marks = null) {
   const ids = new Set(turnIds(from, id));
   const map = {};
   for (const e of entriesOf(from)) if (ids.has(e.id)) map[e.id] = typeof rename[e.id] === 'string' && rename[e.id] ? rename[e.id] : e.id;
-  const moved = entriesOf(from).filter((e) => ids.has(e.id)).map((e) => {
+  let moved = entriesOf(from).filter((e) => ids.has(e.id)).map((e) => {
     const forkOf = e.forkOf != null && Object.hasOwn(map, e.forkOf) ? map[e.forkOf] : e.forkOf;
     return map[e.id] === e.id && forkOf === e.forkOf ? e : { ...e, id: map[e.id], ...(e.forkOf != null ? { forkOf } : {}) };
   });
+  let rest = entriesOf(from).filter((e) => !ids.has(e.id));
+  if (marks) ({ moved, rest } = moveMarks(entriesOf(from), ids, moved, rest, marks));
   const sorted = [...entriesOf(to)];
   for (const e of moved) {
     let i = sorted.findIndex((x) => Number.isFinite(x?.createdAt) && entryOrder(x, e) > 0);
     if (i < 0) i = sorted.length;
     sorted.splice(i, 0, e);
   }
-  return { from: entriesOf(from).filter((e) => !ids.has(e.id)), to: sorted, moved, ids: map };
+  return { from: rest, to: sorted, moved, ids: map };
+}
+// What a moved turn may hold, and what the turns around it may have taken from it, stays marked on both sides:
+// - the moved turn: whatever the source held before it (it may quote that), as ranTaint (sticky in sync-merge);
+// - the source's turns after it: whatever the moved turn held (their answers may quote it), as ranTaint;
+// - a Build version whose lineage was marked as not the owner's words (taintedFrom) and that the move cut off from that
+//   mark keeps it as its own (untrusted), so its app still runs strict, with its own data store.
+// Entries that already carry as much are left as they are (no new version to sync).
+function moveMarks(all, ids, moved, rest, { entryTaint, worseTaint, taintedFrom }) {
+  const first = all.findIndex((e) => ids.has(e.id));
+  const sum = (list) => list.reduce((w, e) => worseTaint(w, entryTaint(e)), '');
+  const before = sum(all.slice(0, first)), turn = sum(all.filter((e) => ids.has(e.id)));
+  const stamp = (e, why) => {
+    const own = entryTaint(e);
+    return why && worseTaint(own, why) !== own ? { ...e, ranTaint: worseTaint(e.ranTaint || '', why) } : e;
+  };
+  const after = new Set(all.slice(first + 1).map((e) => e.id));
+  const kept = (list, orig) => list.map((e, i) => {
+    if (e.kind !== 'build' || typeof taintedFrom !== 'function') return e;
+    const was = taintedFrom(all, orig[i]);
+    if (!was || taintedFrom(list, e)) return e;
+    return { ...e, untrusted: typeof was.untrusted === 'string' && was.untrusted ? was.untrusted : 'share' };
+  });
+  const movedOrig = all.filter((e) => ids.has(e.id)), restOrig = all.filter((e) => !ids.has(e.id));
+  return {
+    moved: kept(moved.map((e) => stamp(e, before)), movedOrig),
+    rest: kept(rest.map((e) => (after.has(e.id) ? stamp(e, turn) : e)), restOrig),
+  };
 }
 
 const lastAt = (t) => Math.max(...entriesOf(t).map(entryTime).filter(Number.isFinite), -Infinity);

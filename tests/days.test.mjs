@@ -324,3 +324,47 @@ test('moveDest: the one-tap Move goes to the most recently active flow of that k
   assert.equal(moveDest([coen], 'coen', 'c', {}), null, 'never the source');
   assert.equal(moveDest([{ id: 'n', flow: { kind: 'edgeball' }, entries: [] }], 'edgeball', 'c', {}), null, 'never an empty flow');
 });
+
+test('moveTurn never drops taint: later source turns keep what the moved turn held, the moved turn keeps what came before', async () => {
+  const { moveTurn } = await import('../public/days.js');
+  const { threadTaint, entryTaint, worseTaint } = await import('../public/context.js');
+  const { taintedFrom } = await import('../public/appdata.js');
+  const marks = { entryTaint, worseTaint, taintedFrom };
+  const now = Date.UTC(2026, 10, 14);
+  const E = (id, at, extra = {}) => ({ id, kind: 'ask', createdAt: now + at, prompt: 'p', text: 't', ...extra });
+  // [a shared link, a follow-up that may quote it]: moving the link turn leaves the follow-up marked
+  const link = E('link', 1, { untrusted: 'share' }), follow = E('follow', 2), early = E('early', 0);
+  const out = moveTurn({ entries: [early, link, follow] }, { entries: [] }, 'link', {}, marks);
+  assert.equal(threadTaint(out.from), 'share', 'the source still holds what the follow-up may quote');
+  assert.equal(out.from.find((e) => e.id === 'follow').ranTaint, 'share');
+  assert.equal(out.from.find((e) => e.id === 'early'), early, 'a turn before it is left as it was');
+  // a turn asked after a web read moves with that mark
+  const web = E('web', 1, { ranTaint: 'browser' }), asked = E('asked', 2);
+  const out2 = moveTurn({ entries: [web, asked] }, { entries: [E('z', -5)] }, 'asked', {}, marks);
+  assert.equal(threadTaint(out2.to), 'browser', 'the target now knows the moved turn may quote it');
+  assert.equal(out2.moved[0].ranTaint, 'browser');
+  assert.equal(threadTaint(out2.from), 'browser');
+  // nothing to carry: the same objects, so nothing new syncs
+  const clean = moveTurn({ entries: [E('c1', 1), E('c2', 2)] }, { entries: [] }, 'c1', {}, marks);
+  assert.deepEqual(clean.from.map((e) => e.ranTaint), [undefined]);
+  // without marks, the old behaviour (pure move)
+  assert.equal(moveTurn({ entries: [early, link, follow] }, { entries: [] }, 'link').from[1], follow);
+});
+
+test('moveTurn keeps a Build lineage\'s mark: a refine moved away from a marked root, and refines left by a marked root', async () => {
+  const { moveTurn } = await import('../public/days.js');
+  const { entryTaint, worseTaint } = await import('../public/context.js');
+  const { taintedFrom } = await import('../public/appdata.js');
+  const marks = { entryTaint, worseTaint, taintedFrom };
+  const now = Date.UTC(2026, 10, 14);
+  const B = (id, at, extra = {}) => ({ id, kind: 'build', createdAt: now + at, prompt: 'p', text: '', app: { title: 'A', html: '<p>' }, ...extra });
+  const root = B('root', 1, { untrusted: 'link' }), v2 = B('v2', 2, { refineOf: 'root' }), v3 = B('v3', 3, { refineOf: 'v2' });
+  assert.equal(taintedFrom([root, v2, v3], v2), root);
+  const out = moveTurn({ entries: [root, v2, v3] }, { entries: [] }, 'v2', {}, marks);
+  const moved = out.moved[0];
+  assert.ok(taintedFrom(out.to, moved), 'the moved refine still runs strict');
+  assert.equal(moved.untrusted, 'link');
+  // the root moved away: the refines left behind keep the mark
+  const out2 = moveTurn({ entries: [root, v2, v3] }, { entries: [] }, 'root', {}, marks);
+  for (const e of out2.from) assert.ok(taintedFrom(out2.from, e), `${e.id} still runs strict`);
+});

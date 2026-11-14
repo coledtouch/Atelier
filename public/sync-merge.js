@@ -709,7 +709,14 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
   const isBusy = (e) => (e.pending === true && !orphan(e)) || isLocked(locked, e.id);
   const asSeen = (e) => (e && orphan(e) ? { ...e, recovered: true } : e); // an orphan decides as a recovered entry
   for (const r of remote.entries) {
-    if (quarantined(r.id, r.h) || away(r.id)) continue;
+    if (away(r.id)) {
+      // Moved out, its delete not sent: the copy stays out of the thread. A version this device pushed whose answer never
+      // came (k.pend) is learned, so the delete goes at the revision it landed as.
+      const k = kOf(base, r.id);
+      if (k && Array.isArray(k.pend) && k.pend.includes(r.h)) rec.e[r.id] = recordOf(r, await viewG(r), k);
+      continue;
+    }
+    if (quarantined(r.id, r.h)) continue;
     const l = asSeen(L.get(r.id)), k = kOf(base, r.id);
     const gR = await viewG(r);
     revive(rec, r.id);
@@ -756,6 +763,8 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
     // gone from the server and from here: its record goes, but what this device knew of its versions stays (record.dead),
     // so a stale tab's copy of one written back later (after the thread came back here) is still recognised as stale
     for (const id of Object.keys(rec.e)) if (!R.has(id) && !L.has(id) && !away(id)) { bury(rec, id, rec.e[id]); delete rec.e[id]; }
+    // a moved-out entry's push that never landed: nothing of it is there to wait for
+    for (const id of Object.keys(rec.e)) if (away(id) && !R.has(id) && Array.isArray(rec.e[id]?.pend)) { const { pend: _p, ...k } = rec.e[id]; rec.e[id] = k; }
   }
   const slots = buildSlots(local, decisions, inserts);
   const tomb = Boolean(remote.deletedAt) && remote.entries.length === 0;
