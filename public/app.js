@@ -8,32 +8,32 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=136';
-import * as Sync from './sync.js?v=136';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=136';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=136';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=136';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY, mergeProfile, factsInUse, FACTS_IN_PROMPT } from './context.js?v=136';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=136';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=136';
-import { initLookup } from './lookup.js?v=136';
-import { createRemix } from './remix-app.js?v=136';
-import { sendMode, looksLikeQuestion } from './remix.js?v=136';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=136';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=136';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=136';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=136';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=136';
-import * as ClaudeImport from './claude-import.js?v=136';
-import { createFeedback } from './feedback.js?v=136';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=136';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=136';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=136';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=136';
-import { HUMANIZER } from './humanizer.js?v=136';
-import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=136';
-import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, mergeSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=136';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handPlan, firstShots, rolledDay, keepsFlow } from './days.js?v=136';
+import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=137';
+import * as Sync from './sync.js?v=137';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=137';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=137';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=137';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY, mergeProfile, factsInUse, FACTS_IN_PROMPT } from './context.js?v=137';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=137';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=137';
+import { initLookup } from './lookup.js?v=137';
+import { createRemix } from './remix-app.js?v=137';
+import { sendMode, looksLikeQuestion } from './remix.js?v=137';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=137';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=137';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=137';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=137';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=137';
+import * as ClaudeImport from './claude-import.js?v=137';
+import { createFeedback } from './feedback.js?v=137';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=137';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=137';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=137';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=137';
+import { HUMANIZER } from './humanizer.js?v=137';
+import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=137';
+import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, mergeSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=137';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handPlan, firstShots, rolledDay, keepsFlow } from './days.js?v=137';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -1185,7 +1185,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '136';
+const APP_BUILD = '137';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -5686,15 +5686,18 @@ $('#essentialOptions').addEventListener('change', (ev) => {
 });
 document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog" id="contextDialog" aria-labelledby="contextTitle"><div class="sheet-body"><header class="sheet-head"><h2 id="contextTitle">Your <em>context</em></h2><button type="button" class="icon-btn" data-context-close aria-label="Close context">${ICON.x}</button></header><p class="hint">What Atelier can use for your next prompt. Earlier messages in this thread provide conversation context.</p><div id="contextDetails"></div><div class="sheet-foot"><button type="button" class="chip" data-context-profile>Manage profile &amp; memory</button><button type="button" class="btn-primary" data-context-close>Done</button></div></div></dialog>`);
 function renderContextChips() {
-  const chips = [], o = S.opts[S.mode] || S.opts.ask, writing = S.mode === 'ask' && o.voice;
+  // v137: writing style, web and tools each switch their own setting in place; the rest open the Context window.
+  const chips = [], o = S.opts[S.mode] || S.opts.ask;
   if (S.files.length) chips.push(`${S.files.length} ${S.files.length === 1 ? 'file attached' : 'files attached'}`);
   if (S.attachments.length) chips.push(`${S.attachments.length} ${S.attachments.length === 1 ? 'image attached' : 'images attached'}`);
   if (S.video) chips.push('Video attached');
-  if (writing) chips.push('Your writing style');
-  if (S.mode === 'ask' && o.web && providerReady('anthropic') && feat('web')) chips.push('Web enabled');
-  if (agentTools().length && (S.mode === 'ask' || S.mode === 'code')) chips.push(o.accountAccess === 'off' ? 'Tools off' : o.tools ? 'Tools enabled' : 'Tools available');
+  if (S.mode === 'ask') chips.push({ text: o.voice ? 'Your writing style' : 'Writing style off', flip: 'voice', on: Boolean(o.voice) });
+  if (S.mode === 'ask' && providerReady('anthropic') && feat('web')) chips.push({ text: o.web ? 'Web enabled' : 'Web off', flip: 'web', on: Boolean(o.web) });
+  if (agentTools().length && (S.mode === 'ask' || S.mode === 'code')) chips.push({ text: o.accountAccess === 'off' ? 'Tools off' : o.tools ? 'Tools enabled' : 'Tools available', flip: 'tools', on: o.accountAccess !== 'off' });
   if (ME?.bio || ME?.learned || ME?.memory?.length) chips.push('Profile & memory');
-  $('#contextChips').innerHTML = chips.slice(0, 3).map((text) => `<button type="button" class="context-chip" data-context-open>${esc(text)}</button>`).join('');
+  $('#contextChips').innerHTML = chips.slice(0, 3).map((c) => typeof c === 'string'
+    ? `<button type="button" class="context-chip" data-context-open>${esc(c)}</button>`
+    : `<button type="button" class="context-chip${c.on ? ' on' : ''}" data-context-flip="${c.flip}" aria-pressed="${c.on}" title="${c.flip === 'tools' ? 'Tap to change when tools are used' : `Tap to turn ${c.on ? 'off' : 'on'}`}">${esc(c.text)}</button>`).join('');
   $('#composerContext').hidden = !chips.length;
   if ($('#contextDialog')?.open) renderContextDetails();
 }
@@ -5709,7 +5712,18 @@ function renderContextDetails() {
 }
 function openContext() { renderContextDetails(); $('#contextDialog').showModal(); }
 $('#contextBtn').onclick = openContext;
-$('#contextChips').addEventListener('click', openContext);
+// Tools go round: when needed → always → off → when needed. Same settings as the Context window.
+function flipContextChip(key) {
+  const o = S.opts[S.mode] || S.opts.ask;
+  if (key === 'tools') { const next = o.accountAccess === 'off' ? 'auto' : o.tools ? 'off' : 'always'; o.accountAccess = next; o.tools = next === 'always'; saveOpts(); }
+  else { S.opts.ask[key] = !S.opts.ask[key]; saveOpts('ask'); }
+  renderOptions();
+  $(`[data-context-flip="${key}"]`, $('#contextChips'))?.focus({ preventScroll: true });
+}
+$('#contextChips').addEventListener('click', (ev) => {
+  const flip = ev.target.closest('[data-context-flip]');
+  if (flip) flipContextChip(flip.dataset.contextFlip); else if (ev.target.closest('[data-context-open]')) openContext();
+});
 $('#contextDialog').addEventListener('click', (ev) => {
   if (ev.target.closest('[data-context-close]')) return $('#contextDialog').close();
   if (ev.target.closest('[data-context-profile]')) { $('#contextDialog').close(); $('#youBtn').click(); return; }

@@ -471,3 +471,24 @@ test('v136: an old extension behind the relay says to update it, not "Unknown co
   vars.fetch = relay('Google Messages isn’t open in any browser.');
   await assert.rejects(vars.extCall('gmessages', {}), /^Error: Google Messages isn’t open in any browser\.$/);
 });
+
+test('v137: the writing, web and tools chips switch their own setting; attachments and profile still open Context', () => {
+  const box = { innerHTML: '' }, ctx = { hidden: true }, focused = [];
+  const $ = (sel) => sel === '#contextChips' ? box : sel === '#composerContext' ? ctx : sel === '#contextDialog' ? { open: false } : { focus: () => focused.push(sel) };
+  const vars = lift({ S: { mode: 'ask', files: [], attachments: [], video: null, opts: { ask: { voice: true, web: true, tools: false, accountAccess: 'auto' } } },
+    ME: {}, $, esc: (s) => s, providerReady: () => true, feat: () => true, agentTools: () => [1], saveOpts: () => {}, renderOptions: () => vars.renderContextChips(),
+    renderContextDetails: () => {} }, 'renderContextChips', 'flipContextChip');
+  const labels = () => [...box.innerHTML.matchAll(/data-context-flip="(\w+)" aria-pressed="(\w+)"[^>]*>([^<]+)</g)].map((m) => `${m[1]}:${m[2]}:${m[3]}`);
+  vars.renderContextChips();
+  assert.deepEqual(labels(), ['voice:true:Your writing style', 'web:true:Web enabled', 'tools:true:Tools available']);
+  vars.flipContextChip('web'); vars.flipContextChip('voice');
+  assert.deepEqual(labels(), ['voice:false:Writing style off', 'web:false:Web off', 'tools:true:Tools available']);
+  vars.flipContextChip('tools'); assert.equal(labels()[2], 'tools:true:Tools enabled');
+  vars.flipContextChip('tools'); assert.equal(labels()[2], 'tools:false:Tools off');
+  assert.equal(vars.S.opts.ask.accountAccess, 'off');
+  vars.flipContextChip('tools'); assert.equal(labels()[2], 'tools:true:Tools available');
+  vars.S.files = [{}];
+  vars.renderContextChips();
+  assert.match(box.innerHTML, /^<button type="button" class="context-chip" data-context-open>1 file attached<\/button>/);
+  assert.match(APP, /if \(flip\) flipContextChip\(flip\.dataset\.contextFlip\); else if \(ev\.target\.closest\('\[data-context-open\]'\)\) openContext\(\);/);
+});
