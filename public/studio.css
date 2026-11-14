@@ -479,8 +479,9 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
   .top { gap: 6px; padding-inline: max(10px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-right)); }
   .top-right { gap: 0; }
   .top-right #newBtn { display: none; }
-  .key-state { padding: 0; border: 0; margin-right: 6px; width: 16px; justify-content: center; }
-  .key-state span { display: none; }
+  /* The whole label fits from 320px up ("Check connection" is the longest): the dot alone, in a 16px box against Studio,
+     read as a clipped pill. */
+  .key-state { padding: 0 9px; gap: 6px; margin: 0 0 0 6px; }
   .brand { font-size: 25px; gap: 7px; }
   .brand-mark { width: 36px; height: 36px; border-radius: 10px; }
   .icon-btn { width: 38px; }
@@ -544,7 +545,7 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
   .top-right { gap: 0; } /* the 44px boxes already space the icons; keeps the 481–640 header (with #newBtn) inside its padding */
   .brand { min-height: 44px; }
   .key-state { position: relative; }
-  .key-state::after { content: ''; position: absolute; left: auto; right: -6px; top: 50%; translate: 0 -50%; width: clamp(28px, 100vw - 281px, 44px); height: 44px; } /* grows left toward the brand and ends at #youBtn's edge (margin-right 6px); the clamp keeps it clear of the brand at 320-324px */
+  .key-state::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; translate: 0 -50%; height: 44px; } /* the pill's own width, 44px tall: never over Studio or the brand */
   .actions .mini, .idea-acts .mini, .appfoot .mini { min-height: 44px; }
   .codeblock-bar .acts { gap: 6px; }
   .legal-links a { display: inline-block; padding: 13.5px 8px; margin: -13.5px -8px; } /* 17.6px line + 27 = 44.6 tall; 8px sides keep Privacy 44 wide past the " · " */

@@ -1,6 +1,6 @@
 // Days and flows: a flow is a thread; a day is derived from the times of its entries (local time), never stored.
 // Pure helpers the UI uses. No DOM and no network, so tests/days.test.mjs imports it directly.
-import { spaceOf, spaceByHand } from './thread-spaces.js?v=134';
+import { spaceOf, spaceByHand } from './thread-spaces.js?v=135';
 
 const pad = (n) => String(n).padStart(2, '0');
 /** 'YYYY-MM-DD' in local time. */
@@ -69,9 +69,13 @@ export function dayList(threads) {
   return [...days].sort().reverse().map((day) => ({ day, ids: flowsOn(threads, day).map((t) => t.id) }));
 }
 
-/** The nearest day in `days` (any order) before (-1) or after (1) `day`, or null past the ends. */
-export function stepDay(days, day, dir) {
-  const sorted = [...days].sort();
+/**
+ * The nearest day in `days` (any order) before (-1) or after (1) `day`, or null past the ends. `today` (a day key) is the
+ * last day there is: a later key in the list (the clock moved back, or a stamp from a device ahead of this one) is never a
+ * step, and from such a day the step back is the latest day up to today.
+ */
+export function stepDay(days, day, dir, today = null) {
+  const sorted = [...days].filter((d) => !today || d <= today).sort();
   return (dir < 0 ? sorted.filter((d) => d < day).pop() : sorted.find((d) => d > day)) ?? null;
 }
 
@@ -101,6 +105,47 @@ export function handFlows(threads, spaces) {
   return out;
 }
 
+/**
+ * His hand choices ('coen!' in the sorter's map, kept on this device) against the threads' synced flows. A guess can only
+ * become a synced flow while a thread has none (a send adopts it, a new flow's sorter sets it), so a guess that synced from
+ * another device can land first and take his choice's place. `shots`: the ids whose hand choice may still be written over
+ * a flow that differs, once. `landed(t)`: the thread's flow is the one the server holds (nothing unsent).
+ * → { write: [{thread, flow, spent}], adopt: [{id, kind}], settled: [id] }:
+ * - write: no flow yet (or an invalid one), or a different flow while a shot is left (spent: true uses it up);
+ * - adopt: a different flow and no shot left. His choice landed and was then replaced, which only a pick made on another
+ *   device does (a guess never replaces a flow), so that newer pick becomes this device's hand choice too;
+ * - settled: a shot whose choice agrees with the flow and has landed. It has nothing left to defend, so it is cleared,
+ *   and a later flow that differs is his newer pick from another device.
+ * An empty thread, a guess (no '!') and a flow that agrees are otherwise left alone.
+ */
+export function handPlan(threads, spaces, shots, landed = () => false) {
+  const write = [], adopt = [], settled = [];
+  for (const t of threads) {
+    if (!t || !entriesOf(t).length || !spaceByHand(spaces, t.id)) continue;
+    const hand = cleanFlow({ kind: spaceOf(spaces, t.id) }), now = cleanFlow(t.flow);
+    if (!hand) continue;
+    if (now?.kind === hand.kind) { if (shots.has(t.id) && landed(t)) settled.push(t.id); continue; }
+    if (!now) write.push({ thread: t, flow: hand, spent: false });
+    else if (shots.has(t.id)) write.push({ thread: t, flow: hand, spent: true });
+    else adopt.push({ id: t.id, kind: now.kind });
+  }
+  return { write, adopt, settled };
+}
+
+/**
+ * The shots handed out the first time this build runs (handPlan): only to hand choices whose thread has no flow or a
+ * different one, which a guess may have taken. A choice that already agrees has nothing to defend, and a shot it kept
+ * would later overwrite his newer pick from another device. → ids
+ */
+export function firstShots(threads, spaces) {
+  const out = [];
+  for (const t of threads) {
+    if (!t || !spaceByHand(spaces, t.id)) continue;
+    if (cleanFlow(t.flow)?.kind !== spaceOf(spaces, t.id)) out.push(t.id);
+  }
+  return out;
+}
+
 /** The line that tells the model what a flow is about ('This flow is about work for Coen Construction.'), or '' for a kind the set doesn't have. */
 export function flowHint(kind, set) {
   const about = set?.groups?.find((g) => g.key === kind)?.about;
@@ -113,6 +158,13 @@ export const KIND_DEFAULTS = Object.freeze({
   linkedin: Object.freeze({ mode: 'ask', ask: Object.freeze({ voice: true }) }),
   kid: AUTO, personal: AUTO, work: AUTO, coen: AUTO, edgeball: AUTO, apps: AUTO,
 });
+
+/**
+ * The choices a kind of flow owns: they belong to the flow whatever their value, and never reach the global choices.
+ * LinkedIn's "As me" is the point of a LinkedIn flow, so turning it off there must not turn it off for every later chat.
+ * (The Auto model the other kinds start with is not owned: a model picked by hand there is his choice and goes global.)
+ */
+export const KIND_OWNS = Object.freeze({ linkedin: Object.freeze({ ask: Object.freeze(['voice']) }) });
 
 /**
  * A page left open overnight: the day it should show when it comes back. `live` is the day S.day was set to while that
@@ -148,10 +200,10 @@ export function flowOpts(t, base, baseMode, clean = (o) => o) {
 
 /**
  * The global choices (LS 'opts') after a change to one mode's choices in a flow: `stored` with `slice` laid over its
- * `mode`, and nothing else touched (other modes keep the global values, not this flow's). Keys the flow's kind sets by
- * default (linkedin's ask.voice, the Auto model of the others) stay as stored while they still have the kind's value: they
- * belong to the flow, never to every later chat. One he changed (a model picked in a Coen flow) is his choice and goes
- * global like any other. Returns a new object.
+ * `mode`, and nothing else touched (other modes keep the global values, not this flow's). A key the kind owns (KIND_OWNS:
+ * LinkedIn's ask.voice) always stays as stored. Another key the kind sets by default (the Auto model) stays as stored
+ * while it still has the kind's value; one he changed (a model picked in a Coen flow) is his choice and goes global like
+ * any other. Returns a new object.
  */
 export function globalOptsWrite(stored, mode, slice, kind) {
   const out = isObj(stored) ? structuredClone(stored) : {};
@@ -159,7 +211,9 @@ export function globalOptsWrite(stored, mode, slice, kind) {
   const was = isObj(out[mode]) ? out[mode] : {};
   const own = structuredClone(slice);
   const d = KIND_DEFAULTS[kind]?.[mode];
-  if (isObj(d)) for (const k of Object.keys(d)) { if (own[k] !== d[k]) continue; if (k in was) own[k] = was[k]; else delete own[k]; }
+  const owned = KIND_OWNS[kind]?.[mode] || [];
+  const held = (k) => owned.includes(k) || (isObj(d) && k in d && own[k] === d[k]);
+  for (const k of Object.keys(own)) { if (!held(k)) continue; if (k in was) own[k] = was[k]; else delete own[k]; }
   out[mode] = { ...was, ...own };
   return out;
 }

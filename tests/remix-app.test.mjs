@@ -1202,3 +1202,35 @@ test('v114 #11: object URLs are let go: one viewer URL at a time, one per cut, a
   h.remix.wipe();
   assert.ok(U.revoked.includes('blob:2'));
 });
+
+test('follow-up 7: a Remix retry counts on today (deps.redone) only once it starts', async () => {
+  const log = [];
+  let offline = true;
+  const over = { redone: (e) => log.push(['redone', e.id]), run: (e) => log.push(['run', e.id]), offline: () => offline };
+  // a plan that failed, retried offline: nothing runs, nothing is stamped
+  const h = harness({ over });
+  const failed = { id: 'f1', kind: 'video', error: 'The plan failed', remix: { plan: null } };
+  assert.equal(await h.remix.onAct('retry', null, failed), true);
+  assert.deepEqual(log, []);
+  assert.match(h.log.toasts.at(-1), /offline/);
+  // online: stamped, then run
+  offline = false;
+  await h.remix.onAct('retry', null, failed);
+  assert.deepEqual(log, [['redone', 'f1'], ['run', 'f1']]);
+  // a cut that failed, after a reload (no source File here): the cut never starts, so no stamp
+  log.length = 0; offline = true;
+  const h2 = harness({ answers: [{ raw: FX.plan }], over });
+  const e = await planned(h2, 'tighten the close');
+  e.remix.renderError = 'No encoder here.';
+  h2.kv.map.delete('rx:src:e1'); // a reload with the source gone
+  const fresh = A.createRemix({ ...h2.deps });
+  await fresh.onAct('retry', null, e);
+  await flush();
+  assert.deepEqual(log, [], 'nothing started');
+  assert.equal(e.remix.needSource, true);
+  // with the source here it starts (offline is fine: the cut runs on this device), and is stamped as it starts
+  delete e.remix.needSource; e.remix.renderError = 'No encoder here.';
+  await h2.remix.onAct('retry', null, e);
+  assert.deepEqual(log, [['redone', 'e1']]);
+  assert.equal(e.remix.renderError, undefined);
+});

@@ -8,14 +8,14 @@
 // Money rules kept here: nothing billable starts before an Approve tap (filmQueue only starts shots whose approval key
 // matches their cost key); a shot whose start may have reached the provider ('unknown') needs a fresh approval; global
 // Stop never touches filming; a reload never starts anything new (boot only polls ops it finds in rx:ops).
-import * as R from './remix.js?v=134';
-import { cutsFrom } from './remix-cuts.js?v=134';
-import { advanceShot, shotRequest, firstFrameShape, pollShot, classify, pollDelay, SHOT_TIMING } from './remix-shots.js?v=134';
-import { buildGraph } from './remix-graph.js?v=134';
-import { createRemixStore, keys as rxKeys, SOURCE_MAX } from './remix-store.js?v=134';
-import { cardThumb, padFrameAt, grabFrame, canvasToDataUrl, ensureFonts, makeCanvas, composeFrame } from './remix-draw.js?v=134';
-import { frameAt as graphFrameAt } from './remix-graph.js?v=134';
-import { videoParts, planFor, noteFor, fmtDur } from './video.js?v=134';
+import * as R from './remix.js?v=135';
+import { cutsFrom } from './remix-cuts.js?v=135';
+import { advanceShot, shotRequest, firstFrameShape, pollShot, classify, pollDelay, SHOT_TIMING } from './remix-shots.js?v=135';
+import { buildGraph } from './remix-graph.js?v=135';
+import { createRemixStore, keys as rxKeys, SOURCE_MAX } from './remix-store.js?v=135';
+import { cardThumb, padFrameAt, grabFrame, canvasToDataUrl, ensureFonts, makeCanvas, composeFrame } from './remix-draw.js?v=135';
+import { frameAt as graphFrameAt } from './remix-graph.js?v=135';
+import { videoParts, planFor, noteFor, fmtDur } from './video.js?v=135';
 
 export const PLACEHOLDER = 'How should we remix it?'; // one line on a 360 px phone (the composer note and chips carry the rest)
 export const COPY = Object.freeze({
@@ -161,7 +161,7 @@ export function createRemix(deps) {
   const toast = deps.toast || (() => {});
   const ApiError = deps.ApiError || class extends Error { constructor(status, msg) { super(msg); this.status = status; } };
   let renderMod = null;
-  const loadRender = () => (renderMod ||= (deps.loadRender ? Promise.resolve(deps.loadRender()) : import('./remix-render.js?v=134')).catch((err) => { renderMod = null; throw err; }));
+  const loadRender = () => (renderMod ||= (deps.loadRender ? Promise.resolve(deps.loadRender()) : import('./remix-render.js?v=135')).catch((err) => { renderMod = null; throw err; }));
 
   const probes = new WeakMap(); // composer video → {status, info, caps, error}
   const files = new Map(); // entryId → source File (this session)
@@ -833,14 +833,17 @@ export function createRemix(deps) {
   }
 
   // ─────────── the cut ───────────
-  async function cut(e, { preview = false } = {}) {
+  // started: called once the cut gets past its guards and starts (a retry counts on today only then).
+  async function cut(e, { preview = false, started = null } = {}) {
     const r = e.remix;
     if (doc?.hidden) return;
     if (renders.has(e.id)) return;
     if (blocked(r)) { toast('Fix the highlighted beats first', { error: true }); return; }
     const file = await sourceFile(e);
     if (!file) { r.needSource = true; deps.repaint?.(e); return; }
+    if (renders.has(e.id)) return; // another cut started while the source was read
     delete r.needSource; delete r.renderError;
+    started?.();
     const ctrl = new AbortController();
     const threadId = threadOf(e); // the user may switch threads while it cuts
     // v114: 'cut' with no cut running here is a leftover (see bodyHtml). This one starts from the review state, so a
@@ -1390,7 +1393,12 @@ export function createRemix(deps) {
     if (!e?.remix) return false;
     const id = el?.dataset?.id;
     switch (act) {
-      case 'retry': if (e.error || !e.remix.plan) { deps.run?.(e); return true; } if (e.remix.renderError) { cut(e); return true; } deps.run?.(e); return true;
+      case 'retry': {
+        // The turn counts on today (deps.redone) only once the retry starts: a cut past its guards, or a run while online.
+        if (e.remix.plan && e.remix.renderError && !e.error) { cut(e, { started: () => deps.redone?.(e) }); return true; } // the cut runs on this device: no network needed
+        if (deps.offline?.()) { toast('You’re offline — try again once you’re connected', { error: true }); return true; }
+        deps.redone?.(e); deps.run?.(e); return true;
+      }
       case 'edit-prompt': openSheet(e); return true;
       case 'rx-revise': {
         const text = deps.inputValue?.()?.trim();
