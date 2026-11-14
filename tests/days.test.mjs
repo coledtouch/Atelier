@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dayKey, entryTime, flowDays, flowsOn, daySlice, dayTimeline, dayList, stepDay, kindOf, cleanFlow, flowHint, KIND_DEFAULTS, rolledDay, keepsFlow, handPlan } from '../public/days.js';
+import { dayKey, entryTime, flowDays, flowsOn, daySlice, dayTimeline, dayList, stepDay, kindOf, cleanFlow, flowHint, KIND_DEFAULTS, rolledDay, keepsFlow, handPlan, firstShots } from '../public/days.js';
 import { GROUP_SETS } from '../public/thread-spaces.js';
 
 const at = (y, m, d, h = 12, min = 0) => new Date(y, m - 1, d, h, min).getTime();
@@ -137,6 +137,85 @@ test('handPlan: a hand choice beats a guessed flow, whatever arrived first', () 
   const { write, adopt } = handPlan(threads, spaces, new Set(['a', 'b', 'c']));
   assert.deepEqual(write.map(({ thread, flow, spent }) => [thread.id, flow, spent]), [['a', { kind: 'coen' }, false], ['b', { kind: 'coen' }, true], ['g', { kind: 'coen' }, false]]);
   assert.deepEqual(adopt, [{ id: 'f', kind: 'apps' }]);
-  assert.deepEqual(handPlan([], spaces, new Set()), { write: [], adopt: [] });
-  assert.deepEqual(handPlan([null, { id: 'z', entries: e }], spaces, new Set()), { write: [], adopt: [] });
+  assert.deepEqual(handPlan([], spaces, new Set()), { write: [], adopt: [], settled: [] });
+  assert.deepEqual(handPlan([null, { id: 'z', entries: e }], spaces, new Set()), { write: [], adopt: [], settled: [] });
+});
+
+test('handPlan: a shot is cleared once his choice is seen landed (agrees, nothing unsent)', () => {
+  const e = [{ id: 'x', createdAt: 1 }];
+  const spaces = { a: 'coen!', b: 'coen!', c: 'coen!' };
+  const threads = [
+    { id: 'a', entries: e, flow: { kind: 'coen' } }, // agrees and landed: the shot goes
+    { id: 'b', entries: e, flow: { kind: 'coen' } }, // agrees but not sent yet: the shot stays
+    { id: 'c', entries: e, flow: { kind: 'coen' } }, // agrees, landed, no shot: nothing
+  ];
+  const landed = (t) => t.id !== 'b';
+  assert.deepEqual(handPlan(threads, spaces, new Set(['a', 'b']), landed), { write: [], adopt: [], settled: ['a'] });
+  assert.deepEqual(handPlan(threads, spaces, new Set(['a', 'b'])).settled, [], 'with no landed check nothing is cleared');
+});
+
+test('firstShots: on the first run only marks whose flow is missing or different get a shot', () => {
+  const e = [{ id: 'x', createdAt: 1 }];
+  const spaces = { a: 'coen!', b: 'coen!', c: 'coen!', d: 'kid', gone: 'coen!' };
+  const threads = [
+    { id: 'a', entries: e }, // no flow: a shot
+    { id: 'b', entries: e, flow: { kind: 'personal' } }, // differs: a shot
+    { id: 'c', entries: e, flow: { kind: 'coen' } }, // agrees: none
+    { id: 'd', entries: e, flow: { kind: 'work' } }, // a guess, not a mark: none
+  ];
+  assert.deepEqual(firstShots(threads, spaces), ['a', 'b']);
+  assert.deepEqual(firstShots([null], spaces), []);
+});
+
+// Devices that each hold hand marks, sharing one synced flow for thread t, with the server's rule: a push is taken
+// when its base is fresh, which a device that pulled first always has. Each device runs the app's rule (handPlan with
+// its shots, landed = its record matches) after every pull or push.
+function fleet(names, serverKind) {
+  const server = { flow: serverKind ? { kind: serverKind } : null };
+  const devs = Object.fromEntries(names.map((n) => [n, { spaces: {}, shots: null, t: { id: 't', entries: [{ id: 'x' }], flow: server.flow }, rec: server.flow, writes: 0 }]));
+  const run = (d) => {
+    if (!d.shots) d.shots = new Set(firstShots([d.t], d.spaces));
+    const landed = (t) => cleanFlow(t.flow)?.kind === cleanFlow(d.rec)?.kind;
+    const { write, adopt, settled } = handPlan([d.t], d.spaces, d.shots, landed);
+    for (const id of settled) d.shots.delete(id);
+    for (const a of adopt) d.spaces[a.id] = `${a.kind}!`;
+    for (const w of write) { d.t = { ...d.t, flow: w.flow }; d.writes++; if (w.spent) d.shots.delete('t'); }
+  };
+  const pull = (n) => { const d = devs[n]; d.t = { ...d.t, flow: server.flow }; d.rec = server.flow; run(d); };
+  const push = (n) => { const d = devs[n]; if (cleanFlow(d.t.flow)?.kind !== cleanFlow(d.rec)?.kind) { server.flow = d.t.flow; d.rec = d.t.flow; } run(d); };
+  const pick = (n, kind) => { const d = devs[n]; d.spaces.t = `${kind}!`; d.shots ??= new Set(); d.shots.add('t'); d.t = { ...d.t, flow: { kind } }; };
+  const settle = (order) => { for (let i = 0; i < 4; i++) for (const n of order) { pull(n); push(n); } };
+  return { server, devs, run, pull, push, pick, settle };
+}
+
+test('two devices: his choice beats a guess that synced first, and his later pick on the other device wins', () => {
+  const f = fleet(['desk', 'phone'], 'personal'); // a guess reached the server before his choice synced
+  f.devs.desk.spaces.t = 'coen!'; // he chose Coen on the desk
+  f.pull('desk'); f.push('desk');
+  assert.deepEqual(f.server.flow, { kind: 'coen' }, 'his choice replaced the guess');
+  f.pull('desk');
+  assert.equal(f.devs.desk.shots.size, 0, 'seen landed: the shot is cleared');
+  f.pull('phone');
+  f.pick('phone', 'work'); f.push('phone'); // later, he picks Work on the phone
+  f.settle(['desk', 'phone']);
+  assert.deepEqual(f.server.flow, { kind: 'work' }, 'the newer pick stays');
+  assert.equal(f.devs.desk.spaces.t, 'work!', 'and the desk takes it as his choice');
+  assert.equal(f.devs.desk.writes, 1, 'the desk wrote once, over the guess, never over his pick');
+});
+
+test('three devices holding marks: the newest pick survives (review: item 1)', () => {
+  const f = fleet(['a', 'b', 'c'], 'coen');
+  for (const n of ['a', 'b', 'c']) f.devs[n].spaces.t = 'coen!'; // marks that agree with the flow when this build first runs
+  for (const n of ['a', 'b', 'c']) f.pull(n);
+  for (const n of ['a', 'b', 'c']) assert.equal(f.devs[n].shots.size, 0, `${n}: an agreeing mark gets no shot`);
+  f.pick('b', 'work'); f.push('b');
+  f.settle(['a', 'c', 'b']);
+  assert.deepEqual(f.server.flow, { kind: 'work' }, 'his newest pick stays on the server');
+  for (const n of ['a', 'b', 'c']) assert.equal(f.devs[n].spaces.t, 'work!', `${n} shows Work as his choice`);
+  assert.deepEqual(['a', 'c'].map((n) => f.devs[n].writes), [0, 0], 'no stale mark wrote over it');
+  // and again later, from another device
+  f.pick('c', 'apps'); f.push('c');
+  f.settle(['b', 'a', 'c']);
+  assert.deepEqual(f.server.flow, { kind: 'apps' });
+  for (const n of ['a', 'b', 'c']) assert.equal(f.devs[n].spaces.t, 'apps!');
 });

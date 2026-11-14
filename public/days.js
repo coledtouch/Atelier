@@ -109,23 +109,41 @@ export function handFlows(threads, spaces) {
  * His hand choices ('coen!' in the sorter's map, kept on this device) against the threads' synced flows. A guess can only
  * become a synced flow while a thread has none (a send adopts it, a new flow's sorter sets it), so a guess that synced from
  * another device can land first and take his choice's place. `shots`: the ids whose hand choice may still be written over
- * a flow that differs, once. → { write: [{thread, flow, spent}], adopt: [{id, kind}] }:
+ * a flow that differs, once. `landed(t)`: the thread's flow is the one the server holds (nothing unsent).
+ * → { write: [{thread, flow, spent}], adopt: [{id, kind}], settled: [id] }:
  * - write: no flow yet (or an invalid one), or a different flow while a shot is left (spent: true uses it up);
- * - adopt: a different flow and no shot left. His choice was written and then replaced, which only a pick made on another
- *   device does (a guess never replaces a flow), so that newer pick becomes this device's hand choice too.
- * An empty thread, a guess (no '!') and a flow that agrees are left alone.
+ * - adopt: a different flow and no shot left. His choice landed and was then replaced, which only a pick made on another
+ *   device does (a guess never replaces a flow), so that newer pick becomes this device's hand choice too;
+ * - settled: a shot whose choice agrees with the flow and has landed. It has nothing left to defend, so it is cleared,
+ *   and a later flow that differs is his newer pick from another device.
+ * An empty thread, a guess (no '!') and a flow that agrees are otherwise left alone.
  */
-export function handPlan(threads, spaces, shots) {
-  const write = [], adopt = [];
+export function handPlan(threads, spaces, shots, landed = () => false) {
+  const write = [], adopt = [], settled = [];
   for (const t of threads) {
     if (!t || !entriesOf(t).length || !spaceByHand(spaces, t.id)) continue;
     const hand = cleanFlow({ kind: spaceOf(spaces, t.id) }), now = cleanFlow(t.flow);
-    if (!hand || now?.kind === hand.kind) continue;
+    if (!hand) continue;
+    if (now?.kind === hand.kind) { if (shots.has(t.id) && landed(t)) settled.push(t.id); continue; }
     if (!now) write.push({ thread: t, flow: hand, spent: false });
     else if (shots.has(t.id)) write.push({ thread: t, flow: hand, spent: true });
     else adopt.push({ id: t.id, kind: now.kind });
   }
-  return { write, adopt };
+  return { write, adopt, settled };
+}
+
+/**
+ * The shots handed out the first time this build runs (handPlan): only to hand choices whose thread has no flow or a
+ * different one, which a guess may have taken. A choice that already agrees has nothing to defend, and a shot it kept
+ * would later overwrite his newer pick from another device. → ids
+ */
+export function firstShots(threads, spaces) {
+  const out = [];
+  for (const t of threads) {
+    if (!t || !spaceByHand(spaces, t.id)) continue;
+    if (cleanFlow(t.flow)?.kind !== spaceOf(spaces, t.id)) out.push(t.id);
+  }
+  return out;
 }
 
 /** The line that tells the model what a flow is about ('This flow is about work for Coen Construction.'), or '' for a kind the set doesn't have. */
