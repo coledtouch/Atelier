@@ -310,7 +310,7 @@ function sendRig(S) {
   let id = 0;
   const input = { value: '', focus() {} };
   const vars = {
-    S, input, composerFrom: '', $: () => ({ value: '', focus() {} }), navigator: { onLine: true }, hasCredentials: () => true,
+    S, dayKey, input, composerFrom: '', $: () => ({ value: '', focus() {} }), navigator: { onLine: true }, hasCredentials: () => true,
     feat: () => false, running: new Set(), run: async (e) => { calls.run.push(e); }, newThread: () => ({ id: 'n1', title: '', entries: [] }),
     uid: () => `e${++id}`, videoSource: () => null, welcome: { classList: { add() {} } }, stream: { append() {} }, renderEntry: () => ({}),
     renderDay: () => { calls.render.push({ view: S.view, thread: S.thread?.id, entries: S.thread?.entries.length }); },
@@ -321,7 +321,7 @@ function sendRig(S) {
 test('the All view never sends: a turn from All goes into the flow the In: picker names, shown before it is added', async () => {
   const coen = { id: 'coen', title: 'Hall kitchen', opts: { mode: 'ask' }, entries: [{ id: 'old', kind: 'ask', prompt: 'earlier' }] };
   const kid = { id: 'kid', title: 'Science fair', opts: { mode: 'ask' }, entries: [{ id: 'k1', kind: 'ask', prompt: 'magnets' }] };
-  const S = { mode: 'ask', view: 'all', thread: coen, video: null, attachments: [], files: [], opts: { ask: {} }, tester: null };
+  const S = { mode: 'ask', day: dayKey(Date.now()), view: 'all', thread: coen, video: null, attachments: [], files: [], opts: { ask: {} }, tester: null };
   const { vars, calls } = sendRig(S);
   await vars.submit('Estimate the cabinets');
   assert.equal(S.view, 'coen', 'the send shows the flow it went into');
@@ -340,6 +340,39 @@ test('the All view never sends: a turn from All goes into the flow the In: picke
   assert.deepEqual(S.thread.entries.map((e) => e.prompt), ['A post about the bid we won']);
   // every path that adds a turn goes through it
   for (const fn of ['submit', 'runTasks', 'addRemixEntry']) assert.match(fnSource(fn), /if \(!S\.thread\) S\.thread = newThread\(\);\n(?:\s*if \(!S\.thread\.opts\) saveFlowOpts\(\);[^\n]*\n)?\s*intoFlow\(\);/, fn);
+});
+
+test('a turn sent while a past day is shown lands on today, never under the Earlier bar', async () => {
+  const today = dayKey(Date.now()), yesterday = dayKey(Date.now() - 864e5);
+  const old = Date.now() - 3 * 864e5;
+  // All on yesterday, In: a flow with nothing that day
+  const coen = { id: 'coen', title: 'Hall kitchen', opts: { mode: 'ask' }, entries: [{ id: 'old', kind: 'ask', prompt: 'earlier', at: old }] };
+  const S = { mode: 'ask', day: yesterday, view: 'all', thread: coen, video: null, attachments: [], files: [], opts: { ask: {} }, tester: null };
+  const { vars, calls } = sendRig(S);
+  vars.earlierOpen = null;
+  await vars.submit('Estimate the cabinets');
+  assert.equal(S.day, today, 'the page moves to today');
+  assert.equal(S.view, 'coen');
+  assert.deepEqual(calls.render, [{ view: 'coen', thread: 'coen', entries: 1 }]);
+  // already in that flow, reading a past day: it moves to today and keeps the whole conversation open
+  S.day = yesterday;
+  await vars.submit('And the counters');
+  assert.equal(S.day, today);
+  assert.equal(calls.render.length, 2);
+  assert.equal(vars.earlierOpen, 'coen');
+  // the fold never hides a turn made today, whichever day is shown
+  const t = { id: 'f', entries: [{ id: 'a', at: old }, { id: 'b', at: Date.now() }] };
+  assert.equal(earlierCut(t, yesterday), 2, 'yesterday alone would fold all of it');
+  assert.match(fnSource('renderThread'), /Math\.min\(earlierCut\(flow, S\.day\), earlierCut\(flow, dayKey\(Date\.now\(\)\)\)\)/);
+  assert.match(fnSource('newFlow'), /S\.day = dayKey\(Date\.now\(\)\);/, 'a new flow lives on today');
+});
+
+test('Today review fixes: empty note only today, focus kept on a redraw, a remote delete keeps a past day', () => {
+  for (const fn of ['renderTimeline', 'paintView']) assert.match(fnSource(fn), /Boolean\(S\.thread\?\.entries\.length\) \|\| !isToday\(\)/, fn);
+  const tabs = fnSource('paintTabs');
+  assert.match(tabs, /had = box\.contains\(document\.activeElement\) \? document\.activeElement\.dataset\.view : null/);
+  assert.match(tabs, /find\(\(b\) => b\.dataset\.view === had\) \|\| sel\)\.focus\(/);
+  assert.match(fnSource('syncApplied'), /if \(!isToday\(\)\) \{ S\.view = 'all'; earlierOpen = null; openFlowOpts\(null\); renderDay\(\); renderOptions\(\); \}\n\s*else startFresh\(\);/);
 });
 
 test('a new flow\'s kind: the sorter guesses it after the first answer, unless he picked one', async () => {

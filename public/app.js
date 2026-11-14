@@ -591,7 +591,12 @@ function lateCopy(old) {
 // Owner thread sync merged changes in (public/sync.js), or another tab saved the open thread: it was updated in place,
 // or deleted on another device (closed: the engine already toasted). Only what changed is redrawn; refresh open drawers.
 function syncApplied({ open } = {}) {
-  if (open?.closed) { clearTimeout(persistTimer); S.thread = null; startFresh(); }
+  if (open?.closed) {
+    clearTimeout(persistTimer); S.thread = null;
+    // browsing a past day: stay on it, on All with In: on a new flow (startFresh would jump to today)
+    if (!isToday()) { S.view = 'all'; earlierOpen = null; openFlowOpts(null); renderDay(); renderOptions(); }
+    else startFresh();
+  }
   else if (open && S.thread) patchStream(open);
   threadsArrived();
 }
@@ -732,13 +737,13 @@ function paintDayBar() {
   $('#dayNext').disabled = !stepDay(days, S.day, 1);
 }
 function paintTabs() {
-  const box = $('#flowTabs'), had = box.contains(document.activeElement);
+  const box = $('#flowTabs'), had = box.contains(document.activeElement) ? document.activeElement.dataset.view : null; // the tab focus was on
   const flows = tabFlows(dayPool(), S.day, S.view === 'all' ? null : S.thread);
   const tab = (t) => `<button type="button" role="tab" class="flow-tab" data-view="${esc(t.id)}" aria-selected="${S.view === t.id}" tabindex="${S.view === t.id ? 0 : -1}" style="--flow:${flowColor(kindOf(t, threadSpaces))}" title="${esc(flowName(t))}"><i class="flow-dot" aria-hidden="true"></i><span>${esc(flowName(t))}</span></button>`;
   box.innerHTML = `<button type="button" role="tab" class="flow-tab flow-tab-all" data-view="all" aria-selected="${S.view === 'all'}" tabindex="${S.view === 'all' ? 0 : -1}"><span>All</span></button>${flows.map(tab).join('')}`;
   const sel = $('[aria-selected="true"]', box);
   if (!sel) return;
-  if (had) sel.focus({ preventScroll: true });
+  if (had) ($('[role="tab"]', box).find((b) => b.dataset.view === had) || sel).focus({ preventScroll: true }); // a redraw (sync) keeps focus where it was
   // keep the chosen tab in view in the sideways row (never scrollIntoView: that would scroll the conversation too)
   const l = sel.offsetLeft, r = l + sel.offsetWidth;
   if (l < box.scrollLeft || r > box.scrollLeft + box.clientWidth) box.scrollLeft = Math.max(0, l - 24);
@@ -753,7 +758,7 @@ function renderTimeline() {
   const box = $('#timeline'), all = S.view === 'all';
   const rows = all ? dayTimeline(dayPool(), S.day) : [], empty = all && dayCache !== null && !rows.length;
   box.hidden = !rows.length;
-  $('#dayEmpty').hidden = all ? !(empty && isToday()) : Boolean(S.thread?.entries.length);
+  $('#dayEmpty').hidden = all ? !(empty && isToday()) : Boolean(S.thread?.entries.length) || !isToday();
   welcome.classList.add('in-day'); // the date and the starters stay; the greeting gives way to the day bar
   if (all) welcome.classList.toggle('gone', !(empty && isToday()));
   box.innerHTML = rows.map(({ thread: t, entry: e, at }) => {
@@ -770,7 +775,7 @@ function paintView() {
   $('#composer').classList.toggle('in-all', all); // a folded composer keeps In: in All (studio.css)
   welcome.classList.add('in-day');
   if (all && dayCache === null) welcome.classList.add('gone'); // until the first read says whether the day is empty
-  if (!all) { $('#timeline').hidden = true; $('#dayEmpty').hidden = Boolean(S.thread?.entries.length); }
+  if (!all) { $('#timeline').hidden = true; $('#dayEmpty').hidden = Boolean(S.thread?.entries.length) || !isToday(); }
 }
 function paintEarlier() {
   const n = S.view !== 'all' && S.thread ? streamFrom : 0, bar = $('#earlierBar');
@@ -781,9 +786,13 @@ function paintEarlier() {
 function flushOpen() { persist(true, { flush: true }); }
 // The flow a turn goes into. All is a view only: from it a turn goes into the flow the In: picker names (submit makes a
 // new one when it names none), and that flow is shown before the turn is added, so its answer streams where it belongs.
+// A turn always lands on today: sent from a past day, the page moves to today. Already in that flow, its whole
+// conversation stays open (he was reading it); from All its part of today shows, with the rest under the Earlier bar.
 function intoFlow() {
-  if (S.view === S.thread.id) return;
-  S.view = S.thread.id; earlierOpen = null;
+  const today = dayKey(Date.now());
+  if (S.view === S.thread.id && S.day === today) return;
+  earlierOpen = S.view === S.thread.id ? S.thread.id : null;
+  S.day = today; S.view = S.thread.id;
   renderDay();
 }
 // A flow's tab, a timeline row (entry: scrolled to it), or the picker in a flow.
@@ -797,6 +806,7 @@ function newFlow() {
   flushOpen();
   stopReading({ disarm: true });
   S.thread = newThread(); S.view = S.thread.id; earlierOpen = null;
+  S.day = dayKey(Date.now()); // a new flow lives on today
   openFlowOpts(S.thread);
   $('#activityStatus').textContent = '';
   renderDay(); renderOptions();
@@ -1903,7 +1913,8 @@ function renderThread() {
   // Today: All shows the day's prompts instead (renderTimeline). A flow shows its part of the day (from its first entry
   // on S.day), the rest folded under the Earlier bar; numbers still count the whole flow.
   const flow = S.view === 'all' ? null : S.thread;
-  streamFrom = flow && earlierOpen !== flow.id ? earlierCut(flow, S.day) : 0;
+  // never past a turn made today, whichever day is shown: a turn just sent can't fold under the Earlier bar
+  streamFrom = flow && earlierOpen !== flow.id ? Math.min(earlierCut(flow, S.day), earlierCut(flow, dayKey(Date.now()))) : 0;
   if (flow) { welcome.classList.add('gone'); flow.entries.slice(streamFrom).forEach((e, k) => stream.append(renderEntry(e, streamFrom + k))); }
   paintEarlier(); paintView();
   updateKeyState();
