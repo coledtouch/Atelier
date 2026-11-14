@@ -6,7 +6,7 @@
 // ('bc:') so an interrupted download or a reload never fetches finished blobs again, and only one is in memory at a time.
 //   createSync(deps)   the engine, with every browser dependency injected (tests run it in Node against the real
 //                      src/sync.js over tests/fake-r2.mjs). Exported as createEngine too.
-//   wrapDb / init / verified / pause / kick / flush / on / busy / badge / deleteThread / deleteCopy / pendingCount /
+//   wrapDb / init / verified / pause / kick / flush / on / busy / badge / deleteThread / deleteCopy / moveIds / moveOut / pendingCount /
 //   wipeWarning / showStatus / firstRunAhead / forget / holdRunLock / noteImported   the browser singleton app.js calls
 //                      (about 20 small hooks), plus the Settings → Your data block, Recently deleted, the first-sync
 //                      dialog and the nav label.
@@ -24,6 +24,11 @@
 //   lo:<id>           written while a LinkedIn tester session was active: never uploads
 //   del:<id>          a delete-everywhere waiting to be sent {seen: {entryId: rev}, at, title, born?, keep?} — keep: the
 //                     entries this device hadn't synced yet; they go up first, so Recently deleted can give them back
+//   mv:<id>           entries moved out of this thread to another flow (app.js moveTurn) that the server still holds here
+//                     {seen: {entryId: rev}, to: {entryId: [threadId, entryIdThere]}, sending: [entryId], born?, at}:
+//                     a move delete (no trash copy) at those revisions, sent once the entry landed where it went
+//                     (sendMoves); until then a pull never puts it back (planPull moving). sending: already on the wire,
+//                     so an undo can't call it back and gives the entry a new id instead (moveIds)
 //   hide:<id>         removed locally by a non-user path: never downloaded again
 //   in:<id>/<entry>   a pulled entry waiting for blobs {rev, h, missing: [sha256], refs: [{$b, t, n}], have: [sha256],
 //                     wait, bytes, video, at} — have: its blobs already in the cache; wait: 'wifi' (a large video on
@@ -40,7 +45,7 @@
 // Safety rules the engine keeps (merge_spec): updatedAt never decides a merge; pending, run-locked and recovered
 // (r > 0) entries are never pushed; pulled entries are validated with data-safety's validateBackup before they touch
 // IndexedDB (failures are quarantined); anything the server lacks is pushed again, never deleted here; only the drawer
-// delete sends a server delete; the first 401 pauses sync until the passcode is proven again, and nothing at all is
+// delete and a moved turn's source send a server delete; the first 401 pauses sync until the passcode is proven again, and nothing at all is
 // sent while it is paused (no lockout feeding); no request outlives a stop or its timeout.
 // IndexedDB is the engine's one copy of a thread: every plan reads it and every merge is written into it (in one
 // transaction that re-checks the plan). A tab's open thread is a view of it, refreshed in place whenever another tab
@@ -1663,7 +1668,7 @@ export function createSync(deps = {}) {
       const orphans = locks?.query && !locked.unknown && !isLive(id) ? new Set((local?.entries || []).filter((e) => e?.pending === true && !locked.has(e.id) && !ownRuns.has(e.id)).map((e) => e.id)) : null;
       const plan = await planPull({
         local, record: rec, remote: view, now: now(), uid, locked, live: liveIn(id, local, locked),
-        quarantined: (eid, h) => qKeys.has(`${id}/${eid}/${h}`), hashOf: hasher(id), orphans,
+        quarantined: (eid, h) => qKeys.has(`${id}/${eid}/${h}`), hashOf: hasher(id), orphans, moving: await movingOf(id),
       });
       if (plan.partial && !view.full) { full = true; attempt--; continue; } // a local copy missing known entries: read it whole
       if (plan.defer) { deferred.add(id); return; }
@@ -1766,7 +1771,7 @@ export function createSync(deps = {}) {
         rec = { ...rest, refetch: true };
         await setRec(id, rec);
       }
-      const plan = await planPush({ thread, record: forPush(id, rec), locked: pushLockedFor(id, locked), media, hashOf, holdBlobs });
+      const plan = await planPush({ thread, record: forPush(id, rec), locked: pushLockedFor(id, locked), media, hashOf, holdBlobs, moving: await movingOf(id) });
       if (debug) safe(() => debug('push', { id, plan, open: getOpen()?.id === id, thread }));
       noteHeld(id, plan);
       const mediaHeld = heldMedia.get(id) || 0;
@@ -2066,6 +2071,126 @@ export function createSync(deps = {}) {
     }
   }
 
+  // ── moves: a turn moved to another flow (app.js moveTurn) ──
+  // The entry leaves its old thread with its id: a move delete (rev-aware, no trash copy) removes it there on the server,
+  // so every device's pull drops its copy (gone) instead of the next full pull here putting it back. Order, so nothing is
+  // ever only in memory: moveIds (ids for the target) → the app saves the target → moveOut (records the delete) → the
+  // app saves the source. The delete goes once the entry landed in the target (its record knows it), or once the target
+  // no longer has it (moved on, deleted); never while the source still has it (a save on its way, or a crash between).
+  const hasOwn = (x, k) => Boolean(x) && typeof x === 'object' && Object.prototype.hasOwnProperty.call(x, k);
+  const recOf = async (id) => (await store.get(`t:${id}`).catch(() => null)) || recs.get(id) || null;
+  async function movingOf(id) {
+    const m = await store.get(`mv:${id}`).catch(() => null);
+    const ids = Object.keys(m?.seen || {});
+    return ids.length ? new Set(ids) : null;
+  }
+  // The ids the turn's entries take in thread toId → { ids: {old: new}, refused }. An entry this thread's record already
+  // knows (it was there, or its delete there went out) gets a new id: under the old one a push would be taken for a stale
+  // copy, or dropped as deleted. Exception: an entry moved out of toId whose delete hasn't gone yet (an undo, or moving
+  // it back) is called back instead and keeps its id. fixed: ids that can't change (a Remix turn: its saved shots are
+  // filed under the id) → refused when one of them would need a new id, and nothing is changed.
+  async function moveIds(fromId, toId, ids, { fixed = [] } = {}) {
+    await ready().catch(() => {});
+    const list = (Array.isArray(ids) ? ids : []).filter(syncId), map = Object.fromEntries(list.map((x) => [x, x]));
+    if (forgotten || !syncId(toId)) return { ids: map, refused: false };
+    const rec = await recOf(toId);
+    const known = (x) => Boolean(rec && (hasOwn(rec.e, x) || hasOwn(rec.dead, x))) || inbound.has(`${toId}/${x}`);
+    let refused = false, back = [];
+    await store.update(`mv:${toId}`, (cur) => {
+      refused = false; back = [];
+      const sending = new Set(Array.isArray(cur?.sending) ? cur.sending : []);
+      const call = list.filter((x) => hasOwn(cur?.seen, x) && !sending.has(x));
+      if (list.some((x) => !call.includes(x) && known(x) && fixed.includes(x))) { refused = true; return undefined; }
+      if (!call.length) return undefined;
+      back = call;
+      const seen = { ...cur.seen }, to = { ...(cur.to || {}) };
+      for (const x of call) { delete seen[x]; delete to[x]; }
+      return { ...cur, seen, to };
+    }).catch(warn);
+    if (refused) return { ids: map, refused: true };
+    for (const x of list) if (!back.includes(x) && known(x)) map[x] = uid();
+    return { ids: map, refused: false };
+  }
+  // The turn's entries left fromId for toId ({oldId: idThere}): the server's copies in fromId are deleted once they
+  // landed (sendMoves). A move still waiting to land in fromId (moved on before it got there) now waits on toId.
+  // drop: the source is empty now; it goes from this device as an empty flow does (never saved), with no hide mark, so
+  // its tombstone, or a turn someone adds to it on another device, still syncs here.
+  async function moveOut(fromId, toId, map, { drop = false } = {}) {
+    await ready().catch(() => {});
+    if (!syncId(fromId) || !syncId(toId) || !map || typeof map !== 'object') return;
+    const pairs = Object.entries(map).filter(([a, b]) => syncId(a) && syncId(b));
+    if (!forgotten && pairs.length) {
+      const rec = await recOf(fromId);
+      const seen = {}, to = {};
+      for (const [a, b] of pairs) { const k = rec?.e?.[a]; if (k && isRev(k.r) && k.r > 0) { seen[a] = k.r; to[a] = [toId, b]; } }
+      if (Object.keys(seen).length) {
+        await store.update(`mv:${fromId}`, (cur) => ({
+          seen: { ...(cur?.seen || {}), ...seen }, to: { ...(cur?.to || {}), ...to }, sending: Array.isArray(cur?.sending) ? cur.sending : [],
+          born: validDate(cur?.born) && cur.born > 0 ? cur.born : validDate(rec?.born) ? rec.born : 0, at: now(),
+        }));
+      }
+      const there = new Map(pairs);
+      const waits = (x) => Array.isArray(x) && x[0] === fromId && there.has(x[1]);
+      for (const [k, m] of await store.entries('mv:').catch(() => [])) {
+        if (k === `mv:${fromId}` || !Object.values(m?.to || {}).some(waits)) continue;
+        await store.update(k, (cur) => {
+          if (!cur?.to) return undefined;
+          const next = { ...cur.to };
+          for (const [eid, x] of Object.entries(next)) if (waits(x)) next[eid] = [toId, there.get(x[1])];
+          return { ...cur, to: next };
+        }).catch(warn);
+      }
+    }
+    if (drop) {
+      await db.del(fromId);
+      await dropPrints(fromId);
+      dirty.delete(fromId);
+      await store.del(`d:${fromId}`).catch(() => {});
+      post({ changed: [{ t: fromId, e: [], removed: [], closed: true }] });
+    }
+    emitSoon();
+    kick('delete');
+  }
+  async function sendMoves(sum) {
+    for (const [k, m0] of await store.entries('mv:')) {
+      halted();
+      const id = k.slice(3), ids = Object.keys(m0?.seen || {});
+      if (!ids.length || !syncId(id) || deleting.has(id)) continue; // a delete of the whole thread covers these
+      const src = await localThread(id).catch(() => null);
+      const sending = new Set(Array.isArray(m0.sending) ? m0.sending : []), go = [];
+      for (const eid of ids) {
+        if (sending.has(eid)) { go.push(eid); continue; } // on the wire before (its answer was lost): sent again
+        if (src?.entries?.some?.((e) => e?.id === eid)) continue; // still in the source: the move isn't saved yet
+        const [tid, there] = Array.isArray(m0.to?.[eid]) ? m0.to[eid] : [];
+        const landed = syncId(tid) && syncId(there) && recs.get(tid)?.e?.[there]?.r > 0;
+        const t = landed || !syncId(tid) ? null : await localThread(tid).catch(() => null);
+        if (landed || !t?.entries?.some?.((e) => e?.id === there)) go.push(eid);
+      }
+      if (!go.length) continue;
+      const m = await store.update(k, (cur) => (cur?.seen ? { ...cur, sending: [...new Set([...(cur.sending || []), ...go.filter((x) => hasOwn(cur.seen, x))])] } : undefined));
+      const out = (m?.sending || []).filter((x) => hasOwn(m.seen, x));
+      if (!out.length) continue;
+      const seen = Object.fromEntries(out.map((x) => [x, m.seen[x]]));
+      const r = await api('DELETE', `thread/${id}`, { json: { v: FORMAT, seen, move: true, ...(validDate(m.born) && m.born > 0 ? { born: m.born } : {}) } });
+      const done = () => store.update(k, (cur) => {
+        if (!cur?.seen) return undefined;
+        const next = { ...cur.seen }, to = { ...(cur.to || {}) };
+        for (const x of out) { delete next[x]; delete to[x]; }
+        return { ...cur, seen: next, to, sending: (cur.sending || []).filter((x) => !out.includes(x)) };
+      });
+      if (r.status === 404 || r.status === 400 || r.status === 413) { await done(); continue; } // nothing there to delete, or a body it won't take
+      if (!r.ok) throw new Retry(`move ${r.status}`);
+      await done();
+      touched.add(id);
+      // One that changed elsewhere after this device looked (or a lineage the server re-created) stays there: a full read
+      // brings that copy back to the source, so nothing anyone wrote is lost.
+      const rec = recs.get(id);
+      if (rec && (r.json?.removed ?? 0) < out.length) await setRec(id, { ...rec, full: true });
+      pullAfter.add(id);
+      sum.moved = (sum.moved || 0) + out.length;
+    }
+  }
+
   // ── first sync and the scans ──
   // Marks threads for the push path. Plain: every eligible thread (the first-sync union). hashed: threads already on
   // the server only when a push would send something. quick (once a session): only threads written since this device
@@ -2081,7 +2206,7 @@ export function createSync(deps = {}) {
       if (!t || !t.entries?.length || skipReason(id, t, rec)) continue;
       if (hashed && rec?.rev > 0) {
         if (quick && !maybeChanged(t, rec)) continue;
-        const plan = await planPush({ thread: t, record: forPush(id, rec), locked: pushLockedFor(id, await pushLocks()), media, hashOf: hasher(id), holdBlobs });
+        const plan = await planPush({ thread: t, record: forPush(id, rec), locked: pushLockedFor(id, await pushLocks()), media, hashOf: hasher(id), holdBlobs, moving: await movingOf(id) });
         if (!plan.dirty && !plan.refetch) { if (Number.isFinite(t.updatedAt)) await setAt(id, t.updatedAt); continue; }
         if (plan.refetch) pullAfter.add(id);
       }
@@ -2151,6 +2276,7 @@ export function createSync(deps = {}) {
       await sendDeletes(sum);
       for (let pass = 0; pass < SYNC_CLIENT.pushPasses; pass++) {
         await pushAll(sum, { hidden: hiddenFlush });
+        await sendMoves(sum); // after the pushes: a moved turn leaves its old flow once it landed in the new one
         const again = [...pullAfter];
         pullAfter.clear();
         for (const id of again) { halted(); await pullOne(id, sum, { full: Boolean(recs.get(id)?.refetch || recs.get(id)?.full) }); }
@@ -2414,6 +2540,7 @@ export function createSync(deps = {}) {
     const r = { changes: 0, media: 0, other: 0, threads: 0 };
     if (!cfg?.enabled) return r;
     r.changes = deleting.size;
+    for (const [, m] of await store.entries('mv:').catch(() => [])) r.changes += Object.keys(m?.seen || {}).length; // moves not sent yet
     const ids = new Set([...(await store.entries('d:').catch(() => [])).map(([k]) => k.slice(2))]);
     for (const id of await db.keys().catch(() => [])) ids.add(id);
     const locked = await pushLocks();
@@ -2593,7 +2720,7 @@ export function createSync(deps = {}) {
     kick, run, cycle: (opts) => run({ pull: true, ...opts }), pullNow: () => run({ pull: true }), pushNow: () => run({ pull: false }),
     pushThread: (id) => serial(() => pushThread(id)), pullThread: (id, opts) => serial(() => pullThread(id, {}, opts)),
     intent, noteWrite, noteHidden, noteRead, noteSaving, noteSaved: saved, noteSaveFailed, saveThread, refreshOpen,
-    deleteThread, deleteCopy, restore, trash, flush, uploadOlder, removeSynced, pendingCount, localReport, holdRunLock, forget,
+    deleteThread, deleteCopy, moveIds, moveOut, restore, trash, flush, uploadOlder, removeSynced, pendingCount, localReport, holdRunLock, forget,
     downloadNow, setCellular, netChanged, noteFor, metered,
     status, emit, badge, on: enabled, busy: () => Boolean(cycling) || openWork > 0 || msgWork > 0, isLeader: () => leader, config: () => (cfg ? { ...cfg } : null),
     record: (id) => recs.get(id) || null, noteImported, onMessage,
@@ -2729,6 +2856,9 @@ export function landedOn(eng, t) {
 export const flowLanded = (t) => landedOn(engine, t);
 export const deleteCopy = (id) => (engine ? engine.deleteCopy(id) : Promise.resolve('Delete this thread?'));
 export const deleteThread = (id) => (engine ? engine.deleteThread(id) : bootDeps?.rawDB?.del(id));
+// A turn moved to another flow (app.js moveTurn): the ids its entries take in the target, then the source's side.
+export const moveIds = (fromId, toId, ids, opts) => (engine ? engine.moveIds(fromId, toId, ids, opts) : Promise.resolve({ ids: Object.fromEntries((ids || []).map((x) => [x, x])), refused: false }));
+export const moveOut = (fromId, toId, map, opts = {}) => (engine ? engine.moveOut(fromId, toId, map, opts) : Promise.resolve(opts.drop ? bootDeps?.rawDB?.del(fromId) : undefined));
 export const pendingCount = () => (engine ? engine.pendingCount().catch(() => 0) : Promise.resolve(0));
 export const forget = () => (engine ? engine.forget() : idbStore(syncNamespace(bootDeps?.account || 'owner', bootDeps?.scope).store).destroy());
 export const noteImported = (n) => Boolean(engine?.noteImported(n));

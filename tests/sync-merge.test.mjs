@@ -1448,3 +1448,79 @@ test('two devices: a flow set on one reaches the other once and then both are qu
   await pull(pc, srv, 't1');
   for (const dev of [pc, phone]) assert.equal((await planPush({ thread: dev.threads.get('t1'), record: dev.records.get('t1') })).dirty, false);
 });
+
+// ── a turn moved to another flow (app.js moveTurn, sync.js mv:) ──
+// The source thread's entries this device moved out and still has to delete there (moving): a pull never puts them back
+// and never forgets what the record knows of them (the delete is sent at that revision, and an undo before it is sent
+// needs that knowledge whole), and a push never asks for the full pull that would re-add them.
+test('planPull with moving: a moved-out entry is neither re-added nor forgotten, in a delta or a full pull', async () => {
+  const e1 = ask('e1', 1), e2 = ask('e2', 2);
+  const doc = await docOf('t1', [e1, e2], { title: { v: 'Thread t1', base: 0 } });
+  const rec = await recordFor(doc);
+  const local = thread('t1', [structuredClone(e1)]); // e2 went to another flow
+  const without = await planPull({ local, record: rec, remote: viewOf(doc), uid });
+  assert.deepEqual(without.added, ['e2'], 'without moving, a known-but-missing entry comes back (the old behaviour)');
+  for (const view of [viewOf(doc), viewOf(doc, 0)]) {
+    const plan = await planPull({ local, record: rec, remote: view, uid, moving: new Set(['e2']) });
+    assert.deepEqual(plan.slots.map((s) => [s.id, s.from]), [['e1', 'local']]);
+    assert.deepEqual(plan.added, []); assert.equal(plan.changed, false); assert.equal(plan.push, false);
+    assert.equal(plan.partial, false, 'no full re-read is asked for');
+    assert.deepEqual(plan.record.e.e2, rec.e.e2, 'the record still knows e2 as it was');
+    assert.equal(plan.record.dead?.e2, undefined);
+  }
+  // once the server has deleted it (gone), the usual path buries it
+  const del = applyDelete(doc, { e2: rec.e.e2.r }, NOW + 1);
+  assert.deepEqual([del.removed, del.deleted], [['e2'], false], 'a partial delete keeps the thread');
+  const after = await planPull({ local, record: rec, remote: viewOf(del.doc, rec.rev), uid, moving: new Set() });
+  assert.equal(after.record.e.e2, undefined); assert.ok(after.record.dead.e2);
+  assert.deepEqual(after.slots.map((s) => s.id), ['e1']);
+});
+
+test('planPull with moving: an entry moved out and back before the delete went is simply there again', async () => {
+  const e1 = ask('e1', 1), e2 = ask('e2', 2);
+  const doc = await docOf('t1', [e1, e2], { title: { v: 'Thread t1', base: 0 } });
+  const rec = await recordFor(doc);
+  const local = thread('t1', [structuredClone(e1)]);
+  const p1 = await planPull({ local, record: rec, remote: viewOf(doc), uid, moving: new Set(['e2']) });
+  applyPlan(local, p1, await hydrateAll(p1));
+  local.entries.push(structuredClone(e2)); // the undo: back, same id, same content
+  const p2 = await planPull({ local, record: p1.record, remote: viewOf(doc), uid });
+  assert.equal(p2.changed, false); assert.equal(p2.push, false);
+  const push = await planPush({ thread: local, record: p2.record });
+  assert.equal(push.dirty, false, 'nothing to send: the server still holds it as it is');
+});
+
+test('planPush with moving: no full pull is asked for an entry moved out; any other missing one still asks', async () => {
+  const e1 = ask('e1', 1), e2 = ask('e2', 2), e3 = ask('e3', 3);
+  const doc = await docOf('t1', [e1, e2, e3]);
+  const rec = await recordFor(doc);
+  const local = thread('t1', [structuredClone(e1), structuredClone(e3)]);
+  assert.equal((await planPush({ thread: local, record: rec })).refetch, true);
+  assert.equal((await planPush({ thread: local, record: rec, moving: new Set(['e2']) })).refetch, false);
+  assert.equal((await planPush({ thread: thread('t1', [structuredClone(e1)]), record: rec, moving: new Set(['e2']) })).refetch, true, 'e3 is still missing');
+});
+
+test('checkDelete takes the move flag (a move skips Recently deleted) and rejects a bad one', () => {
+  assert.equal(checkDelete({ v: FORMAT, seen: { e1: 1 }, move: true }), null);
+  assert.equal(checkDelete({ v: FORMAT, seen: { e1: 1 } }), null);
+  assert.equal(checkDelete({ v: FORMAT, seen: { e1: 1 }, move: 'yes' })?.code, 'bad_shape');
+});
+
+test('two devices: a moved turn leaves the source and lands in the target everywhere, without coming back', async () => {
+  const srv = server(), pc = device(), phone = device();
+  pc.threads.set('coen', thread('coen', [ask('a', 1), ask('slack', 2)], { title: 'Coen' }));
+  pc.threads.set('edge', thread('edge', [ask('x', 0)], { title: 'Edgeball' }));
+  for (const id of ['coen', 'edge']) { await push(pc, srv, id); await pull(phone, srv, id); }
+  // the pc moves "slack" from coen to edge: the target goes up first, then the source's delete at the revision it knew
+  const coen = pc.threads.get('coen'), moved = coen.entries.splice(1, 1)[0];
+  pc.threads.get('edge').entries.push(moved);
+  await push(pc, srv, 'edge');
+  const del = applyDelete(srv.docs.get('coen'), { slack: pc.records.get('coen').e.slack.r }, NOW + 5);
+  srv.docs.set('coen', del.doc);
+  await pull(pc, srv, 'coen'); await pull(phone, srv, 'coen'); await pull(phone, srv, 'edge');
+  for (const dev of [pc, phone]) {
+    assert.deepEqual(dev.threads.get('coen').entries.map((e) => e.id), ['a']);
+    assert.deepEqual(dev.threads.get('edge').entries.map((e) => e.id), ['x', 'slack']);
+  }
+  assert.deepEqual(contentOf(pc.threads.get('edge')), contentOf(phone.threads.get('edge')));
+});
