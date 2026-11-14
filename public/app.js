@@ -33,7 +33,7 @@ import { renderAppErrors, loadAppErrors } from './app-errors.js?v=132';
 import { HUMANIZER } from './humanizer.js?v=132';
 import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=132';
 import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=132';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handFlows } from './days.js?v=132';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handFlows, rolledDay, keepsFlow } from './days.js?v=132';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -593,12 +593,16 @@ function lateCopy(old) {
 function syncApplied({ open } = {}) {
   if (open?.closed) {
     clearTimeout(persistTimer); S.thread = null;
-    // browsing a past day: stay on it, on All with In: on a new flow (startFresh would jump to today)
-    if (!isToday()) { S.view = 'all'; earlierOpen = null; openFlowOpts(null); renderDay(); renderOptions(); }
-    else startFresh();
+    closedOpenFlow();
   }
   else if (open && S.thread) patchStream(open);
   threadsArrived();
+}
+// The open flow is gone (deleted here, or on another device). Browsing a past day: stay on it, on All with In: on a new
+// flow (startFresh would jump to today). On today: a fresh start.
+function closedOpenFlow() {
+  if (!isToday()) { S.view = 'all'; earlierOpen = null; openFlowOpts(null); renderDay(); renderOptions(); }
+  else startFresh();
 }
 // Redraws only the entries that changed (replaced: repainted in place; added: inserted at their place; removed), so a
 // Look up card, a selection, an expanded prompt or keyboard focus elsewhere in the conversation stays put. Entries
@@ -633,10 +637,9 @@ function patchStream({ replaced = [], added = [], removed = [] } = {}) {
 // Threads copied in after the boot stopped waiting (it waits 2 s): refresh whichever list is showing them.
 function threadsArrived() {
   refreshClaudeCount();
-  renderRecentThreads();
   if (!$('#threadsDrawer').hidden) renderThreads();
   if (!$('#libraryDrawer').hidden) renderLibrary();
-  refreshDay();
+  refreshDay(); // one read draws Today and the home screen's recent list (readDay), however many changes arrive together
 }
 // Settings → Your data: "Bring over older conversations" shows only while the old database still needs bringing over.
 function syncMigrateBtn() { const b = $('#migrateBtn'); if (b) b.hidden = !migrationPending(); }
@@ -651,10 +654,13 @@ function newThread(flow = null) {
 // Each flow keeps its own composer choices: thread.opts, the shape of S.opts plus mode. They stay on this device (sync
 // carries only the title, the flow and the entries). A flow with none opens with its kind's defaults over the last
 // global choices (LS 'opts' and 'mode'); a thread with no kind and no choices opens with the global ones, as before.
-function openFlowOpts(thread) {
+// keepMode: the kind's choices load but the composer stays in its mode (setFlow).
+let flowStartMode = null; // the mode the open flow opened with
+function openFlowOpts(thread, { keepMode = false } = {}) {
   const { opts, mode } = flowOpts(thread, globalOpts(), LS.get('mode', S.mode), cleanOpts);
   S.opts = opts;
-  if (MODES[mode] && mode !== S.mode) setMode(mode, { load: true }); // the callers draw the options after this
+  if (!keepMode && MODES[mode] && mode !== S.mode) setMode(mode, { load: true }); // the callers draw the options after this
+  flowStartMode = S.mode;
 }
 // A composer change (saveOpts, setMode) saves into the open flow. keepTime: changing a chip in last week's flow doesn't
 // move it to the top of the list.
@@ -664,12 +670,14 @@ function saveFlowOpts() {
   t.opts = { ...structuredClone(S.opts), mode: S.mode };
   persist(false, { keepTime: true });
 }
-// A flow's kind, chosen or confirmed. One with no choices of its own yet starts from the kind's defaults.
+// A flow's kind, chosen or confirmed. One with no choices of its own yet starts from the kind's defaults (the Auto model,
+// LinkedIn's As me). Its mode changes too only while the flow is empty and still in the mode it opened with: a mode he
+// picked first (Image, Video) stays, and so does the mode of an older flow with turns in it.
 function setFlow(thread, kind) {
   const flow = cleanFlow({ kind });
   if (!thread || !flow) return;
   thread.flow = flow;
-  if (thread === S.thread) { if (!thread.opts) { openFlowOpts(thread); saveFlowOpts(); renderOptions(); } persist(false, { keepTime: true }); } // a kind is not activity: it stays where it was in Newest first
+  if (thread === S.thread) { if (!thread.opts) { openFlowOpts(thread, { keepMode: thread.entries.length > 0 || S.mode !== flowStartMode }); saveFlowOpts(); renderOptions(); } persist(false, { keepTime: true }); } // a kind is not activity: it stays where it was in Newest first
   else DB.put(thread).catch(storageError);
   renderFlowTabs();
 }
@@ -699,8 +707,8 @@ async function migrateHandFlows() {
     if (accountReloading) return;
     // A stored row is read again just before the write: reading the whole library can take seconds, and a sync pull or
     // another tab may have saved a turn into it since. DB.get records what IndexedDB holds, so the save merges with it.
-    const live = S.thread?.id === thread.id ? S.thread : liveThreads.get(thread.id);
-    const cur = live || await DB.get(thread.id);
+    const onScreen = S.thread?.id === thread.id ? S.thread : liveThreads.get(thread.id);
+    const cur = onScreen || await DB.get(thread.id);
     if (!cur || cur.flow != null || !cur.entries?.length) continue;
     cur.flow = flow; await DB.put(cur);
   }
@@ -713,7 +721,10 @@ async function migrateHandFlows() {
 // + Flow), and either All, the day's prompts across flows (newest at the bottom), or one flow's conversation (S.view is
 // its id and S.thread is that flow). In All, S.thread is the flow the composer's In: picker names: a send goes there and
 // shows it (intoFlow), so a turn never goes out with a mix of flows. null there means a new flow.
-let dayCache = null, daySeq = 0; // every saved thread, as last read (allThreads); null until the first read
+let dayCache = null; // every saved thread, as last read (allThreads); null until the first read
+let dayReading = false, dayAgain = false; // a read waits or runs; another was asked for meanwhile (refreshDay)
+const DAY_READ_WAIT = 60; // ms: changes that arrive together (a sync pull of many flows) share one read
+let dayLive = null; // the day S.day was set to while it was today (noteDay); null once he browsed to a past day
 let streamFrom = 0, earlierOpen = null; // the first entry the open flow shows; the flow whose earlier part is shown too
 const daysSorted = new Set(); // past days whose unsorted flows were sent to the sorter this session (sortDay)
 const flowColor = (kind) => (GROUPS.groups.some((g) => g.key === kind) ? `var(--flow-${kind})` : 'var(--flow-none)');
@@ -726,20 +737,54 @@ function dayPool() {
 }
 const isToday = () => S.day === dayKey(Date.now());
 // Everything Today shows: the day bar, the tabs, the picker and All or the flow. Drawn now from the last read, then again
-// once the threads are read.
-function renderDay() {
+// once the threads are read. cached: a tab, All, ◀ ▶ or + Flow only changes what is shown, so the last read is enough
+// (keepInDay put the flow just left in it as it is on screen); the library is read only when nothing was read yet.
+function renderDay({ cached = false } = {}) {
+  noteDay();
   renderThread(); // the flow's conversation, or nothing in All
   if (dayCache) paintDay();
-  refreshDay();
+  if (!cached || !dayCache) refreshDay();
 }
-async function refreshDay(known) {
-  const seq = ++daySeq, rows = await allThreads(known);
-  if (seq !== daySeq || accountReloading) return;
-  // The store is held by another tab: what came back is short. It is drawn again from the rows once they arrive.
-  if (rows.busy) { rows.late.then((saved) => { if (seq === daySeq) refreshDay(saved); }); if (!rows.length) return; }
-  dayCache = rows;
-  paintDay();
-  sortDay();
+// The day on screen stays "live" while it is the day that was today when it was set: left open overnight, it moves to
+// the new today when the page comes back (rollDay). A past day he browsed to is never live, so he is never moved off it.
+function noteDay() {
+  if (isToday()) dayLive = S.day;
+  else if (S.day !== dayLive) dayLive = null;
+}
+// Reading every saved thread is slow on a phone with a large library (media included), so reads never overlap: a call
+// while one waits or runs asks for one more after it. A burst of sync changes costs one or two reads, not one each.
+function refreshDay() {
+  if (dayReading) { dayAgain = true; return; }
+  dayReading = true;
+  setTimeout(readDay, DAY_READ_WAIT);
+}
+async function readDay() {
+  dayAgain = false; // what was asked for before the read starts, it covers
+  try {
+    let rows = await allThreads();
+    if (accountReloading) return;
+    // The store is held by another tab: what came back is short. It is drawn now, and again from the same read's rows
+    // once they arrive (no second read).
+    if (rows.busy) {
+      if (rows.length) { dayCache = rows; paintDay(); }
+      rows = await allThreads(await rows.late);
+      if (accountReloading) return;
+    }
+    dayCache = rows;
+    renderRecentThreads(rows.saved); // the home screen's recent list, from the same rows
+    paintDay();
+    sortDay();
+  } finally {
+    dayReading = false;
+    if (dayAgain) refreshDay();
+  }
+}
+// The flow being left goes into the last read as it is on screen (its turns this visit included), so the day can be
+// drawn from that read alone (renderDay cached). A flow with nothing in it is never saved, so it leaves no tab.
+function keepInDay(t) {
+  if (!dayCache || !t?.entries.length) return;
+  const i = dayCache.findIndex((x) => x.id === t.id);
+  if (i < 0) dayCache.push(t); else dayCache[i] = t;
 }
 function paintDay() {
   paintDayBar(); paintTabs(); paintPicker();
@@ -810,7 +855,7 @@ function paintEarlier() {
   if (n) $('button', bar).textContent = `Earlier in this flow · ${n}`;
 }
 // Leaving the open flow for another view of the day (+ Flow, All, ◀ ▶, In:): a flush, as openThread and startFresh do.
-function flushOpen() { persist(true, { flush: true }); }
+function flushOpen() { keepInDay(S.thread); persist(true, { flush: true }); }
 // The flow a turn goes into. All is a view only: from it a turn goes into the flow the In: picker names (submit makes a
 // new one when it names none), and that flow is shown before the turn is added, so its answer streams where it belongs.
 // A turn always lands on today: sent from a past day, the page moves to today. Already in that flow, its whole
@@ -824,6 +869,12 @@ function intoFlow() {
   earlierOpen = S.view === S.thread.id ? S.thread.id : null;
   S.day = today; S.view = S.thread.id;
   renderDay();
+}
+// A turn redone now (Retry, a Remix retry) belongs to today (days.js entryTime): it is stamped, and the page moves to
+// today with it as it does for a send (intoFlow).
+function redoneNow(e) {
+  e.at = Date.now();
+  if (S.thread?.entries.includes(e)) intoFlow();
 }
 // A flow's tab, a timeline row (entry: scrolled to it), or the picker in a flow.
 async function openFlow(id, entry = null) {
@@ -839,7 +890,7 @@ function newFlow() {
   S.day = dayKey(Date.now()); // a new flow lives on today
   openFlowOpts(S.thread);
   $('#activityStatus').textContent = '';
-  renderDay(); renderOptions();
+  renderDay({ cached: true }); renderOptions();
   input.placeholder = MODES[S.mode].ph;
   input.focus({ preventScroll: true });
 }
@@ -849,7 +900,7 @@ function showAll() {
   flushOpen();
   if (S.thread && !S.thread.entries.length) { S.thread = null; openFlowOpts(null); renderOptions(); }
   S.view = 'all'; earlierOpen = null;
-  renderDay();
+  renderDay({ cached: true });
   requestAnimationFrame(scrollDay);
 }
 function scrollDay() { if (S.view === 'all' && $('#timeline').hidden) stage.scrollTo({ top: 0, behavior: 'instant' }); else scrollDown(true, true); }
@@ -860,7 +911,7 @@ function stepToDay(dir) {
   flushOpen();
   if (S.thread && !S.thread.entries.length) { S.thread = null; openFlowOpts(null); renderOptions(); }
   S.day = to; S.view = 'all'; earlierOpen = null;
-  renderDay();
+  renderDay({ cached: true });
   requestAnimationFrame(scrollDay);
 }
 // Boot: Atelier opens on today. The last flow opens on its tab when it had a turn today; otherwise the day's All, with
@@ -871,6 +922,23 @@ function openToday(t) {
   S.thread = t; openFlowOpts(t); S.view = t.id; renderOptions();
   requestAnimationFrame(() => scrollDown(true, true));
 }
+// The page comes back (visible again, focus, restored from the cache) on a new date. Left on what was today, it moves to
+// today as the boot would: the open flow stays when it has a turn today or nothing in it yet, else today's All with In:
+// on a new flow. A past day he browsed to stays, and so does a page with a run going (checked again the next time).
+function rollDay() {
+  const to = rolledDay(S.day, dayLive, dayKey(Date.now()));
+  if (!to || S.busy || accountReloading) return;
+  if (S.thread && !keepsFlow(S.thread, to)) {
+    flushOpen(); stopReading({ disarm: true });
+    S.thread = null; S.view = 'all'; openFlowOpts(null); renderOptions();
+  }
+  S.day = to; earlierOpen = null;
+  renderDay();
+  requestAnimationFrame(scrollDay);
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') rollDay(); });
+window.addEventListener('focus', () => rollDay());
+window.addEventListener('pageshow', () => rollDay());
 // A timeline row: its flow, scrolled to that turn (under the header), which flashes once.
 function showEntry(id) {
   const li = stream.querySelector(`:scope > .entry[data-id="${CSS.escape(id)}"]`);
@@ -3887,7 +3955,7 @@ async function nameThread(e, thread) {
   if (!feat('helpers')) return; // the title stays the prompt's first words
   try {
     const t = helperAnswer(await completeChat({ model: modelFor('fast'), role: 'fast', max_tokens: 800, temperature: 0.3, extra: noThink, messages: [{ role: 'system', content: SYS.title() }, { role: 'user', content: e.prompt }] }), 'title', 8);
-    if (t && t.length < 60 && thread && !manualTitles.has(thread.id) && !accountReloading && await DB.get(thread.id)) { thread.title = t.replace(/^["'#\s]+|["'.\s]+$/g, ''); await DB.put(thread); renderRecentThreads(); renderFlowTabs(); }
+    if (t && t.length < 60 && thread && !manualTitles.has(thread.id) && !accountReloading && await DB.get(thread.id)) { thread.title = t.replace(/^["'#\s]+|["'.\s]+$/g, ''); await DB.put(thread); renderFlowTabs(); }
   } catch {}
 }
 
@@ -3971,7 +4039,7 @@ stream.addEventListener('click', async (ev) => {
     return;
   }
   if (e.remix && remix && act?.startsWith('rx-') && (await remix.onAct(act, b, e, li))) return;
-  if (e.remix && remix && (act === 'retry' || act === 'edit-prompt')) { await remix.onAct(act, b, e, li); return; } // retry → plan or cut again; edit → Fine-tune, never a plain Video prompt
+  if (e.remix && remix && (act === 'retry' || act === 'edit-prompt')) { if (act === 'retry' && !e.pending) redoneNow(e); await remix.onAct(act, b, e, li); return; } // retry → plan or cut again; edit → Fine-tune, never a plain Video prompt
   switch (act) {
     case 'copy':
       return copy(e.kind === 'ideas' ? e.ideas.map((d, i) => `${i + 1}. ${d.title} — ${d.pitch}`).join('\n') : stripThink(e.text));
@@ -3989,7 +4057,7 @@ stream.addEventListener('click', async (ev) => {
       { const was = entryTaint(e); if (was) e.ranTaint = worseTaint(e.ranTaint, was); }
       Object.assign(e, { text: '', think: '', media: [], ideas: null, app: null, error: null, errorKind: null, cut: null, steps: null, enhanced: null, budget: null });
       if (e.params?.seed) delete e.params.seed;
-      e.at = Date.now(); // redone now: the entry belongs to today (days.js entryTime)
+      redoneNow(e);
       rearmRetry(e); // a spoken request this device sent, tried again, reads its new answer too
       for (const key of libThumbs.keys()) if (key.includes(`:${e.id}:`)) libThumbs.delete(key); // new media, same entry id: drop stale Library thumbs/posters
       return run(e);
@@ -5397,14 +5465,15 @@ async function renderRecentThreads(known) {
 // day: a row of the Days list opens the flow on that day (its part of it shows, the rest under the Earlier bar).
 async function openThread(id, day = null) {
   persist(true, { flush: true });
+  keepInDay(S.thread); // the flow being left, as it is on screen, so the day draws from the last read
   const t = (S.thread?.id === id && S.thread) || liveThreads.get(id) || recoverThread(await DB.get(id)); // the one on screen as it is
-  if (!t || accountReloading) return toast('That thread is no longer on this device. Refresh the list.', { error: true });
+  if (!t || accountReloading) return toast('That flow is no longer on this device. Refresh the list.', { error: true });
   if (t.id !== S.thread?.id) stopReading({ disarm: true });
   if (day) S.day = day;
   S.thread = t; openFlowOpts(t);
   // Today shows it as its tab: its part of the day, or all of it when it has nothing that day (opened from the list)
   S.view = t.id; earlierOpen = earlierCut(t, S.day) >= t.entries.length ? t.id : null;
-  renderDay(); closeDrawers(); renderOptions();
+  renderDay({ cached: true }); closeDrawers(); renderOptions();
   LS.set(workspaceKey('lastFlow'), t.id);
   requestAnimationFrame(() => scrollDown(true, true));
 }
@@ -5748,7 +5817,7 @@ $('#clearThreadSearch').onclick = () => {
   renderThreads(false, threadRows);
 };
 $('#drawerNewThread').onclick = () => { closeDrawers(false); startFresh(); };
-document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog" id="threadMenuDialog" aria-labelledby="threadMenuTitle"><form class="sheet-body" id="threadMenuForm"><div class="sheet-head"><h2 id="threadMenuTitle">Your <em>thread</em></h2><button type="button" class="icon-btn" data-thread-close aria-label="Close thread options">${ICON.x}</button></div><div class="thread-edit-body"><label class="field"><span>Thread name</span><input id="threadName" maxlength="120" required autocomplete="off" /></label><p class="hint">Renaming keeps all of your conversation. Pins are saved for this account on this device.</p><div class="thread-space" id="threadSpace" role="group" aria-label="Group"><span>Group, for the By group order</span><button type="button" class="chip" data-space="">Automatic</button>${GROUPS.groups.map((g) => `<button type="button" class="chip" data-space="${g.key}" title="${esc(g.label)}">${esc(g.short)}</button>`).join('')}</div><p class="hint bad" id="threadMenuError" role="alert"></p></div><div class="sheet-foot"><button type="button" class="chip danger" id="threadMenuDelete">Delete thread</button><button type="submit" class="btn-primary">Save name</button></div></form></dialog>`);
+document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog" id="threadMenuDialog" aria-labelledby="threadMenuTitle"><form class="sheet-body" id="threadMenuForm"><div class="sheet-head"><h2 id="threadMenuTitle">Your <em>flow</em></h2><button type="button" class="icon-btn" data-thread-close aria-label="Close flow options">${ICON.x}</button></div><div class="thread-edit-body"><label class="field"><span>Flow name</span><input id="threadName" maxlength="120" required autocomplete="off" /></label><p class="hint">Renaming keeps all of your conversation. Pins are saved for this account on this device.</p><div class="thread-space" id="threadSpace" role="group" aria-label="Group"><span>Group, for the By group order</span><button type="button" class="chip" data-space="">Automatic</button>${GROUPS.groups.map((g) => `<button type="button" class="chip" data-space="${g.key}" title="${esc(g.label)}">${esc(g.short)}</button>`).join('')}</div><p class="hint bad" id="threadMenuError" role="alert"></p></div><div class="sheet-foot"><button type="button" class="chip danger" id="threadMenuDelete">Delete flow</button><button type="submit" class="btn-primary">Save name</button></div></form></dialog>`);
 let menuThreadId = null;
 $('#threadMenuDialog [data-thread-close]').onclick = () => $('#threadMenuDialog').close();
 $('#threadMenuForm').addEventListener('submit', async (ev) => {
@@ -5757,15 +5826,15 @@ $('#threadMenuForm').addEventListener('submit', async (ev) => {
   const b = ev.submitter; if (b?.disabled) return; if (b) b.disabled = true;
   try {
     const t = liveThreads.get(id) || (S.thread?.id === id ? S.thread : await DB.get(id));
-    if (!t) throw new Error('This thread is no longer on this device.');
+    if (!t) throw new Error('This flow is no longer on this device.');
     manualTitles.add(id); t.title = title; t.updatedAt = Date.now(); await DB.put(t);
     if (S.thread?.id === id) S.thread.title = title;
-    $('#threadMenuDialog').close(); renderThreads(); renderRecentThreads(); refreshDay(); toast('Thread renamed');
+    $('#threadMenuDialog').close(); renderThreads(); refreshDay(); toast('Flow renamed');
   } catch (err) { $('#threadMenuError').textContent = netText(err); }
   finally { if (b) b.disabled = false; }
 });
 async function deleteSavedThread(id) {
-  if (S.busy) return toast('Wait for generation to finish before deleting a thread.');
+  if (S.busy) return toast('Wait for generation to finish before deleting a flow.');
   if (remix?.activeThreads().has(id) && !confirm(remix.deleteWarning(id))) return;
   const ask = Sync.on() ? await Sync.deleteCopy(id) : 'Delete this thread?';
   if (!confirm(ask)) return;
@@ -5777,8 +5846,8 @@ async function deleteSavedThread(id) {
   if (!ask.startsWith(Sync.COPY.deleteConfirm)) appStore.forgetThread(id).catch((err) => console.error(err));
   pinnedThreads.delete(id); LS.set(workspaceKey('pinnedThreads'), [...pinnedThreads]);
   forgetSpace(id);
-  if (wasOpen) startFresh();
-  renderThreads(); renderRecentThreads(); refreshDay(); $('#threadMenuDialog').close();
+  if (wasOpen) closedOpenFlow(); // a past day being browsed stays on screen
+  renderThreads(); refreshDay(); $('#threadMenuDialog').close();
 }
 // The thread menu (rename, group, delete), from a row's ⋯ in the Days list or Rename in a flow's menu.
 function openThreadMenu(id, title) {
@@ -5788,11 +5857,15 @@ function openThreadMenu(id, title) {
   $('#threadMenuError').textContent = ''; $('#threadMenuDialog').showModal(); $('#threadName').focus(); $('#threadName').select();
 }
 // The thread's group, chosen by hand (kept at once, no Save needed): it is also the flow's synced kind (pickKind).
-// Automatic hands the group back to the sorter; a synced kind stays (it is never cleared) and shows as chosen.
+// Automatic hands the group back to the sorter, so it shows only while the flow has no synced kind: that is never
+// cleared, so Automatic would do nothing. A synced kind shows as chosen.
 function paintThreadSpace() {
   const t = [S.thread, ...(threadRows || []), ...(dayCache || [])].find((x) => x?.id === menuThreadId);
   const mine = spaceByHand(threadSpaces, menuThreadId) ? spaceOf(threadSpaces, menuThreadId) : t?.flow?.kind || '';
-  for (const b of $$('#threadSpace [data-space]')) b.setAttribute('aria-pressed', String(b.dataset.space === mine));
+  for (const b of $$('#threadSpace [data-space]')) {
+    b.setAttribute('aria-pressed', String(b.dataset.space === mine));
+    if (!b.dataset.space) b.hidden = Boolean(t?.flow);
+  }
 }
 $('#threadSpace').addEventListener('click', async (ev) => {
   const b = ev.target.closest('[data-space]'), id = menuThreadId; if (!b || !id) return;

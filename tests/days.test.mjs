@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dayKey, entryTime, flowDays, flowsOn, daySlice, dayTimeline, dayList, stepDay, kindOf, cleanFlow, flowHint, KIND_DEFAULTS } from '../public/days.js';
+import { dayKey, entryTime, flowDays, flowsOn, daySlice, dayTimeline, dayList, stepDay, kindOf, cleanFlow, flowHint, KIND_DEFAULTS, rolledDay, keepsFlow } from '../public/days.js';
 import { GROUP_SETS } from '../public/thread-spaces.js';
 
 const at = (y, m, d, h = 12, min = 0) => new Date(y, m - 1, d, h, min).getTime();
@@ -74,11 +74,39 @@ test('cleanFlow rejects junk', () => {
   assert.deepEqual(cleanFlow({ kind: 'kid', color: '#abc' }), { kind: 'kid', color: '#abc' });
 });
 
-test('flowHint names the kind', () => {
-  assert.equal(flowHint('coen', GROUP_SETS.owner), 'This flow is about Work: Coen Construction.');
+test('flowHint names the kind in a phrase written for the model, one short line', () => {
+  assert.equal(flowHint('coen', GROUP_SETS.owner), 'This flow is about work for Coen Construction.');
+  assert.equal(flowHint('edgeball', GROUP_SETS.owner), 'This flow is about work for Edgeball Strategies.');
+  assert.equal(flowHint('kid', GROUP_SETS.owner), 'This flow is about their kid.');
+  assert.equal(flowHint('linkedin', GROUP_SETS.basic), 'This flow is about a LinkedIn post in their voice.');
+  for (const set of [GROUP_SETS.owner, GROUP_SETS.basic]) for (const g of set.groups) {
+    const h = flowHint(g.key, set);
+    assert.match(h, /^This flow is about [a-z][^.:]{2,70}\.$/, `${set.id} ${g.key}: ${h}`);
+    assert.doesNotMatch(h, /Work: |about (Kid|Personal|Work)\./, 'never the list heading');
+  }
   assert.equal(flowHint('nope', GROUP_SETS.owner), '');
+  assert.equal(flowHint('', GROUP_SETS.owner), '');
 });
 
-test('KIND_DEFAULTS', () => {
+test('KIND_DEFAULTS: LinkedIn is Ask with As me; every other kind is Ask with the Auto model', () => {
   assert.deepEqual(KIND_DEFAULTS.linkedin, { mode: 'ask', ask: { voice: true } });
+  for (const k of ['kid', 'personal', 'work', 'coen', 'edgeball', 'apps']) assert.deepEqual(KIND_DEFAULTS[k], { mode: 'ask', ask: { model: '' } }, k);
+  for (const set of [GROUP_SETS.owner, GROUP_SETS.basic]) for (const g of set.groups) assert.ok(KIND_DEFAULTS[g.key], `${g.key} has defaults`);
+});
+
+test('rolledDay: a page left on today moves to the new today; a past day he browsed to stays', () => {
+  const d12 = '2026-11-12', d13 = '2026-11-13', d10 = '2026-11-10';
+  assert.equal(rolledDay(d12, d12, d13), d13, 'left open on the 12th overnight: the 13th');
+  assert.equal(rolledDay(d13, d13, d13), null, 'same day: nothing');
+  assert.equal(rolledDay(d10, null, d13), null, 'browsing a past day: stays');
+  assert.equal(rolledDay(d10, d12, d13), null, 'a day other than the one that was today: stays');
+  assert.equal(rolledDay(d12, null, d13), null, 'set to the 12th while it was already the 13th: he chose it');
+});
+
+test('keepsFlow: the open flow stays on the new day when it has a turn that day, or nothing yet', () => {
+  const d13 = '2026-11-13';
+  assert.equal(keepsFlow({ entries: [entry('a', at(2026, 11, 12, 23, 30))] }, d13), false, 'last night only');
+  assert.equal(keepsFlow({ entries: [entry('a', at(2026, 11, 12, 23, 30)), entry('b', at(2026, 11, 13, 0, 10))] }, d13), true);
+  assert.equal(keepsFlow({ entries: [] }, d13), true, 'a new flow with nothing in it yet');
+  assert.equal(keepsFlow(null, d13), false);
 });

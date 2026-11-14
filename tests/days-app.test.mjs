@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, KIND_DEFAULTS, dayKey, tabFlows, earlierCut, daySlice, dayList, flowsOn, handFlows } from '../public/days.js';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, KIND_DEFAULTS, dayKey, tabFlows, earlierCut, daySlice, dayList, flowsOn, handFlows, rolledDay, keepsFlow } from '../public/days.js';
 import { groupsFor, spaceRequest, parseSpaces, spaceOf } from '../public/thread-spaces.js';
 import { problems } from './humanizer-lint.mjs';
 
@@ -37,7 +37,8 @@ test('retry stamps at: a redone turn counts on the day it was redone', () => {
   const at = APP.indexOf("    case 'retry':\n      if (e.pending || e.canva) return;");
   assert.ok(at > 0, 'app.js has the retry act');
   const body = APP.slice(at, APP.indexOf('      return run(e);\n', at) + '      return run(e);\n'.length);
-  assert.match(body, /e\.at = Date\.now\(\);[^\n]*\n(?:.*\n)*?\s*return run\(e\);\n$/, 'e.at is stamped before run(e)');
+  assert.match(body, /redoneNow\(e\);[^\n]*\n(?:.*\n)*?\s*return run\(e\);\n$/, 'e.at is stamped (redoneNow) before run(e)');
+  assert.match(fnSource('redoneNow'), /e\.at = Date\.now\(\);/);
 });
 
 test('runPrompt adds the flow hint line, after the static part, and nothing for a thread with no kind', () => {
@@ -206,6 +207,12 @@ test('globalOptsWrite: one mode’s slice reaches the global choices, never a ki
   assert.equal(stored.ask.web, false, 'a new object');
   // nothing stored for the default key: it is left out, so the built-in default holds
   assert.deepEqual(globalOptsWrite({}, 'ask', { voice: true, web: true }, 'linkedin'), { ask: { web: true } });
+  // a key the kind sets is held back only while it still has the kind's value: turned off, it goes global like any chip
+  assert.equal(globalOptsWrite({ ask: { voice: true } }, 'ask', { voice: false }, 'linkedin').ask.voice, false);
+  // the Auto model a Coen flow starts with never clears the model pinned for every chat; a model picked there is kept
+  const pinned = { ask: { model: 'anthropic:claude-opus-5-5', think: false } };
+  assert.deepEqual(globalOptsWrite(pinned, 'ask', { model: '', think: true }, 'coen').ask, { model: 'anthropic:claude-opus-5-5', think: true });
+  assert.equal(globalOptsWrite(pinned, 'ask', { model: 'openai:gpt-6.1-sol' }, 'coen').ask.model, 'openai:gpt-6.1-sol');
   // any other kind, or no flow: the whole slice
   assert.equal(globalOptsWrite(stored, 'ask', { voice: true }, 'coen').ask.voice, true);
   assert.equal(globalOptsWrite(stored, 'ask', { voice: true }, undefined).ask.voice, true);
@@ -411,7 +418,8 @@ test('Today review fixes: empty note only today, focus kept on a redraw, a remot
   const tabs = fnSource('paintTabs');
   assert.match(tabs, /had = box\.contains\(document\.activeElement\) \? document\.activeElement\.dataset\.view : null/);
   assert.match(tabs, /find\(\(b\) => b\.dataset\.view === had\) \|\| sel\)\.focus\(/);
-  assert.match(fnSource('syncApplied'), /if \(!isToday\(\)\) \{ S\.view = 'all'; earlierOpen = null; openFlowOpts\(null\); renderDay\(\); renderOptions\(\); \}\n\s*else startFresh\(\);/);
+  assert.match(fnSource('syncApplied'), /clearTimeout\(persistTimer\); S\.thread = null;\n\s*closedOpenFlow\(\);/);
+  assert.match(fnSource('closedOpenFlow'), /if \(!isToday\(\)\) \{ S\.view = 'all'; earlierOpen = null; openFlowOpts\(null\); renderDay\(\); renderOptions\(\); \}\n\s*else startFresh\(\);/);
 });
 
 test('a new flow\'s kind: the sorter guesses it after the first answer, unless he picked one', async () => {
@@ -686,7 +694,7 @@ test('a guess is not written until a send', async () => {
   await left.v.sortDay();
   assert.deepEqual(left.drawn, []);
   // wired: Today sorts a past day once it has read the threads
-  assert.match(fnSource('refreshDay'), /paintDay\(\);\n\s*sortDay\(\);/);
+  assert.match(fnSource('readDay'), /paintDay\(\);\n\s*sortDay\(\);/);
   assert.match(APP, /if \(threadSort === 'space' && fromSorter !== true\) sortIntoSpaces\(all\);/, 'the drawer\'s By group still sorts as before');
 });
 
@@ -757,4 +765,235 @@ test('the Days list: the stored order comes back when it closes, and it counts f
   assert.match(body, /`\$\{all\.length\} \$\{all\.length === 1 \? 'flow' : 'flows'\}`/);
   assert.doesNotMatch(body, /'matching threads?'|saved \$\{|Loading your threads|No (?:matching )?threads/);
   for (const s of ['1 flow', '3 flows', '2 matching flows', 'Loading your flows…', 'No matching flows', 'No flows yet']) assert.deepEqual(problems(s), [], s);
+});
+
+// ── Final review fixes ──
+test('a page left open overnight comes back on today; a past day he browsed to stays', () => {
+  const today = dayKey(Date.now()), yesterday = dayKey(at(1)), older = dayKey(at(3));
+  const rig = (S, dayLive = yesterday) => {
+    const calls = { render: 0, flush: 0, opts: [], options: 0 };
+    const v = { S, dayKey, rolledDay, keepsFlow, accountReloading: false, dayLive, earlierOpen: 'x',
+      flushOpen: () => { calls.flush++; }, stopReading: () => {}, openFlowOpts: (t) => calls.opts.push(t?.id ?? null), renderOptions: () => { calls.options++; },
+      renderDay: () => { calls.render++; }, requestAnimationFrame: () => {}, scrollDay: () => {} };
+    lift(v, 'rollDay');
+    return { v, calls };
+  };
+  // All on last night, In: on last night's flow: today's All, In: on a new flow (as the boot does)
+  const late = { id: 'late', entries: [{ id: 'a', at: at(1, 23) }] };
+  let S = { day: yesterday, view: 'all', thread: late, busy: false };
+  let { v, calls } = rig(S);
+  v.rollDay();
+  assert.deepEqual([S.day, S.view, S.thread], [today, 'all', null]);
+  assert.deepEqual(calls.opts, [null]);
+  assert.deepEqual([calls.render, calls.flush, calls.options], [1, 1, 1]);
+  assert.equal(v.earlierOpen, null);
+  v.rollDay();
+  assert.equal(calls.render, 1, 'already today: nothing more');
+  // reading last night's flow on its tab: the same, its tab would be empty today
+  S = { day: yesterday, view: 'late', thread: late, busy: false };
+  ({ v, calls } = rig(S));
+  v.rollDay();
+  assert.deepEqual([S.day, S.view, S.thread], [today, 'all', null]);
+  // a flow with a turn today (synced from the desktop overnight) stays open on its tab
+  const synced = { id: 'synced', entries: [{ id: 'a', at: at(1, 23) }, { id: 'b', at: Date.now() }] };
+  S = { day: yesterday, view: 'synced', thread: synced, busy: false };
+  ({ v, calls } = rig(S));
+  v.rollDay();
+  assert.deepEqual([S.day, S.view, S.thread], [today, 'synced', synced]);
+  assert.deepEqual([calls.opts, calls.render], [[], 1]);
+  // a new flow with nothing in it yet stays too
+  const fresh = { id: 'fresh', entries: [] };
+  S = { day: yesterday, view: 'fresh', thread: fresh, busy: false };
+  ({ v } = rig(S));
+  v.rollDay();
+  assert.deepEqual([S.day, S.view, S.thread], [today, 'fresh', fresh]);
+  // browsing a past day: never moved
+  S = { day: older, view: 'late', thread: late, busy: false };
+  ({ v, calls } = rig(S, null));
+  v.rollDay();
+  assert.deepEqual([S.day, S.view, S.thread, calls.render], [older, 'late', late, 0]);
+  // a run still going: left alone until the next time it comes back
+  S = { day: yesterday, view: 'late', thread: late, busy: true };
+  ({ v, calls } = rig(S));
+  v.rollDay();
+  assert.deepEqual([S.day, calls.render], [yesterday, 0]);
+  S.busy = false; v.rollDay();
+  assert.equal(S.day, today);
+  // wired: on coming back (visible, focus, a page restored from the cache)
+  assert.match(APP, /document\.addEventListener\('visibilitychange', \(\) => \{ if \(document\.visibilityState === 'visible'\) rollDay\(\); \}\);/);
+  assert.match(APP, /window\.addEventListener\('focus', \(\) => rollDay\(\)\);/);
+  assert.match(APP, /window\.addEventListener\('pageshow', \(\) => rollDay\(\)\);/);
+});
+
+test('noteDay: the day counts as live only when it was today as it was set', () => {
+  const today = dayKey(Date.now()), yesterday = dayKey(at(1));
+  const S = { day: today };
+  const v = { S, dayLive: null };
+  v.isToday = () => S.day === dayKey(Date.now());
+  lift(v, 'noteDay');
+  v.noteDay();
+  assert.equal(v.dayLive, today);
+  S.day = yesterday; v.noteDay();
+  assert.equal(v.dayLive, null, 'browsed to yesterday');
+  // left on today past midnight: the day it was set to stays live until it rolls over
+  v.dayLive = yesterday; v.noteDay();
+  assert.equal(v.dayLive, yesterday);
+  assert.match(fnSource('renderDay'), /^function renderDay\([^)]*\) \{\n\s*noteDay\(\);/);
+});
+
+test('Today reads the library once for a burst of changes, and never two reads at once', async () => {
+  const timers = [], pending = [], recent = [];
+  let reads = 0, painted = 0;
+  const v = { S: { thread: null }, accountReloading: false, dayCache: null, dayReading: false, dayAgain: false, DAY_READ_WAIT: 50,
+    setTimeout: (f) => { timers.push(f); return timers.length; },
+    allThreads: (known) => { if (known) return Promise.resolve(Object.assign([...known], { saved: known })); reads++; return new Promise((res) => pending.push(res)); },
+    paintDay: () => { painted++; }, sortDay: () => {}, renderRecentThreads: (k) => recent.push(k) };
+  lift(v, 'refreshDay', 'readDay');
+  const tick = () => new Promise((r) => setImmediate(r));
+  for (let i = 0; i < 40; i++) v.refreshDay(); // the desktop's migration: 40 flows pulled in a burst
+  assert.deepEqual([timers.length, reads], [1, 0], 'one read waits');
+  timers.shift()();
+  assert.equal(reads, 1);
+  for (let i = 0; i < 10; i++) v.refreshDay(); // more arrive while it reads
+  assert.equal(timers.length, 0, 'no second read while one runs');
+  const rows = [{ id: 'a', entries: [] }];
+  pending.shift()(Object.assign([...rows], { saved: rows }));
+  await tick();
+  assert.equal(painted, 1);
+  assert.equal(v.dayCache.length, 1);
+  assert.deepEqual(recent, [rows], 'the same read draws the recent list on the home screen');
+  assert.equal(timers.length, 1, 'one more read for the changes that came during it');
+  timers.shift()();
+  pending.shift()(Object.assign([...rows], { saved: rows }));
+  await tick();
+  assert.deepEqual([reads, painted, timers.length], [2, 2, 0], '50 changes: two reads');
+  // the store held by another tab: the short list now, the rest when the same read gets through, with no new read
+  let late;
+  v.allThreads = (known) => { if (known) return Promise.resolve(Object.assign([...known], { saved: known })); reads++; return Promise.resolve(Object.assign([{ id: 'open' }], { busy: true, saved: null, late: new Promise((r) => { late = r; }) })); };
+  v.refreshDay(); timers.shift()();
+  await tick();
+  assert.deepEqual([reads, painted], [3, 3], 'the short list is drawn');
+  v.refreshDay();
+  assert.equal(timers.length, 0, 'still one read');
+  late(rows); await tick();
+  assert.deepEqual([reads, painted], [3, 4]);
+  assert.equal(timers.length, 1, 'then the one asked for meanwhile');
+  // threadsArrived reads once for Today and the recent list; a rename, a delete and a new title too
+  const arrived = fnSource('threadsArrived');
+  assert.doesNotMatch(arrived, /renderRecentThreads/);
+  assert.equal(arrived.match(/refreshDay\(/g).length, 1);
+  for (const s of [APP.slice(APP.indexOf("$('#threadMenuForm').addEventListener('submit'"), APP.indexOf('async function deleteSavedThread')), fnSource('deleteSavedThread'), fnSource('nameThread')]) assert.doesNotMatch(s, /renderRecentThreads\(\); (refreshDay|renderFlowTabs)/);
+});
+
+test('a tab tap draws the day from what was read, without reading the library again', () => {
+  const run = (cached, cache) => {
+    const log = [];
+    const v = { dayCache: cache, dayLive: null, S: { day: dayKey(Date.now()) }, isToday: () => true, renderThread: () => log.push('thread'), paintDay: () => log.push('paint'), refreshDay: () => log.push('read') };
+    lift(v, 'noteDay', 'renderDay');
+    v.renderDay(cached ? { cached: true } : undefined);
+    return log;
+  };
+  assert.deepEqual(run(true, []), ['thread', 'paint']);
+  assert.deepEqual(run(true, null), ['thread', 'read'], 'nothing read yet: it reads');
+  assert.deepEqual(run(false, []), ['thread', 'paint', 'read']);
+  for (const fn of ['openThread', 'showAll', 'stepToDay', 'newFlow']) assert.match(fnSource(fn), /renderDay\(\{ cached: true \}\)/, fn);
+  // the flow being left goes into the cache as it is on screen, so its tab and turns are right without a read
+  const stored = { id: 'a', entries: [{ id: 'old' }] }, live = { id: 'a', entries: [{ id: 'old' }, { id: 'new' }] }, fresh = { id: 'b', entries: [{ id: 'x' }] };
+  const v = { dayCache: [stored] };
+  lift(v, 'keepInDay');
+  v.keepInDay(live); v.keepInDay(fresh); v.keepInDay({ id: 'empty', entries: [] }); v.keepInDay(null);
+  assert.deepEqual(v.dayCache, [live, fresh]);
+  v.dayCache = null; v.keepInDay(live);
+  assert.equal(v.dayCache, null);
+  assert.match(fnSource('flushOpen'), /keepInDay\(S\.thread\);/);
+  assert.match(fnSource('openThread'), /keepInDay\(S\.thread\);/);
+});
+
+test('the group dialog hides Automatic once the flow has a synced kind', () => {
+  const btns = ['', 'coen', 'kid'].map((space) => ({ dataset: { space }, hidden: false, attrs: {}, setAttribute(k, x) { this.attrs[k] = x; } }));
+  const v = { S: { thread: null }, threadRows: [], dayCache: [], threadSpaces: {}, menuThreadId: 't', spaceByHand: () => false, spaceOf: () => '', $$: () => btns };
+  lift(v, 'paintThreadSpace');
+  v.dayCache = [{ id: 't', flow: { kind: 'coen' }, entries: [] }];
+  v.paintThreadSpace();
+  assert.equal(btns[0].hidden, true);
+  assert.equal(btns[1].attrs['aria-pressed'], 'true');
+  v.dayCache = [{ id: 't', entries: [] }];
+  v.paintThreadSpace();
+  assert.equal(btns[0].hidden, false, 'a guess or no group yet: Automatic shows');
+});
+
+test('picking a kind for the open flow: its defaults (Auto model), and the mode only while nothing was chosen yet', () => {
+  const rig = (thread, mode, start = mode) => {
+    const modes = [];
+    const S = { thread, mode, opts: {} };
+    const v = { S, flowStartMode: start, MODES: { ask: {}, image: {}, video: {} }, flowOpts, cleanOpts: (o) => o, cleanFlow,
+      globalOpts: () => ({ ask: { model: 'anthropic:claude-opus-5-5', voice: false }, image: { model: '' } }), LS: { get: (k, d) => d },
+      setMode: (k) => { modes.push(k); S.mode = k; }, saveFlowOpts: () => { thread.opts = { ...structuredClone(S.opts), mode: S.mode }; }, renderOptions: () => {}, persist: () => {}, renderFlowTabs: () => {} };
+    lift(v, 'openFlowOpts', 'setFlow');
+    return { v, S, modes };
+  };
+  // a new flow, still on the mode it opened with: Ask, Auto model
+  let t = { id: 'n', entries: [] }, r = rig(t, 'image');
+  r.v.setFlow(t, 'coen');
+  assert.deepEqual([r.S.mode, r.S.opts.ask.model], ['ask', '']);
+  assert.equal(t.opts.mode, 'ask');
+  // he switched it to Video first (in this composer): it stays Video; the Ask choices still start from the kind
+  t = { id: 'n2', entries: [] }; r = rig(t, 'video', 'ask');
+  r.v.setFlow(t, 'kid');
+  assert.deepEqual([r.S.mode, r.modes, r.S.opts.ask.model], ['video', [], '']);
+  // an old flow with turns and no choices on this device: its mode stays
+  t = { id: 'old', entries: [{ id: 'e' }] }; r = rig(t, 'image');
+  r.v.setFlow(t, 'linkedin');
+  assert.deepEqual([r.S.mode, r.S.opts.ask.voice], ['image', true]);
+  // a flow with choices of its own: nothing changes
+  t = { id: 'own', entries: [], opts: { mode: 'image', ask: { model: 'x' } } }; r = rig(t, 'image');
+  r.v.setFlow(t, 'coen');
+  assert.deepEqual([r.S.mode, r.S.opts], ['image', {}]);
+  assert.match(fnSource('openFlowOpts'), /flowStartMode = S\.mode;/);
+});
+
+test('a retry lands on today, a Remix retry too', () => {
+  const at0 = APP.indexOf("    case 'retry':\n      if (e.pending || e.canva) return;");
+  const body = APP.slice(at0, APP.indexOf('      return run(e);\n', at0));
+  assert.match(body, /\n\s*redoneNow\(e\);\n/);
+  assert.match(APP, /if \(e\.remix && remix && \(act === 'retry' \|\| act === 'edit-prompt'\)\) \{ if \(act === 'retry' && !e\.pending\) redoneNow\(e\); await remix\.onAct\(/);
+  // redoneNow: stamped now, and the page goes where a send would (intoFlow): from a past day, to today
+  const yesterday = dayKey(at(1)), e = { id: 'r', at: at(1) };
+  const flow = { id: 'coen', flow: { kind: 'coen' }, entries: [{ id: 'x', at: at(2) }, e] };
+  const S = { day: yesterday, view: 'coen', thread: flow }, drawn = [];
+  const v = { S, dayKey, cleanFlow, kindOf, threadSpaces: {}, earlierOpen: null, renderDay: () => drawn.push(S.day), renderFlowTabs: () => {} };
+  lift(v, 'intoFlow', 'redoneNow');
+  const before = Date.now();
+  v.redoneNow(e);
+  assert.ok(e.at >= before);
+  assert.deepEqual([S.day, S.view, v.earlierOpen, drawn], [dayKey(Date.now()), 'coen', 'coen', [dayKey(Date.now())]], 'today, the whole conversation open');
+  // an entry not in the open flow only gets its time
+  const other = { id: 'o' };
+  v.redoneNow(other);
+  assert.ok(other.at >= before);
+  assert.equal(drawn.length, 1);
+});
+
+test('deleting the open flow while a past day shows stays on that day', async () => {
+  assert.match(fnSource('deleteSavedThread'), /if \(wasOpen\) closedOpenFlow\(\);/);
+  const yesterday = dayKey(at(1)), log = [];
+  const S = { day: yesterday, view: 'gone', thread: null };
+  const v = { S, earlierOpen: 'gone', isToday: () => S.day === dayKey(Date.now()), openFlowOpts: (t) => log.push(['opts', t]), renderDay: () => log.push('day'), renderOptions: () => log.push('options'), startFresh: () => log.push('fresh') };
+  lift(v, 'closedOpenFlow');
+  v.closedOpenFlow();
+  assert.deepEqual([S.day, S.view, v.earlierOpen], [yesterday, 'all', null]);
+  assert.deepEqual(log, [['opts', null], 'day', 'options']);
+  S.day = dayKey(Date.now()); log.length = 0;
+  v.closedOpenFlow();
+  assert.deepEqual(log, ['fresh']);
+});
+
+test('the Days drawer and the flow menus say flow', () => {
+  for (const s of ['Flow renamed', 'That flow is no longer on this device. Refresh the list.', 'This flow is no longer on this device.', 'Your <em>flow</em>', '<span>Flow name</span>', 'Delete flow</button>', 'Close flow options']) assert.ok(APP.includes(s), s);
+  for (const s of ['Thread renamed', 'That thread is no longer on this device', 'This thread is no longer on this device', 'Your <em>thread</em>', '<span>Thread name</span>', 'Delete thread</button>', 'Close thread options']) assert.ok(!APP.includes(s), s);
+  for (const s of ['Flow renamed', 'That flow is no longer on this device. Refresh the list.', 'Your flow', 'Flow name', 'Delete flow', 'Close flow options']) assert.deepEqual(problems(s), [], s);
+});
+
+test('migrateHandFlows names the record on screen once', () => {
+  assert.equal(fnSource('migrateHandFlows').match(/const live = /g).length, 1);
 });

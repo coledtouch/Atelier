@@ -1,6 +1,6 @@
 // Days and flows: a flow is a thread; a day is derived from the times of its entries (local time), never stored.
 // Pure helpers the UI uses. No DOM and no network, so tests/days.test.mjs imports it directly.
-import { spaceOf, spaceByHand, labelOf } from './thread-spaces.js?v=132';
+import { spaceOf, spaceByHand } from './thread-spaces.js?v=132';
 
 const pad = (n) => String(n).padStart(2, '0');
 /** 'YYYY-MM-DD' in local time. */
@@ -101,14 +101,26 @@ export function handFlows(threads, spaces) {
   return out;
 }
 
-/** The line that tells the model what a flow is about, or '' for a kind the set doesn't have. */
+/** The line that tells the model what a flow is about ('This flow is about work for Coen Construction.'), or '' for a kind the set doesn't have. */
 export function flowHint(kind, set) {
-  const label = labelOf(set, kind);
-  return label ? `This flow is about ${label}.` : '';
+  const about = set?.groups?.find((g) => g.key === kind)?.about;
+  return about ? `This flow is about ${about}.` : '';
 }
 
-/** How a kind of flow behaves by default. Kinds not named here are { mode: 'ask' }. */
-export const KIND_DEFAULTS = Object.freeze({ linkedin: Object.freeze({ mode: 'ask', ask: Object.freeze({ voice: true }) }) });
+/** How a kind of flow behaves by default (spec): LinkedIn is Ask with "As me", the others Ask with the Auto model. Kinds not named here are { mode: 'ask' }. */
+const AUTO = Object.freeze({ mode: 'ask', ask: Object.freeze({ model: '' }) });
+export const KIND_DEFAULTS = Object.freeze({
+  linkedin: Object.freeze({ mode: 'ask', ask: Object.freeze({ voice: true }) }),
+  kid: AUTO, personal: AUTO, work: AUTO, coen: AUTO, edgeball: AUTO, apps: AUTO,
+});
+
+/**
+ * A page left open overnight: the day it should show when it comes back. `live` is the day S.day was set to while that
+ * day was today (null once he browsed to a past day). → the new today, or null to stay where he is.
+ */
+export const rolledDay = (day, live, today) => (live && day === live && day !== today ? today : null);
+/** Whether the open flow stays open on `day`: it has a turn that day, or nothing at all yet (a new flow). */
+export const keepsFlow = (t, day) => Boolean(t) && (!entriesOf(t).length || daySlice(t, day).entries.length > 0);
 
 const isObj = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 function overlay(a, b) {
@@ -137,7 +149,9 @@ export function flowOpts(t, base, baseMode, clean = (o) => o) {
 /**
  * The global choices (LS 'opts') after a change to one mode's choices in a flow: `stored` with `slice` laid over its
  * `mode`, and nothing else touched (other modes keep the global values, not this flow's). Keys the flow's kind sets by
- * default (linkedin's ask.voice) stay as stored: they belong to the flow, never to every later chat. Returns a new object.
+ * default (linkedin's ask.voice, the Auto model of the others) stay as stored while they still have the kind's value: they
+ * belong to the flow, never to every later chat. One he changed (a model picked in a Coen flow) is his choice and goes
+ * global like any other. Returns a new object.
  */
 export function globalOptsWrite(stored, mode, slice, kind) {
   const out = isObj(stored) ? structuredClone(stored) : {};
@@ -145,7 +159,7 @@ export function globalOptsWrite(stored, mode, slice, kind) {
   const was = isObj(out[mode]) ? out[mode] : {};
   const own = structuredClone(slice);
   const d = KIND_DEFAULTS[kind]?.[mode];
-  if (isObj(d)) for (const k of Object.keys(d)) { if (k in was) own[k] = was[k]; else delete own[k]; }
+  if (isObj(d)) for (const k of Object.keys(d)) { if (own[k] !== d[k]) continue; if (k in was) own[k] = was[k]; else delete own[k]; }
   out[mode] = { ...was, ...own };
   return out;
 }
