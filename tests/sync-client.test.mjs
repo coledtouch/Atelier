@@ -2767,3 +2767,60 @@ test('move race: a push whose answer was lost still has its landed copy deleted'
   assert.deepEqual(idsOf(pc.get('t1')), ['e1']);
   assert.deepEqual(idsOf(pc.get('t2')), ['e3', 'e2']);
 });
+
+// The re-review's 4th probe: the pc's push lands but its answer is lost, the phone edits that turn, then the pc moves it.
+// The move must settle in a bounded number of reads. It deletes only what this device knew, so the phone's edit stays
+// on the server (in the old flow, as a copy) and nothing anyone wrote is lost.
+test('move race: a lost push answer, then another device edits the turn, then the move: it settles and keeps the edit', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.put(thread('t1', [ask('e1', T0)]));
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc); await online(phone);
+  const t = structuredClone(pc.get('t1')); t.entries.push(ask('e2', T0 + 1)); await pc.put(t);
+  pc.before = async (x) => {
+    if (x.method !== 'POST' || x.path !== 'thread/t1') return null;
+    pc.before = null;
+    const u = new URL(`https://atelier.test/api/sync/${x.path}`), headers = new Headers({ 'content-type': 'application/json', 'x-app-pass': 'pw', 'content-length': String(Buffer.byteLength(x.body)) });
+    await handleSync(workerRequest(u, { method: 'POST', headers, body: x.body }), w.env, u, u.pathname.slice('/api/'.length));
+    throw new TypeError('Failed to fetch');
+  };
+  await push(pc).catch(() => {});
+  w.clock.t += MIN; await sync(phone);
+  const p = structuredClone(phone.get('t1')); p.entries[1].text = 'edited on phone'; w.clock.t += 1000; await phone.put(p); await sync(phone);
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  const n0 = w.requests(pc).length;
+  for (let i = 0; i < 5; i++) { w.clock.t += MIN; await sync(pc); }
+  const reqs = w.requests(pc).slice(n0);
+  const fullReads = reqs.filter((x) => x.method === 'GET' && x.path.startsWith('thread/t1')).length;
+  assert.ok(fullReads <= 3, `settles in a few reads, not every cycle (${fullReads})`);
+  assert.equal(pc.engine.record('t1')?.e?.e2?.pend, undefined, 'no push left waiting');
+  const mv = await pc.store.get('mv:t1');
+  assert.deepEqual(Object.keys(mv?.seen || {}), [], 'the move is settled');
+  // nothing lost: the pc's version is in the new flow, the phone's edit is still on the server and on both devices
+  assert.deepEqual(pc.get('t2').entries.map((e) => e.id), ['e3', 'e2']);
+  assert.ok(w.doc('t1').entries.some((e) => e.id === 'e2'), 'the phone edit is kept on the server');
+  assert.ok(pc.get('t1').entries.some((e) => e.id === 'e2' && e.text === 'edited on phone'), 'and comes back to the old flow here as a copy');
+  // and it stays settled: later cycles read nothing more of t1
+  const n1 = w.requests(pc).length;
+  for (let i = 0; i < 3; i++) { w.clock.t += MIN; await sync(pc); }
+  assert.equal(w.requests(pc).slice(n1).filter((x) => x.method === 'GET' && x.path.startsWith('thread/t1')).length, 0);
+});
+
+test('move: a push that never settles stops holding the move after a few full reads', async () => {
+  const w = world();
+  const pc = device(w, 'pc');
+  await pc.put(thread('t1', [ask('e1', T0), ask('e2', T0 + 1)]));
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc);
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  // a pend that no read can settle (stands in for a case planPull doesn't know): the wait is bounded
+  const stuck = () => { const rec = pc.engine.record('t1'); if (rec?.e?.e2) rec.e.e2.pend = ['f'.repeat(64)]; };
+  stuck();
+  const n0 = w.requests(pc).length;
+  for (let i = 0; i < 8; i++) { stuck(); w.clock.t += MIN; await sync(pc); }
+  const reqs = w.requests(pc).slice(n0);
+  assert.ok(reqs.filter((x) => x.method === 'GET' && x.path.startsWith('thread/t1')).length <= 4, 'bounded full reads');
+  assert.equal(reqs.filter((x) => x.method === 'DELETE').length, 1, 'then the delete goes, at the revision it knew');
+  assert.deepEqual(w.doc('t1').entries.map((e) => e.id), ['e1']);
+});

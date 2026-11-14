@@ -2163,6 +2163,8 @@ export function createSync(deps = {}) {
     emitSoon();
     kick('delete');
   }
+  // How many full reads a move waits for a push whose answer never came before it deletes at the revision it knew.
+  const MOVE_WAITS = 3;
   async function sendMoves(sum) {
     for (const [k, m0] of await store.entries('mv:')) {
       halted();
@@ -2170,8 +2172,7 @@ export function createSync(deps = {}) {
       if (!ids.length || !syncId(id) || deleting.has(id)) continue; // a delete of the whole thread covers these
       const src = await localThread(id).catch(() => null);
       const sending = new Set(Array.isArray(m0.sending) ? m0.sending : []), go = [];
-      const revs = {}, none = [];
-      let unsettled = false;
+      const revs = {}, none = [], wait = [];
       for (const eid of ids) {
         if (sending.has(eid)) { go.push(eid); continue; } // on the wire before (its answer was lost): sent again
         if (src?.entries?.some?.((e) => e?.id === eid)) continue; // still in the source: the move isn't saved yet
@@ -2181,19 +2182,32 @@ export function createSync(deps = {}) {
         if (!landed && t?.entries?.some?.((e) => e?.id === there)) continue;
         // The revision to delete at: the newest this device's pushes reached on the server. A push whose answer never
         // came (pend) waits for a full read, which tells whether it landed (planPull moving learns its revision) or not.
+        // The wait is bounded (MOVE_WAITS reads), so a case no read settles never holds the move or reads for ever.
         const kx = recs.get(id)?.e?.[eid];
-        if (Array.isArray(kx?.pend) && kx.pend.length) { unsettled = true; continue; }
+        if (Array.isArray(kx?.pend) && kx.pend.length && (m0.waits?.[eid] || 0) < MOVE_WAITS) { wait.push(eid); continue; }
         const rev = Math.max(isRev(m0.seen[eid]) ? m0.seen[eid] : 0, isRev(kx?.r) ? kx.r : 0);
         if (rev > 0) { revs[eid] = rev; go.push(eid); } else none.push(eid); // never reached the server: nothing to delete there
       }
-      if (unsettled) { const rec = recs.get(id); if (rec && !rec.full) await setRec(id, { ...rec, full: true }); pullAfter.add(id); }
+      if (wait.length) {
+        await store.update(k, (cur) => {
+          if (!cur?.seen) return undefined;
+          const waits = { ...(cur.waits || {}) };
+          for (const x of wait) if (hasOwn(cur.seen, x)) waits[x] = (waits[x] || 0) + 1;
+          return { ...cur, waits };
+        });
+        const rec = recs.get(id); if (rec && !rec.full) await setRec(id, { ...rec, full: true }); pullAfter.add(id);
+      }
       if (!go.length && !none.length) continue;
+      // One a push may have reached (its record is there, its answer never came) and that now holds someone else's
+      // version: nothing of this device's to delete, and a full read brings that version back to the source as a copy.
+      if (none.some((x) => recs.get(id)?.e?.[x])) { const rec = recs.get(id); if (rec && !rec.full) await setRec(id, { ...rec, full: true }); pullAfter.add(id); }
       const m = await store.update(k, (cur) => {
         if (!cur?.seen) return undefined;
         const seen = { ...cur.seen }, to = { ...(cur.to || {}) };
-        for (const x of none) { delete seen[x]; delete to[x]; }
+        const waits = { ...(cur.waits || {}) };
+        for (const x of none) { delete seen[x]; delete to[x]; delete waits[x]; }
         for (const [x, r] of Object.entries(revs)) if (hasOwn(seen, x)) seen[x] = Math.max(seen[x] || 0, r);
-        return { ...cur, seen, to, sending: [...new Set([...(cur.sending || []), ...go.filter((x) => hasOwn(seen, x))])] };
+        return { ...cur, seen, to, waits, sending: [...new Set([...(cur.sending || []), ...go.filter((x) => hasOwn(seen, x))])] };
       });
       const out = (m?.sending || []).filter((x) => hasOwn(m.seen, x));
       if (!out.length) continue;
@@ -2202,8 +2216,9 @@ export function createSync(deps = {}) {
       const done = () => store.update(k, (cur) => {
         if (!cur?.seen) return undefined;
         const next = { ...cur.seen }, to = { ...(cur.to || {}) };
-        for (const x of out) { delete next[x]; delete to[x]; }
-        return { ...cur, seen: next, to, sending: (cur.sending || []).filter((x) => !out.includes(x)) };
+        const waits = { ...(cur.waits || {}) };
+        for (const x of out) { delete next[x]; delete to[x]; delete waits[x]; }
+        return { ...cur, seen: next, to, waits, sending: (cur.sending || []).filter((x) => !out.includes(x)) };
       });
       if (r.status === 404 || r.status === 400 || r.status === 413) { await done(); continue; } // nothing there to delete, or a body it won't take
       if (!r.ok) throw new Retry(`move ${r.status}`);

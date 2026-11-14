@@ -711,9 +711,12 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
   for (const r of remote.entries) {
     if (away(r.id)) {
       // Moved out, its delete not sent: the copy stays out of the thread. A version this device pushed whose answer never
-      // came (k.pend) is learned, so the delete goes at the revision it landed as.
+      // came (k.pend) is learned, so the delete goes at the revision it landed as. A full view holding someone else's
+      // version ends the wait too, at the revision this device knew: the delete then leaves that edit on the server (it
+      // comes back here as a copy), so nothing anyone wrote is lost.
       const k = kOf(base, r.id);
       if (k && Array.isArray(k.pend) && k.pend.includes(r.h)) rec.e[r.id] = recordOf(r, await viewG(r), k);
+      else if (remote.full && k && Array.isArray(k.pend)) { const { pend: _p, ...kk } = k; rec.e[r.id] = kk; }
       continue;
     }
     if (quarantined(r.id, r.h)) continue;

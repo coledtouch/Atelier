@@ -368,3 +368,25 @@ test('moveTurn keeps a Build lineage\'s mark: a refine moved away from a marked 
   const out2 = moveTurn({ entries: [root, v2, v3] }, { entries: [] }, 'root', {}, marks);
   for (const e of out2.from) assert.ok(taintedFrom(out2.from, e), `${e.id} still runs strict`);
 });
+
+// The re-review's probe (scratchpad/probe/marks.mjs): a later source turn still streaming keeps its own object, so the
+// run that writes its answer into that object writes into the flow that gets saved.
+test('moveTurn stamps the source turns in place: a turn still answering is never swapped for a copy', async () => {
+  const { moveTurn } = await import('../public/days.js');
+  const { entryTaint, worseTaint } = await import('../public/context.js');
+  const { taintedFrom } = await import('../public/appdata.js');
+  const now = Date.UTC(2026, 10, 14);
+  const link = { id: 'a', kind: 'ask', prompt: 'p', text: 't', createdAt: now + 1, untrusted: 'link' };
+  const live = { id: 'b', kind: 'ask', prompt: 'q', text: 'partial', createdAt: now + 2, pending: true };
+  const r = moveTurn({ id: 's', entries: [link, live] }, { id: 't', entries: [] }, 'a', {}, { entryTaint, worseTaint, taintedFrom });
+  assert.equal(r.from[0], live, 'the same object the run is writing to');
+  assert.equal(live.ranTaint, 'link', 'stamped on the live object');
+  live.text = 'the whole answer'; live.pending = false;
+  assert.equal(r.from[0].text, 'the whole answer', 'the answer reaches the saved flow');
+  // a Build refine left behind by its marked root keeps its mark on its own object too
+  const B = (id, at, extra = {}) => ({ id, kind: 'build', createdAt: now + at, prompt: 'p', text: '', app: { title: 'A', html: '<p>' }, ...extra });
+  const root = B('root', 1, { untrusted: 'link' }), v2 = B('v2', 2, { refineOf: 'root' });
+  const r2 = moveTurn({ entries: [root, v2] }, { entries: [] }, 'root', {}, { entryTaint, worseTaint, taintedFrom });
+  assert.equal(r2.from[0], v2);
+  assert.ok(taintedFrom(r2.from, v2), 'still runs strict');
+});

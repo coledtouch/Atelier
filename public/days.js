@@ -235,7 +235,8 @@ export function turnIds(t, id) {
 }
 
 /**
- * Moves the turn holding entry `id` from thread `from` to thread `to`. Pure: the threads are not changed.
+ * Moves the turn holding entry `id` from thread `from` to thread `to`. The threads' entry lists are not changed; with
+ * marks, the source entries that stay get their marks in place (moveMarks), so each keeps its object.
  * Each entry keeps its id, createdAt and at, so its day stays the same; `rename` ({oldId: newId}) gives a new id to an
  * entry the target already knew under the old one (sync: a turn moved back), as a copy, and its forks follow it.
  * marks ({entryTaint, worseTaint, taintedFrom}: context.js and appdata.js): a move never drops taint (moveMarks).
@@ -265,25 +266,33 @@ export function moveTurn(from, to, id, rename = {}, marks = null) {
 // - a Build version whose lineage was marked as not the owner's words (taintedFrom) and that the move cut off from that
 //   mark keeps it as its own (untrusted), so its app still runs strict, with its own data store.
 // Entries that already carry as much are left as they are (no new version to sync).
+// The source's entries are marked IN PLACE: a turn still answering there keeps the object its run writes into, so its
+// answer reaches the flow that is saved (app.js moveEntry also refuses a move while any answer is coming). The moved
+// entries are marked on copies: they go to a new list.
 function moveMarks(all, ids, moved, rest, { entryTaint, worseTaint, taintedFrom }) {
   const first = all.findIndex((e) => ids.has(e.id));
   const sum = (list) => list.reduce((w, e) => worseTaint(w, entryTaint(e)), '');
   const before = sum(all.slice(0, first)), turn = sum(all.filter((e) => ids.has(e.id)));
-  const stamp = (e, why) => {
-    const own = entryTaint(e);
-    return why && worseTaint(own, why) !== own ? { ...e, ranTaint: worseTaint(e.ranTaint || '', why) } : e;
-  };
+  const raises = (e, why) => { const own = entryTaint(e); return Boolean(why) && worseTaint(own, why) !== own; };
+  const stamp = (e, why) => (raises(e, why) ? { ...e, ranTaint: worseTaint(e.ranTaint || '', why) } : e);
+  const stampHere = (e, why) => { if (raises(e, why)) e.ranTaint = worseTaint(e.ranTaint || '', why); return e; };
   const after = new Set(all.slice(first + 1).map((e) => e.id));
-  const kept = (list, orig) => list.map((e, i) => {
-    if (e.kind !== 'build' || typeof taintedFrom !== 'function') return e;
-    const was = taintedFrom(all, orig[i]);
-    if (!was || taintedFrom(list, e)) return e;
-    return { ...e, untrusted: typeof was.untrusted === 'string' && was.untrusted ? was.untrusted : 'share' };
-  });
+  const kept = (list, orig, here) => {
+    const lost = list.map((e, i) => {
+      if (e.kind !== 'build' || typeof taintedFrom !== 'function') return null;
+      const was = taintedFrom(all, orig[i]);
+      return was && !taintedFrom(list, e) ? (typeof was.untrusted === 'string' && was.untrusted ? was.untrusted : 'share') : null;
+    });
+    return list.map((e, i) => {
+      if (!lost[i]) return e;
+      if (here) { e.untrusted = lost[i]; return e; }
+      return { ...e, untrusted: lost[i] };
+    });
+  };
   const movedOrig = all.filter((e) => ids.has(e.id)), restOrig = all.filter((e) => !ids.has(e.id));
   return {
     moved: kept(moved.map((e) => stamp(e, before)), movedOrig),
-    rest: kept(rest.map((e) => (after.has(e.id) ? stamp(e, turn) : e)), restOrig),
+    rest: kept(rest.map((e) => (after.has(e.id) ? stampHere(e, turn) : e)), restOrig, true),
   };
 }
 

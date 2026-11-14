@@ -1381,6 +1381,7 @@ function moveRig({ threads, open = null, pending = false } = {}) {
     $: () => ({ hidden: true }), storageError: (err) => { throw err; },
   };
   v.turnBusy = evalIn(v, `return (${constExpr('turnBusy')});`);
+  v.flowBusy = evalIn(v, `return (${constExpr('flowBusy')});`);
   v.flowName = evalIn(v, `return (${constExpr('flowName')});`);
   v.flowById = evalIn(v, `return (${constExpr('flowById')});`);
   lift(v, 'newThread', 'moveEntry');
@@ -1480,4 +1481,24 @@ test('moveEntry: a move carries taint both ways, and a tap while a move runs say
   await v.moveEntry('edge', 'link', { id: 'coen' });
   assert.equal(toasts.at(-1)[0], 'Still moving. Try again in a moment.');
   assert.deepEqual(problems('Still moving. Try again in a moment.'), []);
+});
+
+test('moveEntry: no move while any answer in the source or the target is still coming, so none is lost', async () => {
+  const now = Date.now();
+  const src = () => T('coen', [E('a', now - 3000), E('b', now - 2000, { pending: true, text: 'partial' })]);
+  const { v, db, log, toasts } = moveRig({ threads: [src(), T('edge', [E('x', now - 9000)])], open: 'coen' });
+  const live = v.S.thread.entries[1];
+  await v.moveEntry('coen', 'a', { id: 'edge' });
+  assert.equal(toasts.at(-1)[0], 'Another answer in this flow is still coming. Move it once it’s done.');
+  assert.ok(!log.some((x) => x[0] === 'put' || x[0] === 'ids'), 'nothing saved, nothing recorded');
+  assert.equal(v.S.thread.entries[1], live, 'the streaming turn is the same object');
+  assert.deepEqual(db.get('edge').entries.map((e) => e.id), ['x']);
+  // the target answering: same rule
+  const r2 = moveRig({ threads: [T('coen', [E('a', now - 3000)]), T('edge', [E('x', now - 9000, { pending: true })])], open: 'coen' });
+  await r2.v.moveEntry('coen', 'a', { id: 'edge' });
+  assert.equal(r2.toasts.at(-1)[0], 'That flow is still answering. Move it there once it’s done.');
+  assert.ok(!r2.log.some((x) => x[0] === 'put' || x[0] === 'ids'));
+  // the picker says so before it opens
+  assert.match(APP, /if \(flowBusy\(from\)\) return toast\('Another answer in this flow is still coming\. Move it once it’s done\.'\);/);
+  for (const t of ['Another answer in this flow is still coming. Move it once it’s done.', 'That flow is still answering. Move it there once it’s done.']) assert.deepEqual(problems(t), [], t);
 });

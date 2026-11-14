@@ -1541,3 +1541,14 @@ test('planPull with moving: a moved-out version whose push answer was lost is le
   const never = await planPull({ local, record: rec, remote: viewOf(only), uid, moving: new Set(['e2']) });
   assert.deepEqual(never.record.e.e2, { r: 0, f: null, g: null, old: [] });
 });
+
+test('planPull with moving: a full view holding someone else\'s version of a moved-out entry ends the wait, at the revision this device knew', async () => {
+  const e1 = ask('e1', 1), e2 = ask('e2', 2, 'edited on the phone');
+  const doc = await docOf('t1', [e1, e2], { title: { v: 'Thread t1', base: 0 } });
+  const full = await recordFor(doc);
+  const rec = { ...full, e: { e1: full.e.e1, e2: { r: 0, f: null, g: null, old: [], pend: ['f'.repeat(64)] } } }; // ours: answer lost, not what is there
+  const local = thread('t1', [structuredClone(e1)]);
+  const plan = await planPull({ local, record: rec, remote: viewOf(doc), uid, moving: new Set(['e2']) });
+  assert.deepEqual(plan.slots.map((s) => s.id), ['e1'], 'still out of the source while the move is pending');
+  assert.deepEqual(plan.record.e.e2, { r: 0, f: null, g: null, old: [] }, 'no pend left, and the revision stays the one this device knew');
+});

@@ -2378,6 +2378,9 @@ const btn = (act, icon, label) => `<button class="mini" data-act="${act}">${icon
 // The one-tap "Move to Edgeball?" a send offered (thread-spaces.js suggestKind): this session only, the last send only.
 const moveHints = new Map(); // entryId → kind
 const turnBusy = (t, ids) => t.entries.some((x) => ids.includes(x.id) && x.pending);
+// Any answer still coming in a flow: a move rewrites that flow's list and saves it, so it waits (the run keeps writing
+// into its own entry and saves its own copy of the flow; neither may be swapped or overwritten mid-answer).
+const flowBusy = (t) => Boolean(t?.entries?.some((x) => x?.pending));
 // Only the last send offers a move, and only when it names a kind other than the open flow's (not a Remix turn).
 function offerMove(e, text) {
   moveHints.clear();
@@ -6021,6 +6024,7 @@ async function openMovePicker(flowId, entryId) {
   const ids = from ? turnIds(from, entryId) : [];
   if (!ids.length) return toast('That flow is no longer on this device.', { error: true });
   if (turnBusy(from, ids)) return toast('Wait for the answer to finish, then move it.');
+  if (flowBusy(from)) return toast('Another answer in this flow is still coming. Move it once it’s done.');
   const { today, recent } = moveTargets(dayCache ? dayPool() : await allThreads(), dayKey(Date.now()), flowId);
   const row = (t) => `<button type="button" class="move-row" data-move-to="${esc(t.id)}" style="--flow:${flowColor(kindOf(t, threadSpaces))}"><i class="flow-dot" aria-hidden="true"></i><span>${esc(flowName(t))}</span></button>`;
   $('#moveList').innerHTML = (today.length ? `<h3>Today</h3>${today.map(row).join('')}` : '') + (recent.length ? `<h3>Recent</h3>${recent.map(row).join('')}` : '')
@@ -6049,12 +6053,14 @@ async function moveEntry(fromId, entryId, dest, { undo = true } = {}) {
     const ids = from ? turnIds(from, entryId) : [];
     if (!ids.length) return toast('That flow is no longer on this device.', { error: true });
     if (turnBusy(from, ids)) return toast('Wait for the answer to finish, then move it.');
+    if (flowBusy(from)) return toast('Another answer in this flow is still coming. Move it once it’s done.');
     const turn = from.entries.filter((x) => ids.includes(x.id));
     const fixed = turn.filter((x) => x.remix).map((x) => x.id); // a Remix turn's shots are filed under its id
     if (fixed.some((x) => remix?._jobs?.has(x))) return toast('This remix is still filming. Move it once it’s done.');
     const to = dest.thread || (dest.id ? await flowById(dest.id) : newThread({ kind: dest.kind }));
     if (!to) return toast('That flow is no longer on this device.', { error: true });
     if (to.id === from.id) return;
+    if (flowBusy(to)) return toast('That flow is still answering. Move it there once it’s done.');
     const { ids: rename, refused } = await Sync.moveIds(from.id, to.id, ids, { fixed });
     if (refused) return toast('This remix can’t go back to that flow. It already left it on your other devices.', { error: true });
     const apps = new Map(turn.filter((x) => x.kind === 'build').map((x) => [x.id, appKey(from.id, from.entries, x)]));
