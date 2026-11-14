@@ -33,7 +33,7 @@ import { renderAppErrors, loadAppErrors } from './app-errors.js?v=134';
 import { HUMANIZER } from './humanizer.js?v=134';
 import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=134';
 import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, mergeSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=134';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handPlan, rolledDay, keepsFlow } from './days.js?v=134';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handPlan, firstShots, rolledDay, keepsFlow } from './days.js?v=134';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -700,17 +700,21 @@ async function guessFlow(thread) {
 // (dayRead: the boot, a sync pull, another tab's save) and by migrateHandFlows. Each row is read again just before the
 // write: reading the whole library can take seconds, and a sync pull or another tab may have saved a turn or a flow into
 // it since. Written as stored (DB.put keeps updatedAt), so no old thread jumps to the top of Newest first. → how many
-// threads changed (written, or his choice taken from a newer pick made on another device).
+// threads changed (written, or his choice taken from a newer pick made on another device). A shot is spent only once
+// storage has kept that: a device that can't keep its shots never writes over a flow that differs, so two such devices
+// never push their choices back and forth.
 let handsBusy = false;
 async function handsWin(rows) {
   if (handsBusy || accountReloading || !Array.isArray(rows)) return 0;
   handsBusy = true;
   try {
     refreshSpaces(); // a choice made in another tab counts
-    const shots = handShots(), live = (t) => (S.thread?.id === t.id ? S.thread : liveThreads.get(t.id) || t); // the record on screen, never a stale copy
-    const { write, adopt } = handPlan(rows.map(live), threadSpaces, shots);
+    const live = (t) => (S.thread?.id === t.id ? S.thread : liveThreads.get(t.id) || t); // the record on screen, never a stale copy
+    const seen = rows.map(live), st = handShots(seen), shots = st.ids;
+    const { write, adopt, settled } = handPlan(seen, threadSpaces, shots, Sync.flowLanded);
     for (const { id, kind } of adopt) { if (GROUPS.groups.some((g) => g.key === kind)) threadSpaces[id] = `${kind}!`; else Reflect.deleteProperty(threadSpaces, id); }
     if (adopt.length) saveSpaces(adopt.map((a) => a.id));
+    if (settled.length) { for (const id of settled) shots.delete(id); keepShots(st); } // landed: nothing left to defend
     let wrote = 0;
     for (const { thread } of write) {
       if (accountReloading) break;
@@ -718,23 +722,42 @@ async function handsWin(rows) {
       const cur = onScreen || await DB.get(thread.id);
       const now = cur && handPlan([cur], threadSpaces, shots).write[0]; // the same rule on the row as it is now
       if (!now) continue;
-      cur.flow = now.flow; await DB.put(cur); wrote++;
-      if (now.spent) shots.delete(cur.id);
+      if (now.spent) {
+        shots.delete(cur.id);
+        if (!keepShots(st)) { shots.add(cur.id); continue; } // not kept: it would be granted again, so it isn't used
+      }
+      if (cur === S.thread) { setFlow(cur, now.flow.kind); renderOptions(); } // the composer shows the new kind's choices
+      else { cur.flow = now.flow; await DB.put(cur); }
+      wrote++;
     }
-    if (wrote) LS.set(workspaceKey('handShots'), [...shots]);
     return wrote + adopt.length;
   } finally { handsBusy = false; }
 }
 // The ids whose hand choice may still be written once over a flow that differs (days.js handPlan), on this device for
-// this account. The first time this build runs, every hand choice already made gets its one.
-function handShots() {
-  const key = workspaceKey('handShots');
-  if (!lsHas(key)) LS.set(key, Object.keys(threadSpaces).filter((id) => spaceByHand(threadSpaces, id)));
-  return new Set((LS.get(key, []) || []).filter((id) => typeof id === 'string'));
+// this account: { ids, seeded }. The first time this build runs with the library read (rows), the hand choices already
+// made whose flow is missing or different get one (firstShots). A choice that agrees gets none.
+function readShots() {
+  const v = LS.get(workspaceKey('handShots'), null);
+  const list = Array.isArray(v) ? v : Array.isArray(v?.ids) ? v.ids : [];
+  return { ids: new Set(list.filter((id) => typeof id === 'string')), seeded: Array.isArray(v) || v?.seeded === true };
+}
+// → false when storage didn't keep them (full or blocked)
+function keepShots(st) {
+  return LS.set(workspaceKey('handShots'), { seeded: st.seeded, ids: [...st.ids] });
+}
+function handShots(rows) {
+  const st = readShots();
+  if (!st.seeded && Array.isArray(rows)) {
+    for (const id of firstShots(rows, threadSpaces)) st.ids.add(id);
+    st.seeded = true;
+    keepShots(st);
+  }
+  return st;
 }
 function addShot(id) {
-  const s = handShots();
-  s.add(id); LS.set(workspaceKey('handShots'), [...s]);
+  const st = readShots();
+  st.ids.add(id);
+  keepShots(st);
 }
 // v132, once per workspace: a group he chose by hand in the Threads list ('coen!' in threadSpaces) becomes that thread's
 // synced flow, since he already confirmed it, even over a flow a guess put there first (handsWin). Running it again
@@ -759,6 +782,8 @@ let dayReading = false, dayAgain = false; // a read waits or runs; another was a
 const DAY_READ_WAIT = 60; // ms: changes that arrive together (a sync pull of many flows) share one read
 let dayLate = null; // a read the busy store is holding (awaitLate); the page draws from the last read until it lands
 const DAY_LATE_GIVE_UP = 20_000; // ms: a read held this long no longer stops a new one
+let dayAbandoned = null; // a held read given up on that may still land. At most one: a stalled store isn't asked again every 20 s
+let daySeq = 0, dayDrawn = 0; // reads numbered as they start; the newest one drawn. A read older than it is never drawn (drawRead)
 let dayLive = null; // the day S.day was set to while it was today (noteDay); null once he browsed to a past day
 let streamFrom = 0, earlierOpen = null; // the first entry the open flow shows; the flow whose earlier part is shown too
 const daysSorted = new Set(); // past days whose unsorted flows were sent to the sorter this session (sortDay)
@@ -789,7 +814,8 @@ function noteDay() {
 // Reading every saved thread is slow on a phone with a large library (media included), so reads never overlap: a call
 // while one waits or runs asks for one more after it. A burst of sync changes costs one or two reads, not one each.
 // While the busy store holds a read (dayLate), a call draws from the last read at once and asks for one more read once
-// that one lands, or once it has been held for DAY_LATE_GIVE_UP: a read that never lands never stops the page.
+// that one lands, or once it has been held for DAY_LATE_GIVE_UP: a read that never lands never stops the page. One given
+// up on is still drawn if it lands, unless a newer read was drawn first.
 function refreshDay() {
   if (dayReading) { dayAgain = true; return; }
   if (dayLate) { dayAgain = true; if (dayCache) paintDay(); return; }
@@ -798,33 +824,56 @@ function refreshDay() {
 }
 async function readDay() {
   dayAgain = false; // what was asked for before the read starts, it covers
+  const seq = ++daySeq;
   try {
     const rows = await allThreads();
     if (accountReloading) return;
     // The store is held by another tab: what came back is short. It is drawn now, and again from the same read's rows
     // once they arrive (no second read). The wait doesn't hold this read's turn (awaitLate).
     if (rows.busy) {
-      if (rows.length) { dayCache = rows; paintDay(); }
-      awaitLate(rows.late);
+      if (rows.length && seq > dayDrawn) { dayCache = rows; paintDay(); }
+      awaitLate(rows.late, seq);
       return;
     }
-    dayRead(rows);
+    drawRead(rows, seq);
   } finally {
     dayReading = false;
     if (dayAgain) refreshDay();
   }
 }
-function awaitLate(late) {
-  const mine = {};
+function awaitLate(late, seq) {
+  const mine = { overdue: false };
   dayLate = mine;
-  const done = async (saved) => {
-    if (dayLate !== mine) return; // given up on, or a newer one waits
-    dayLate = null;
-    if (saved && !accountReloading) dayRead(await allThreads(saved));
-    if (dayAgain) refreshDay();
+  let landed = false;
+  const land = async (saved) => {
+    if (landed) return;
+    landed = true;
+    if (dayLate === mine) dayLate = null;
+    if (dayAbandoned === mine) {
+      dayAbandoned = null;
+      if (dayLate?.overdue) giveUpLate(dayLate); // the one held past its time while this was out
+    }
+    if (saved && !accountReloading) drawRead(await allThreads(saved), seq);
+    if (dayAgain && !dayLate && !dayReading) refreshDay();
   };
-  Promise.resolve(late).then(done, () => done(null));
-  setTimeout(() => done(null), DAY_LATE_GIVE_UP);
+  Promise.resolve(late).then(land, () => land(null));
+  setTimeout(() => {
+    if (dayLate !== mine) return; // landed already
+    if (dayAbandoned) mine.overdue = true; // one given up on is still out: wait for it first
+    else giveUpLate(mine);
+  }, DAY_LATE_GIVE_UP);
+}
+// A held read stops holding up refreshes. It may still land (awaitLate); the read asked for meanwhile starts now.
+function giveUpLate(held) {
+  dayLate = null;
+  dayAbandoned = held;
+  if (dayAgain) refreshDay();
+}
+// A read is drawn unless a newer one already was.
+function drawRead(rows, seq) {
+  if (seq <= dayDrawn) return;
+  dayDrawn = seq;
+  dayRead(rows);
 }
 // A whole read of the library: Today, the home screen's recent list (from the same rows), a past day's sorting, and his
 // hand choices over any guess that came in (handsWin).

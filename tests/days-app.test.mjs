@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, KIND_DEFAULTS, dayKey, tabFlows, earlierCut, daySlice, dayList, flowsOn, handFlows, handPlan, stepDay, rolledDay, keepsFlow } from '../public/days.js';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, KIND_DEFAULTS, dayKey, tabFlows, earlierCut, daySlice, dayList, flowsOn, handFlows, handPlan, firstShots, stepDay, rolledDay, keepsFlow } from '../public/days.js';
 import { groupsFor, spaceRequest, parseSpaces, spaceOf, spaceByHand, mergeSpaces, cleanSpaces } from '../public/thread-spaces.js';
 import { problems } from './humanizer-lint.mjs';
 
@@ -610,12 +610,15 @@ const handSpaces = () => ({ a: 'coen!', b: 'kid', d: 'coen!', e: 'personal!', go
 function migrationRig(rows, spaces, { open = null } = {}) {
   const puts = [], ls = {}, reads = { n: 0 }, drawn = [];
   const db = new Map(rows.map((t) => [t.id, structuredClone(t)]));
-  const v = { S: { thread: open }, liveThreads: new Map(), threadSpaces: spaces, handPlan, cleanFlow, spaceByHand, GROUPS: OWNER, workspaceKey: (k) => `${k}:ws`, accountReloading: false, handsBusy: false,
-    LS: { get: (k, d) => (k in ls ? ls[k] : d), set: (k, x) => { ls[k] = x; } }, lsHas: (k) => k in ls, saveSpaces: (ids) => drawn.push(['spaces', ids]),
+  const v = { S: { thread: open }, liveThreads: new Map(), threadSpaces: spaces, handPlan, firstShots, cleanFlow, spaceByHand, GROUPS: OWNER, workspaceKey: (k) => `${k}:ws`, accountReloading: false, handsBusy: false,
+    lsFull: false, landed: false, Sync: { flowLanded: () => v.landed },
+    LS: { get: (k, d) => (k in ls ? structuredClone(ls[k]) : d), set: (k, x) => { if (v.lsFull) return false; ls[k] = structuredClone(x); return true; } }, lsHas: (k) => k in ls, saveSpaces: (ids) => drawn.push(['spaces', ids]),
     DB: { all: async () => { reads.n++; const out = [...db.values()].map((t) => structuredClone(t)); v.afterAll?.(db); return out; },
       get: async (id) => structuredClone(db.get(id)), put: async (t) => { puts.push(t.id); db.set(t.id, structuredClone(t)); } },
+    // the real setFlow saves the open flow (persist) and draws its choices when it has none; renderOptions draws them
+    setFlow: (t, kind) => { t.flow = { kind }; drawn.push(['setFlow', t.id, kind]); v.DB.put(t); }, renderOptions: () => drawn.push('options'),
     renderFlowTabs: () => drawn.push('tabs') };
-  lift(v, 'migrateHandFlows', 'handsWin', 'handShots', 'addShot');
+  lift(v, 'migrateHandFlows', 'handsWin', 'readShots', 'keepShots', 'handShots', 'addShot');
   return { v, db, puts, ls, reads, drawn };
 }
 
@@ -627,7 +630,7 @@ test('hand choices become synced flows once', async () => {
   assert.ok(!('flow' in r.db.get('b')), 'a guess is not written');
   assert.ok(!('flow' in r.db.get('c')));
   assert.deepEqual(r.db.get('d').flow, { kind: 'coen' }, 'a flow a guess put there first gives way to his hand choice (follow-up 1)');
-  assert.deepEqual(r.ls['handShots:ws'], ['a', 'e', 'gone'], 'every earlier hand choice got one rewrite; d used its own');
+  assert.deepEqual(r.ls['handShots:ws'], { seeded: true, ids: ['a', 'e'] }, 'only choices whose flow was missing or different got a rewrite; d used its own, a keeps its until seen landed');
   assert.ok(!('flow' in r.db.get('e')), 'an empty thread is left alone');
   assert.equal(r.ls['flowsMigrated:ws'], true, 'the flag is per workspace');
   assert.deepEqual(r.drawn, ['tabs']);
@@ -662,7 +665,7 @@ test('hand choices become synced flows once', async () => {
   await raced.v.migrateHandFlows();
   assert.deepEqual(raced.db.get('a').flow, { kind: 'coen' });
   assert.deepEqual(raced.puts, ['a', 'd']);
-  assert.deepEqual(raced.ls['handShots:ws'], ['e', 'gone'], 'a and d each used their one rewrite');
+  assert.deepEqual(raced.ls['handShots:ws'], { seeded: true, ids: ['e'] }, 'a and d each used their one rewrite');
   // runs at boot, after Today is drawn, and the flag stays the owner's through a tester's Clear
   assert.match(APP, /\n  renderDay\(\); \/\/ Today[^\n]*\n  migrateHandFlows\(\)\.catch\(/);
   assert.match(constExpr('OWNER_LS_KEEP'), /'flowsMigrated'/);
@@ -674,12 +677,12 @@ test('a hand choice beats a guess whatever order they arrive in: a sync pull, th
   const e = (id) => [{ id, kind: 'ask', prompt: 'x', createdAt: at(3) }];
   // a sync pull: he picked Coen here (one rewrite); another device's send synced its guess first. The next read puts his back.
   const pulled = migrationRig([{ id: 'p', title: 'Deck', updatedAt: at(3), flow: { kind: 'personal' }, entries: e('p1') }], { p: 'coen!' });
-  pulled.ls['handShots:ws'] = ['p'];
+  pulled.ls['handShots:ws'] = { seeded: true, ids: ['p'] };
   pulled.ls['flowsMigrated:ws'] = true;
   assert.equal(await pulled.v.handsWin(await pulled.v.DB.all()), 1);
   assert.deepEqual(pulled.db.get('p').flow, { kind: 'coen' });
   assert.equal(pulled.db.get('p').updatedAt, at(3), 'not moved to the top of Newest first');
-  assert.deepEqual(pulled.ls['handShots:ws'], [], 'the rewrite is used up');
+  assert.deepEqual(pulled.ls['handShots:ws'], { seeded: true, ids: [] }, 'the rewrite is used up');
   // the same pull again finds them agreeing: nothing is written
   assert.equal(await pulled.v.handsWin(await pulled.v.DB.all()), 0);
   // later he picks Apps on the other device: with the rewrite used up, that newer pick becomes this device's choice too
@@ -767,7 +770,8 @@ test('a guess is not written until a send', async () => {
   assert.deepEqual(left.drawn, []);
   // wired: Today sorts a past day once it has read the threads
   assert.match(fnSource('dayRead'), /paintDay\(\);\n\s*sortDay\(\);/);
-  assert.match(fnSource('readDay'), /dayRead\(rows\);/);
+  assert.match(fnSource('readDay'), /drawRead\(rows, seq\);/);
+  assert.match(fnSource('drawRead'), /dayRead\(rows\);/);
   assert.match(APP, /if \(threadSort === 'space' && fromSorter !== true\) sortIntoSpaces\(all\);/, 'the drawer\'s By group still sorts as before');
 });
 
@@ -917,11 +921,11 @@ test('noteDay: the day counts as live only when it was today as it was set', () 
 test('Today reads the library once for a burst of changes, and never two reads at once', async () => {
   const timers = [], pending = [], recent = [], giveUps = [];
   let reads = 0, painted = 0;
-  const v = { S: { thread: null }, accountReloading: false, dayCache: null, dayReading: false, dayAgain: false, DAY_READ_WAIT: 50, dayLate: null, DAY_LATE_GIVE_UP: 20000,
+  const v = { S: { thread: null }, accountReloading: false, dayCache: null, dayReading: false, dayAgain: false, DAY_READ_WAIT: 50, dayLate: null, DAY_LATE_GIVE_UP: 20000, daySeq: 0, dayDrawn: 0, dayAbandoned: null,
     setTimeout: (f, ms) => { (ms === 20000 ? giveUps : timers).push(f); return timers.length; },
     allThreads: (known) => { if (known) return Promise.resolve(Object.assign([...known], { saved: known })); reads++; return new Promise((res) => pending.push(res)); },
     paintDay: () => { painted++; }, sortDay: () => {}, renderRecentThreads: (k) => recent.push(k) };
-  lift(v, 'refreshDay', 'readDay', 'awaitLate', 'dayRead');
+  lift(v, 'refreshDay', 'readDay', 'awaitLate', 'giveUpLate', 'drawRead', 'dayRead');
   const tick = () => new Promise((r) => setImmediate(r));
   for (let i = 0; i < 40; i++) v.refreshDay(); // the desktop's migration: 40 flows pulled in a burst
   assert.deepEqual([timers.length, reads], [1, 0], 'one read waits');
@@ -1080,11 +1084,66 @@ test('handsWin names the record on screen once, and migrateHandFlows goes throug
   assert.match(fnSource('migrateHandFlows'), /await handsWin\(rows\)/);
 });
 
+test('a shot defends his choice only until it is seen landed; then a differing flow is his newer pick (review: item 1)', async () => {
+  const e = (id) => [{ id, kind: 'ask', prompt: 'x', createdAt: at(3) }];
+  const rows = [
+    { id: 'same', title: 'Agrees', updatedAt: at(3), flow: { kind: 'coen' }, entries: e('s1') },
+    { id: 'guessed', title: 'Guess first', updatedAt: at(3), flow: { kind: 'personal' }, entries: e('g1') },
+  ];
+  const r = migrationRig(rows, { same: 'coen!', guessed: 'coen!' });
+  assert.equal(await r.v.handsWin(await r.v.DB.all()), 1);
+  assert.deepEqual(r.puts, ['guessed'], 'the guess gives way');
+  assert.deepEqual(r.ls['handShots:ws'], { seeded: true, ids: [] }, 'an agreeing choice got no shot; the other used its one');
+  // another device picks Apps for the agreeing one: no shot, so it is taken as his choice, never written over
+  r.db.get('same').flow = { kind: 'apps' };
+  assert.equal(await r.v.handsWin(await r.v.DB.all()), 1);
+  assert.equal(r.v.threadSpaces.same, 'apps!');
+  assert.deepEqual(r.puts, ['guessed']);
+  // a pick made here keeps its shot while unsent, and loses it once the server holds it
+  r.v.threadSpaces.same = 'work!'; r.v.addShot('same'); r.db.get('same').flow = { kind: 'work' };
+  await r.v.handsWin(await r.v.DB.all());
+  assert.deepEqual(r.ls['handShots:ws'].ids, ['same'], 'not landed yet: kept');
+  r.v.landed = true;
+  await r.v.handsWin(await r.v.DB.all());
+  assert.deepEqual(r.ls['handShots:ws'].ids, [], 'landed: cleared');
+  r.db.get('same').flow = { kind: 'kid' }; // his newer pick on another device
+  await r.v.handsWin(await r.v.DB.all());
+  assert.equal(r.v.threadSpaces.same, 'kid!', 'adopted');
+  assert.deepEqual(r.puts, ['guessed'], 'and never written back over');
+  assert.match(fnSource('handsWin'), /handPlan\(seen, threadSpaces, shots, Sync\.flowLanded\)/);
+});
+
+test('a device that cannot keep its shots never writes over a flow that differs (review: item 1, storage full)', async () => {
+  const e = (id) => [{ id, kind: 'ask', prompt: 'x', createdAt: at(3) }];
+  const rows = [
+    { id: 'diff', title: 'Differs', updatedAt: at(3), flow: { kind: 'personal' }, entries: e('d1') },
+    { id: 'none', title: 'No flow', updatedAt: at(3), entries: e('n1') },
+  ];
+  const r = migrationRig(rows, { diff: 'coen!', none: 'coen!' });
+  r.v.lsFull = true;
+  for (let i = 0; i < 3; i++) await r.v.handsWin(await r.v.DB.all());
+  assert.deepEqual(r.db.get('diff').flow, { kind: 'personal' }, 'not written over, however often it runs');
+  assert.deepEqual(r.db.get('none').flow, { kind: 'coen' }, 'a thread with no flow still gets his choice');
+  assert.deepEqual(r.puts, ['none']);
+  r.v.lsFull = false;
+  await r.v.handsWin(await r.v.DB.all());
+  assert.deepEqual(r.db.get('diff').flow, { kind: 'coen' }, 'once storage keeps the spend, the shot is used');
+});
+
+test('his choice replacing the open flow\'s kind goes through setFlow and redraws the composer (review: item 1)', async () => {
+  const open = { id: 'o', title: 'Open', updatedAt: at(3), flow: { kind: 'personal' }, opts: { mode: 'ask' }, entries: [{ id: 'o1', kind: 'ask', prompt: 'x', createdAt: at(3) }] };
+  const r = migrationRig([structuredClone(open)], { o: 'linkedin!' }, { open });
+  assert.equal(await r.v.handsWin(await r.v.DB.all()), 1);
+  assert.deepEqual(open.flow, { kind: 'linkedin' });
+  assert.deepEqual(r.drawn.filter((d) => d === 'options' || d[0] === 'setFlow'), [['setFlow', 'o', 'linkedin'], 'options']);
+  assert.deepEqual(r.db.get('o').flow, { kind: 'linkedin' }, 'and it is saved');
+});
+
 test('a read the busy store never lets go of no longer stops later refreshes (follow-up 6)', async () => {
   const timers = [], giveUps = [];
   let reads = 0, painted = 0;
   const rows = [{ id: 'a', entries: [] }];
-  const v = { S: { thread: null }, accountReloading: false, dayCache: null, dayReading: false, dayAgain: false, DAY_READ_WAIT: 50, dayLate: null, DAY_LATE_GIVE_UP: 20000,
+  const v = { S: { thread: null }, accountReloading: false, dayCache: null, dayReading: false, dayAgain: false, DAY_READ_WAIT: 50, dayLate: null, DAY_LATE_GIVE_UP: 20000, daySeq: 0, dayDrawn: 0, dayAbandoned: null,
     setTimeout: (f, ms) => { (ms === 20000 ? giveUps : timers).push(f); },
     allThreads: (known) => {
       if (known) return Promise.resolve(Object.assign([...known], { saved: known }));
@@ -1093,7 +1152,7 @@ test('a read the busy store never lets go of no longer stops later refreshes (fo
       return Promise.resolve(reads === 1 ? Object.assign([{ id: 'open' }], { busy: true, saved: null, late: new Promise(() => {}) }) : Object.assign([...rows], { saved: rows }));
     },
     paintDay: () => { painted++; }, sortDay: () => {}, renderRecentThreads: () => {} };
-  lift(v, 'refreshDay', 'readDay', 'awaitLate', 'dayRead');
+  lift(v, 'refreshDay', 'readDay', 'awaitLate', 'giveUpLate', 'drawRead', 'dayRead');
   const tick = () => new Promise((r) => setImmediate(r));
   v.refreshDay(); timers.shift()(); await tick();
   assert.deepEqual([reads, painted, v.dayReading], [1, 1, false], 'the short list is drawn and the read gives up its turn');
@@ -1105,6 +1164,65 @@ test('a read the busy store never lets go of no longer stops later refreshes (fo
   assert.deepEqual([reads, v.dayCache.length, v.dayLate], [2, 1, null], 'the new read gets through and is drawn');
   v.refreshDay();
   assert.equal(timers.length, 1, 'and refreshes work as before');
+});
+
+// A rig for the held-read cases: each full read is a promise the test settles (busy with a late part, or whole).
+function lateRig() {
+  const timers = [], giveUps = [], reads = [], recent = [];
+  const v = { S: { thread: null }, accountReloading: false, dayCache: null, dayReading: false, dayAgain: false, DAY_READ_WAIT: 50, dayLate: null, DAY_LATE_GIVE_UP: 20000,
+    daySeq: 0, dayDrawn: 0, dayAbandoned: null,
+    setTimeout: (f, ms) => { (ms === 20000 ? giveUps : timers).push(f); },
+    allThreads: (known) => (known ? Promise.resolve(Object.assign([...known], { saved: known })) : new Promise((res) => reads.push(res))),
+    paintDay: () => {}, sortDay: () => {}, renderRecentThreads: (k) => recent.push(k) };
+  lift(v, 'refreshDay', 'readDay', 'awaitLate', 'giveUpLate', 'drawRead', 'dayRead');
+  const tick = () => new Promise((r) => setImmediate(r));
+  const held = () => { let late; const p = new Promise((r) => { late = r; }); return { rows: Object.assign([{ id: 'open' }], { busy: true, saved: null, late: p }), late }; };
+  const whole = (ids) => { const r = ids.map((id) => ({ id, entries: [] })); return Object.assign([...r], { saved: r }); };
+  return { v, timers, giveUps, reads, recent, tick, held, whole };
+}
+
+test('a held read that lands after the give-up is still drawn, with nothing else asked for (review: item 6)', async () => {
+  const { v, timers, giveUps, reads, recent, tick, held } = lateRig();
+  v.refreshDay(); timers.shift()();
+  const h = held(); reads.shift()(h.rows); await tick();
+  assert.equal(v.dayCache.length, 1, 'the short list is drawn');
+  giveUps.shift()(); await tick();
+  assert.deepEqual([timers.length, v.dayLate], [0, null], 'given up on, and nothing asked for: no new read');
+  const all = [{ id: 'a', entries: [] }, { id: 'b', entries: [] }];
+  h.late(all); await tick(); await tick();
+  assert.deepEqual(v.dayCache.map((t) => t.id), ['a', 'b'], 'the late rows are drawn after all');
+  assert.deepEqual(recent, [all], 'and the recent list with them');
+});
+
+test('a late read never replaces a newer read that was already drawn (review: item 6)', async () => {
+  const { v, timers, giveUps, reads, tick, held, whole } = lateRig();
+  v.refreshDay(); timers.shift()();
+  const h = held(); reads.shift()(h.rows); await tick();
+  v.refreshDay(); // a change arrives while the store holds the read
+  giveUps.shift()(); await tick();
+  assert.equal(timers.length, 1, 'held too long: one new read');
+  timers.shift()(); reads.shift()(whole(['new'])); await tick();
+  assert.deepEqual(v.dayCache.map((t) => t.id), ['new']);
+  h.late([{ id: 'old', entries: [] }]); await tick(); await tick();
+  assert.deepEqual(v.dayCache.map((t) => t.id), ['new'], 'the older read lands late and is not drawn');
+});
+
+test('a stalled store holds at most one abandoned read: no new full read every 20 s (review: item 6)', async () => {
+  const { v, timers, giveUps, reads, tick, held } = lateRig();
+  v.refreshDay(); timers.shift()();
+  const h1 = held(); reads.shift()(h1.rows); await tick();
+  v.refreshDay(); giveUps.shift()(); await tick();
+  timers.shift()(); const h2 = held(); reads.shift()(h2.rows); await tick();
+  assert.equal(v.dayAbandoned !== null && v.dayLate !== null, true, 'one given up on, one held');
+  v.refreshDay(); giveUps.shift()(); await tick();
+  assert.deepEqual([timers.length, reads.length], [0, 0], 'the second held read is not given up on while the first is out');
+  v.refreshDay();
+  assert.equal(timers.length, 0, 'and refreshes still start no read');
+  h1.late([{ id: 'first', entries: [] }]); await tick(); await tick();
+  assert.deepEqual(v.dayCache.map((t) => t.id), ['first'], 'the first lands and is drawn');
+  assert.equal(timers.length, 1, 'then the overdue second is given up on, and the read asked for meanwhile starts');
+  h2.late([{ id: 'second', entries: [] }]); await tick(); await tick();
+  assert.deepEqual(v.dayCache.map((t) => t.id), ['second'], 'the second still lands: nothing newer was drawn');
 });
 
 test('◀ ▶ never step past today: the day bar and the step both pass today to stepDay (follow-up 4)', () => {

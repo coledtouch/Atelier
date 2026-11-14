@@ -2710,6 +2710,12 @@ export async function flush() { await Promise.allSettled([...inflight]); return 
 export const on = () => Boolean(engine?.on());
 export const busy = () => Boolean(engine?.busy());
 export const badge = (thread) => engine?.badge(thread) || '';
+// A thread's flow is the one the server holds: nothing unsent (flowUnsent). With sync off there is no server to wait for.
+export const flowLanded = (t) => {
+  if (!engine?.on()) return true;
+  const rec = engine.record(t?.id);
+  return Boolean(rec) && !flowUnsent(t, rec);
+};
 export const deleteCopy = (id) => (engine ? engine.deleteCopy(id) : Promise.resolve('Delete this thread?'));
 export const deleteThread = (id) => (engine ? engine.deleteThread(id) : bootDeps?.rawDB?.del(id));
 export const pendingCount = () => (engine ? engine.pendingCount().catch(() => 0) : Promise.resolve(0));
