@@ -6,9 +6,9 @@
 //
 // It needs two macOS permissions, both for osascript, the program macOS holds responsible (the installer makes this
 // file the thing Chrome starts, with osascript as its interpreter line): Full Disk Access to read chat.db, and
-// Automation → Messages to send.
+// Automation → Messages to send. The same Full Disk Access reads the Contacts files, for names (1.0.10).
 
-const HOST_VERSION = '1.0.9';
+const HOST_VERSION = '1.0.10';
 const LIMITS = { recent: 50, read: 100, text: 2000, chat: 200 };
 const APPLE_EPOCH_MS = 978307200000; // 2001-01-01, where Messages counts its dates from
 
@@ -111,11 +111,43 @@ WHERE ${chatMatch(to)} AND IFNULL(m.item_type, 0) = 0 AND ${WORKED} ORDER BY m.d
 WHERE ${chatMatch(to)} AND m.is_from_me = 1 AND m.service = 'iMessage' AND m.error = 22), 0)
 > IFNULL((SELECT MAX(m.date) FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
 WHERE ${chatMatch(to)} AND m.service = 'iMessage' AND m.error = 0 AND (m.is_from_me = 0 OR m.is_delivered = 1)), 0)) AS refused;`;
-function shapeRecent(rows) {
-  return rows.map((r) => ({ chat: r.chat, name: r.name || '', people: r.people || r.id || '', service: r.service || '', last: { at: appleDate(r.d), fromMe: r.fromMe === 1, text: bodyOf(r) } }));
+// Names from the Mac's Contacts (1.0.10, v139). chat.db keeps only the handle, so a one-to-one chat with no display name
+// showed as "+16174126046". Contacts keeps its cards in SQLite files under ~/Library/Application Support/AddressBook
+// (one per account, in Sources/<id>/). The helper reads them read-only, with the same Full Disk Access as chat.db, and
+// swaps each handle for its card's name here on the Mac. No card, or no access: the handle stays.
+// A handle's key: an email in lower case; a phone number by its last 10 digits (+1 or not, any punctuation); a short
+// code as it is.
+function contactKey(handle) {
+  const s = String(handle || '').trim().toLowerCase();
+  if (s.includes('@')) return s.replace(/^mailto:/, '');
+  const d = s.replace(/\D/g, '');
+  return d.length < 3 ? '' : d.length > 10 ? d.slice(-10) : d;
 }
-function shapeRead(rows) {
-  return rows.slice().reverse().map((r) => ({ at: appleDate(r.d), from: r.fromMe === 1 ? 'me' : r.sender || 'them', text: bodyOf(r) }));
+const CONTACT_SQL = `SELECT r.ZFIRSTNAME AS f, r.ZLASTNAME AS l, r.ZNICKNAME AS n, r.ZORGANIZATION AS o, p.ZFULLNUMBER AS v
+FROM ZABCDPHONENUMBER p JOIN ZABCDRECORD r ON r.Z_PK = p.ZOWNER
+UNION ALL SELECT r.ZFIRSTNAME, r.ZLASTNAME, r.ZNICKNAME, r.ZORGANIZATION, e.ZADDRESS
+FROM ZABCDEMAILADDRESS e JOIN ZABCDRECORD r ON r.Z_PK = e.ZOWNER;`;
+const contactName = (r) => [r.f, r.l].map((s) => String(s || '').trim()).filter(Boolean).join(' ') || String(r.n || r.o || '').trim();
+// Rows from every Contacts file, as { key: name }. The first card with a name wins a number two cards share.
+function bookOf(rows) {
+  const book = {};
+  for (const r of rows || []) {
+    const k = contactKey(r.v), name = cut(contactName(r), 80);
+    if (k && name && !(k in book)) book[k] = name;
+  }
+  return book;
+}
+const nameOf = (book, handle) => (book && book[contactKey(handle)]) || '';
+// people: each person's name, or the handle when no card has it. handles: the raw handles, to send to or look up.
+function shapeRecent(rows, book = {}) {
+  return rows.map((r) => {
+    const handles = String(r.people || r.id || '').split(', ').filter(Boolean);
+    const names = handles.map((h) => nameOf(book, h) || h);
+    return { chat: r.chat, name: r.name || (handles.length === 1 ? nameOf(book, handles[0]) : ''), people: names.join(', '), handles: handles.join(', '), service: r.service || '', last: { at: appleDate(r.d), fromMe: r.fromMe === 1, text: bodyOf(r) } };
+  });
+}
+function shapeRead(rows, book = {}) {
+  return rows.slice().reverse().map((r) => ({ at: appleDate(r.d), from: r.fromMe === 1 ? 'me' : nameOf(book, r.sender) || r.sender || 'them', text: bodyOf(r) }));
 }
 // Sends to a chat id when it has one (the conversation that exists), else to the person over iMessage, then SMS.
 const SEND_SCRIPT = [
@@ -241,16 +273,45 @@ function query(sql) {
   if (r.code !== 0) throw new Error(friendlyError(r.err || r.out));
   return r.out.trim() ? JSON.parse(r.out) : [];
 }
+// The Contacts files on this Mac: the local one and one per account (iCloud, Google…).
+function contactFiles() {
+  const base = `${$.NSHomeDirectory().js}/Library/Application Support/AddressBook`;
+  const fm = $.NSFileManager.defaultManager;
+  let sources = [];
+  try { sources = ObjC.deepUnwrap(fm.contentsOfDirectoryAtPathError(`${base}/Sources`, null)) || []; } catch { /* no accounts */ }
+  return [base, ...sources.map((s) => `${base}/Sources/${s}`)].map((d) => `${d}/AddressBook-v22.abcddb`).filter((f) => fm.fileExistsAtPath(f));
+}
+// { book, contacts }: contacts is how many handles have a name, or 'unreadable' when no Contacts file could be read
+// (the answer then says so, so a list of numbers explains itself). Never throws: texts are worth more than names.
+function loadBook() {
+  let files = [];
+  try { files = contactFiles(); } catch { return { book: {}, contacts: 'unreadable' }; }
+  const rows = [];
+  let read = 0;
+  for (const f of files) {
+    const r = run('/usr/bin/sqlite3', ['-readonly', '-json', f, CONTACT_SQL]);
+    if (r.code !== 0) continue;
+    try { rows.push(...(r.out.trim() ? JSON.parse(r.out) : [])); read++; } catch { /* not this file */ }
+  }
+  const book = bookOf(rows);
+  return { book, contacts: files.length && !read ? 'unreadable' : Object.keys(book).length };
+}
+const withNames = (result, contacts) => (contacts === 'unreadable' ? { ...result, contacts } : result);
 function handle(msg) {
   const op = String(msg?.op || '');
   if (op === 'ping') return { version: HOST_VERSION };
-  if (op === 'recent') return { conversations: shapeRecent(query(recentSql(msg.limit))) };
+  if (op === 'recent') {
+    const rows = query(recentSql(msg.limit));
+    const { book, contacts } = loadBook();
+    return withNames({ conversations: shapeRecent(rows, book) }, contacts);
+  }
   if (op === 'read') {
     const chat = String(msg.chat || '').trim();
     if (!chat) throw new Error('Pass chat: a chat id from messages_recent, or a phone number or email.');
     const rows = query(readSql(chat, msg.limit));
     if (!rows.length) throw new Error(`No Messages conversation matches ${cut(chat, 80)}.`);
-    return { chat: rows[0].chat || chat, messages: shapeRead(rows) };
+    const { book, contacts } = loadBook();
+    return withNames({ chat: rows[0].chat || chat, messages: shapeRead(rows, book) }, contacts);
   }
   if (op === 'send') {
     const to = String(msg.to || '').trim().slice(0, LIMITS.chat), text = String(msg.text ?? '');

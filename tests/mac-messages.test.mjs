@@ -8,7 +8,7 @@ import vm from 'node:vm';
 const HOST = readFileSync(new URL('../public/mac/atelier-messages-host.js', import.meta.url), 'utf8');
 const INSTALL = readFileSync(new URL('../public/mac/install-messages.sh', import.meta.url), 'utf8');
 const NAMES = ['b64Decode', 'b64Encode', 'frameLength', 'lengthBytes', 'attributedText', 'appleDate', 'chatMatch', 'recentSql', 'readSql',
-  'chatForSql', 'shapeRecent', 'shapeRead', 'sendArgs', 'friendlyError', 'handle', 'LIMITS'];
+  'chatForSql', 'shapeRecent', 'shapeRead', 'sendArgs', 'friendlyError', 'handle', 'LIMITS', 'contactKey', 'bookOf', 'CONTACT_SQL'];
 const H = vm.runInNewContext(`${HOST}\n;({ ${NAMES.join(', ')} })`, {});
 const utf8 = (s) => [...new TextEncoder().encode(s)];
 const hex = (bytes) => bytes.map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
@@ -68,7 +68,7 @@ test('helper: what the model passes as a chat is quoted, never SQL; a phone numb
 
 test('helper: rows become conversations and oldest-first messages; long texts are cut', () => {
   const recent = H.shapeRecent([{ chat: 'iMessage;-;+16175550142', id: '+16175550142', name: '', people: '+16175550142', service: 'iMessage', text: null, ab: typedstream('See you'), fromMe: 0, d: 757382400 }]);
-  assert.deepEqual(JSON.parse(JSON.stringify(recent)), [{ chat: 'iMessage;-;+16175550142', name: '', people: '+16175550142', service: 'iMessage', last: { at: '2025-01-01T00:00:00.000Z', fromMe: false, text: 'See you' } }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(recent)), [{ chat: 'iMessage;-;+16175550142', name: '', people: '+16175550142', handles: '+16175550142', service: 'iMessage', last: { at: '2025-01-01T00:00:00.000Z', fromMe: false, text: 'See you' } }]);
   const read = H.shapeRead([{ text: 'second', fromMe: 1, d: 757382460 }, { text: 'first', fromMe: 0, sender: '+16175550142', d: 757382400 }, { text: null, ab: null, att: 1, fromMe: 0, d: 1 }]);
   assert.deepEqual(read.map((m) => [m.from, m.text]), [['them', '(attachment)'], ['+16175550142', 'first'], ['me', 'second']]);
   assert.equal(H.shapeRead([{ text: 'x'.repeat(5000), fromMe: 1, d: 1 }])[0].text.length, H.LIMITS.text + 1);
@@ -98,7 +98,7 @@ test('helper: the errors a person can fix say how; anything else passes through,
   assert.match(H.friendlyError('execution error: Not authorized to send Apple events to Messages. (-1743)'), /Automation/);
   assert.equal(H.friendlyError('x'.repeat(900)).length, 300);
   assert.equal(H.friendlyError(''), 'The Messages helper failed.');
-  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.9' });
+  assert.deepEqual(JSON.parse(JSON.stringify(H.handle({ op: 'ping' }))), { version: '1.0.10' });
   assert.throws(() => H.handle({ op: 'delete' }), /Unknown Messages action/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: '  ' }), /Pass to and text/);
   assert.throws(() => H.handle({ op: 'send', to: '+1617', text: 'x'.repeat(2001) }), /over 2000/);
@@ -115,7 +115,7 @@ function hostRig(answer) {
   const full = (msg) => { try { return JSON.parse(JSON.stringify(ctx.handle(msg))); } catch (err) { return { threw: String(err.message) }; } };
   // handle: where it went and how. What the helper saw (1.0.4: history, delivery, note) is checked with full.
   const handle = (msg) => { const r = full(msg); if (r && r.sent) { delete r.history; delete r.delivery; delete r.note; if (r.via === 'iMessage') delete r.via; } return r; };
-  return { handle, full, calls, sent: () => calls.filter(([tool]) => tool === 'osascript').map(([, args]) => args.slice(-3)) };
+  return { handle, full, calls, ctx, sent: () => calls.filter(([tool]) => tool === 'osascript').map(([, args]) => args.slice(-3)) };
 }
 const NO_ACCESS = { code: 1, err: 'Error: unable to open database "/Users/cole/Library/Messages/chat.db": authorization denied' };
 
@@ -410,6 +410,85 @@ test('helper 1.0.9: the helper is a script osascript runs directly; a hashbang l
   const launcher = `#!/usr/bin/osascript -l JavaScript\n${HOST}`;
   const ctx = vm.createContext({});
   assert.doesNotThrow(() => new vm.Script(launcher, { filename: 'atelier-messages-host' }).runInContext(ctx));
-  assert.equal(JSON.parse(JSON.stringify(vm.runInContext('handle({ op: "ping" })', ctx))).version, '1.0.9');
+  assert.equal(JSON.parse(JSON.stringify(vm.runInContext('handle({ op: "ping" })', ctx))).version, '1.0.10');
   assert.match(HOST, /\nif \(typeof ObjC !== 'undefined'\) main\(\);\n?$/, 'main runs under osascript only');
+});
+
+// v139 (helper 1.0.10): "check my 5 most recent texts" listed "+16174126046 (Nov 13): you sent Ok". chat.db keeps only
+// the handle; the name is on the Mac's Contacts card. The helper now reads Contacts and names people itself.
+test('helper 1.0.10: a handle matches its Contacts card by email or by the last 10 digits, +1 or not', () => {
+  for (const [a, b] of [['+16174126046', '(617) 412-6046'], ['+16174126046', '617.412.6046'], ['16174126046', '+1 617 412 6046'], ['Pat@Example.com', 'pat@example.com'], ['mailto:pat@example.com', 'pat@example.com'], ['22395', '22395']]) {
+    assert.equal(H.contactKey(a), H.contactKey(b), `${a} ~ ${b}`);
+  }
+  assert.notEqual(H.contactKey('+16174126046'), H.contactKey('+16174126047'));
+  assert.equal(H.contactKey(''), '');
+  assert.equal(H.contactKey('12'), '', 'too short to be anyone');
+  const book = JSON.parse(JSON.stringify(H.bookOf([
+    { f: 'Jane', l: 'Doe', v: '+1 (617) 412-6046' },
+    { f: 'Someone', l: 'Else', v: '617-412-6046' }, // the first card with a name keeps a shared number
+    { f: null, l: null, n: 'Gus', v: 'gus@example.com' },
+    { o: 'Coen Builders', v: '508 555 0100' },
+    { f: '', l: '', v: '+15085550199' }, // a card with no name names nobody
+  ])));
+  assert.deepEqual(book, { 6174126046: 'Jane Doe', 'gus@example.com': 'Gus', 5085550100: 'Coen Builders' });
+  assert.match(H.CONTACT_SQL, /FROM ZABCDPHONENUMBER p JOIN ZABCDRECORD r ON r\.Z_PK = p\.ZOWNER/);
+  assert.match(H.CONTACT_SQL, /FROM ZABCDEMAILADDRESS e JOIN ZABCDRECORD r ON r\.Z_PK = e\.ZOWNER/);
+});
+
+test('helper 1.0.10: one-to-one chats and senders in a group show the contact name; a number with no card stays', () => {
+  const book = { 6174126046: 'Jane Doe', 'gus@example.com': 'Gus' };
+  const recent = JSON.parse(JSON.stringify(H.shapeRecent([
+    { chat: 'SMS;-;+16174126046', id: '+16174126046', name: '', people: '+16174126046', service: 'SMS', text: 'Ok', fromMe: 1, d: 757382400 },
+    { chat: 'iMessage;+;chat1', id: 'chat1', name: '', people: '+16174126046, gus@example.com, +15085550142', service: 'iMessage', text: 'hi', fromMe: 0, d: 757382400 },
+    { chat: 'iMessage;+;chat2', id: 'chat2', name: 'Site crew', people: '+16174126046, gus@example.com', service: 'iMessage', text: 'hi', fromMe: 0, d: 757382400 },
+    { chat: 'SMS;-;+15085550142', id: '+15085550142', name: '', people: '+15085550142', service: 'SMS', text: 'hey', fromMe: 0, d: 757382400 },
+  ], book)));
+  assert.deepEqual(recent.map((c) => [c.name, c.people, c.handles]), [
+    ['Jane Doe', 'Jane Doe', '+16174126046'],
+    ['', 'Jane Doe, Gus, +15085550142', '+16174126046, gus@example.com, +15085550142'],
+    ['Site crew', 'Jane Doe, Gus', '+16174126046, gus@example.com'],
+    ['', '+15085550142', '+15085550142'],
+  ]);
+  const read = H.shapeRead([{ text: 'me', fromMe: 1, d: 4 }, { text: 'b', fromMe: 0, sender: 'gus@example.com', d: 3 }, { text: 'a', fromMe: 0, sender: '+16174126046', d: 2 }, { text: 'z', fromMe: 0, sender: '+15085550142', d: 1 }], book);
+  assert.deepEqual(read.map((m) => [m.from, m.text]), [['+15085550142', 'z'], ['Jane Doe', 'a'], ['Gus', 'b'], ['me', 'me']]);
+});
+
+test('helper 1.0.10: recent and read look names up in every Contacts file; unreadable Contacts keep the numbers and say so', () => {
+  const RECENT = '[{"chat":"SMS;-;+16174126046","id":"+16174126046","name":"","people":"+16174126046","service":"SMS","text":"Ok","fromMe":1,"d":757382400}]';
+  const READ = '[{"text":"Ok","fromMe":0,"sender":"+16174126046","d":757382400,"chat":"SMS;-;+16174126046"}]';
+  const files = ['/AB/AddressBook-v22.abcddb', '/AB/Sources/A1/AddressBook-v22.abcddb'];
+  const rig = (contacts) => hostRig((tool, args) => {
+    if (tool !== 'sqlite3') return {};
+    if (/chat\.db$/.test(args[2])) return { out: /FROM chat c JOIN message/.test(args[3]) ? RECENT : READ };
+    return contacts(args[2]);
+  });
+  // the iCloud card is in Sources/<id>; the local file has nobody
+  const ok = rig((f) => ({ out: f.includes('Sources') ? '[{"f":"Jane","l":"Doe","v":"(617) 412-6046"}]' : '' }));
+  ok.ctx.contactFiles = () => files;
+  assert.deepEqual(ok.full({ op: 'recent' }).conversations.map((c) => [c.name, c.people]), [['Jane Doe', 'Jane Doe']]);
+  assert.deepEqual(ok.full({ op: 'read', chat: 'SMS;-;+16174126046' }).messages.map((m) => m.from), ['Jane Doe']);
+  const opened = ok.calls.filter(([tool, a]) => tool === 'sqlite3' && /abcddb$/.test(a[2]));
+  assert.ok(opened.every(([, a]) => a[0] === '-readonly'), 'Contacts is opened read-only');
+  assert.deepEqual([...new Set(opened.map(([, a]) => a[2]))], files);
+  assert.equal(ok.full({ op: 'recent' }).contacts, undefined, 'nothing to say when names were read');
+  // no access to Contacts: the texts still come back, with numbers, and the answer says why
+  const denied = rig(() => NO_ACCESS);
+  denied.ctx.contactFiles = () => files;
+  const r = denied.full({ op: 'recent' });
+  assert.deepEqual(r.conversations.map((c) => c.people), ['+16174126046']);
+  assert.equal(r.contacts, 'unreadable');
+  // listing the files fails: the same
+  const blind = rig(() => ({}));
+  blind.ctx.contactFiles = () => { throw new Error('no'); };
+  assert.equal(blind.full({ op: 'read', chat: '+16174126046' }).contacts, 'unreadable');
+  // a send never opens Contacts
+  const send = rig(() => { throw new Error('Contacts opened on a send'); });
+  send.ctx.contactFiles = () => files;
+  assert.equal(send.full({ op: 'send', to: '+16174126046', text: 'x' }).sent, true);
+});
+
+test('app: the agent is told to call people by the names texts come back with', () => {
+  const APP = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(APP, /Call people by the names those results give\. Show a number only when no name comes back\./);
+  assert.match(APP, /\['messages_recent', 'Recent texts', false, '.*?chat id, name, people \(by contact name\), handles, last message\.'/);
 });
