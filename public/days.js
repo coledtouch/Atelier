@@ -1,6 +1,6 @@
 // Days and flows: a flow is a thread; a day is derived from the times of its entries (local time), never stored.
 // Pure helpers the UI uses. No DOM and no network, so tests/days.test.mjs imports it directly.
-import { spaceOf, spaceByHand, labelOf } from './thread-spaces.js?v=131';
+import { spaceOf, spaceByHand, labelOf } from './thread-spaces.js?v=132';
 
 const pad = (n) => String(n).padStart(2, '0');
 /** 'YYYY-MM-DD' in local time. */
