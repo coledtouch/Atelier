@@ -7,7 +7,7 @@
 //                                'html' | 'text' | 'old' (a format nothing here reads) | ''
 //   readFile(kind, bytes, f)   → the text of any kind but 'pdf' (f: fflate's { unzipSync, strFromU8 })
 //   clipText(text, max)        → { text, cut } with the text cut at max characters
-import { legacyText } from './files-legacy.js?v=132';
+import { legacyText } from './files-legacy.js?v=134';
 
 export const FILE_MAX_BYTES = 50 * 1024 * 1024; // a bigger file isn't read
 export const FILE_CHARS = 150_000; // one file's text, at most (~40k tokens)

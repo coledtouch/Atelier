@@ -65,7 +65,7 @@ function loadBackground({ manifest = SOURCE_MANIFEST, pages = {}, storage = {}, 
   const on = () => { const fns = []; return { fns, addListener: (f) => fns.push(f), removeListener: (f) => { const i = fns.indexOf(f); if (i >= 0) fns.splice(i, 1); } }; };
   const h = {
     events: { message: on(), connect: on(), removed: on(), startup: on(), installed: on(), alarm: on(), updated: on() },
-    windows: [], removedWindows: [], injected: [], sockets: [], storage: { ...storage }, session: structuredClone(session), pages, cdp: [], native: [], os: 'win', nativeMissing: false, nativeReply: null, tabUpdates: [],
+    windows: [], removedWindows: [], injected: [], sockets: [], storage: { ...storage }, session: structuredClone(session), pages, cdp: [], native: [], os: 'win', nativeMissing: false, nativeReply: null, tabUpdates: [], reloads: [],
   };
   class FakeInput {}
   Object.defineProperty(FakeInput.prototype, 'value', { set(v) { this.typedValue = v; }, get() { return this.typedValue; } });
@@ -81,7 +81,7 @@ function loadBackground({ manifest = SOURCE_MANIFEST, pages = {}, storage = {}, 
       setTimeout(() => { this.readyState = 3; this.onclose?.({ code }); }, 5);
     }
   }
-  const tab = (id) => { const p = pages[id]; if (!p) throw new Error(`No tab with id: ${id}.`); return { id, title: p.title, url: p.url, status: 'complete', windowId: 1 }; };
+  const tab = (id) => { const p = pages[id]; if (!p) throw new Error(`No tab with id: ${id}.`); return { id, title: p.title, url: p.url, status: 'complete', windowId: 1, discarded: p.discarded === true }; };
   const chrome = {
     runtime: {
       id: EXT_ID,
@@ -112,16 +112,22 @@ function loadBackground({ manifest = SOURCE_MANIFEST, pages = {}, storage = {}, 
       query: async () => Object.keys(pages).map((id) => tab(Number(id))),
       create: async () => { throw new Error('not in these tests'); },
       update: async (id, props) => { h.tabUpdates.push([id, props]); return tab(id); }, remove: async () => {},
+      // A reload wakes a discarded or frozen tab (1.4.8): the page's onReload plays it loading again.
+      reload: async (id) => { h.reloads.push(id); const p = pages[id]; p.discarded = false; p.hold = null; p.onReload?.(); },
       onUpdated: h.events.updated,
     },
     scripting: {
       executeScript: async ({ target, func, args }) => {
         h.injected.push({ tabId: target.tabId, func: func.name, args });
+        // Like Chrome: undefined can't be passed into a page (v132: personal texts sent it and failed).
+        const bad = (args || []).findIndex((v) => v === undefined);
+        if (bad >= 0) throw new Error(`Error at parameter 'injection': Error at property 'args': Error at index ${bad}: Value is unserializable.`);
         const page = pages[target.tabId];
+        if (page.discarded) throw new Error('Cannot access contents of the page. The tab was discarded.');
         if (page.hold) await page.hold; // a page that isn't answering (e.g. showing a dialog box)
         ctx.document = page.document;
         ctx.window = page.window;
-        ctx.location = { href: page.url };
+        ctx.location = { href: page.url, pathname: new URL(page.url).pathname };
         return [{ result: func(...args) }];
       },
     },
@@ -1055,8 +1061,8 @@ test('confirm page: the tick is sent only with an Allow, and the page carries th
   assert.match(js, /port\.postMessage\(\{ answer: choice, \.\.\.\(always \? \{ always: true \} : \{\}\) \}\)/);
 });
 
-test('manifest: version 1.4.6, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
-  assert.equal(SOURCE_MANIFEST.version, '1.4.6');
+test('manifest: version 1.4.8, a description Chrome accepts, and a Chrome new enough for the worker keep-alives', () => {
+  assert.equal(SOURCE_MANIFEST.version, '1.4.8');
   assert.ok(SOURCE_MANIFEST.description.length <= 132);
   assert.ok(Number(SOURCE_MANIFEST.minimum_chrome_version) >= 116);
 });
@@ -1069,8 +1075,8 @@ test('the app asks for the extension build it ships: MIN_EXT is the manifest ver
   const min = /const MIN_EXT = '([\d.]+)';/.exec(APP)?.[1];
   assert.equal(min, SOURCE_MANIFEST.version, 'public/app.js MIN_EXT = extension/manifest.json version');
   const olderExt = new Function(`const MIN_EXT = '${min}'; return ${/\nconst olderExt = ([^\n]+);\n/.exec(APP)[1]};`)();
-  for (const v of ['1.4.5', '1.4.4', '1.4.3', '1.4.2', '1.4.0', '1.3.10', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
-  for (const v of [min, '1.4.6', '1.10.0', '2.0.0']) assert.equal(olderExt(v), false, v);
+  for (const v of ['1.4.7', '1.4.6', '1.4.5', '1.4.4', '1.4.3', '1.4.2', '1.4.0', '1.3.10', '1.3.4', '1.3.3', '1.3.2', '1.3.1', '1.2.9', '0.9', '', null, undefined, '1.3', 'x']) assert.equal(olderExt(v), true, String(v));
+  for (const v of [min, '1.4.8', '1.10.0', '2.0.0']) assert.equal(olderExt(v), false, v);
   assert.match(APP, /if \(olderExt\(d\.version\)\) setTimeout\(\(\) => toast\(`Atelier Browser has an update \(v\$\{MIN_EXT\}\)/);
 });
 
@@ -1083,7 +1089,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
   const prod = packExtension();
   const files = unzipSync(prod.zip);
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  assert.equal(manifest.version, '1.4.6');
+  assert.equal(manifest.version, '1.4.8');
   assert.deepEqual(manifest.content_scripts.map((c) => c.matches), [['https://atelier.ciprari.ai/*']]);
   assert.deepEqual(manifest.host_permissions, ['<all_urls>']);
   assert.ok(!/localhost|127\.0\.0\.1/.test(strFromU8(files['manifest.json'])));
@@ -1092,7 +1098,7 @@ test('the production pack drops localhost everywhere; the dev pack keeps it; bot
 
   const dev = packExtension({ dev: true });
   assert.deepEqual(dev.manifest.content_scripts[0].matches, ['https://atelier.ciprari.ai/*', 'http://localhost:8787/*']);
-  assert.equal(dev.manifest.version, '1.4.6');
+  assert.equal(dev.manifest.version, '1.4.8');
   assert.deepEqual(SOURCE_MANIFEST.content_scripts[0].matches, dev.manifest.content_scripts[0].matches, 'the source keeps localhost for Load unpacked');
 });
 
@@ -1736,7 +1742,57 @@ test('sign-in 1.4.5: what Chrome filled by itself stays only when it is the acco
 test('app 1.4.5: browser_signin’s account is the user’s own word, a sign-in step gets 90 s, and the card says to pick', () => {
   const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /account: \{ type: 'string', description: 'The saved user name or email the user asked for, in their own words\. Never guess one: leave it out, and the user picks from Chrome’s list\.' \}/);
-  assert.match(app, /const MIN_EXT = '1\.4\.6';/);
+  assert.match(app, /const MIN_EXT = '1\.4\.8';/);
   assert.match(app, /step\.name === 'browser_signin' \? 90000 : 60000/);
   assert.match(app, /If Chrome doesn’t fill it, click the user name field on that tab and pick your login\./);
+});
+
+test('personal texts (v132): every step reaches the Google Messages page, even one that sends no value', async () => {
+  const gm = { title: 'Messages', url: 'https://messages.google.com/web/conversations', document: { querySelectorAll: () => [], querySelector: () => null } };
+  const h = loadBackground({ pages: { 7: gm } });
+  assert.deepEqual(await h.local('gmessages', { op: 'recent' }), { ok: true, result: { conversations: [] } });
+  const sent = h.injected.filter((c) => c.func === 'pageGMessages');
+  assert.deepEqual(sent.map((c) => c.args[0]), ['state', 'recent']);
+  assert.equal(JSON.stringify(sent[0].args[1]), '{}', 'state goes with an empty value, not undefined');
+});
+
+// A Google Messages tab: its conversation list shows once `loaded` (a reloaded page fills it in a moment later).
+function gmPage({ discarded = false, hold = null, paired = true } = {}) {
+  const row = { getAttribute: (n) => ({ href: '/web/conversations/CgAAA111', 'data-e2e-is-unread': 'false' })[n] ?? null, querySelector: (sel) => (sel === '[data-e2e-conversation-name]' ? { innerText: 'Pat Example' } : null) };
+  const page = { title: 'Messages', url: `https://messages.google.com/web/${paired ? 'conversations' : 'welcome'}`, discarded, hold, loaded: !discarded && !hold };
+  page.document = { querySelectorAll: (sel) => (sel === 'a[data-e2e-conversation]' && page.loaded ? [row] : []), querySelector: () => null };
+  page.onReload = () => { setTimeout(() => { page.loaded = true; }, 30); };
+  return page;
+}
+
+test('personal texts (1.4.8): a tab Chrome put to sleep is woken with a reload, then read', async () => {
+  const gm = gmPage({ discarded: true });
+  const h = loadBackground({ pages: { 7: gm } });
+  h.run('TIMING.poll = 5; TIMING.wake = 500');
+  const got = await h.local('gmessages', { op: 'recent' });
+  assert.equal(got.ok, true, got.error);
+  assert.deepEqual(got.result.conversations.map((c) => c.name), ['Pat Example'], 'read after its list showed again');
+  assert.deepEqual(h.reloads, [7], 'one reload');
+  assert.ok(h.tabUpdates.some(([id, p]) => id === 7 && p.autoDiscardable === false), 'and Chrome is told not to discard it again');
+});
+
+test('personal texts (1.4.8): a tab that stopped answering is reloaded; an awake one never is', async () => {
+  const frozen = gmPage({ hold: new Promise(() => {}) });
+  const h = loadBackground({ pages: { 7: frozen } });
+  h.run('TIMING.poll = 5; TIMING.read = 40; TIMING.wake = 500');
+  const got = await h.local('gmessages', { op: 'recent' });
+  assert.equal(got.ok, true, got.error);
+  assert.deepEqual(h.reloads, [7]);
+  const awake = loadBackground({ pages: { 7: gmPage() } });
+  assert.equal((await awake.local('gmessages', { op: 'recent' })).ok, true);
+  assert.deepEqual(awake.reloads, [], 'a tab that answers keeps what’s on it');
+  assert.ok(awake.tabUpdates.some(([id, p]) => id === 7 && p.autoDiscardable === false));
+});
+
+test('personal texts (1.4.8): a woken tab that turns out unpaired says so', async () => {
+  const h = loadBackground({ pages: { 7: gmPage({ discarded: true }) } });
+  h.run('TIMING.poll = 5; TIMING.wake = 500');
+  h.pages[7].onReload = () => { h.pages[7].url = 'https://messages.google.com/web/welcome'; };
+  const got = await h.local('gmessages', { op: 'recent' });
+  assert.match(got.error, /^Google Messages isn’t paired in this browser/);
 });
