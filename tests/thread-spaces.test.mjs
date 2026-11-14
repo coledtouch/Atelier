@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GROUP_SETS, PREVIOUS_SET_IDS, carryForward, groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, threadLine, spaceRequest, parseSpaces, bySpace } from '../public/thread-spaces.js';
+import { GROUP_SETS, PREVIOUS_SET_IDS, carryForward, groupsFor, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, threadLine, spaceRequest, parseSpaces, bySpace, mergeSpaces } from '../public/thread-spaces.js';
 
 const { basic, owner } = GROUP_SETS;
 
@@ -81,4 +81,20 @@ test('By group order: the set\'s groups in their order, then the ones not sorted
   assert.deepEqual(bySpace(threads, spaces, owner).map((t) => t.id), ['p1', 'p2', 'c1', 'c2', 'e1', 'w1', 'a1', 'n1']);
   assert.deepEqual(bySpace([{ id: 'p' }, { id: 'w' }, { id: 'n' }], { p: 'personal', w: 'work' }, basic).map((t) => t.id), ['w', 'p', 'n']);
   assert.deepEqual(threads.map((t) => t.id), ['n1', 'a1', 'w1', 'p1', 'c1', 'e1', 'c2', 'p2'], 'the list passed in is not reordered');
+});
+
+test('mergeSpaces: a tab saves only the answers it changed, and a guess never replaces a hand choice', () => {
+  const set = GROUP_SETS.owner;
+  // another tab chose 'a' by hand after this tab read the map; this tab's sorter guessed 'a' and 'b'
+  const stored = { a: 'coen!', c: 'kid' };
+  const mine = { a: 'personal', b: 'work', c: 'kid' };
+  assert.deepEqual(mergeSpaces(stored, mine, ['a', 'b'], set), { a: 'coen!', b: 'work', c: 'kid' });
+  // a hand choice made here wins over what is stored, guess or hand
+  assert.deepEqual(mergeSpaces({ a: 'coen!' }, { a: 'kid!' }, ['a'], set), { a: 'kid!' });
+  // an id gone from this tab's map (Automatic) is removed; ids not named are left as stored
+  assert.deepEqual(mergeSpaces({ a: 'coen!', z: 'apps' }, {}, ['a'], set), { z: 'apps' });
+  // junk stored or a key the set lacks is dropped; the inputs are not changed
+  assert.deepEqual(mergeSpaces('junk', { a: 'kid' }, ['a'], set), { a: 'kid' });
+  assert.deepEqual(mergeSpaces({ q: 'nope' }, {}, [], set), {});
+  assert.deepEqual(stored, { a: 'coen!', c: 'kid' });
 });

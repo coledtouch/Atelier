@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dayKey, entryTime, flowDays, flowsOn, daySlice, dayTimeline, dayList, stepDay, kindOf, cleanFlow, flowHint, KIND_DEFAULTS, rolledDay, keepsFlow } from '../public/days.js';
+import { dayKey, entryTime, flowDays, flowsOn, daySlice, dayTimeline, dayList, stepDay, kindOf, cleanFlow, flowHint, KIND_DEFAULTS, rolledDay, keepsFlow, handPlan } from '../public/days.js';
 import { GROUP_SETS } from '../public/thread-spaces.js';
 
 const at = (y, m, d, h = 12, min = 0) => new Date(y, m - 1, d, h, min).getTime();
@@ -109,4 +109,34 @@ test('keepsFlow: the open flow stays on the new day when it has a turn that day,
   assert.equal(keepsFlow({ entries: [entry('a', at(2026, 11, 12, 23, 30)), entry('b', at(2026, 11, 13, 0, 10))] }, d13), true);
   assert.equal(keepsFlow({ entries: [] }, d13), true, 'a new flow with nothing in it yet');
   assert.equal(keepsFlow(null, d13), false);
+});
+
+test('stepDay never steps past today: a future day in the list, or the clock moved back', () => {
+  const days = ['2026-11-11', '2026-11-13', '2026-11-15'];
+  assert.equal(stepDay(days, '2026-11-11', 1, '2026-11-13'), '2026-11-13');
+  assert.equal(stepDay(days, '2026-11-13', 1, '2026-11-13'), null, 'today is the last step forward');
+  assert.equal(stepDay(days, '2026-11-15', 1, '2026-11-13'), null, 'never on from a future day');
+  assert.equal(stepDay(days, '2026-11-15', -1, '2026-11-13'), '2026-11-13', 'back from a future day lands on today');
+  assert.equal(stepDay(days, '2026-11-11', 1, '2026-11-12'), null, 'the clock moved back: the 13th is in the future');
+  assert.equal(stepDay(days, '2026-11-12', -1, '2026-11-12'), '2026-11-11');
+  assert.equal(stepDay(days, '2026-11-11', 1), '2026-11-13', 'no today given: as before');
+});
+
+test('handPlan: a hand choice beats a guessed flow, whatever arrived first', () => {
+  const e = [{ id: 'x', createdAt: 1 }];
+  const spaces = { a: 'coen!', b: 'coen!', c: 'coen!', d: 'kid', e: 'coen!', f: 'coen!', g: 'coen!' };
+  const threads = [
+    { id: 'a', entries: e }, // no flow yet: the hand choice is written
+    { id: 'b', entries: e, flow: { kind: 'personal' } }, // a guess got there first (a sync pull, a race): his choice is written again
+    { id: 'c', entries: e, flow: { kind: 'coen' } }, // they agree: nothing
+    { id: 'd', entries: e, flow: { kind: 'work' } }, // only a guess on this device: nothing
+    { id: 'e', entries: [] }, // empty: nothing
+    { id: 'f', entries: e, flow: { kind: 'apps' } }, // his one rewrite was spent: a later pick on another device is adopted
+    { id: 'g', entries: e, flow: { kind: 'x y' } }, // an invalid flow counts as none
+  ];
+  const { write, adopt } = handPlan(threads, spaces, new Set(['a', 'b', 'c']));
+  assert.deepEqual(write.map(({ thread, flow, spent }) => [thread.id, flow, spent]), [['a', { kind: 'coen' }, false], ['b', { kind: 'coen' }, true], ['g', { kind: 'coen' }, false]]);
+  assert.deepEqual(adopt, [{ id: 'f', kind: 'apps' }]);
+  assert.deepEqual(handPlan([], spaces, new Set()), { write: [], adopt: [] });
+  assert.deepEqual(handPlan([null, { id: 'z', entries: e }], spaces, new Set()), { write: [], adopt: [] });
 });

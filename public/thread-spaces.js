@@ -48,6 +48,20 @@ export function cleanSpaces(raw, set) {
   for (const [id, v] of Object.entries(raw)) if (typeof v === 'string' && keys.has(v.replace(/!$/, ''))) out[id] = v;
   return out;
 }
+/**
+ * What localStorage holds now (`stored`, perhaps written by another tab since this one read it) with this tab's answers
+ * for `ids` laid over it: a guess never replaces a hand choice ('coen!'), a hand choice made here always lands, and an id
+ * missing from `mine` (Automatic) is removed. Ids not named keep the stored answer. → a new object.
+ */
+export function mergeSpaces(stored, mine, ids, set) {
+  const out = cleanSpaces(stored, set);
+  for (const id of ids) {
+    const v = typeof mine?.[id] === 'string' ? mine[id] : undefined;
+    if (v === undefined) delete out[id];
+    else if (v.endsWith('!') || !String(out[id] || '').endsWith('!')) out[id] = v;
+  }
+  return cleanSpaces(out, set);
+}
 /** The thread's group key, or '' (not sorted yet). */
 export const spaceOf = (spaces, id) => String(spaces?.[id] || '').replace(/!$/, '');
 /** true when the owner chose this thread's group by hand. */
