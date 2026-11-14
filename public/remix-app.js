@@ -833,14 +833,17 @@ export function createRemix(deps) {
   }
 
   // ─────────── the cut ───────────
-  async function cut(e, { preview = false } = {}) {
+  // started: called once the cut gets past its guards and starts (a retry counts on today only then).
+  async function cut(e, { preview = false, started = null } = {}) {
     const r = e.remix;
     if (doc?.hidden) return;
     if (renders.has(e.id)) return;
     if (blocked(r)) { toast('Fix the highlighted beats first', { error: true }); return; }
     const file = await sourceFile(e);
     if (!file) { r.needSource = true; deps.repaint?.(e); return; }
+    if (renders.has(e.id)) return; // another cut started while the source was read
     delete r.needSource; delete r.renderError;
+    started?.();
     const ctrl = new AbortController();
     const threadId = threadOf(e); // the user may switch threads while it cuts
     // v114: 'cut' with no cut running here is a leftover (see bodyHtml). This one starts from the review state, so a
@@ -1390,7 +1393,12 @@ export function createRemix(deps) {
     if (!e?.remix) return false;
     const id = el?.dataset?.id;
     switch (act) {
-      case 'retry': if (e.error || !e.remix.plan) { deps.run?.(e); return true; } if (e.remix.renderError) { cut(e); return true; } deps.run?.(e); return true;
+      case 'retry': {
+        // The turn counts on today (deps.redone) only once the retry starts: a cut past its guards, or a run while online.
+        if (e.remix.plan && e.remix.renderError && !e.error) { cut(e, { started: () => deps.redone?.(e) }); return true; } // the cut runs on this device: no network needed
+        if (deps.offline?.()) { toast('You’re offline — try again once you’re connected', { error: true }); return true; }
+        deps.redone?.(e); deps.run?.(e); return true;
+      }
       case 'edit-prompt': openSheet(e); return true;
       case 'rx-revise': {
         const text = deps.inputValue?.()?.trim();
