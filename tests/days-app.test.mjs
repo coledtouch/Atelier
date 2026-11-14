@@ -367,6 +367,42 @@ test('a turn sent while a past day is shown lands on today, never under the Earl
   assert.match(fnSource('newFlow'), /S\.day = dayKey\(Date\.now\(\)\);/, 'a new flow lives on today');
 });
 
+test('a tab redraw puts focus back on the tab that had it (paintTabs, run)', () => {
+  const doc = { activeElement: null };
+  const mk = (html) => {
+    const view = /data-view="([^"]*)"/.exec(html)[1], selected = /aria-selected="true"/.test(html);
+    const b = { dataset: { view }, selected, offsetLeft: 0, offsetWidth: 10, focused: 0, focus() { doc.activeElement = b; b.focused++; } };
+    return b;
+  };
+  let kids = [];
+  const box = {
+    scrollLeft: 0, clientWidth: 500,
+    set innerHTML(h) { kids = (h.match(/<button[^>]*>/g) || []).map(mk); },
+    contains: (el) => kids.includes(el),
+    querySelector: (s) => (s === '[aria-selected="true"]' ? kids.find((k) => k.selected) || null : null),
+    querySelectorAll: (s) => (s === '[role="tab"]' ? kids : []),
+  };
+  const coen = { id: 'coen', title: 'Hall kitchen', entries: [{ prompt: 'x', at: Date.now() }] };
+  const kid = { id: 'kid', title: 'Science fair', entries: [{ prompt: 'y', at: Date.now() }] };
+  const S = { day: dayKey(Date.now()), view: 'coen', thread: coen };
+  const $ = (s, el = doc) => (s === '#flowTabs' ? box : el.querySelector(s));
+  const $$ = (s, el = doc) => [...el.querySelectorAll(s)];
+  const v = { S, document: doc, $, $$, tabFlows, kindOf, threadSpaces: {}, esc: (x) => String(x), flowColor: () => 'red', flowName: (t) => t?.title || 'New flow', dayPool: () => [coen, kid] };
+  lift(v, 'paintTabs');
+  v.paintTabs();
+  assert.equal(doc.activeElement, null, 'no focus taken when it was elsewhere');
+  // focus on the Science fair tab (not the selected one); a sync redraws
+  doc.activeElement = kids.find((k) => k.dataset.view === 'kid');
+  v.paintTabs();
+  assert.equal(doc.activeElement?.dataset.view, 'kid', 'the same tab, newly drawn, has focus');
+  assert.ok(kids.includes(doc.activeElement));
+  // a tab that is gone: the selected one gets it
+  doc.activeElement = kids.find((k) => k.dataset.view === 'kid');
+  v.dayPool = () => [coen];
+  v.paintTabs();
+  assert.equal(doc.activeElement?.dataset.view, 'coen');
+});
+
 test('Today review fixes: empty note only today, focus kept on a redraw, a remote delete keeps a past day', () => {
   for (const fn of ['renderTimeline', 'paintView']) assert.match(fnSource(fn), /Boolean\(S\.thread\?\.entries\.length\) \|\| !isToday\(\)/, fn);
   const tabs = fnSource('paintTabs');

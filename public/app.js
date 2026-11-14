@@ -743,7 +743,7 @@ function paintTabs() {
   box.innerHTML = `<button type="button" role="tab" class="flow-tab flow-tab-all" data-view="all" aria-selected="${S.view === 'all'}" tabindex="${S.view === 'all' ? 0 : -1}"><span>All</span></button>${flows.map(tab).join('')}`;
   const sel = $('[aria-selected="true"]', box);
   if (!sel) return;
-  if (had) ($('[role="tab"]', box).find((b) => b.dataset.view === had) || sel).focus({ preventScroll: true }); // a redraw (sync) keeps focus where it was
+  if (had) ($$('[role="tab"]', box).find((b) => b.dataset.view === had) || sel).focus({ preventScroll: true }); // a redraw (sync) keeps focus where it was
   // keep the chosen tab in view in the sideways row (never scrollIntoView: that would scroll the conversation too)
   const l = sel.offsetLeft, r = l + sel.offsetWidth;
   if (l < box.scrollLeft || r > box.scrollLeft + box.clientWidth) box.scrollLeft = Math.max(0, l - 24);
