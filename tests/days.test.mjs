@@ -245,3 +245,82 @@ test('three devices holding marks: the newest pick survives (review: item 1)', (
   assert.deepEqual(f.server.flow, { kind: 'apps' });
   for (const n of ['a', 'b', 'c']) assert.equal(f.devs[n].spaces.t, 'apps!');
 });
+
+// ── moving a turn to another flow (the owner's Nov 14 report: a Slack question filed under Coen, and no way to move it) ──
+test('turnIds: a turn is its entry and every sync fork of it, from whichever version is picked', async () => {
+  const { turnIds } = await import('../public/days.js');
+  const t = { entries: [entry('a', 1), entry('b', 2), { ...entry('b2', 2), forkOf: 'b' }, { ...entry('b3', 2), forkOf: 'b2' }, entry('c', 3)] };
+  assert.deepEqual(turnIds(t, 'b'), ['b', 'b2', 'b3']);
+  assert.deepEqual(turnIds(t, 'b3'), ['b', 'b2', 'b3'], 'a fork moves with its whole turn');
+  assert.deepEqual(turnIds(t, 'a'), ['a']);
+  assert.deepEqual(turnIds(t, 'zz'), []);
+  const orphan = { entries: [{ ...entry('f', 5), forkOf: 'gone' }] };
+  assert.deepEqual(turnIds(orphan, 'f'), ['f'], 'a fork whose original is elsewhere is a turn of its own');
+});
+
+test('moveTurn: the turn leaves the source and lands in the target in entry order, keeping id, time and at', async () => {
+  const { moveTurn } = await import('../public/days.js');
+  const b = { ...entry('b', at(2026, 11, 14, 8, 44)), at: at(2026, 11, 14, 9, 0), prompt: 'Any new messages from slack?', text: 'none' };
+  const fork = { ...entry('b2', b.createdAt), forkOf: 'b', text: 'other' };
+  const from = { id: 'coen', entries: [entry('a', at(2026, 11, 14, 8)), b, fork, entry('c', at(2026, 11, 14, 10))] };
+  const to = { id: 'edge', entries: [entry('x', at(2026, 11, 13, 9)), entry('y', at(2026, 11, 14, 11))] };
+  const out = moveTurn(from, to, 'b');
+  assert.deepEqual(out.from.map((e) => e.id), ['a', 'c']);
+  assert.deepEqual(out.to.map((e) => e.id), ['x', 'b', 'b2', 'y'], 'sorted as every device and the server sort (createdAt, fork, id)');
+  assert.equal(out.moved[0], b, 'the same entry object: nothing about it changes');
+  assert.equal(out.moved[0].at, b.at); assert.equal(out.moved[0].createdAt, b.createdAt);
+  assert.deepEqual(from.entries.map((e) => e.id), ['a', 'b', 'b2', 'c'], 'pure: the threads are not changed');
+  assert.equal(dayKey(entryTime(out.moved[0])), '2026-11-14', 'its day does not change');
+});
+
+test('moveTurn with renames: new ids where the target already knew the old ones, and forks follow their original', async () => {
+  const { moveTurn } = await import('../public/days.js');
+  const b = { ...entry('b', 5), text: 'x' }, f = { ...entry('b2', 5), forkOf: 'b' };
+  const out = moveTurn({ entries: [b, f] }, { entries: [entry('z', 9)] }, 'b', { b: 'n1' });
+  assert.deepEqual(out.to.map((e) => [e.id, e.forkOf ?? null]), [['n1', null], ['b2', 'n1'], ['z', null]]);
+  assert.notEqual(out.moved[0], b, 'a renamed entry is a copy');
+  assert.equal(b.id, 'b', 'the original keeps its id');
+  assert.deepEqual(out.ids, { b: 'n1', b2: 'b2' });
+});
+
+test('moveTurn and taint: the target now carries the moved turn\'s marks and the source no longer does', async () => {
+  const { moveTurn } = await import('../public/days.js');
+  const { threadTaint } = await import('../public/context.js');
+  const now = Date.UTC(2026, 10, 14);
+  const shared = { id: 's', kind: 'ask', createdAt: now, prompt: 'p', text: 't', untrusted: 'share' };
+  const from = { entries: [{ id: 'a', kind: 'ask', createdAt: now - 1, prompt: 'p', text: 't' }, shared] };
+  const to = { entries: [{ id: 'z', kind: 'ask', createdAt: now - 5, prompt: 'p', text: 't' }] };
+  assert.equal(threadTaint(from.entries), 'share'); assert.equal(threadTaint(to.entries), '');
+  const out = moveTurn(from, to, 's');
+  assert.equal(threadTaint(out.from), '', 'the source flow no longer holds the shared text');
+  assert.equal(threadTaint(out.to), 'share', 'the target flow now does');
+  const ran = { id: 'r', kind: 'ask', createdAt: now, prompt: 'p', text: 't', ranTaint: 'browser' };
+  assert.equal(threadTaint(moveTurn({ entries: [ran] }, { entries: [] }, 'r').to), 'browser', 'what an earlier run read moves too');
+});
+
+test('moveTargets: today\'s flows, then other recent flows, never the source or an empty flow', async () => {
+  const { moveTargets } = await import('../public/days.js');
+  const day = '2026-11-14', d = (h, dd = 14) => at(2026, 11, dd, h);
+  const coen = { id: 'coen', entries: [entry('a', d(8))] };
+  const edge = { id: 'edge', entries: [entry('b', d(9, 12))] };
+  const kid = { id: 'kid', entries: [entry('c', d(10))] };
+  const old = { id: 'old', entries: [entry('e', d(7, 1))] };
+  const empty = { id: 'new', createdAt: d(11), entries: [] };
+  const many = Array.from({ length: 9 }, (_, i) => ({ id: `m${i}`, entries: [entry(`m${i}`, d(9, 2 + i))] }));
+  const out = moveTargets([coen, edge, kid, old, empty, ...many], day, 'coen');
+  assert.deepEqual(out.today.map((t) => t.id), ['kid']);
+  assert.deepEqual(out.recent.map((t) => t.id), ['edge', 'm8', 'm7', 'm6', 'm5', 'm4'], 'the most recent first, six at most');
+  assert.deepEqual(moveTargets([coen, edge], day, 'edge').today.map((t) => t.id), ['coen']);
+});
+
+test('moveDest: the one-tap Move goes to the most recently active flow of that kind, else a new one (null)', async () => {
+  const { moveDest } = await import('../public/days.js');
+  const e1 = { id: 'e1', flow: { kind: 'edgeball' }, entries: [entry('a', 5)] };
+  const e2 = { id: 'e2', entries: [entry('b', 9)] }; // a guess only
+  const coen = { id: 'c', flow: { kind: 'coen' }, entries: [entry('c', 20)] };
+  assert.equal(moveDest([e1, e2, coen], 'edgeball', 'c', { e2: 'edgeball' }), e2);
+  assert.equal(moveDest([e1, e2, coen], 'edgeball', 'c', {}), e1);
+  assert.equal(moveDest([coen], 'edgeball', 'c', {}), null);
+  assert.equal(moveDest([coen], 'coen', 'c', {}), null, 'never the source');
+  assert.equal(moveDest([{ id: 'n', flow: { kind: 'edgeball' }, entries: [] }], 'edgeball', 'c', {}), null, 'never an empty flow');
+});

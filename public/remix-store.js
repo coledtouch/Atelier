@@ -11,6 +11,7 @@
 //   rx:src:<entry>         {blob, …} — the source video File (owner ≤ 500 MB, tester ≤ 200 MB)
 //   rx:cut:<entry>         {blob, …} — the finished cut (the thread keeps only e.remix.export's numbers)
 //   rx:plan:<entry>        {plan, shots, opts, assets, at} — the review draft, saved with a 1 s debounce
+// A turn moved to another flow keeps its id, so its keys stay; refile points their threadId at the new flow.
 // db: {kvGet(k), kvSet(k, v), kvDel?(k), kvKeys?()} — kvDel/kvKeys arrive with the app.js A2 patch; without them a
 // delete writes null and a prune only reaches the entries rx:ops and the jobs it knows about.
 // No DOM; tests/remix-store.test.mjs runs it on memoryKv().
@@ -254,6 +255,29 @@ export function createRemixStore(db, opts = {}) {
     for (const entry of mine) await dropEntry(entry);
     return [...mine];
   }
+  /**
+   * A Remix turn moved to another flow (app.js moveTurn): every record of that entry that names a thread (its blobs, job
+   * and op records) now names threadId, so a prune or the old flow's delete never drops what it filmed. → records changed.
+   */
+  async function refile(entryId, threadId) {
+    if (!entryOk(entryId) || typeof threadId !== 'string' || !threadId) return 0;
+    let n = 0;
+    const list = typeof db.kvKeys === 'function' ? (await db.kvKeys()).filter((k) => parseKey(k)?.entry === entryId && parseKey(k)?.kind !== 'ops') : [keys.job(entryId)];
+    for (const k of list) {
+      await serial(k, async () => {
+        const v = await db.kvGet(k);
+        if (!record(v) || typeof v.threadId !== 'string' || v.threadId === threadId) return;
+        await db.kvSet(k, { ...v, threadId });
+        n++;
+      });
+    }
+    await serial(keys.ops, async () => {
+      const list2 = await opsAll();
+      if (!list2.some((o) => o.entryId === entryId && o.threadId !== threadId)) return;
+      await db.kvSet(keys.ops, list2.map((o) => (o.entryId === entryId ? { ...o, threadId } : o)));
+    });
+    return n;
+  }
   /** → {usage, quota, rxBytes, persisted} (rxBytes: the bytes of every rx:* blob this store knows of). */
   async function estimate() {
     let usage = null, quota = null, persisted = null, rxBytes = 0;
@@ -270,5 +294,5 @@ export function createRemixStore(db, opts = {}) {
     return { usage, quota, rxBytes, persisted };
   }
 
-  return { keys, putBlob, getBlob, dropBlob, opsAll, opsAdd, opsRemove, jobGet, jobPatch, jobDrop, draftSave, draftFlush, draftCancel, draftLoad, dropEntry, dropThread, prune, estimate };
+  return { keys, putBlob, getBlob, dropBlob, opsAll, opsAdd, opsRemove, jobGet, jobPatch, jobDrop, draftSave, draftFlush, draftCancel, draftLoad, dropEntry, dropThread, refile, prune, estimate };
 }

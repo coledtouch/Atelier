@@ -1,6 +1,7 @@
 // Days and flows: a flow is a thread; a day is derived from the times of its entries (local time), never stored.
 // Pure helpers the UI uses. No DOM and no network, so tests/days.test.mjs imports it directly.
 import { spaceOf, spaceByHand } from './thread-spaces.js?v=137';
+import { entryOrder } from './sync-merge.js?v=137';
 
 const pad = (n) => String(n).padStart(2, '0');
 /** 'YYYY-MM-DD' in local time. */
@@ -216,4 +217,61 @@ export function globalOptsWrite(stored, mode, slice, kind) {
   for (const k of Object.keys(own)) { if (!held(k)) continue; if (k in was) own[k] = was[k]; else delete own[k]; }
   out[mode] = { ...was, ...own };
   return out;
+}
+
+// ── moving a turn to another flow ──
+// A turn is one prompt and its answer: an entry, plus the versions sync kept beside it (forks: forkOf its id, sorted right
+// after it). Retry and Restore keep their versions inside the entry, and a Build refine is a turn of its own.
+/** The ids of the turn holding entry `id` (from its original down to every fork of it), in thread order; [] when absent. */
+export function turnIds(t, id) {
+  const es = entriesOf(t), byId = new Map(es.map((e) => [e.id, e]));
+  let root = byId.get(id);
+  if (!root) return [];
+  const up = new Set([root.id]);
+  while (root.forkOf != null && byId.has(root.forkOf) && !up.has(root.forkOf)) { root = byId.get(root.forkOf); up.add(root.id); }
+  const ids = new Set([root.id]);
+  for (let grew = true; grew;) { grew = false; for (const e of es) if (!ids.has(e.id) && ids.has(e.forkOf)) { ids.add(e.id); grew = true; } }
+  return es.filter((e) => ids.has(e.id)).map((e) => e.id);
+}
+
+/**
+ * Moves the turn holding entry `id` from thread `from` to thread `to`. Pure: the threads are not changed.
+ * Each entry keeps its id, createdAt and at, so its day stays the same; `rename` ({oldId: newId}) gives a new id to an
+ * entry the target already knew under the old one (sync: a turn moved back), as a copy, and its forks follow it.
+ * → { from: the source's entries, to: the target's entries in the order every device sorts them, moved, ids: {old: new} }
+ */
+export function moveTurn(from, to, id, rename = {}) {
+  const ids = new Set(turnIds(from, id));
+  const map = {};
+  for (const e of entriesOf(from)) if (ids.has(e.id)) map[e.id] = typeof rename[e.id] === 'string' && rename[e.id] ? rename[e.id] : e.id;
+  const moved = entriesOf(from).filter((e) => ids.has(e.id)).map((e) => {
+    const forkOf = e.forkOf != null && Object.hasOwn(map, e.forkOf) ? map[e.forkOf] : e.forkOf;
+    return map[e.id] === e.id && forkOf === e.forkOf ? e : { ...e, id: map[e.id], ...(e.forkOf != null ? { forkOf } : {}) };
+  });
+  const sorted = [...entriesOf(to)];
+  for (const e of moved) {
+    let i = sorted.findIndex((x) => Number.isFinite(x?.createdAt) && entryOrder(x, e) > 0);
+    if (i < 0) i = sorted.length;
+    sorted.splice(i, 0, e);
+  }
+  return { from: entriesOf(from).filter((e) => !ids.has(e.id)), to: sorted, moved, ids: map };
+}
+
+const lastAt = (t) => Math.max(...entriesOf(t).map(entryTime).filter(Number.isFinite), -Infinity);
+const byRecent = (a, b) => lastAt(b) - lastAt(a);
+/**
+ * Where a turn can go, for the Move picker: { today: the flows with something on `day` (most recently active that day
+ * first), recent: up to `limit` other flows, the most recently active first }. Never the source, never an empty flow
+ * (a new flow not saved yet: the picker offers "+ New flow" per kind instead).
+ */
+export function moveTargets(threads, day, fromId, limit = 6) {
+  const pool = threads.filter((t) => t && t.id !== fromId && entriesOf(t).length);
+  const today = flowsOn(pool, day);
+  const seen = new Set(today);
+  return { today, recent: pool.filter((t) => !seen.has(t)).sort(byRecent).slice(0, limit) };
+}
+
+/** The flow a one-tap "Move to Edgeball" uses: the most recently active flow of that kind (not the source, not empty), or null for a new one. */
+export function moveDest(threads, kind, fromId, guesses) {
+  return threads.filter((t) => t && t.id !== fromId && entriesOf(t).length && kindOf(t, guesses) === kind).sort(byRecent)[0] || null;
 }
