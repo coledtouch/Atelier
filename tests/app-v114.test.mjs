@@ -461,3 +461,13 @@ test('ui #4, #12, Messages row: the browser bar follows the chosen theme, the to
   assert.match(APP, /dlg\.setAttribute\('aria-labelledby', 'tokTitle'\);\r?\n\s+dlg\.innerHTML = `<form method="dialog"><h3 id="tokTitle">/);
   assert.match(APP, /approveAll\(\) \? 'Atelier can read your texts here and send them\. Approve everything is on, so it doesn’t ask\.'/);
 });
+
+test('v136: an old extension behind the relay says to update it, not "Unknown command gmessages"', async () => {
+  const relay = (error) => async () => ({ ok: false, status: 400, json: async () => ({ ok: false, error }) });
+  const vars = lift({ EXT: { ready: false }, REMOTE: { online: true }, MIN_EXT: '1.4.8', apiHeaders: () => ({}), deviceKind: () => 'linux',
+    fetch: relay('Unknown command gmessages') }, 'extCall');
+  await assert.rejects(vars.extCall('gmessages', { op: 'recent' }), /has an old copy\. Update it to 1\.4\.8 in Settings → Connections/);
+  await assert.rejects(vars.extCall('signin', {}), /Saved-password sign-in needs Atelier Browser 1\.4\.0/);
+  vars.fetch = relay('Google Messages isn’t open in any browser.');
+  await assert.rejects(vars.extCall('gmessages', {}), /^Error: Google Messages isn’t open in any browser\.$/);
+});
