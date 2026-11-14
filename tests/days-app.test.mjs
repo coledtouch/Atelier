@@ -1359,3 +1359,110 @@ test('the header keeps the whole connection label at phone width (follow-up 9)',
   assert.match(phone, /\n {2}\.key-state \{ padding: 0 9px; gap: 6px; margin: 0 0 0 6px; \}/);
   assert.match(css, /\n {2}\.key-state::after \{ content: ''; position: absolute; left: 0; right: 0; top: 50%; translate: 0 -50%; height: 44px; \}/, 'its 44px touch area stays inside its own width');
 });
+
+// ── moving a turn to another flow ──
+const { turnIds, moveTurn: movedTurn, moveTargets, moveDest } = await import('../public/days.js');
+const { suggestKind } = await import('../public/thread-spaces.js');
+const { threadTaint } = await import('../public/context.js');
+function moveRig({ threads, open = null, pending = false } = {}) {
+  const db = new Map(threads.map((t) => [t.id, structuredClone(t)])), log = [], toasts = [];
+  const S = { thread: open ? db.get(open) : null, view: open || 'all', day: dayKey(Date.now()) };
+  if (pending && S.thread) S.thread.entries.at(-1).pending = true;
+  const v = {
+    S, moveBusy: false, accountReloading: false, remix: null, dayCache: [...db.values()], earlierOpen: null, threadSpaces: {}, GROUPS: groupsFor('owner'),
+    turnIds, movedTurn, moveTargets, moveDest, kindOf, cleanFlow, liveThreads: new Map(), moveHints: new Map(),
+    recoverThread: (t) => t, appKey: () => '', uid: (() => { let n = 0; return () => `new${++n}`; })(),
+    DB: { get: async (id) => db.get(id), put: async (t) => { log.push(['put', t.id, t.entries.map((e) => e.id)]); db.set(t.id, t); } },
+    Sync: {
+      moveIds: async (a, b, ids) => { log.push(['ids', a, b, ids]); return { ids: Object.fromEntries(ids.map((x) => [x, x])), refused: false }; },
+      moveOut: async (a, b, map, opts) => { log.push(['out', a, b, map, Boolean(opts?.drop)]); if (opts?.drop) db.delete(a); },
+    },
+    toast: (m, o) => toasts.push([m, o]), keepInDay: () => {}, renderDay: () => log.push('day'), refreshDay: () => {}, renderOptions: () => {}, openFlowOpts: () => {}, nameThread: () => log.push('name'),
+    $: () => ({ hidden: true }), storageError: (err) => { throw err; },
+  };
+  v.turnBusy = evalIn(v, `return (${constExpr('turnBusy')});`);
+  v.flowName = evalIn(v, `return (${constExpr('flowName')});`);
+  v.flowById = evalIn(v, `return (${constExpr('flowById')});`);
+  lift(v, 'newThread', 'moveEntry');
+  return { v, db, log, toasts, S };
+}
+const T = (id, entries, extra = {}) => ({ id, title: `Flow ${id}`, createdAt: 1, updatedAt: 1, entries, ...extra });
+const E = (id, at, extra = {}) => ({ id, kind: 'ask', prompt: `prompt ${id}`, text: `answer ${id}`, createdAt: at, ...extra });
+const settled = () => new Promise((r) => setImmediate(r));
+
+test('moveEntry: the turn lands in the target with its id and time, then leaves the source, in a safe order', async () => {
+  const { v, db, log, toasts } = moveRig({ threads: [T('coen', [E('a', 10), E('slack', 20), E('b', 30)], { flow: { kind: 'coen' } }), T('edge', [E('x', 5)], { flow: { kind: 'edgeball' } })], open: 'coen' });
+  await v.moveEntry('coen', 'slack', { id: 'edge' });
+  assert.deepEqual(log.filter((x) => Array.isArray(x)).map((x) => x.slice(0, 3)), [['ids', 'coen', 'edge'], ['put', 'edge', ['x', 'slack']], ['out', 'coen', 'edge'], ['put', 'coen', ['a', 'b']]]);
+  assert.equal(db.get('edge').entries[1].createdAt, 20);
+  assert.equal(toasts[0][0], 'Moved to “Flow edge”');
+  assert.equal(toasts[0][1].action.label, 'Undo');
+  // Undo puts it back where it was, with the same id
+  await toasts[0][1].action.onClick();
+  await settled();
+  assert.deepEqual(db.get('coen').entries.map((e) => e.id), ['a', 'slack', 'b']);
+  assert.deepEqual(db.get('edge').entries.map((e) => e.id), ['x']);
+  assert.equal(toasts[1][0], 'Moved back to “Flow coen”');
+});
+
+test('moveEntry: the only turn empties its flow, which goes; Undo brings the flow back', async () => {
+  const { v, db, log, toasts, S } = moveRig({ threads: [T('coen', [E('slack', 20)], { flow: { kind: 'coen' } })], open: 'coen' });
+  await v.moveEntry('coen', 'slack', { kind: 'edgeball' });
+  const made = [...db.keys()].find((k) => k !== 'coen');
+  assert.equal(db.has('coen'), false, 'the empty flow is gone');
+  assert.deepEqual(db.get(made).flow, { kind: 'edgeball' }, 'a new flow in that kind');
+  assert.equal(db.get(made).title, 'prompt slack');
+  assert.ok(log.some((x) => Array.isArray(x) && x[0] === 'out' && x[4] === true), 'dropped through sync');
+  assert.ok(log.includes('name'), 'the new flow is named as a first send names one');
+  assert.equal(S.thread.id, made, 'the open flow follows the turn');
+  await toasts[0][1].action.onClick();
+  await settled();
+  assert.deepEqual(db.get('coen').entries.map((e) => e.id), ['slack']);
+  assert.deepEqual(db.get('coen').flow, { kind: 'coen' });
+  assert.equal(db.has(made), false);
+});
+
+test('moveEntry: never while the answer is still coming; the timeline ⋯ and Move hide then too', async () => {
+  const { v, db, toasts } = moveRig({ threads: [T('coen', [E('a', 10), E('slack', 20)]), T('edge', [E('x', 5)])], open: 'coen', pending: true });
+  await v.moveEntry('coen', 'slack', { id: 'edge' });
+  assert.equal(toasts[0][0], 'Wait for the answer to finish, then move it.');
+  assert.deepEqual(db.get('edge').entries.map((e) => e.id), ['x']);
+  assert.match(fnSource('renderTimeline'), /\$\{e\.pending \? '' : `<button type="button" class="tl-more" data-move-flow="\$\{esc\(t\.id\)\}" data-move-entry="\$\{esc\(e\.id\)\}"/);
+  assert.match(fnSource('paintEntry'), /if \(S\.thread\?\.entries\.includes\(e\) && !turnBusy\(S\.thread, turnIds\(S\.thread, e\.id\)\)\) acts\.insertAdjacentHTML\('beforeend', btn\('move', ICON\.move, 'Move'\) \+ hintBtn\(e\)\);/);
+  const css = readFileSync(new URL('../public/studio.css', import.meta.url), 'utf8');
+  assert.match(css, /\.tl-more \{[^}]*width: 44px; min-height: 44px;/, 'the ⋯ is a 44px target');
+  assert.match(css, /\.move-row \{[^}]*min-height: 48px;/);
+  assert.match(css, /\.actions \.mini, \.idea-acts \.mini, \.appfoot \.mini \{ min-height: 44px; \}/, 'Move and the suggestion are .actions .mini');
+});
+
+test('a later turn that built on the moved one stays, and the taint goes with the moved turn', () => {
+  const now = Date.now(), from = T('coen', [E('read', now - 2000, { untrusted: 'share' }), E('follow', now - 1000)]);
+  const to = T('edge', [E('x', now - 5000)]);
+  const r = movedTurn(from, to, 'read');
+  assert.deepEqual(r.from.map((e) => e.id), ['follow']);
+  assert.equal(threadTaint(from.entries), 'share', 'shared text taints the flow');
+  assert.equal(threadTaint(r.from), '', 'the source no longer carries it');
+  assert.equal(threadTaint(r.to), 'share', 'the target does');
+});
+
+test('the suggestion: a send that names another kind offers a one-tap move, nothing else', () => {
+  const at = APP.indexOf('  S.thread.entries.push(e);\n  offerMove(e, text);');
+  assert.ok(at > 0, 'submit sets the hint right after the turn is added');
+  assert.match(fnSource('offerMove'), /moveHints\.clear\(\);\n.*suggestKind\(text, kindOf\(S\.thread, threadSpaces\), GROUPS\);\n  if \(k\) moveHints\.set\(e\.id, k\);/);
+  const G = groupsFor('owner');
+  assert.equal(suggestKind('Any new messages from slack?', 'coen', G), 'edgeball');
+  assert.equal(suggestKind('Any new texts from Coen?', 'coen', G), '');
+  const v = { moveHints: new Map([['e1', 'edgeball']]), GROUPS: G, ICON: { move: '' }, esc: (x) => x, flowColor: () => 'red' };
+  lift(v, 'hintBtn');
+  assert.match(v.hintBtn({ id: 'e1' }), />Move to Edgeball\?<\/button>$/);
+  assert.equal(v.hintBtn({ id: 'e2' }), '');
+  const move = APP.slice(APP.indexOf("    case 'move-to': {"), APP.indexOf("    case 'copy':\n"));
+  assert.match(move, /moveDest\(.*b\.dataset\.kind, S\.thread\.id, threadSpaces\)/);
+  assert.match(move, /return moveEntry\(S\.thread\.id, e\.id, to \? \{ id: to\.id \} : \{ kind: b\.dataset\.kind \}\);/);
+});
+
+test('move copy passes the humanizer lint and says flow', () => {
+  const copy = ['Move', 'Move to…', 'Move to Edgeball?', 'Today', 'Recent', 'New flow', '+ New flow in Edgeball', 'Move this turn to another flow', 'Moved to “Flow edge”', 'Moved back to “Flow coen”',
+    'Wait for the answer to finish, then move it.', 'This remix is still filming. Move it once it’s done.', 'This remix can’t go back to that flow. It already left it on your other devices.', 'That flow is no longer on this device.'];
+  for (const t of copy) { assert.deepEqual(problems(t), [], t); assert.doesNotMatch(t, /thread/i, t); }
+});

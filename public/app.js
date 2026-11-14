@@ -32,8 +32,8 @@ import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?
 import { renderAppErrors, loadAppErrors } from './app-errors.js?v=137';
 import { HUMANIZER } from './humanizer.js?v=137';
 import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=137';
-import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, mergeSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=137';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handPlan, firstShots, rolledDay, keepsFlow } from './days.js?v=137';
+import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, mergeSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace, suggestKind } from './thread-spaces.js?v=137';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handPlan, firstShots, rolledDay, keepsFlow, turnIds, moveTurn as movedTurn, moveTargets, moveDest } from './days.js?v=137';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -941,6 +941,7 @@ function paintPicker() {
   $('#flowPickName').textContent = flowName(S.thread);
 }
 // All: the day's prompts across flows, oldest first, each with its flow's chip and time; a row opens its flow there.
+// Its ⋯ (always shown, 44px: no hover, no long-press) opens Move for that turn, except while its answer is still coming.
 // An empty today shows the welcome's starters under one line; an empty flow shows that line alone.
 function renderTimeline() {
   const box = $('#timeline'), all = S.view === 'all';
@@ -951,7 +952,7 @@ function renderTimeline() {
   if (all) welcome.classList.toggle('gone', !(empty && isToday()));
   box.innerHTML = rows.map(({ thread: t, entry: e, at }) => {
     const kind = kindOf(t, threadSpaces), g = GROUPS.groups.find((x) => x.key === kind);
-    return `<li><button type="button" class="tl-row" data-flow="${esc(t.id)}" data-entry="${esc(e.id)}" style="--flow:${flowColor(kind)}" title="${esc(flowName(t))}"><span class="tl-time">${new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span><span class="flow-chip"><i class="flow-dot" aria-hidden="true"></i><span>${esc(g?.short || flowName(t))}</span></span><span class="tl-prompt">${esc(String(e.prompt || '').slice(0, 300))}</span></button></li>`;
+    return `<li><button type="button" class="tl-row" data-flow="${esc(t.id)}" data-entry="${esc(e.id)}" style="--flow:${flowColor(kind)}" title="${esc(flowName(t))}"><span class="tl-time">${new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span><span class="flow-chip"><i class="flow-dot" aria-hidden="true"></i><span>${esc(g?.short || flowName(t))}</span></span><span class="tl-prompt">${esc(String(e.prompt || '').slice(0, 300))}</span></button>${e.pending ? '' : `<button type="button" class="tl-more" data-move-flow="${esc(t.id)}" data-move-entry="${esc(e.id)}" aria-label="Move this turn to another flow">⋯</button>`}</li>`;
   }).join('');
   if (rows.length && stickToBottom) scrollDown();
 }
@@ -1899,6 +1900,7 @@ const LANG_EXT = { javascript: 'js', js: 'js', typescript: 'ts', ts: 'ts', pytho
 const ICON = {
   copy: '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg>',
   down: '<svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>',
+  move: '<svg viewBox="0 0 24 24"><path d="M4 12h11M11 7l5 5-5 5M20 5v14"/></svg>',
   play: '<svg viewBox="0 0 24 24"><path d="M7 5v14l11-7z"/></svg>',
   retry: '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5"/></svg>',
   expand: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
@@ -2368,10 +2370,24 @@ function paintEntry(li, e) {
   else if (e.cut === 'cap' && !e.pending) out.insertAdjacentHTML('beforeend', '<p class="cut-note">Stopped at the tester length limit — ask it to continue</p>');
   else if (e.cut === 'short' && !e.pending) out.insertAdjacentHTML('beforeend', '<p class="cut-note">The app’s code ended early — ask Atelier to finish it</p>');
   if (e.forkOf && !$('.sync-note', out)) out.insertAdjacentHTML('afterbegin', `<p class="sync-note">${esc(Sync.forkNote(e))}</p>`); // owner thread sync kept both versions
+  if (S.thread?.entries.includes(e) && !turnBusy(S.thread, turnIds(S.thread, e.id))) acts.insertAdjacentHTML('beforeend', btn('move', ICON.move, 'Move') + hintBtn(e));
   li.setAttribute('aria-busy', e.pending ? 'true' : 'false');
   if (e.pending) syncLoops(out);
 }
 const btn = (act, icon, label) => `<button class="mini" data-act="${act}">${icon}${label}</button>`;
+// The one-tap "Move to Edgeball?" a send offered (thread-spaces.js suggestKind): this session only, the last send only.
+const moveHints = new Map(); // entryId → kind
+const turnBusy = (t, ids) => t.entries.some((x) => ids.includes(x.id) && x.pending);
+// Only the last send offers a move, and only when it names a kind other than the open flow's (not a Remix turn).
+function offerMove(e, text) {
+  moveHints.clear();
+  const k = e.remix ? '' : suggestKind(text, kindOf(S.thread, threadSpaces), GROUPS);
+  if (k) moveHints.set(e.id, k);
+}
+function hintBtn(e) {
+  const g = GROUPS.groups.find((x) => x.key === moveHints.get(e.id));
+  return g ? `<button class="mini move-hint" data-act="move-to" data-kind="${g.key}" style="--flow:${flowColor(g.key)}">${ICON.move}Move to ${esc(g.short)}?</button>` : '';
+}
 // Build versions (builds.js) as the open thread shows them: e's number, its lineage's size, whether it is the newest,
 // whether it is the head (the base of the next refine) and the head's number when the head is another version.
 const openVersions = new Set(); // earlier versions the user expanded (session only)
@@ -2815,6 +2831,7 @@ async function submit(textArg, modeArg, extra = {}) {
     if (src) e.videoOf = src.id;
   }
   S.thread.entries.push(e);
+  offerMove(e, text); // a one-tap "Move to Edgeball?" when the question names another kind (never moves by itself)
   if (said) armSpoken(e.id); // its answer reads aloud when this run ends (autoReadDone)
   if (!S.thread.title) S.thread.title = text.slice(0, 64);
 
@@ -4170,6 +4187,11 @@ stream.addEventListener('click', async (ev) => {
   if (e.remix && remix && act?.startsWith('rx-') && (await remix.onAct(act, b, e, li))) return;
   if (e.remix && remix && (act === 'retry' || act === 'edit-prompt')) { await remix.onAct(act, b, e, li); return; } // retry → plan or cut again (stamped once it starts: the redone dep); edit → Fine-tune, never a plain Video prompt
   switch (act) {
+    case 'move': return openMovePicker(S.thread.id, e.id);
+    case 'move-to': { // the suggestion: the kind's most recent flow, else a new one in it
+      const to = moveDest(dayCache ? dayPool() : await allThreads(), b.dataset.kind, S.thread.id, threadSpaces);
+      return moveEntry(S.thread.id, e.id, to ? { id: to.id } : { kind: b.dataset.kind });
+    }
     case 'copy':
       return copy(e.kind === 'ideas' ? e.ideas.map((d, i) => `${i + 1}. ${d.title} — ${d.pitch}`).join('\n') : stripThink(e.text));
     case 'speak': micYield(); if (reader.current()?.id !== e.id) stopReading(); return reader.toggle(e.id, stripThink(e.text), b, { title: e.prompt, album: S.thread?.title }); // inside the tap: no await before it
@@ -5633,7 +5655,11 @@ $('#earlierBar').addEventListener('click', () => {
   if (same) stage.scrollTop += same.getBoundingClientRect().top - top; // the turn that was first stays where it was
   $('.prompt', stream)?.focus({ preventScroll: true }); // the bar is gone: focus goes to the first turn
 });
-$('#timeline').addEventListener('click', (ev) => { const b = ev.target.closest('[data-flow]'); if (b) openFlow(b.dataset.flow, b.dataset.entry).catch(storageError); });
+$('#timeline').addEventListener('click', (ev) => {
+  const m = ev.target.closest('[data-move-entry]');
+  if (m) { openMovePicker(m.dataset.moveFlow, m.dataset.moveEntry).catch(storageError); return; }
+  const b = ev.target.closest('[data-flow]'); if (b) openFlow(b.dataset.flow, b.dataset.entry).catch(storageError);
+});
 $('#flowPick').onclick = openFlowMenu;
 $('#flowMore').onclick = openKindMenu;
 $('#recentThreads').addEventListener('click', (ev) => { const b = ev.target.closest('[data-recent-thread]'); if (b) openThread(b.dataset.recentThread).catch(storageError); });
@@ -5980,6 +6006,90 @@ $('#clearThreadSearch').onclick = () => {
 };
 $('#drawerNewThread').onclick = () => { closeDrawers(false); startFresh(); };
 document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog" id="threadMenuDialog" aria-labelledby="threadMenuTitle"><form class="sheet-body" id="threadMenuForm"><div class="sheet-head"><h2 id="threadMenuTitle">Your <em>flow</em></h2><button type="button" class="icon-btn" data-thread-close aria-label="Close flow options">${ICON.x}</button></div><div class="thread-edit-body"><label class="field"><span>Flow name</span><input id="threadName" maxlength="120" required autocomplete="off" /></label><p class="hint">Renaming keeps all of your conversation. Pins are saved for this account on this device.</p><div class="thread-space" id="threadSpace" role="group" aria-label="Group"><span>Group, for the By group order</span><button type="button" class="chip" data-space="">Automatic</button>${GROUPS.groups.map((g) => `<button type="button" class="chip" data-space="${g.key}" title="${esc(g.label)}">${esc(g.short)}</button>`).join('')}</div><p class="hint bad" id="threadMenuError" role="alert"></p></div><div class="sheet-foot"><button type="button" class="chip danger" id="threadMenuDelete">Delete flow</button><button type="submit" class="btn-primary">Save name</button></div></form></dialog>`);
+// ── Move a turn to another flow (days.js moveTurn; sync.js moveIds and moveOut carry it to the other devices) ──
+// From a turn's Move, a timeline row's ⋯, or the suggestion after a send. The turn (its prompt, answer and the versions
+// sync kept beside it) keeps its ids and times, so its day stays. Later turns that built on it stay where they are.
+// What the model reads follows the entries: the target's later turns read it, the source's don't, and the taint rules
+// (context.js threadTaint) go with it. Moving the only turn of a flow leaves it empty: it goes, as an empty flow does.
+document.body.insertAdjacentHTML('beforeend', `<dialog class="sheet context-dialog move-dialog" id="moveDialog" aria-labelledby="moveTitle"><div class="sheet-body"><div class="sheet-head"><h2 id="moveTitle">Move to…</h2><button type="button" class="icon-btn" data-move-close aria-label="Close">${ICON.x}</button></div><p class="hint move-what" id="moveWhat"></p><div class="move-list" id="moveList"></div></div></dialog>`);
+let moveFrom = null; // {flow, entry}: the turn the picker is open for
+$('#moveDialog [data-move-close]').onclick = () => $('#moveDialog').close();
+const flowById = async (id) => (S.thread?.id === id && S.thread) || liveThreads.get(id) || recoverThread(await DB.get(id).catch(() => null));
+// The picker: today's flows, then other recent ones, then a new flow in each kind (so Edgeball works with none yet).
+async function openMovePicker(flowId, entryId) {
+  const from = await flowById(flowId);
+  const ids = from ? turnIds(from, entryId) : [];
+  if (!ids.length) return toast('That flow is no longer on this device.', { error: true });
+  if (turnBusy(from, ids)) return toast('Wait for the answer to finish, then move it.');
+  const { today, recent } = moveTargets(dayCache ? dayPool() : await allThreads(), dayKey(Date.now()), flowId);
+  const row = (t) => `<button type="button" class="move-row" data-move-to="${esc(t.id)}" style="--flow:${flowColor(kindOf(t, threadSpaces))}"><i class="flow-dot" aria-hidden="true"></i><span>${esc(flowName(t))}</span></button>`;
+  $('#moveList').innerHTML = (today.length ? `<h3>Today</h3>${today.map(row).join('')}` : '') + (recent.length ? `<h3>Recent</h3>${recent.map(row).join('')}` : '')
+    + `<h3>New flow</h3>${GROUPS.groups.map((g) => `<button type="button" class="move-row move-new" data-move-kind="${g.key}" style="--flow:${flowColor(g.key)}"><i class="flow-dot" aria-hidden="true"></i><span>+ New flow in ${esc(g.short)}</span></button>`).join('')}`;
+  const p = String(from.entries.find((x) => x.id === entryId)?.prompt || '').trim();
+  $('#moveWhat').textContent = `“${p.length > 80 ? `${p.slice(0, 79)}…` : p}” from ${flowName(from)}`;
+  moveFrom = { flow: flowId, entry: entryId };
+  $('#moveDialog').showModal();
+  $('.move-row', $('#moveList'))?.focus({ preventScroll: true });
+}
+$('#moveList').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-move-to], [data-move-kind]'); if (!b || !moveFrom) return;
+  const { flow, entry } = moveFrom; moveFrom = null;
+  $('#moveDialog').close();
+  moveEntry(flow, entry, b.dataset.moveTo ? { id: b.dataset.moveTo } : { kind: b.dataset.moveKind }).catch(storageError);
+});
+// dest: {id} a saved flow, {kind} a new flow of that kind, {thread} a flow object (Undo: the emptied source, put back).
+// Order, so a crash never loses the turn: sync's ids for the target, the target saved, the move recorded, the source saved.
+let moveBusy = false;
+async function moveEntry(fromId, entryId, dest, { undo = true } = {}) {
+  if (moveBusy || accountReloading) return;
+  moveBusy = true;
+  try {
+    const from = await flowById(fromId);
+    const ids = from ? turnIds(from, entryId) : [];
+    if (!ids.length) return toast('That flow is no longer on this device.', { error: true });
+    if (turnBusy(from, ids)) return toast('Wait for the answer to finish, then move it.');
+    const turn = from.entries.filter((x) => ids.includes(x.id));
+    const fixed = turn.filter((x) => x.remix).map((x) => x.id); // a Remix turn's shots are filed under its id
+    if (fixed.some((x) => remix?._jobs?.has(x))) return toast('This remix is still filming. Move it once it’s done.');
+    const to = dest.thread || (dest.id ? await flowById(dest.id) : newThread({ kind: dest.kind }));
+    if (!to) return toast('That flow is no longer on this device.', { error: true });
+    if (to.id === from.id) return;
+    const fresh = !to.entries.length && !dest.thread;
+    const { ids: rename, refused } = await Sync.moveIds(from.id, to.id, ids, { fixed });
+    if (refused) return toast('This remix can’t go back to that flow. It already left it on your other devices.', { error: true });
+    const apps = new Map(turn.filter((x) => x.kind === 'build').map((x) => [x.id, appKey(from.id, from.entries, x)]));
+    const r = movedTurn(from, to, entryId, rename);
+    to.entries = r.to;
+    if (!to.title) to.title = String(r.moved[0]?.prompt || '').slice(0, 64) || 'Moved turn';
+    to.updatedAt = Date.now();
+    await DB.put(to);
+    const drop = !r.from.length;
+    await Sync.moveOut(from.id, to.id, r.ids, { drop });
+    from.entries = r.from;
+    if (!drop) { from.updatedAt = Date.now(); await DB.put(from); }
+    for (const x of fixed) remix?.store?.refile?.(r.ids[x], to.id).catch((err) => console.warn('[atelier] remix move', err));
+    // A Build app's saved data is keyed by its flow (appdata.js appKey): it is copied to the new key, the old one stays.
+    for (const [old, key] of apps) {
+      const moved = to.entries.find((x) => x.id === r.ids[old]), next = moved && appKey(to.id, to.entries, moved);
+      if (key && next && next !== key) copyAppData(key, next).catch((err) => console.warn('[atelier] app data move', err));
+    }
+    for (const x of ids) moveHints.delete(x);
+    if (fresh) nameThread(r.moved[0], to); // a new flow gets its title as a first send's does (not awaited)
+    if (dayCache) { if (drop) dayCache = dayCache.filter((t) => t.id !== from.id); else keepInDay(from); keepInDay(to); }
+    if (drop && S.thread === from) { S.thread = to; openFlowOpts(to); if (S.view !== 'all') S.view = to.id; earlierOpen = null; renderOptions(); }
+    renderDay({ cached: true }); refreshDay();
+    if (!$('#threadsDrawer').hidden) renderThreads();
+    const back = drop ? { thread: from } : { id: from.id };
+    if (undo) toast(`Moved to “${flowName(to)}”`, { ms: 7000, action: { label: 'Undo', onClick: () => moveEntry(to.id, r.ids[ids[0]], back, { undo: false }).catch(storageError) } });
+    else toast(`Moved back to “${flowName(to)}”`);
+  } finally { moveBusy = false; }
+}
+async function copyAppData(from, to) {
+  const src = await appStore.load(from);
+  if (!src?.items?.size) return;
+  const dst = await appStore.load(to);
+  if (!dst.items.size) appStore.apply(to, [...src.items].map(([k, v]) => ['s', k, v]));
+}
 let menuThreadId = null;
 $('#threadMenuDialog [data-thread-close]').onclick = () => $('#threadMenuDialog').close();
 $('#threadMenuForm').addEventListener('submit', async (ev) => {
