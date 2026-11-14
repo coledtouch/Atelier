@@ -225,7 +225,7 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
 .day-search { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; margin-left: auto; padding: 0 13px; border: 1px solid var(--line); border-radius: 99px; color: var(--ink-2); font: 500 12px/1 var(--sans); }
 .day-search svg { width: 14px; height: 14px; }
 .day-search:hover { color: var(--ink); background: var(--surface-2); }
-.flow-strip { display: flex; align-items: flex-start; gap: 6px; max-width: 860px; margin: 0 auto 20px; }
+.flow-strip { position: relative; display: flex; align-items: flex-start; gap: 6px; max-width: 860px; margin: 0 auto 20px; }
 .flow-tabs { position: relative; display: flex; flex-wrap: wrap; gap: 6px; flex: 0 1 auto; min-width: 0; }
 .flow-tab { --flow: var(--flow-none); display: inline-flex; align-items: center; gap: 7px; max-width: 240px; min-height: 34px; padding: 0 13px; border: 1px solid var(--line); border-radius: 99px; color: var(--ink-2); font: 500 12px/1 var(--sans); transition: background .2s, border-color .2s, color .2s; }
 .flow-tab > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -260,6 +260,10 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
 .flow-menu button > span { overflow: hidden; text-overflow: ellipsis; }
 .flow-menu button[aria-checked='true'] { background: var(--surface-2); }
 .flow-menu .flow-menu-new { color: var(--ink-2); }
+.flow-more { flex: none; width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 99px; } /* the open flow's kind and Rename */
+.flow-more[aria-expanded='true'] { background: var(--surface-2); }
+.attach-menu.flow-kind-menu { top: calc(100% + 6px); bottom: auto; } /* under the strip; left is set by openKindMenu */
+.flow-menu button > small { margin-left: auto; padding-left: 10px; }
 /* A folded composer (phones) in All keeps In: on show, so a send never goes to a flow he can't see */
 #composer.compact.in-all > .composer-controls { display: flex; padding-top: 0; }
 #composer.compact.in-all > .composer-controls > :not(#flowPick) { display: none; }
@@ -392,6 +396,7 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
   .flow-tabs::-webkit-scrollbar { display: none; }
   .flow-tab { flex: none; max-width: 180px; min-height: 40px; }
   .flow-new { min-height: 40px; }
+  .flow-more { width: 40px; height: 40px; }
   .tl-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'chip time' 'prompt prompt'; row-gap: 6px; }
   .tl-time { grid-area: time; }
   .flow-chip { grid-area: chip; justify-self: start; }
@@ -510,6 +515,7 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
 @media (pointer: coarse) {
   .flow-tab, .flow-new, .day-search, .earlier-btn { min-height: 44px; } /* Today's controls: full touch height */
   .day-step { width: 44px; height: 44px; }
+  .flow-more { width: 44px; height: 44px; }
   .day-search { min-width: 44px; }
   .composer-control { min-height: 44px; }
   .welcome-all-threads { min-height: 44px; }

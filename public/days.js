@@ -1,6 +1,6 @@
 // Days and flows: a flow is a thread; a day is derived from the times of its entries (local time), never stored.
 // Pure helpers the UI uses. No DOM and no network, so tests/days.test.mjs imports it directly.
-import { spaceOf, labelOf } from './thread-spaces.js?v=131';
+import { spaceOf, spaceByHand, labelOf } from './thread-spaces.js?v=131';
 
 const pad = (n) => String(n).padStart(2, '0');
 /** 'YYYY-MM-DD' in local time. */
@@ -84,6 +84,20 @@ export function cleanFlow(v) {
   if (typeof v.kind !== 'string' || !/^[a-z0-9-]{1,24}$/.test(v.kind)) return null;
   const out = { kind: v.kind };
   if (typeof v.color === 'string' && v.color && v.color.length <= 16) out.color = v.color;
+  return out;
+}
+
+/**
+ * The threads whose kind he chose by hand in the sorter's map ('coen!') that have entries and no flow yet, each with the
+ * flow to write. A guess (no '!'), an empty thread and a thread that already has a flow are left alone.
+ */
+export function handFlows(threads, spaces) {
+  const out = [];
+  for (const t of threads) {
+    if (!t || t.flow != null || !entriesOf(t).length || !spaceByHand(spaces, t.id)) continue;
+    const flow = cleanFlow({ kind: spaceOf(spaces, t.id) });
+    if (flow) out.push({ thread: t, flow });
+  }
   return out;
 }
 

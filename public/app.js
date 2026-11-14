@@ -33,7 +33,7 @@ import { renderAppErrors, loadAppErrors } from './app-errors.js?v=131';
 import { HUMANIZER } from './humanizer.js?v=131';
 import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=131';
 import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=131';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut } from './days.js?v=131';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handFlows } from './days.js?v=131';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -685,6 +685,20 @@ async function guessFlow(thread) {
     if (kind && !picked() && !accountReloading && await DB.get(thread.id)) setFlow(thread, kind);
   } catch (err) { console.warn('[atelier] flow kind', err); }
 }
+// v132, once per workspace: a group he chose by hand in the Threads list ('coen!' in threadSpaces) becomes that thread's
+// synced flow, since he already confirmed it. Written as stored (DB.put keeps updatedAt), so no old thread jumps to the
+// top of Newest first. A thread that has a flow is never changed, so running it again changes nothing.
+async function migrateHandFlows() {
+  const flag = workspaceKey('flowsMigrated');
+  if (LS.get(flag, false) === true) return;
+  const rows = await DB.all();
+  if (accountReloading) return;
+  const live = (t) => (S.thread?.id === t.id ? S.thread : liveThreads.get(t.id) || t); // the record on screen, never a stale copy
+  const todo = handFlows(rows.map(live), threadSpaces);
+  for (const { thread, flow } of todo) { thread.flow = flow; await DB.put(thread); }
+  LS.set(flag, true);
+  if (todo.length) renderFlowTabs();
+}
 
 // ───────────────────────── Today ─────────────────────────
 // The home screen is a day (S.day): its flows as tabs (All first, then the flows touched that day, most recent first, then
@@ -693,6 +707,7 @@ async function guessFlow(thread) {
 // shows it (intoFlow), so a turn never goes out with a mix of flows. null there means a new flow.
 let dayCache = null, daySeq = 0; // every saved thread, as last read (allThreads); null until the first read
 let streamFrom = 0, earlierOpen = null; // the first entry the open flow shows; the flow whose earlier part is shown too
+const daysSorted = new Set(); // past days whose unsorted flows were sent to the sorter this session (sortDay)
 const flowColor = (kind) => (GROUPS.groups.some((g) => g.key === kind) ? `var(--flow-${kind})` : 'var(--flow-none)');
 const flowName = (t) => t?.title || 'New flow';
 // The threads Today draws from: the last read, with the open flow as it is on screen (saved or not yet).
@@ -716,6 +731,7 @@ async function refreshDay(known) {
   if (rows.busy) { rows.late.then((saved) => { if (seq === daySeq) refreshDay(saved); }); if (!rows.length) return; }
   dayCache = rows;
   paintDay();
+  sortDay();
 }
 function paintDay() {
   paintDayBar(); paintTabs(); paintPicker();
@@ -741,6 +757,9 @@ function paintTabs() {
   const flows = tabFlows(dayPool(), S.day, S.view === 'all' ? null : S.thread);
   const tab = (t) => `<button type="button" role="tab" class="flow-tab" data-view="${esc(t.id)}" aria-selected="${S.view === t.id}" tabindex="${S.view === t.id ? 0 : -1}" style="--flow:${flowColor(kindOf(t, threadSpaces))}" title="${esc(flowName(t))}"><i class="flow-dot" aria-hidden="true"></i><span>${esc(flowName(t))}</span></button>`;
   box.innerHTML = `<button type="button" role="tab" class="flow-tab flow-tab-all" data-view="all" aria-selected="${S.view === 'all'}" tabindex="${S.view === 'all' ? 0 : -1}"><span>All</span></button>${flows.map(tab).join('')}`;
+  const more = $('#flowMore'), inFlow = S.view !== 'all' && Boolean(S.thread); // the open flow's menu (openKindMenu)
+  more.hidden = !inFlow;
+  if (inFlow) more.setAttribute('aria-label', `Options for ${flowName(S.thread)}`);
   const sel = $('[aria-selected="true"]', box);
   if (!sel) return;
   if (had) ($$('[role="tab"]', box).find((b) => b.dataset.view === had) || sel).focus({ preventScroll: true }); // a redraw (sync) keeps focus where it was
@@ -788,7 +807,10 @@ function flushOpen() { persist(true, { flush: true }); }
 // new one when it names none), and that flow is shown before the turn is added, so its answer streams where it belongs.
 // A turn always lands on today: sent from a past day, the page moves to today. Already in that flow, its whole
 // conversation stays open (he was reading it); from All its part of today shows, with the rest under the Earlier bar.
+// A turn sent in a flow with no kind keeps the sorter's guess (kept on this device until now): it becomes the synced kind.
 function intoFlow() {
+  const guess = !S.thread.flow && cleanFlow({ kind: kindOf(S.thread, threadSpaces) });
+  if (guess) { S.thread.flow = guess; renderFlowTabs(); } // saved with the turn (persist)
   const today = dayKey(Date.now());
   if (S.view === S.thread.id && S.day === today) return;
   earlierOpen = S.view === S.thread.id ? S.thread.id : null;
@@ -860,6 +882,33 @@ async function pickFlow(id) {
   flushOpen();
   S.thread = t; openFlowOpts(t); renderOptions(); paintPicker(); paintTabs();
 }
+// A small menu opened from a button (In:, the open flow's ⋯): arrow keys, Home and End move; Esc and Tab close it and give
+// focus back to the button; a click or focus outside closes it. Focus starts on the checked item. → its close().
+function popMenu(btn, menu, mount, onClose) {
+  let open = true;
+  const close = () => {
+    if (!open) return;
+    open = false; menu.remove(); btn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey, true);
+    onClose();
+  };
+  const onDown = (e) => { if (!menu.contains(e.target) && !btn.contains(e.target)) close(); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); close(); btn.focus(); return; }
+    if (!menu.contains(document.activeElement)) return;
+    if (e.key === 'Tab') { e.preventDefault(); close(); btn.focus(); return; }
+    const items = $$('button', menu), i = items.indexOf(document.activeElement);
+    const to = e.key === 'ArrowDown' ? (i + 1) % items.length : e.key === 'ArrowUp' ? (i - 1 + items.length) % items.length : e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : -1;
+    if (to >= 0) { e.preventDefault(); items[to].focus(); }
+  };
+  mount.append(menu);
+  btn.setAttribute('aria-expanded', 'true');
+  setTimeout(() => { if (open) document.addEventListener('pointerdown', onDown); });
+  document.addEventListener('keydown', onKey, true); // capture: Esc must not reach the global stopAll()
+  ($('[aria-checked="true"]', menu) || $('button', menu)).focus({ preventScroll: true });
+  menu.addEventListener('focusout', (e) => { if (e.relatedTarget && !menu.contains(e.relatedTarget) && e.relatedTarget !== btn) close(); });
+  return close;
+}
 let closeFlowMenu = null;
 function openFlowMenu() {
   if (closeFlowMenu) return closeFlowMenu();
@@ -868,23 +917,40 @@ function openFlowMenu() {
   menu.className = 'attach-menu flow-menu'; menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', 'Send to flow');
   menu.innerHTML = flows.map((t) => `<button type="button" role="menuitemradio" aria-checked="${t === S.thread}" data-flow="${esc(t.id)}" style="--flow:${flowColor(kindOf(t, threadSpaces))}"><i class="flow-dot" aria-hidden="true"></i><span>${esc(flowName(t))}</span></button>`).join('')
     + `<button type="button" role="menuitemradio" aria-checked="${!S.thread}" data-flow="" class="flow-menu-new">+ New flow</button>`;
-  $('.dock-inner').append(menu); // anchored in the dock like the attach menu, so it moves with it
-  btn.setAttribute('aria-expanded', 'true');
-  const onDown = (e) => { if (!menu.contains(e.target) && !btn.contains(e.target)) closeFlowMenu(); };
-  const onKey = (e) => {
-    if (e.key === 'Escape') { e.stopPropagation(); closeFlowMenu(); btn.focus(); return; }
-    if (!menu.contains(document.activeElement)) return;
-    if (e.key === 'Tab') { e.preventDefault(); closeFlowMenu(); btn.focus(); return; }
-    const items = $$('button', menu), i = items.indexOf(document.activeElement);
-    const to = e.key === 'ArrowDown' ? (i + 1) % items.length : e.key === 'ArrowUp' ? (i - 1 + items.length) % items.length : e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : -1;
-    if (to >= 0) { e.preventDefault(); items[to].focus(); }
-  };
-  closeFlowMenu = () => { menu.remove(); btn.setAttribute('aria-expanded', 'false'); document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey, true); closeFlowMenu = null; };
-  setTimeout(() => document.addEventListener('pointerdown', onDown));
-  document.addEventListener('keydown', onKey, true); // capture: Esc must not reach the global stopAll()
-  ($('[aria-checked="true"]', menu) || $('button', menu)).focus({ preventScroll: true });
+  closeFlowMenu = popMenu(btn, menu, $('.dock-inner'), () => { closeFlowMenu = null; }); // anchored in the dock like the attach menu, so it moves with it
   menu.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; closeFlowMenu(); pickFlow(b.dataset.flow).catch(storageError); };
-  menu.addEventListener('focusout', (e) => { if (e.relatedTarget && !menu.contains(e.relatedTarget) && e.relatedTarget !== btn) closeFlowMenu?.(); });
+}
+// The open flow's menu (⋯ next to its tab): each kind of the set, the one it has checked (a guess says so), then Rename.
+// There is no "no kind": a flow's kind is changed, never cleared.
+function kindMenuHtml(t) {
+  const kind = kindOf(t, threadSpaces), guess = Boolean(kind) && !t.flow;
+  return GROUPS.groups.map((g) => `<button type="button" role="menuitemradio" data-kind="${g.key}" aria-checked="${g.key === kind}" style="--flow:${flowColor(g.key)}"><i class="flow-dot" aria-hidden="true"></i><span>${esc(g.label)}</span>${guess && g.key === kind ? '<small>Guess</small>' : ''}</button>`).join('')
+    + (t.entries.length ? '<button type="button" role="menuitem" data-rename>Rename</button>' : ''); // a flow not saved yet has no name to change
+}
+// A kind picked for a flow (its menu, or a group in the Days list's thread menu): its synced kind, and his hand choice for
+// the By group order. A flow not saved yet keeps it on the record only; it is saved with the first turn.
+function pickKind(t, kind) {
+  if (t.entries.length) { threadSpaces[t.id] = kind + '!'; saveSpaces(); }
+  setFlow(t, kind);
+}
+let closeKindMenu = null;
+function openKindMenu() {
+  if (closeKindMenu) return closeKindMenu();
+  const t = S.thread, btn = $('#flowMore');
+  if (!t || S.view === 'all') return;
+  const menu = document.createElement('div');
+  menu.className = 'attach-menu flow-menu flow-kind-menu'; menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', `Options for ${flowName(t)}`);
+  menu.innerHTML = kindMenuHtml(t);
+  menu.style.left = `${btn.offsetLeft}px`; // under the button, kept inside the strip
+  closeKindMenu = popMenu(btn, menu, $('.flow-strip'), () => { closeKindMenu = null; });
+  const room = menu.parentElement.clientWidth - menu.offsetWidth;
+  if (menu.offsetLeft > room) menu.style.left = `${Math.max(0, room)}px`;
+  menu.onclick = (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    closeKindMenu(); btn.focus({ preventScroll: true });
+    if (b.dataset.kind) pickKind(t, b.dataset.kind);
+    else if (b.hasAttribute('data-rename')) openThreadMenu(t.id, flowName(t));
+  };
 }
 // flush: a save made on the way out of a thread (opening another, New, leaving the app), in case a change is still
 // waiting. It writes as any save does, but it only stamps the thread "now" when something was waiting (persistDue) or
@@ -5363,6 +5429,7 @@ $('#earlierBar').addEventListener('click', () => {
 });
 $('#timeline').addEventListener('click', (ev) => { const b = ev.target.closest('[data-flow]'); if (b) openFlow(b.dataset.flow, b.dataset.entry).catch(storageError); });
 $('#flowPick').onclick = openFlowMenu;
+$('#flowMore').onclick = openKindMenu;
 $('#recentThreads').addEventListener('click', (ev) => { const b = ev.target.closest('[data-recent-thread]'); if (b) openThread(b.dataset.recentThread).catch(storageError); });
 $('#firstUseGoals').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-start-mode]'); if (!b) return;
@@ -5480,7 +5547,7 @@ function openDrawer(id) {
   const d = $('#' + id);
   // Jump into search only with a mouse/trackpad — on a phone that would pop the keyboard over the list.
   (id === 'threadsDrawer' && matchMedia('(pointer: fine)').matches ? $('#threadSearch') : $('[data-close]', d)).focus({ preventScroll: true });
-  if (id === 'threadsDrawer') { $('#threadList').innerHTML = '<li class="empty-note" role="status">Loading your threads…</li>'; renderThreads(); }
+  if (id === 'threadsDrawer') { $('#threadList').innerHTML = '<li class="empty-note" role="status">Loading your flows…</li>'; renderThreads(); }
   if (id === 'libraryDrawer') renderLibrary(); // first load shows skeleton tiles; a reopen keeps the last grid until the repaint
 }
 // v114: the rows of the Threads drawer's last read, kept while it is open. Typing in the search, a new order and a
@@ -5490,6 +5557,7 @@ function openDrawer(id) {
 // replaces them. Dropped when the drawer closes: they hold every thread's media.
 let threadRows = null, searchTimer = 0;
 function closeDrawers(restore = true) {
+  if (!$('#threadsDrawer').hidden) threadSort = storedThreadSort(); // the date's Days order was for that visit (openDays)
   $$('.drawer').forEach((d) => (d.hidden = true)); $('#scrim').hidden = true; syncOverlay();
   clearTimeout(searchTimer); threadRows = null; // read again when the drawer next opens
   if (cv.open && !cv.busy) cvClose({ focus: false }); // the Library reopens on its grid; a running import keeps its picker and progress
@@ -5520,7 +5588,8 @@ async function allThreads(known) {
 // Pinned threads stay on top in every order, sorted the same way among themselves. By day (v132, the default) is the
 // Days list: a heading per day, and under it the flows that had something that day.
 const THREAD_SORTS = { days: 'By day', recent: 'Newest first', oldest: 'Oldest first', title: 'Title, A to Z', entries: 'Longest first', space: 'By group' };
-let threadSort = Object.hasOwn(THREAD_SORTS, LS.get('threadSort', 'days')) ? LS.get('threadSort', 'days') : 'days';
+const storedThreadSort = () => { const s = LS.get('threadSort', 'days'); return Object.hasOwn(THREAD_SORTS, s) ? s : 'days'; };
+let threadSort = storedThreadSort();
 // The Days order's headings: Today, Yesterday, else the date (with its year when it is not this year).
 function dayHeading(day) {
   const d = dayDate(day), now = new Date(), y = new Date(now); y.setDate(now.getDate() - 1);
@@ -5570,12 +5639,13 @@ if (previousSpaces && Object.keys(threadSpaces).length) saveSpaces();
 try { localStorage.removeItem('atelier.' + workspaceKey('threadSpaces')); } catch {}
 const forgetSpace = (id) => { if (threadSpaces[id]) { Reflect.deleteProperty(threadSpaces, id); saveSpaces(); } };
 let spacesBusy = false, spacesFailedAt = 0;
-async function sortIntoSpaces(threads) {
-  if (spacesBusy || !feat('helpers') || Date.now() - spacesFailedAt < 60_000) return;
+// showing: whether the answers are still wanted (the By group order, or the past day on screen); redraw: what shows them.
+// → false when it could not start (busy, helpers off, or a failure less than a minute ago).
+async function sortIntoSpaces(threads, { showing = () => threadSort === 'space' && !$('#threadsDrawer').hidden, redraw = () => renderThreads(true) } = {}) {
+  if (spacesBusy || !feat('helpers') || Date.now() - spacesFailedAt < 60_000) return false;
   const todo = threads.filter((t) => t.entries.length && !spaceOf(threadSpaces, t.id));
-  if (!todo.length) return;
+  if (!todo.length) return true;
   spacesBusy = true;
-  const showing = () => threadSort === 'space' && !$('#threadsDrawer').hidden;
   try {
     for (let i = 0; i < todo.length && showing(); i += SPACE_BATCH) {
       const batch = todo.slice(i, i + SPACE_BATCH);
@@ -5584,11 +5654,22 @@ async function sortIntoSpaces(threads) {
       if (!got.some(Boolean)) throw new Error('no groups in the answer');
       got.forEach((s, k) => { if (s && !spaceOf(threadSpaces, batch[k].id)) threadSpaces[batch[k].id] = s; });
       saveSpaces();
-      if (showing()) await renderThreads(true);
+      if (showing()) await redraw();
     }
   } catch (err) { console.error(err); spacesFailedAt = Date.now(); }
   spacesBusy = false;
-  if (showing()) renderThreads(true); // the "Sorting…" heading goes
+  if (showing()) redraw(); // the "Sorting…" heading goes
+  return true;
+}
+// A past day's flows with no kind are sorted in the background the first time that day shows this session (the batch
+// sorter above). The answers stay guesses on this device (threadSpaces), so a wrong one never syncs: a guess becomes the
+// flow's kind when he picks it in the flow's menu (pickKind) or sends a turn in that flow (intoFlow).
+function sortDay() {
+  const day = S.day;
+  if (isToday() || daysSorted.has(day) || !dayCache) return;
+  daysSorted.add(day);
+  return sortIntoSpaces(flowsOn(dayPool(), day).filter((t) => !t.flow), { showing: () => S.day === day && !accountReloading, redraw: paintDay })
+    .then((ran) => { if (!ran) daysSorted.delete(day); }); // busy or off: tried again the next time the day shows
 }
 // Headings in the Threads list fold: tap one to hide its threads (its count stays). Kept per device and account, one
 // entry per order and heading ('space:Personal', 'recent:Earlier'), so folding Personal in By group leaves Today alone.
@@ -5614,11 +5695,11 @@ async function renderThreads(fromSorter = false, known = null) {
   all = sortThreads(all, threadSort);
   all = [...all.filter((t) => pinnedThreads.has(t.id)), ...all.filter((t) => !pinnedThreads.has(t.id))];
   $('#threadSort').value = threadSort; $('#threadSortVal').textContent = THREAD_SORTS[threadSort];
-  $('#threadCount').textContent = storeBusy ? 'Loading your threads…' : q ? `${all.length} ${all.length === 1 ? 'matching thread' : 'matching threads'}` : `${all.length} saved ${all.length === 1 ? 'thread' : 'threads'}`;
+  $('#threadCount').textContent = storeBusy ? 'Loading your flows…' : q ? `${all.length} ${all.length === 1 ? 'matching flow' : 'matching flows'}` : `${all.length} ${all.length === 1 ? 'flow' : 'flows'}`;
   const list = $('#threadList');
-  const busyNote = storeBusy ? '<li class="empty-note" role="status"><strong>Your threads are still loading</strong>Another copy of Atelier is using storage. They show here when it is free.</li>' : '';
+  const busyNote = storeBusy ? '<li class="empty-note" role="status"><strong>Your flows are still loading</strong>Another copy of Atelier is using storage. They show here when it is free.</li>' : '';
   if (storeBusy && !all.length) { list.innerHTML = busyNote; return; }
-  if (!all.length) { list.innerHTML = `<li class="empty-note"><strong>${q ? 'No matching threads' : 'No threads yet'}</strong>${q ? 'Try another word or clear your search.' : 'Send a prompt and the conversation shows up here.'}</li>`; return; }
+  if (!all.length) { list.innerHTML = `<li class="empty-note"><strong>${q ? 'No matching flows' : 'No flows yet'}</strong>${q ? 'Try another word or clear your search.' : 'Send a prompt and the conversation shows up here.'}</li>`; return; }
   const day = 864e5, today = new Date().setHours(0, 0, 0, 0);
   const byDate = threadSort === 'recent' || threadSort === 'oldest'; // date headings only mean something in date order
   if (threadSort === 'space' && fromSorter !== true) sortIntoSpaces(all); // not awaited: the list shows now and fills in
@@ -5691,15 +5772,26 @@ async function deleteSavedThread(id) {
   if (wasOpen) startFresh();
   renderThreads(); renderRecentThreads(); refreshDay(); $('#threadMenuDialog').close();
 }
-// The thread's group, chosen by hand (kept at once, no Save needed): Automatic hands it back to the sorter.
+// The thread menu (rename, group, delete), from a row's ⋯ in the Days list or Rename in a flow's menu.
+function openThreadMenu(id, title) {
+  menuThreadId = id;
+  $('#threadName').value = title;
+  paintThreadSpace();
+  $('#threadMenuError').textContent = ''; $('#threadMenuDialog').showModal(); $('#threadName').focus(); $('#threadName').select();
+}
+// The thread's group, chosen by hand (kept at once, no Save needed): it is also the flow's synced kind (pickKind).
+// Automatic hands the group back to the sorter; a synced kind stays (it is never cleared) and shows as chosen.
 function paintThreadSpace() {
-  const mine = spaceByHand(threadSpaces, menuThreadId) ? spaceOf(threadSpaces, menuThreadId) : '';
+  const t = [S.thread, ...(threadRows || []), ...(dayCache || [])].find((x) => x?.id === menuThreadId);
+  const mine = spaceByHand(threadSpaces, menuThreadId) ? spaceOf(threadSpaces, menuThreadId) : t?.flow?.kind || '';
   for (const b of $$('#threadSpace [data-space]')) b.setAttribute('aria-pressed', String(b.dataset.space === mine));
 }
-$('#threadSpace').addEventListener('click', (ev) => {
-  const b = ev.target.closest('[data-space]'); if (!b || !menuThreadId) return;
-  if (b.dataset.space) { threadSpaces[menuThreadId] = b.dataset.space + '!'; saveSpaces(); } else forgetSpace(menuThreadId);
-  paintThreadSpace(); renderThreads();
+$('#threadSpace').addEventListener('click', async (ev) => {
+  const b = ev.target.closest('[data-space]'), id = menuThreadId; if (!b || !id) return;
+  if (b.dataset.space) { const t = (S.thread?.id === id && S.thread) || liveThreads.get(id) || recoverThread(await DB.get(id).catch(() => null)); if (t) pickKind(t, b.dataset.space); else { threadSpaces[id] = b.dataset.space + '!'; saveSpaces(); } }
+  else forgetSpace(id);
+  if (id === menuThreadId) paintThreadSpace();
+  renderThreads();
 });
 $('#threadMenuDelete').onclick = () => deleteSavedThread(menuThreadId).catch((err) => { $('#threadMenuError').textContent = netText(err); });
 $('#threadList').addEventListener('click', async (ev) => {
@@ -5716,12 +5808,7 @@ $('#threadList').addEventListener('click', async (ev) => {
     $(`[data-pin="${CSS.escape(id)}"]`, $('#threadList'))?.focus({ preventScroll: true }); return;
   }
   const more = ev.target.closest('[data-thread-menu]');
-  if (more) {
-    menuThreadId = more.dataset.threadMenu;
-    $('#threadName').value = $('.thread-title', more.closest('.thread')).textContent;
-    paintThreadSpace();
-    $('#threadMenuError').textContent = ''; $('#threadMenuDialog').showModal(); $('#threadName').focus(); $('#threadName').select(); return;
-  }
+  if (more) { openThreadMenu(more.dataset.threadMenu, $('.thread-title', more.closest('.thread')).textContent); return; }
   const li = ev.target.closest('.thread');
   if (!li) return;
   await openThread(li.dataset.id, li.dataset.day); // By day: that flow on that day
@@ -6608,7 +6695,7 @@ $('#migrateBtn').onclick = async (ev) => {
 // own (keys scoped to it, and the shared preferences and session keys that hold no owner data), never the owner's
 // migration flags, sign-in markers, profile cache or navigation keys, another account's scoped keys, settings that now
 // hold an owner passcode (signed in from another tab), or the older-thread boundary flag (it protects the owner's rows).
-const OWNER_LS_KEEP = new Set(['migratedV3', 'migrateToastAt', 'owner', 'signedIn', 'me', 'meBase', 'lastThread', 'lastFlow', 'pinnedThreads', 'threadGroupsShut']);
+const OWNER_LS_KEEP = new Set(['migratedV3', 'migrateToastAt', 'owner', 'signedIn', 'me', 'meBase', 'lastThread', 'lastFlow', 'pinnedThreads', 'threadGroupsShut', 'flowsMigrated']);
 function wipesKey(k) {
   if (!k.startsWith('atelier.') || k === 'atelier.sharedHistoryUnguarded') return false;
   if (workspace === 'owner') return true;
@@ -8330,6 +8417,7 @@ window.atelierBoot?.started();
     openToday(recoverThread(t));
   }
   renderDay(); // Today: the resumed flow, else the day's All
+  migrateHandFlows().catch((err) => console.warn('[atelier] hand-picked flows', err)); // not set: tried again next launch
   remix.boot().catch((err) => console.warn('[atelier] remix resume', err)); // reads rx:ops once, resumes polling, prunes rx:*
   // Build app data of threads no longer on this device (in Recently deleted, deleted on another device): kept 30 days from
   // when this device first finds the thread gone, so a restore brings it back, then deleted (appdata.js prune).

@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, KIND_DEFAULTS, dayKey, tabFlows, earlierCut, daySlice, dayList } from '../public/days.js';
-import { groupsFor, spaceRequest, parseSpaces } from '../public/thread-spaces.js';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, KIND_DEFAULTS, dayKey, tabFlows, earlierCut, daySlice, dayList, flowsOn, handFlows } from '../public/days.js';
+import { groupsFor, spaceRequest, parseSpaces, spaceOf } from '../public/thread-spaces.js';
 import { problems } from './humanizer-lint.mjs';
 
 // Days and flows, the app.js half (Task 5): each flow keeps its own kind and composer choices, a retried turn is
@@ -305,7 +305,7 @@ test('earlierCut: where a flow\'s part of the day starts', () => {
 });
 
 // submit's rig, as tests/untrusted-turns.test.mjs builds it, with the real intoFlow
-function sendRig(S) {
+function sendRig(S, extra = {}) {
   const calls = { render: [], run: [] };
   let id = 0;
   const input = { value: '', focus() {} };
@@ -314,6 +314,7 @@ function sendRig(S) {
     feat: () => false, running: new Set(), run: async (e) => { calls.run.push(e); }, newThread: () => ({ id: 'n1', title: '', entries: [] }),
     uid: () => `e${++id}`, videoSource: () => null, welcome: { classList: { add() {} } }, stream: { append() {} }, renderEntry: () => ({}),
     renderDay: () => { calls.render.push({ view: S.view, thread: S.thread?.id, entries: S.thread?.entries.length }); },
+    ...extra,
   };
   lift(vars, 'submit', 'intoFlow');
   return { vars, calls };
@@ -385,7 +386,8 @@ test('a tab redraw puts focus back on the tab that had it (paintTabs, run)', () 
   const coen = { id: 'coen', title: 'Hall kitchen', entries: [{ prompt: 'x', at: Date.now() }] };
   const kid = { id: 'kid', title: 'Science fair', entries: [{ prompt: 'y', at: Date.now() }] };
   const S = { day: dayKey(Date.now()), view: 'coen', thread: coen };
-  const $ = (s, el = doc) => (s === '#flowTabs' ? box : el.querySelector(s));
+  const more = { hidden: true, setAttribute() {} };
+  const $ = (s, el = doc) => (s === '#flowTabs' ? box : s === '#flowMore' ? more : el.querySelector(s));
   const $$ = (s, el = doc) => [...el.querySelectorAll(s)];
   const v = { S, document: doc, $, $$, tabFlows, kindOf, threadSpaces: {}, esc: (x) => String(x), flowColor: () => 'red', flowName: (t) => t?.title || 'New flow', dayPool: () => [coen, kid] };
   lift(v, 'paintTabs');
@@ -491,9 +493,8 @@ test('boot opens Today: the last flow when it has something today, else the day\
 test('the drawer defaults to Days: a Days order first, the others kept, a stored order respected', () => {
   const sorts = evalIn({}, `return (${constExpr('THREAD_SORTS')});`);
   assert.deepEqual(Object.keys(sorts), ['days', 'recent', 'oldest', 'title', 'entries', 'space']);
-  const decl = /\nlet threadSort = ([^\n]*);\n/.exec(APP);
-  assert.ok(decl, 'app.js has let threadSort');
-  const pick = (stored) => evalIn({ THREAD_SORTS: sorts, LS: { get: (k, d) => (stored === undefined ? d : stored) } }, `return (${decl[1]});`);
+  assert.match(APP, /\nlet threadSort = storedThreadSort\(\);\n/, 'app.js has let threadSort, from the stored order');
+  const pick = (stored) => evalIn({ THREAD_SORTS: sorts, LS: { get: (k, d) => (stored === undefined ? d : stored) } }, `return (${constExpr('storedThreadSort')})();`);
   assert.equal(pick(undefined), 'days', 'nothing stored: Days');
   assert.equal(pick('title'), 'title', 'an order picked before is kept');
   assert.equal(pick('nonsense'), 'days');
@@ -567,4 +568,170 @@ test('sending from a past day returns to today: a flow opened from the Days list
   assert.equal(calls.render.length, 1);
   assert.equal(vars.earlierOpen, 'coen', 'the conversation he was reading stays open');
   assert.deepEqual(flow.entries.map((e) => e.prompt), ['cabinets', 'And the counters']);
+});
+
+// Task 8: existing threads come into days and flows, and nothing is lost on the way.
+const OWNER = groupsFor('owner');
+const oldShape = () => [
+  { id: 'a', title: 'Hall kitchen', createdAt: at(30), updatedAt: at(29), entries: [{ id: 'a1', kind: 'ask', prompt: 'cabinets', createdAt: at(30) }, { id: 'a2', kind: 'image', prompt: 'render it', createdAt: at(29), images: ['data:image/png;base64,AA'] }] },
+  { id: 'b', title: 'Science fair', createdAt: at(20), updatedAt: at(20), entries: [{ id: 'b1', kind: 'ask', prompt: 'magnets', createdAt: at(20) }] },
+  { id: 'c', title: 'Garden', createdAt: at(10), updatedAt: at(10), entries: [{ id: 'c1', kind: 'ask', prompt: 'tomatoes', createdAt: at(10) }] },
+  { id: 'd', title: 'Synced already', createdAt: at(5), updatedAt: at(5), flow: { kind: 'work' }, entries: [{ id: 'd1', kind: 'ask', prompt: 'invoice', createdAt: at(5) }] },
+  { id: 'e', title: '', createdAt: at(1), updatedAt: at(1), entries: [] },
+];
+const handSpaces = () => ({ a: 'coen!', b: 'kid', d: 'coen!', e: 'personal!', gone: 'apps!' });
+function migrationRig(rows, spaces, { open = null } = {}) {
+  const puts = [], ls = {}, reads = { n: 0 }, drawn = [];
+  const db = new Map(rows.map((t) => [t.id, structuredClone(t)]));
+  const v = { S: { thread: open }, liveThreads: new Map(), threadSpaces: spaces, handFlows, workspaceKey: (k) => `${k}:ws`, accountReloading: false,
+    LS: { get: (k, d) => (k in ls ? ls[k] : d), set: (k, x) => { ls[k] = x; } },
+    DB: { all: async () => { reads.n++; return [...db.values()].map((t) => structuredClone(t)); }, put: async (t) => { puts.push(t.id); db.set(t.id, structuredClone(t)); } },
+    renderFlowTabs: () => drawn.push('tabs') };
+  lift(v, 'migrateHandFlows');
+  return { v, db, puts, ls, reads, drawn };
+}
+
+test('hand choices become synced flows once', async () => {
+  const before = oldShape(), r = migrationRig(before, handSpaces());
+  await r.v.migrateHandFlows();
+  assert.deepEqual(r.puts, ['a'], 'only a thread with entries, a hand choice and no flow is written');
+  assert.deepEqual(r.db.get('a').flow, { kind: 'coen' });
+  assert.ok(!('flow' in r.db.get('b')), 'a guess is not written');
+  assert.ok(!('flow' in r.db.get('c')));
+  assert.deepEqual(r.db.get('d').flow, { kind: 'work' }, 'a synced flow is never replaced');
+  assert.ok(!('flow' in r.db.get('e')), 'an empty thread is left alone');
+  assert.equal(r.ls['flowsMigrated:ws'], true, 'the flag is per workspace');
+  assert.deepEqual(r.drawn, ['tabs']);
+  // nothing is lost: every thread, entry, title and time is as it was
+  for (const t of before) {
+    const now = r.db.get(t.id);
+    assert.equal(now.title, t.title); assert.equal(now.updatedAt, t.updatedAt, `${t.id}: not moved to the top of Newest first`);
+    assert.equal(now.entries.length, t.entries.length); assert.deepEqual(now.entries, t.entries);
+    assert.deepEqual({ ...now, flow: undefined }, { ...t, flow: undefined });
+  }
+  // once: the flag stops a second read; without it a second run still changes nothing (idempotent)
+  await r.v.migrateHandFlows();
+  assert.equal(r.reads.n, 1);
+  Reflect.deleteProperty(r.ls, 'flowsMigrated:ws');
+  await r.v.migrateHandFlows();
+  assert.deepEqual(r.puts, ['a']);
+  // the open flow is changed on screen too, so its next save keeps the flow
+  const open = { ...structuredClone(oldShape()[0]), entries: [...oldShape()[0].entries, { id: 'a3', kind: 'ask', prompt: 'not saved yet' }] };
+  const o = migrationRig(oldShape(), handSpaces(), { open });
+  await o.v.migrateHandFlows();
+  assert.deepEqual(open.flow, { kind: 'coen' });
+  assert.equal(o.db.get('a').entries.length, 3, 'the record on screen is the one written');
+  // runs at boot, after Today is drawn, and the flag stays the owner's through a tester's Clear
+  assert.match(APP, /\n  renderDay\(\); \/\/ Today[^\n]*\n  migrateHandFlows\(\)\.catch\(/);
+  assert.match(constExpr('OWNER_LS_KEEP'), /'flowsMigrated'/);
+  assert.deepEqual(handFlows(oldShape(), handSpaces()).map(({ thread, flow }) => [thread.id, flow]), [['a', { kind: 'coen' }]]);
+});
+
+function sortRig({ day, rows, answer, spaces = {} }) {
+  const asked = [], drawn = [];
+  const S = { day, thread: null, view: 'all' };
+  const v = { S, feat: () => true, spacesBusy: false, spacesFailedAt: 0, daysSorted: new Set(), dayCache: rows, dayPool: () => rows, flowsOn, dayKey,
+    isToday: () => S.day === dayKey(Date.now()), spaceOf, threadSpaces: spaces, SPACE_BATCH: 20, GROUPS: OWNER, ME: { bio: '' }, spaceRequest, parseSpaces,
+    modelFor: () => 'fast', noThink: {}, saveSpaces: () => {}, accountReloading: false, paintDay: () => drawn.push(S.day),
+    completeChat: async (o) => { asked.push(o); return answer; },
+    DB: { put: () => assert.fail('a guess is never saved to the thread') }, setFlow: () => assert.fail('a guess is never set as the flow'), persist: () => assert.fail('nothing is saved') };
+  lift(v, 'sortIntoSpaces', 'sortDay');
+  return { v, S, asked, drawn };
+}
+test('a guess is not written until a send', async () => {
+  const day = dayKey(at(3));
+  const rows = [
+    { id: 'p', title: 'Fence quote', entries: [{ id: 'p1', prompt: 'fence quote for the Smiths', createdAt: at(3) }] },
+    { id: 'q', title: 'Bedtime story', entries: [{ id: 'q1', prompt: 'a dragon story', createdAt: at(3, 20) }] },
+    { id: 's', title: 'Synced', flow: { kind: 'work' }, entries: [{ id: 's1', prompt: 'x', createdAt: at(3) }] },
+    { id: 'o', title: 'Other day', entries: [{ id: 'o1', prompt: 'y', createdAt: at(9) }] },
+  ];
+  // today: nothing is asked
+  const t = sortRig({ day: dayKey(Date.now()), rows, answer: '' });
+  await t.v.sortDay();
+  assert.equal(t.asked.length, 0);
+  // a past day: its flows with no kind, in one batch; the answers stay guesses on this device
+  const r = sortRig({ day, rows, answer: '1: kid\n2: coen' });
+  await r.v.sortDay();
+  assert.equal(r.asked.length, 1);
+  assert.deepEqual(r.asked[0].messages, spaceRequest([rows[1], rows[0]], OWNER, ''), 'only that day\'s unsorted flows (most recent first)');
+  assert.deepEqual(r.v.threadSpaces, { q: 'kid', p: 'coen' }, 'guesses, not hand choices');
+  for (const x of rows) assert.ok(x.id === 's' ? x.flow.kind === 'work' : !('flow' in x), `${x.id}: no flow written`);
+  assert.ok(r.drawn.length && r.drawn.every((d) => d === day), 'the day redraws with the guessed chips');
+  assert.equal(kindOf(rows[0], r.v.threadSpaces), 'coen', 'the chip reads the guess');
+  // once per day this session; a day left meanwhile is not redrawn
+  await r.v.sortDay();
+  assert.equal(r.asked.length, 1);
+  const left = sortRig({ day, rows: rows.map((x) => ({ ...x })), answer: '1: kid' });
+  left.v.completeChat = async () => { left.S.day = dayKey(Date.now()); return '1: kid\n2: coen'; };
+  await left.v.sortDay();
+  assert.deepEqual(left.drawn, []);
+  // wired: Today sorts a past day once it has read the threads
+  assert.match(fnSource('refreshDay'), /paintDay\(\);\n\s*sortDay\(\);/);
+  assert.match(APP, /if \(threadSort === 'space' && fromSorter !== true\) sortIntoSpaces\(all\);/, 'the drawer\'s By group still sorts as before');
+});
+
+test('a send writes the guess', async () => {
+  const guess = { coen: 'kid' };
+  const coen = { id: 'coen', title: 'Hall kitchen', opts: { mode: 'ask' }, entries: [{ id: 'old', kind: 'ask', prompt: 'earlier', createdAt: at(3) }] };
+  const S = { mode: 'ask', day: dayKey(at(3)), view: 'coen', thread: coen, video: null, attachments: [], files: [], opts: { ask: {} }, tester: null };
+  const { vars } = sendRig(S, { kindOf, cleanFlow, threadSpaces: guess });
+  await vars.submit('Estimate the cabinets');
+  assert.deepEqual(coen.flow, { kind: 'kid' }, 'the guess becomes the synced flow');
+  // a flow he picked stays; a flow with no guess stays unsorted; already today in the flow, the guess still lands
+  const work = { id: 'w', title: 'Invoice', flow: { kind: 'work' }, opts: { mode: 'ask' }, entries: [] };
+  S.thread = work; S.view = 'all'; guess.w = 'coen';
+  await vars.submit('Send the invoice');
+  assert.deepEqual(work.flow, { kind: 'work' });
+  const bare = { id: 'z', title: 'Notes', opts: { mode: 'ask' }, entries: [] };
+  S.thread = bare; S.view = 'all';
+  await vars.submit('A note');
+  assert.ok(!('flow' in bare));
+  const here = { id: 'h', title: 'Here', opts: { mode: 'ask' }, entries: [] };
+  S.thread = here; S.view = 'h'; S.day = dayKey(Date.now()); guess.h = 'personal';
+  await vars.submit('Again');
+  assert.deepEqual(here.flow, { kind: 'personal' });
+});
+
+test('the flow tab menu: each kind of the set, the current one checked, then Rename', () => {
+  // the button: next to the tabs (never inside the tablist), a real menu button, shown in a flow
+  const strip = HTML.slice(HTML.indexOf('<div class="flow-strip">'), HTML.indexOf('id="newFlowBtn"'));
+  assert.match(strip, /<\/div>\n\s*<button type="button" class="icon-btn flow-more" id="flowMore" aria-haspopup="menu" aria-expanded="false" aria-label="Flow options" title="Flow options" hidden>/);
+  assert.match(fnSource('paintTabs'), /\$\('#flowMore'\)/);
+  assert.match(APP, /\$\('#flowMore'\)\.onclick = openKindMenu;/);
+  // its items
+  const v = { GROUPS: OWNER, kindOf, threadSpaces: { g: 'kid' }, flowColor: (k) => `var(--flow-${k})`, esc: (x) => String(x) };
+  lift(v, 'kindMenuHtml');
+  const html = v.kindMenuHtml({ id: 'f', flow: { kind: 'coen' }, entries: [{}] });
+  assert.equal((html.match(/role="menuitemradio"/g) || []).length, OWNER.groups.length);
+  assert.deepEqual([...html.matchAll(/data-kind="([^"]+)" aria-checked="true"/g)].map((m) => m[1]), ['coen']);
+  assert.match(html, /role="menuitem" data-rename>Rename<\/button>$/);
+  assert.doesNotMatch(html, /Unsorted|data-kind=""/, 'no "no kind": a flow is never cleared');
+  const guessed = v.kindMenuHtml({ id: 'g', entries: [{}] });
+  assert.deepEqual([...guessed.matchAll(/data-kind="([^"]+)" aria-checked="true"/g)].map((m) => m[1]), ['kid'], 'a guess shows checked');
+  assert.match(guessed, /<small>Guess<\/small>/);
+  assert.doesNotMatch(v.kindMenuHtml({ id: 'n', entries: [] }), /data-rename/, 'a flow not saved yet has nothing to rename');
+  assert.doesNotMatch(v.kindMenuHtml({ id: 'n', entries: [] }), /aria-checked="true"/);
+  // a pick: the kind becomes the flow, and the group his hand choice
+  const log = [], w = { threadSpaces: {}, saveSpaces: () => log.push('save'), setFlow: (t, k) => log.push(['flow', t.id, k]) };
+  lift(w, 'pickKind');
+  w.pickKind({ id: 'f', entries: [{}] }, 'kid');
+  assert.deepEqual(w.threadSpaces, { f: 'kid!' }); assert.deepEqual(log, ['save', ['flow', 'f', 'kid']]);
+  log.length = 0;
+  w.pickKind({ id: 'n', entries: [] }, 'coen');
+  assert.deepEqual(w.threadSpaces, { f: 'kid!' }, 'an unsaved flow leaves no group behind'); assert.deepEqual(log, [['flow', 'n', 'coen']]);
+  assert.match(fnSource('openKindMenu'), /pickKind\(t, b\.dataset\.kind\)/);
+  assert.match(fnSource('openKindMenu'), /openThreadMenu\(t\.id, flowName\(t\)\)/, 'Rename uses the existing rename');
+  // a group chosen by hand in the Days list's menu is a pick too
+  assert.match(APP, /if \(b\.dataset\.space\) \{ const t = [^\n]*pickKind\(t, b\.dataset\.space\)/);
+  for (const s of ['Flow options', 'Options for Hall kitchen', 'Rename', 'Guess', ...OWNER.groups.map((g) => g.label)]) assert.deepEqual(problems(s), [], s);
+});
+
+test('the Days list: the stored order comes back when it closes, and it counts flows', () => {
+  assert.match(fnSource('closeDrawers'), /if \(!\$\('#threadsDrawer'\)\.hidden\) threadSort = storedThreadSort\(\);/);
+  const body = fnSource('renderThreads');
+  assert.match(body, /`\$\{all\.length\} \$\{all\.length === 1 \? 'matching flow' : 'matching flows'\}`/);
+  assert.match(body, /`\$\{all\.length\} \$\{all\.length === 1 \? 'flow' : 'flows'\}`/);
+  assert.doesNotMatch(body, /'matching threads?'|saved \$\{|Loading your threads|No (?:matching )?threads/);
+  for (const s of ['1 flow', '3 flows', '2 matching flows', 'Loading your flows…', 'No matching flows', 'No flows yet']) assert.deepEqual(problems(s), [], s);
 });
