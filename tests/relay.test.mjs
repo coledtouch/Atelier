@@ -350,3 +350,30 @@ test('v130: the app pairs each computer as its own kind, and sends a Messages co
   const worker = readFileSync(new URL('../src/worker.js', import.meta.url), 'utf8');
   assert.match(worker, /const kind = \['mac', 'win', 'linux', 'other'\]\.includes\(device\) \? device : '';/);
 });
+
+test('v136: an old extension that has no gmessages command is passed over; the computer with Google Messages answers', async () => {
+  const ctx = fakeCtx(), relay = new Relay(ctx, {});
+  await pair(relay, 'win', 'c'.repeat(64));
+  await pair(relay, 'mac', 'b'.repeat(64));
+  await connect(relay, 'c'.repeat(64), WIN_UA);
+  await connect(relay, 'b'.repeat(64), MAC_UA); // the Mac, on an old extension, is the newest
+  const [win, mac] = ctx.accepted.map((a) => a.ws);
+  const answer = async (ws, n, reply) => {
+    for (let i = 0; i < 100 && ws.sent.length < n; i++) await new Promise((r) => setTimeout(r, 1));
+    await relay.webSocketMessage(ws, JSON.stringify({ id: JSON.parse(ws.sent.at(-1)).id, ...reply }));
+  };
+  const call = () => relay.fetch(new Request('https://relay/cmd', { method: 'POST', body: JSON.stringify({ cmd: 'gmessages', args: { op: 'recent' } }) }));
+  let pending = call();
+  await answer(mac, 1, { ok: false, error: 'Unknown command gmessages' });
+  await answer(win, 1, { ok: true, result: { conversations: [] } });
+  assert.deepEqual(await (await pending).json(), { ok: true, result: { conversations: [] } });
+  // With no computer that has it, the last answer stands; any other error still stops at once.
+  pending = call();
+  await answer(mac, 2, { ok: false, error: 'Unknown command gmessages' });
+  await answer(win, 2, { ok: false, error: 'Unknown command gmessages' });
+  assert.match((await (await pending).json()).error, /^Unknown command gmessages$/);
+  pending = call();
+  await answer(mac, 3, { ok: false, error: 'Unknown command gmessagesx' });
+  assert.equal((await (await pending).json()).error, 'Unknown command gmessagesx');
+  assert.equal(win.sent.length, 2, 'a different error is final');
+});

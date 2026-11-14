@@ -25,7 +25,9 @@ const deviceFromAgent = (agent) => (/Macintosh|Mac OS X/i.test(agent) ? 'mac' : 
 const deviceOf = (ws) => { const a = ws.deserializeAttachment?.() || {}; return DEVICES.includes(a.device) ? a.device : deviceFromAgent(a.agent || ''); };
 
 // What a browser with no Google Messages tab, or an unpaired one, answers (extension/background.js GM_NOT_OPEN / GM_NOT_PAIRED).
-const NO_GM_TAB = /^Google Messages isn’t (open|paired) in this browser/;
+// An extension older than 1.4.x has no gmessages command and did nothing (v136): the search goes on past it too.
+// Before, the Mac on 1.4.0, the newest connection, answered first and stopped it.
+const NO_GM_TAB = /^(Google Messages isn’t (open|paired) in this browser|Unknown command gmessages$)/;
 
 function timingSafe(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
