@@ -151,8 +151,9 @@ test('Messages on a Mac is disclosed as the helper, the extension and the agent 
     'The settings under Approvals and “Don’t ask again on this computer” can remove those steps.']) assert.ok(m.includes(words), words);
   // the helper: Messages' own database, opened read-only; a conversation's people, words and times
   assert.match(HOST, /const db = `\$\{\$\.NSHomeDirectory\(\)\.js\}\/Library\/Messages\/chat\.db`;\s*const r = run\('\/usr\/bin\/sqlite3', \['-readonly', '-json', db, sql\]\);/);
-  assert.match(HOST, /return rows\.map\(\(r\) => \(\{ chat: r\.chat, name: r\.name \|\| '', people: r\.people \|\| r\.id \|\| '', service: r\.service \|\| '', last: \{ at: appleDate\(r\.d\), fromMe: r\.fromMe === 1, text: bodyOf\(r\) \} \}\)\);/);
-  assert.match(HOST, /return rows\.slice\(\)\.reverse\(\)\.map\(\(r\) => \(\{ at: appleDate\(r\.d\), from: r\.fromMe === 1 \? 'me' : r\.sender \|\| 'them', text: bodyOf\(r\) \}\)\);/);
+  assert.match(HOST, /const handles = String\(r\.people \|\| r\.id \|\| ''\)\.split\(', '\)\.filter\(Boolean\);/);
+  assert.match(HOST, /return \{ chat: r\.chat, name: r\.name \|\| \(handles\.length === 1 \? nameOf\(book, handles\[0\]\) : ''\), people: names\.join\(', '\), handles: handles\.join\(', '\), service: r\.service \|\| '', last: \{ at: appleDate\(r\.d\), fromMe: r\.fromMe === 1, text: bodyOf\(r\) \} \};/);
+  assert.match(HOST, /return rows\.slice\(\)\.reverse\(\)\.map\(\(r\) => \(\{ at: appleDate\(r\.d\), from: r\.fromMe === 1 \? 'me' : nameOf\(book, r\.sender\) \|\| r\.sender \|\| 'them', text: bodyOf\(r\) \}\)\);/);
   // the setup command is copied from Settings → Connections
   assert.match(APP, /const cmd = `curl -fsSL \$\{location\.origin\}\/mac\/install-messages\.sh \| sh -s \$\{id\}`;/);
   // sending: a write in the app (its card), refused by the relay and by the extension without the app's approval flag,
