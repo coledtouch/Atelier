@@ -32,8 +32,8 @@ import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?
 import { renderAppErrors, loadAppErrors } from './app-errors.js?v=134';
 import { HUMANIZER } from './humanizer.js?v=134';
 import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=134';
-import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=134';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handFlows, rolledDay, keepsFlow } from './days.js?v=134';
+import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, mergeSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=134';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handPlan, rolledDay, keepsFlow } from './days.js?v=134';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -683,37 +683,70 @@ function setFlow(thread, kind) {
 }
 // A new flow's kind (ruling R3): once its first answer is in, the fast helper sorts it as the Threads list's By group
 // does (thread-spaces.js), and the answer becomes its flow unless he picked a kind first, or a group by hand. One small
-// request per new flow; the title prompt is unchanged.
+// request per new flow; the title prompt is unchanged. Also run for a turn sent in an older flow with no kind and no
+// guess (intoFlow). A pick made meanwhile, in this tab or another (localStorage, the stored row), always wins.
 async function guessFlow(thread) {
-  const picked = () => Boolean(thread.flow) || spaceByHand(threadSpaces, thread.id);
+  const picked = () => { refreshSpaces(); return Boolean(thread.flow) || spaceByHand(threadSpaces, thread.id); };
   if (!feat('helpers') || !thread || picked()) return;
   try {
     const raw = await completeChat({ model: modelFor('fast'), role: 'fast', max_tokens: 200, temperature: 0, extra: noThink, messages: spaceRequest([thread], GROUPS, ME.bio) });
     const [kind] = parseSpaces(raw, 1, GROUPS);
-    if (kind && !picked() && !accountReloading && await DB.get(thread.id)) setFlow(thread, kind);
+    const stored = kind && !picked() && !accountReloading ? await DB.get(thread.id) : null;
+    if (stored && !cleanFlow(stored.flow) && !picked() && !accountReloading) setFlow(thread, kind);
   } catch (err) { console.warn('[atelier] flow kind', err); }
 }
+// His hand choices beat guesses, whatever order they arrive in (days.js handPlan): a guess that synced from another
+// device, or arrived while the library was being read, is replaced by his choice. Run after every read of the library
+// (dayRead: the boot, a sync pull, another tab's save) and by migrateHandFlows. Each row is read again just before the
+// write: reading the whole library can take seconds, and a sync pull or another tab may have saved a turn or a flow into
+// it since. Written as stored (DB.put keeps updatedAt), so no old thread jumps to the top of Newest first. → how many
+// threads changed (written, or his choice taken from a newer pick made on another device).
+let handsBusy = false;
+async function handsWin(rows) {
+  if (handsBusy || accountReloading || !Array.isArray(rows)) return 0;
+  handsBusy = true;
+  try {
+    refreshSpaces(); // a choice made in another tab counts
+    const shots = handShots(), live = (t) => (S.thread?.id === t.id ? S.thread : liveThreads.get(t.id) || t); // the record on screen, never a stale copy
+    const { write, adopt } = handPlan(rows.map(live), threadSpaces, shots);
+    for (const { id, kind } of adopt) { if (GROUPS.groups.some((g) => g.key === kind)) threadSpaces[id] = `${kind}!`; else Reflect.deleteProperty(threadSpaces, id); }
+    if (adopt.length) saveSpaces(adopt.map((a) => a.id));
+    let wrote = 0;
+    for (const { thread } of write) {
+      if (accountReloading) break;
+      const onScreen = S.thread?.id === thread.id ? S.thread : liveThreads.get(thread.id);
+      const cur = onScreen || await DB.get(thread.id);
+      const now = cur && handPlan([cur], threadSpaces, shots).write[0]; // the same rule on the row as it is now
+      if (!now) continue;
+      cur.flow = now.flow; await DB.put(cur); wrote++;
+      if (now.spent) shots.delete(cur.id);
+    }
+    if (wrote) LS.set(workspaceKey('handShots'), [...shots]);
+    return wrote + adopt.length;
+  } finally { handsBusy = false; }
+}
+// The ids whose hand choice may still be written once over a flow that differs (days.js handPlan), on this device for
+// this account. The first time this build runs, every hand choice already made gets its one.
+function handShots() {
+  const key = workspaceKey('handShots');
+  if (!lsHas(key)) LS.set(key, Object.keys(threadSpaces).filter((id) => spaceByHand(threadSpaces, id)));
+  return new Set((LS.get(key, []) || []).filter((id) => typeof id === 'string'));
+}
+function addShot(id) {
+  const s = handShots();
+  s.add(id); LS.set(workspaceKey('handShots'), [...s]);
+}
 // v132, once per workspace: a group he chose by hand in the Threads list ('coen!' in threadSpaces) becomes that thread's
-// synced flow, since he already confirmed it. Written as stored (DB.put keeps updatedAt), so no old thread jumps to the
-// top of Newest first. A thread that has a flow is never changed, so running it again changes nothing.
+// synced flow, since he already confirmed it, even over a flow a guess put there first (handsWin). Running it again
+// changes nothing.
 async function migrateHandFlows() {
   const flag = workspaceKey('flowsMigrated');
   if (LS.get(flag, false) === true) return;
   const rows = await DB.all();
   if (accountReloading) return;
-  const live = (t) => (S.thread?.id === t.id ? S.thread : liveThreads.get(t.id) || t); // the record on screen, never a stale copy
-  const todo = handFlows(rows.map(live), threadSpaces);
-  for (const { thread, flow } of todo) {
-    if (accountReloading) return;
-    // A stored row is read again just before the write: reading the whole library can take seconds, and a sync pull or
-    // another tab may have saved a turn into it since. DB.get records what IndexedDB holds, so the save merges with it.
-    const onScreen = S.thread?.id === thread.id ? S.thread : liveThreads.get(thread.id);
-    const cur = onScreen || await DB.get(thread.id);
-    if (!cur || cur.flow != null || !cur.entries?.length) continue;
-    cur.flow = flow; await DB.put(cur);
-  }
+  const changed = await handsWin(rows);
   LS.set(flag, true);
-  if (todo.length) renderFlowTabs();
+  if (changed) renderFlowTabs();
 }
 
 // ───────────────────────── Today ─────────────────────────
@@ -724,6 +757,8 @@ async function migrateHandFlows() {
 let dayCache = null; // every saved thread, as last read (allThreads); null until the first read
 let dayReading = false, dayAgain = false; // a read waits or runs; another was asked for meanwhile (refreshDay)
 const DAY_READ_WAIT = 60; // ms: changes that arrive together (a sync pull of many flows) share one read
+let dayLate = null; // a read the busy store is holding (awaitLate); the page draws from the last read until it lands
+const DAY_LATE_GIVE_UP = 20_000; // ms: a read held this long no longer stops a new one
 let dayLive = null; // the day S.day was set to while it was today (noteDay); null once he browsed to a past day
 let streamFrom = 0, earlierOpen = null; // the first entry the open flow shows; the flow whose earlier part is shown too
 const daysSorted = new Set(); // past days whose unsorted flows were sent to the sorter this session (sortDay)
@@ -753,31 +788,52 @@ function noteDay() {
 }
 // Reading every saved thread is slow on a phone with a large library (media included), so reads never overlap: a call
 // while one waits or runs asks for one more after it. A burst of sync changes costs one or two reads, not one each.
+// While the busy store holds a read (dayLate), a call draws from the last read at once and asks for one more read once
+// that one lands, or once it has been held for DAY_LATE_GIVE_UP: a read that never lands never stops the page.
 function refreshDay() {
   if (dayReading) { dayAgain = true; return; }
+  if (dayLate) { dayAgain = true; if (dayCache) paintDay(); return; }
   dayReading = true;
   setTimeout(readDay, DAY_READ_WAIT);
 }
 async function readDay() {
   dayAgain = false; // what was asked for before the read starts, it covers
   try {
-    let rows = await allThreads();
+    const rows = await allThreads();
     if (accountReloading) return;
     // The store is held by another tab: what came back is short. It is drawn now, and again from the same read's rows
-    // once they arrive (no second read).
+    // once they arrive (no second read). The wait doesn't hold this read's turn (awaitLate).
     if (rows.busy) {
       if (rows.length) { dayCache = rows; paintDay(); }
-      rows = await allThreads(await rows.late);
-      if (accountReloading) return;
+      awaitLate(rows.late);
+      return;
     }
-    dayCache = rows;
-    renderRecentThreads(rows.saved); // the home screen's recent list, from the same rows
-    paintDay();
-    sortDay();
+    dayRead(rows);
   } finally {
     dayReading = false;
     if (dayAgain) refreshDay();
   }
+}
+function awaitLate(late) {
+  const mine = {};
+  dayLate = mine;
+  const done = async (saved) => {
+    if (dayLate !== mine) return; // given up on, or a newer one waits
+    dayLate = null;
+    if (saved && !accountReloading) dayRead(await allThreads(saved));
+    if (dayAgain) refreshDay();
+  };
+  Promise.resolve(late).then(done, () => done(null));
+  setTimeout(() => done(null), DAY_LATE_GIVE_UP);
+}
+// A whole read of the library: Today, the home screen's recent list (from the same rows), a past day's sorting, and his
+// hand choices over any guess that came in (handsWin).
+function dayRead(rows) {
+  dayCache = rows;
+  renderRecentThreads(rows.saved);
+  paintDay();
+  sortDay();
+  Promise.resolve(handsWin(rows)).then((n) => { if (n) paintDay(); }, (err) => console.warn('[atelier] hand-picked flows', err));
 }
 // The flow being left goes into the last read as it is on screen (its turns this visit included), so the day can be
 // drawn from that read alone (renderDay cached). A flow with nothing in it is never saved, so it leaves no tab.
@@ -801,9 +857,9 @@ function paintDayBar() {
   const d = dayDate(S.day), sameYear = d.getFullYear() === new Date().getFullYear();
   $('#dayDateText').textContent = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', ...(!sameYear && { year: 'numeric' }) });
   $('#dayDate').setAttribute('aria-label', `${isToday() ? 'Today, ' : ''}${d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', ...(!sameYear && { year: 'numeric' }) })}. Open your days.`);
-  const days = dayKeys();
-  $('#dayPrev').disabled = !stepDay(days, S.day, -1);
-  $('#dayNext').disabled = !stepDay(days, S.day, 1);
+  const days = dayKeys(), today = dayKey(Date.now()); // ▶ never goes past today (days.js stepDay)
+  $('#dayPrev').disabled = !stepDay(days, S.day, -1, today);
+  $('#dayNext').disabled = !stepDay(days, S.day, 1, today);
 }
 function paintTabs() {
   const box = $('#flowTabs'), had = box.contains(document.activeElement) ? document.activeElement.dataset.view : null; // the tab focus was on
@@ -861,9 +917,13 @@ function flushOpen() { keepInDay(S.thread); persist(true, { flush: true }); }
 // A turn always lands on today: sent from a past day, the page moves to today. Already in that flow, its whole
 // conversation stays open (he was reading it); from All its part of today shows, with the rest under the Earlier bar.
 // A turn sent in a flow with no kind keeps the sorter's guess (kept on this device until now): it becomes the synced kind.
+// An older flow with no guess either is sorted now, in the background (guessFlow), and the answer becomes its kind. A new
+// flow's is asked for once its first answer is in, as before.
 function intoFlow() {
+  refreshSpaces(); // a choice made in another tab counts
   const guess = !S.thread.flow && cleanFlow({ kind: kindOf(S.thread, threadSpaces) });
   if (guess) S.thread.flow = guess; // saved with the turn (persist)
+  else if (!S.thread.flow && S.thread.entries.length) guessFlow(S.thread); // not awaited: the turn never waits for it
   const today = dayKey(Date.now());
   if (S.view === S.thread.id && S.day === today) { if (guess) renderFlowTabs(); return; } // otherwise renderDay below draws it
   earlierOpen = S.view === S.thread.id ? S.thread.id : null;
@@ -904,9 +964,9 @@ function showAll() {
   requestAnimationFrame(scrollDay);
 }
 function scrollDay() { if (S.view === 'all' && $('#timeline').hidden) stage.scrollTo({ top: 0, behavior: 'instant' }); else scrollDown(true, true); }
-// ◀ ▶: the day before or after that has anything (today always counts). A day opens on All.
+// ◀ ▶: the day before or after that has anything (today always counts), never past today. A day opens on All.
 function stepToDay(dir) {
-  const to = stepDay(dayKeys(), S.day, dir);
+  const to = stepDay(dayKeys(), S.day, dir, dayKey(Date.now()));
   if (!to) return;
   flushOpen();
   if (S.thread && !S.thread.entries.length) { S.thread = null; openFlowOpts(null); renderOptions(); }
@@ -949,6 +1009,7 @@ function showEntry(id) {
   $('.prompt', li)?.focus({ preventScroll: true });
 }
 // In: in All only changes where the next turn goes (and loads that flow's choices); in a flow it opens the one picked.
+// "+ New flow" is not a pick: it is the + Flow tab's newFlow itself (openFlowMenu), from All or from a flow alike.
 async function pickFlow(id) {
   if (!id) return newFlow();
   if (id === S.thread?.id) return;
@@ -994,7 +1055,12 @@ function openFlowMenu() {
   menu.innerHTML = flows.map((t) => `<button type="button" role="menuitemradio" aria-checked="${t === S.thread}" data-flow="${esc(t.id)}" style="--flow:${flowColor(kindOf(t, threadSpaces))}"><i class="flow-dot" aria-hidden="true"></i><span>${esc(flowName(t))}</span></button>`).join('')
     + `<button type="button" role="menuitemradio" aria-checked="${!S.thread}" data-flow="" class="flow-menu-new">+ New flow</button>`;
   closeFlowMenu = popMenu(btn, menu, $('.dock-inner'), () => { closeFlowMenu = null; }); // anchored in the dock like the attach menu, so it moves with it
-  menu.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; closeFlowMenu(); pickFlow(b.dataset.flow).catch(storageError); };
+  menu.onclick = (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    closeFlowMenu();
+    if (!b.dataset.flow) return newFlow(); // the same as the + Flow tab: same state, same choices, same view
+    pickFlow(b.dataset.flow).catch(storageError);
+  };
 }
 // The open flow's menu (⋯ next to its tab): each kind of the set, the one it has checked (a guess says so), then Rename.
 // There is no "no kind": a flow's kind is changed, never cleared.
@@ -1005,8 +1071,9 @@ function kindMenuHtml(t) {
 }
 // A kind picked for a flow (its menu, or a group in the Days list's thread menu): its synced kind, and his hand choice for
 // the By group order. A flow not saved yet keeps it on the record only; it is saved with the first turn.
+// A hand choice also gets its one rewrite (addShot): a guess that synced first is replaced by it (handsWin).
 function pickKind(t, kind) {
-  if (t.entries.length) { threadSpaces[t.id] = kind + '!'; saveSpaces(); }
+  if (t.entries.length) { threadSpaces[t.id] = kind + '!'; saveSpaces([t.id]); addShot(t.id); }
   setFlow(t, kind);
 }
 let closeKindMenu = null;
@@ -4039,7 +4106,7 @@ stream.addEventListener('click', async (ev) => {
     return;
   }
   if (e.remix && remix && act?.startsWith('rx-') && (await remix.onAct(act, b, e, li))) return;
-  if (e.remix && remix && (act === 'retry' || act === 'edit-prompt')) { if (act === 'retry' && !e.pending) redoneNow(e); await remix.onAct(act, b, e, li); return; } // retry → plan or cut again; edit → Fine-tune, never a plain Video prompt
+  if (e.remix && remix && (act === 'retry' || act === 'edit-prompt')) { await remix.onAct(act, b, e, li); return; } // retry → plan or cut again (stamped once it starts: the redone dep); edit → Fine-tune, never a plain Video prompt
   switch (act) {
     case 'copy':
       return copy(e.kind === 'ideas' ? e.ideas.map((d, i) => `${i + 1}. ${d.title} — ${d.pitch}`).join('\n') : stripThink(e.text));
@@ -5695,7 +5762,7 @@ function sortThreads(list, how) { // list arrives newest first (allThreads); Arr
   if (how === 'oldest') return [...list].reverse();
   if (how === 'title') return [...list].sort((a, b) => (a.title || 'Untitled').localeCompare(b.title || 'Untitled', undefined, { numeric: true, sensitivity: 'base' }));
   if (how === 'entries') return [...list].sort((a, b) => b.entries.length - a.entries.length);
-  if (how === 'space') return bySpace(list, threadSpaces, GROUPS);
+  if (how === 'space') return bySpace(list, Object.fromEntries(list.map((t) => [t.id, kindOf(t, threadSpaces)])), GROUPS); // the synced kind first, then the guess
   return list;
 }
 // A group for each thread (thread-spaces.js): kept on this device for this account, like pins. The owner's studio has
@@ -5711,16 +5778,33 @@ const SPACES_KEY = workspaceKey(`threadGroups.${GROUPS.id}`);
 const storedSpaces = LS.get(SPACES_KEY, null);
 const previousSpaces = storedSpaces == null && PREVIOUS_SET_IDS[GROUPS.id] ? LS.get(workspaceKey(`threadGroups.${PREVIOUS_SET_IDS[GROUPS.id]}`), null) : null;
 const threadSpaces = previousSpaces && typeof previousSpaces === 'object' ? carryForward(previousSpaces, GROUPS) : cleanSpaces(storedSpaces || {}, GROUPS);
-const saveSpaces = () => LS.set(SPACES_KEY, threadSpaces);
+// ids: the answers this tab changed. Only those are laid over what localStorage holds now (another tab may have written
+// since), and a guess never replaces a hand choice there (thread-spaces.js mergeSpaces). No ids: the whole map.
+function saveSpaces(ids = null) {
+  if (ids) {
+    const raw = LS.get(SPACES_KEY, null), next = mergeSpaces(raw && typeof raw === 'object' ? raw : threadSpaces, threadSpaces, ids, GROUPS);
+    for (const k of Object.keys(threadSpaces)) if (!(k in next)) Reflect.deleteProperty(threadSpaces, k);
+    Object.assign(threadSpaces, next);
+  }
+  LS.set(SPACES_KEY, threadSpaces);
+}
+// The map as localStorage holds it now: another tab's choices count before anything here reads or adds one.
+function refreshSpaces() {
+  const raw = LS.get(SPACES_KEY, null);
+  if (!raw || typeof raw !== 'object') return;
+  const fresh = cleanSpaces(raw, GROUPS);
+  for (const k of Object.keys(threadSpaces)) if (!(k in fresh)) Reflect.deleteProperty(threadSpaces, k);
+  Object.assign(threadSpaces, fresh);
+}
 if (previousSpaces && Object.keys(threadSpaces).length) saveSpaces();
 try { localStorage.removeItem('atelier.' + workspaceKey('threadSpaces')); } catch {}
-const forgetSpace = (id) => { if (threadSpaces[id]) { Reflect.deleteProperty(threadSpaces, id); saveSpaces(); } };
+const forgetSpace = (id) => { if (threadSpaces[id]) { Reflect.deleteProperty(threadSpaces, id); saveSpaces([id]); } };
 let spacesBusy = false, spacesFailedAt = 0;
 // showing: whether the answers are still wanted (the By group order, or the past day on screen); redraw: what shows them.
 // → false when it could not start (busy, helpers off, or a failure less than a minute ago).
 async function sortIntoSpaces(threads, { showing = () => threadSort === 'space' && !$('#threadsDrawer').hidden, redraw = () => renderThreads(true) } = {}) {
   if (spacesBusy || !feat('helpers') || Date.now() - spacesFailedAt < 60_000) return false;
-  const todo = threads.filter((t) => t.entries.length && !spaceOf(threadSpaces, t.id));
+  const todo = threads.filter((t) => t.entries.length && !cleanFlow(t.flow) && !spaceOf(threadSpaces, t.id)); // a flow with a synced kind needs no guess
   if (!todo.length) return true;
   spacesBusy = true;
   try {
@@ -5729,8 +5813,10 @@ async function sortIntoSpaces(threads, { showing = () => threadSort === 'space' 
       const raw = await completeChat({ model: modelFor('fast'), role: 'fast', max_tokens: 700, temperature: 0, extra: noThink, messages: spaceRequest(batch, GROUPS, ME.bio) });
       const got = parseSpaces(raw, batch.length, GROUPS);
       if (!got.some(Boolean)) throw new Error('no groups in the answer');
-      got.forEach((s, k) => { if (s && !spaceOf(threadSpaces, batch[k].id)) threadSpaces[batch[k].id] = s; });
-      saveSpaces();
+      refreshSpaces(); // a hand choice made while it was asking (here or in another tab) is never replaced
+      const ids = [];
+      got.forEach((s, k) => { if (s && !spaceOf(threadSpaces, batch[k].id)) { threadSpaces[batch[k].id] = s; ids.push(batch[k].id); } });
+      saveSpaces(ids);
       if (showing()) await redraw();
     }
   } catch (err) { console.error(err); spacesFailedAt = Date.now(); }
@@ -5780,7 +5866,7 @@ async function renderThreads(fromSorter = false, known = null) {
   const day = 864e5, today = new Date().setHours(0, 0, 0, 0);
   const byDate = threadSort === 'recent' || threadSort === 'oldest'; // date headings only mean something in date order
   if (threadSort === 'space' && fromSorter !== true) sortIntoSpaces(all); // not awaited: the list shows now and fills in
-  const group = (at, t) => (threadSort === 'space' ? labelOf(GROUPS, spaceOf(threadSpaces, t.id)) || (spacesBusy ? 'Sorting…' : 'Not sorted yet') : !byDate ? THREAD_SORTS[threadSort] : at >= today ? 'Today' : at >= today - day ? 'Yesterday' : at >= today - 6 * day ? 'This week' : 'Earlier');
+  const group = (at, t) => (threadSort === 'space' ? labelOf(GROUPS, kindOf(t, threadSpaces)) || (spacesBusy ? 'Sorting…' : 'Not sorted yet') : !byDate ? THREAD_SORTS[threadSort] : at >= today ? 'Today' : at >= today - day ? 'Yesterday' : at >= today - 6 * day ? 'This week' : 'Earlier');
   const groupOf = (t) => (pinnedThreads.has(t.id) ? 'Pinned' : group(ClaudeImport.listAt(t), t));
   // By day: a row per flow and day (daysRows); the other orders: a row per thread under its heading
   const rows = threadSort === 'days' ? daysRows(all, keep) : all.map((t) => ({ t, g: groupOf(t), day: '' }));
@@ -5869,7 +5955,7 @@ function paintThreadSpace() {
 }
 $('#threadSpace').addEventListener('click', async (ev) => {
   const b = ev.target.closest('[data-space]'), id = menuThreadId; if (!b || !id) return;
-  if (b.dataset.space) { const t = (S.thread?.id === id && S.thread) || liveThreads.get(id) || recoverThread(await DB.get(id).catch(() => null)); if (t) pickKind(t, b.dataset.space); else { threadSpaces[id] = b.dataset.space + '!'; saveSpaces(); } }
+  if (b.dataset.space) { const t = (S.thread?.id === id && S.thread) || liveThreads.get(id) || recoverThread(await DB.get(id).catch(() => null)); if (t) pickKind(t, b.dataset.space); else { threadSpaces[id] = b.dataset.space + '!'; saveSpaces([id]); addShot(id); } }
   else forgetSpace(id);
   if (id === menuThreadId) paintThreadSpace();
   renderThreads();
@@ -6776,7 +6862,7 @@ $('#migrateBtn').onclick = async (ev) => {
 // own (keys scoped to it, and the shared preferences and session keys that hold no owner data), never the owner's
 // migration flags, sign-in markers, profile cache or navigation keys, another account's scoped keys, settings that now
 // hold an owner passcode (signed in from another tab), or the older-thread boundary flag (it protects the owner's rows).
-const OWNER_LS_KEEP = new Set(['migratedV3', 'migrateToastAt', 'owner', 'signedIn', 'me', 'meBase', 'lastThread', 'lastFlow', 'pinnedThreads', 'threadGroupsShut', 'flowsMigrated']);
+const OWNER_LS_KEEP = new Set(['migratedV3', 'migrateToastAt', 'owner', 'signedIn', 'me', 'meBase', 'lastThread', 'lastFlow', 'pinnedThreads', 'threadGroupsShut', 'flowsMigrated', 'handShots']);
 function wipesKey(k) {
   if (!k.startsWith('atelier.') || k === 'atelier.sharedHistoryUnguarded') return false;
   if (workspace === 'owner') return true;
@@ -8421,6 +8507,9 @@ remix = createRemix({
   S, DB, persist, repaint, toast, esc, btn, ICON, uid, errorBox, ApiError, renderOptions, paintChip,
   streamChat, completeChat, modelFor, providerOf, ensureClip, videoFiles, clipJobs, apiHeaders, noteAllowance, openViewer, setMode, run, liveThreads,
   addEntry: (e) => { addRemixEntry(e).catch((err) => console.error(err)); },
+  // A retry that is starting (past the offline check and Remix's own guards): it counts on today (redoneNow).
+  redone: (e) => { if (!e.pending) redoneNow(e); },
+  offline: () => !navigator.onLine,
   inputValue: () => input.value, clearInput: () => { setComposer(''); autosize(); }, focusInput: () => input.focus(),
   shake: () => { input.classList.remove('shake'); void input.offsetWidth; input.classList.add('shake'); },
   runwayReady: () => Boolean(server.runway && S.settings.passcode && !S.tester),

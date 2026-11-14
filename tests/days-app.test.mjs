@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, KIND_DEFAULTS, dayKey, tabFlows, earlierCut, daySlice, dayList, flowsOn, handFlows, rolledDay, keepsFlow } from '../public/days.js';
-import { groupsFor, spaceRequest, parseSpaces, spaceOf } from '../public/thread-spaces.js';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, KIND_DEFAULTS, dayKey, tabFlows, earlierCut, daySlice, dayList, flowsOn, handFlows, handPlan, stepDay, rolledDay, keepsFlow } from '../public/days.js';
+import { groupsFor, spaceRequest, parseSpaces, spaceOf, spaceByHand, mergeSpaces, cleanSpaces } from '../public/thread-spaces.js';
 import { problems } from './humanizer-lint.mjs';
 
 // Days and flows, the app.js half (Task 5): each flow keeps its own kind and composer choices, a retried turn is
@@ -207,8 +207,8 @@ test('globalOptsWrite: one mode’s slice reaches the global choices, never a ki
   assert.equal(stored.ask.web, false, 'a new object');
   // nothing stored for the default key: it is left out, so the built-in default holds
   assert.deepEqual(globalOptsWrite({}, 'ask', { voice: true, web: true }, 'linkedin'), { ask: { web: true } });
-  // a key the kind sets is held back only while it still has the kind's value: turned off, it goes global like any chip
-  assert.equal(globalOptsWrite({ ask: { voice: true } }, 'ask', { voice: false }, 'linkedin').ask.voice, false);
+  // LinkedIn's "As me" belongs to the flow both ways: turned off there, the global choice stays as stored (follow-up 8)
+  assert.equal(globalOptsWrite({ ask: { voice: true } }, 'ask', { voice: false }, 'linkedin').ask.voice, true);
   // the Auto model a Coen flow starts with never clears the model pinned for every chat; a model picked there is kept
   const pinned = { ask: { model: 'anthropic:claude-opus-5-5', think: false } };
   assert.deepEqual(globalOptsWrite(pinned, 'ask', { model: '', think: true }, 'coen').ask, { model: 'anthropic:claude-opus-5-5', think: true });
@@ -221,6 +221,24 @@ test('globalOptsWrite: one mode’s slice reaches the global choices, never a ki
   // a junk stored value or slice
   assert.deepEqual(globalOptsWrite('junk', 'ask', { web: true }), { ask: { web: true } });
   assert.deepEqual(globalOptsWrite(stored, 'ask', null), stored);
+});
+
+test('turning As me off in a LinkedIn flow leaves the global choices alone; a model picked there still goes global', () => {
+  // As me on everywhere: off in a LinkedIn flow stays in that flow
+  const on = { ask: { model: '', think: false, voice: true, web: false } };
+  assert.deepEqual(globalOptsWrite(on, 'ask', { model: '', think: false, voice: false, web: false }, 'linkedin').ask, on.ask);
+  // As me off everywhere (the usual case): on or off in the flow, nothing global moves, and nothing is written for it
+  const off = { ask: { model: '', voice: false } };
+  for (const voice of [true, false]) assert.equal(globalOptsWrite(off, 'ask', { model: '', voice }, 'linkedin').ask.voice, false, `voice ${voice}`);
+  assert.ok(!('voice' in globalOptsWrite({}, 'ask', { voice: false, web: true }, 'linkedin').ask), 'not stored: left out');
+  // the other choices made in that flow still save globally, a model picked by hand included
+  const out = globalOptsWrite(off, 'ask', { model: 'anthropic:claude-opus-5-5', voice: false, web: true }, 'linkedin');
+  assert.deepEqual(out.ask, { model: 'anthropic:claude-opus-5-5', voice: false, web: true });
+  // outside a LinkedIn flow, As me is an ordinary choice
+  assert.equal(globalOptsWrite(on, 'ask', { voice: false }, 'coen').ask.voice, false);
+  assert.equal(globalOptsWrite(on, 'ask', { voice: false }, '').ask.voice, false);
+  // wired: saveOpts passes the open flow's kind
+  assert.ok(APP.includes("globalOptsWrite(LS.get('opts', {}), mode, S.opts[mode], S.thread?.flow?.kind)"));
 });
 
 test('every change to S.opts is saved: Refine, Omni, Runway and the Context toggle name their mode', () => {
@@ -592,23 +610,24 @@ const handSpaces = () => ({ a: 'coen!', b: 'kid', d: 'coen!', e: 'personal!', go
 function migrationRig(rows, spaces, { open = null } = {}) {
   const puts = [], ls = {}, reads = { n: 0 }, drawn = [];
   const db = new Map(rows.map((t) => [t.id, structuredClone(t)]));
-  const v = { S: { thread: open }, liveThreads: new Map(), threadSpaces: spaces, handFlows, workspaceKey: (k) => `${k}:ws`, accountReloading: false,
-    LS: { get: (k, d) => (k in ls ? ls[k] : d), set: (k, x) => { ls[k] = x; } },
+  const v = { S: { thread: open }, liveThreads: new Map(), threadSpaces: spaces, handPlan, cleanFlow, spaceByHand, GROUPS: OWNER, workspaceKey: (k) => `${k}:ws`, accountReloading: false, handsBusy: false,
+    LS: { get: (k, d) => (k in ls ? ls[k] : d), set: (k, x) => { ls[k] = x; } }, lsHas: (k) => k in ls, saveSpaces: (ids) => drawn.push(['spaces', ids]),
     DB: { all: async () => { reads.n++; const out = [...db.values()].map((t) => structuredClone(t)); v.afterAll?.(db); return out; },
       get: async (id) => structuredClone(db.get(id)), put: async (t) => { puts.push(t.id); db.set(t.id, structuredClone(t)); } },
     renderFlowTabs: () => drawn.push('tabs') };
-  lift(v, 'migrateHandFlows');
+  lift(v, 'migrateHandFlows', 'handsWin', 'handShots', 'addShot');
   return { v, db, puts, ls, reads, drawn };
 }
 
 test('hand choices become synced flows once', async () => {
   const before = oldShape(), r = migrationRig(before, handSpaces());
   await r.v.migrateHandFlows();
-  assert.deepEqual(r.puts, ['a'], 'only a thread with entries, a hand choice and no flow is written');
+  assert.deepEqual(r.puts, ['a', 'd'], 'only threads with entries and a hand choice their flow lacks are written');
   assert.deepEqual(r.db.get('a').flow, { kind: 'coen' });
   assert.ok(!('flow' in r.db.get('b')), 'a guess is not written');
   assert.ok(!('flow' in r.db.get('c')));
-  assert.deepEqual(r.db.get('d').flow, { kind: 'work' }, 'a synced flow is never replaced');
+  assert.deepEqual(r.db.get('d').flow, { kind: 'coen' }, 'a flow a guess put there first gives way to his hand choice (follow-up 1)');
+  assert.deepEqual(r.ls['handShots:ws'], ['a', 'e', 'gone'], 'every earlier hand choice got one rewrite; d used its own');
   assert.ok(!('flow' in r.db.get('e')), 'an empty thread is left alone');
   assert.equal(r.ls['flowsMigrated:ws'], true, 'the flag is per workspace');
   assert.deepEqual(r.drawn, ['tabs']);
@@ -624,7 +643,7 @@ test('hand choices become synced flows once', async () => {
   assert.equal(r.reads.n, 1);
   Reflect.deleteProperty(r.ls, 'flowsMigrated:ws');
   await r.v.migrateHandFlows();
-  assert.deepEqual(r.puts, ['a']);
+  assert.deepEqual(r.puts, ['a', 'd']);
   // the open flow is changed on screen too, so its next save keeps the flow
   const open = { ...structuredClone(oldShape()[0]), entries: [...oldShape()[0].entries, { id: 'a3', kind: 'ask', prompt: 'not saved yet' }] };
   const o = migrationRig(oldShape(), handSpaces(), { open });
@@ -637,16 +656,69 @@ test('hand choices become synced flows once', async () => {
   await late.v.migrateHandFlows();
   assert.deepEqual(late.db.get('a').entries.map((e) => e.id), ['a1', 'a2', 'a9'], 'the newer entry is kept');
   assert.deepEqual(late.db.get('a').flow, { kind: 'coen' });
-  // a flow that arrived meanwhile is not replaced
+  // a flow that arrived meanwhile (a guess synced from another device) gives way to his choice too: the row is read again
   const raced = migrationRig(oldShape(), handSpaces());
   raced.v.afterAll = (store) => { store.get('a').flow = { kind: 'apps' }; };
   await raced.v.migrateHandFlows();
-  assert.deepEqual(raced.db.get('a').flow, { kind: 'apps' });
-  assert.deepEqual(raced.puts, []);
+  assert.deepEqual(raced.db.get('a').flow, { kind: 'coen' });
+  assert.deepEqual(raced.puts, ['a', 'd']);
+  assert.deepEqual(raced.ls['handShots:ws'], ['e', 'gone'], 'a and d each used their one rewrite');
   // runs at boot, after Today is drawn, and the flag stays the owner's through a tester's Clear
   assert.match(APP, /\n  renderDay\(\); \/\/ Today[^\n]*\n  migrateHandFlows\(\)\.catch\(/);
   assert.match(constExpr('OWNER_LS_KEEP'), /'flowsMigrated'/);
+  assert.match(constExpr('OWNER_LS_KEEP'), /'handShots'/);
   assert.deepEqual(handFlows(oldShape(), handSpaces()).map(({ thread, flow }) => [thread.id, flow]), [['a', { kind: 'coen' }]]);
+});
+
+test('a hand choice beats a guess whatever order they arrive in: a sync pull, the batch sorter, a new flow\'s guess (follow-up 1)', async () => {
+  const e = (id) => [{ id, kind: 'ask', prompt: 'x', createdAt: at(3) }];
+  // a sync pull: he picked Coen here (one rewrite); another device's send synced its guess first. The next read puts his back.
+  const pulled = migrationRig([{ id: 'p', title: 'Deck', updatedAt: at(3), flow: { kind: 'personal' }, entries: e('p1') }], { p: 'coen!' });
+  pulled.ls['handShots:ws'] = ['p'];
+  pulled.ls['flowsMigrated:ws'] = true;
+  assert.equal(await pulled.v.handsWin(await pulled.v.DB.all()), 1);
+  assert.deepEqual(pulled.db.get('p').flow, { kind: 'coen' });
+  assert.equal(pulled.db.get('p').updatedAt, at(3), 'not moved to the top of Newest first');
+  assert.deepEqual(pulled.ls['handShots:ws'], [], 'the rewrite is used up');
+  // the same pull again finds them agreeing: nothing is written
+  assert.equal(await pulled.v.handsWin(await pulled.v.DB.all()), 0);
+  // later he picks Apps on the other device: with the rewrite used up, that newer pick becomes this device's choice too
+  pulled.db.get('p').flow = { kind: 'apps' };
+  assert.equal(await pulled.v.handsWin(await pulled.v.DB.all()), 1);
+  assert.equal(pulled.v.threadSpaces.p, 'apps!');
+  assert.deepEqual(pulled.db.get('p').flow, { kind: 'apps' }, 'and is never written back over');
+  assert.deepEqual(pulled.drawn.at(-1), ['spaces', ['p']]);
+  // wired: every whole read of the library ends with handsWin; picking a kind gives the choice its rewrite
+  assert.match(fnSource('dayRead'), /handsWin\(rows\)/);
+  assert.match(fnSource('pickKind'), /saveSpaces\(\[t\.id\]\); addShot\(t\.id\);/);
+  assert.match(fnSource('intoFlow'), /^\s*refreshSpaces\(\);/m);
+
+  // the batch sorter: a hand choice made in another tab while it was asking is never replaced, nor erased from storage
+  const store = { k: { q: 'kid' } };
+  const LS = { get: (k, d) => (k in store ? structuredClone(store[k]) : d), set: (k, x) => { store[k] = structuredClone(x); } };
+  const rows = [{ id: 'p', title: 'Fence', entries: e('p1') }, { id: 'r', title: 'Recipe', entries: e('r1') }];
+  const sv = { S: { day: dayKey(at(3)), thread: null }, feat: () => true, spacesBusy: false, spacesFailedAt: 0, spaceOf, threadSpaces: { q: 'kid' }, SPACE_BATCH: 20, GROUPS: OWNER, ME: { bio: '' }, spaceRequest, parseSpaces,
+    modelFor: () => 'fast', noThink: {}, accountReloading: false, SPACES_KEY: 'k', LS, mergeSpaces, cleanSpaces,
+    completeChat: async () => { store.k = { q: 'kid', p: 'edgeball!' }; return '1: coen\n2: personal'; } };
+  lift(sv, 'sortIntoSpaces', 'saveSpaces', 'refreshSpaces');
+  await sv.sortIntoSpaces(rows, { showing: () => true, redraw: () => {} });
+  assert.deepEqual(store.k, { q: 'kid', p: 'edgeball!', r: 'personal' }, 'his pick stays; the other guess lands');
+  assert.deepEqual(sv.threadSpaces, store.k, 'and this tab now knows it');
+
+  // a new flow's guess: a hand choice made in another tab while it asked wins (localStorage is read again)
+  const set = [], t = { id: 'n', title: 'Hall', entries: e('n1') };
+  const gv = { feat: () => true, GROUPS: OWNER, ME: { bio: '' }, threadSpaces: {}, spaceByHand, spaceRequest, parseSpaces, cleanFlow, modelFor: () => 'fast', noThink: {}, accountReloading: false,
+    DB: { get: async () => t }, setFlow: (x, k) => set.push(k), refreshSpaces: () => {},
+    completeChat: async () => { gv.refreshSpaces = () => { gv.threadSpaces.n = 'coen!'; }; return '1: kid'; } };
+  lift(gv, 'guessFlow');
+  await gv.guessFlow(t);
+  assert.deepEqual(set, [], 'the guess is dropped');
+  // ... and so does a flow another tab saved on the row meanwhile
+  const stored = { ...t, flow: { kind: 'apps' } };
+  const hv = { ...gv, threadSpaces: {}, refreshSpaces: () => {}, DB: { get: async () => stored }, completeChat: async () => '1: kid', setFlow: (x, k) => set.push(k) };
+  lift(hv, 'guessFlow');
+  await hv.guessFlow({ ...t });
+  assert.deepEqual(set, []);
 });
 
 function sortRig({ day, rows, answer, spaces = {} }) {
@@ -694,7 +766,8 @@ test('a guess is not written until a send', async () => {
   await left.v.sortDay();
   assert.deepEqual(left.drawn, []);
   // wired: Today sorts a past day once it has read the threads
-  assert.match(fnSource('readDay'), /paintDay\(\);\n\s*sortDay\(\);/);
+  assert.match(fnSource('dayRead'), /paintDay\(\);\n\s*sortDay\(\);/);
+  assert.match(fnSource('readDay'), /dayRead\(rows\);/);
   assert.match(APP, /if \(threadSort === 'space' && fromSorter !== true\) sortIntoSpaces\(all\);/, 'the drawer\'s By group still sorts as before');
 });
 
@@ -842,13 +915,13 @@ test('noteDay: the day counts as live only when it was today as it was set', () 
 });
 
 test('Today reads the library once for a burst of changes, and never two reads at once', async () => {
-  const timers = [], pending = [], recent = [];
+  const timers = [], pending = [], recent = [], giveUps = [];
   let reads = 0, painted = 0;
-  const v = { S: { thread: null }, accountReloading: false, dayCache: null, dayReading: false, dayAgain: false, DAY_READ_WAIT: 50,
-    setTimeout: (f) => { timers.push(f); return timers.length; },
+  const v = { S: { thread: null }, accountReloading: false, dayCache: null, dayReading: false, dayAgain: false, DAY_READ_WAIT: 50, dayLate: null, DAY_LATE_GIVE_UP: 20000,
+    setTimeout: (f, ms) => { (ms === 20000 ? giveUps : timers).push(f); return timers.length; },
     allThreads: (known) => { if (known) return Promise.resolve(Object.assign([...known], { saved: known })); reads++; return new Promise((res) => pending.push(res)); },
     paintDay: () => { painted++; }, sortDay: () => {}, renderRecentThreads: (k) => recent.push(k) };
-  lift(v, 'refreshDay', 'readDay');
+  lift(v, 'refreshDay', 'readDay', 'awaitLate', 'dayRead');
   const tick = () => new Promise((r) => setImmediate(r));
   for (let i = 0; i < 40; i++) v.refreshDay(); // the desktop's migration: 40 flows pulled in a burst
   assert.deepEqual([timers.length, reads], [1, 0], 'one read waits');
@@ -874,10 +947,13 @@ test('Today reads the library once for a burst of changes, and never two reads a
   await tick();
   assert.deepEqual([reads, painted], [3, 3], 'the short list is drawn');
   v.refreshDay();
-  assert.equal(timers.length, 0, 'still one read');
+  assert.equal(timers.length, 0, 'still one read: no second full read while the store holds one');
+  assert.equal(painted, 4, 'but the page draws from the last read at once');
   late(rows); await tick();
-  assert.deepEqual([reads, painted], [3, 4]);
+  assert.deepEqual([reads, painted], [3, 5]);
   assert.equal(timers.length, 1, 'then the one asked for meanwhile');
+  giveUps.shift()(); await tick();
+  assert.equal(timers.length, 1, 'a read that landed is not given up on later');
   // threadsArrived reads once for Today and the recent list; a rename, a delete and a new title too
   const arrived = fnSource('threadsArrived');
   assert.doesNotMatch(arrived, /renderRecentThreads/);
@@ -956,7 +1032,12 @@ test('a retry lands on today, a Remix retry too', () => {
   const at0 = APP.indexOf("    case 'retry':\n      if (e.pending || e.canva) return;");
   const body = APP.slice(at0, APP.indexOf('      return run(e);\n', at0));
   assert.match(body, /\n\s*redoneNow\(e\);\n/);
-  assert.match(APP, /if \(e\.remix && remix && \(act === 'retry' \|\| act === 'edit-prompt'\)\) \{ if \(act === 'retry' && !e\.pending\) redoneNow\(e\); await remix\.onAct\(/);
+  // a Remix retry is stamped by Remix once it starts (follow-up 7, tests/remix-app.test.mjs), never before its guards
+  assert.match(APP, /if \(e\.remix && remix && \(act === 'retry' \|\| act === 'edit-prompt'\)\) \{ await remix\.onAct\(act, b, e, li\); return; \}/);
+  assert.match(APP, /redone: \(e\) => \{ if \(!e\.pending\) redoneNow\(e\); \},/);
+  assert.match(APP, /offline: \(\) => !navigator\.onLine,/);
+  // the normal retry: its guards (pending, Canva, offline) come first, the stamp just before the run
+  assert.match(body, /if \(e\.pending \|\| e\.canva\) return;\n\s*if \(!navigator\.onLine\) return toast\([^\n]*\n(?:.*\n)*\s*redoneNow\(e\);\n/);
   // redoneNow: stamped now, and the page goes where a send would (intoFlow): from a past day, to today
   const yesterday = dayKey(at(1)), e = { id: 'r', at: at(1) };
   const flow = { id: 'coen', flow: { kind: 'coen' }, entries: [{ id: 'x', at: at(2) }, e] };
@@ -994,6 +1075,140 @@ test('the Days drawer and the flow menus say flow', () => {
   for (const s of ['Flow renamed', 'That flow is no longer on this device. Refresh the list.', 'Your flow', 'Flow name', 'Delete flow', 'Close flow options']) assert.deepEqual(problems(s), [], s);
 });
 
-test('migrateHandFlows names the record on screen once', () => {
-  assert.equal(fnSource('migrateHandFlows').match(/const live = /g).length, 1);
+test('handsWin names the record on screen once, and migrateHandFlows goes through it', () => {
+  assert.equal(fnSource('handsWin').match(/live = /g).length, 1);
+  assert.match(fnSource('migrateHandFlows'), /await handsWin\(rows\)/);
+});
+
+test('a read the busy store never lets go of no longer stops later refreshes (follow-up 6)', async () => {
+  const timers = [], giveUps = [];
+  let reads = 0, painted = 0;
+  const rows = [{ id: 'a', entries: [] }];
+  const v = { S: { thread: null }, accountReloading: false, dayCache: null, dayReading: false, dayAgain: false, DAY_READ_WAIT: 50, dayLate: null, DAY_LATE_GIVE_UP: 20000,
+    setTimeout: (f, ms) => { (ms === 20000 ? giveUps : timers).push(f); },
+    allThreads: (known) => {
+      if (known) return Promise.resolve(Object.assign([...known], { saved: known }));
+      reads++;
+      // the first read is held for good (another tab never lets go); the next one gets through
+      return Promise.resolve(reads === 1 ? Object.assign([{ id: 'open' }], { busy: true, saved: null, late: new Promise(() => {}) }) : Object.assign([...rows], { saved: rows }));
+    },
+    paintDay: () => { painted++; }, sortDay: () => {}, renderRecentThreads: () => {} };
+  lift(v, 'refreshDay', 'readDay', 'awaitLate', 'dayRead');
+  const tick = () => new Promise((r) => setImmediate(r));
+  v.refreshDay(); timers.shift()(); await tick();
+  assert.deepEqual([reads, painted, v.dayReading], [1, 1, false], 'the short list is drawn and the read gives up its turn');
+  for (let i = 0; i < 5; i++) v.refreshDay();
+  assert.deepEqual([reads, painted, timers.length], [1, 6, 0], 'each later refresh draws at once, with no overlapping full read');
+  giveUps.shift()(); await tick();
+  assert.equal(timers.length, 1, 'held too long: one new read is asked for');
+  timers.shift()(); await tick();
+  assert.deepEqual([reads, v.dayCache.length, v.dayLate], [2, 1, null], 'the new read gets through and is drawn');
+  v.refreshDay();
+  assert.equal(timers.length, 1, 'and refreshes work as before');
+});
+
+test('◀ ▶ never step past today: the day bar and the step both pass today to stepDay (follow-up 4)', () => {
+  const bar = fnSource('paintDayBar'), step = fnSource('stepToDay');
+  assert.match(bar, /stepDay\(days, S\.day, -1, today\)/);
+  assert.match(bar, /stepDay\(days, S\.day, 1, today\)/);
+  assert.match(bar, /today = dayKey\(Date\.now\(\)\)/);
+  assert.match(step, /stepDay\(dayKeys\(\), S\.day, dir, dayKey\(Date\.now\(\)\)\)/);
+  // run: a future day in the list (a stamp from a device ahead of this one) is never a step
+  const S = { day: dayKey(Date.now()), view: 'all', thread: null }, drawn = [];
+  const future = dayKey(Date.now() + 3 * 864e5);
+  const v = { S, dayKey, stepDay, dayKeys: () => [future, dayKey(Date.now())], flushOpen: () => {}, renderDay: () => drawn.push(S.day), requestAnimationFrame: () => {}, earlierOpen: null };
+  lift(v, 'stepToDay');
+  v.stepToDay(1);
+  assert.deepEqual([S.day, drawn], [dayKey(Date.now()), []], 'today stays, nothing redraws');
+  S.day = future; v.stepToDay(-1);
+  assert.equal(S.day, dayKey(Date.now()), 'back from a future day lands on today');
+});
+
+test('By group reads the synced kind before the on-device guess, and the sorter skips flows that have one (follow-up 1)', () => {
+  assert.match(fnSource('sortThreads'), /bySpace\(list, Object\.fromEntries\(list\.map\(\(t\) => \[t\.id, kindOf\(t, threadSpaces\)\]\)\), GROUPS\)/);
+  assert.match(APP, /threadSort === 'space' \? labelOf\(GROUPS, kindOf\(t, threadSpaces\)\)/);
+  assert.match(fnSource('sortIntoSpaces'), /t\.entries\.length && !cleanFlow\(t\.flow\) && !spaceOf\(threadSpaces, t\.id\)/);
+});
+
+test('a turn in an older flow with no kind and no guess sorts it now, and the answer becomes its kind (follow-up 3)', async () => {
+  const asked = [];
+  const old = { id: 'o', title: 'Garden', opts: { mode: 'ask' }, entries: [{ id: 'g1', kind: 'ask', prompt: 'tomatoes', createdAt: at(9) }] };
+  const S = { mode: 'ask', day: dayKey(Date.now()), view: 'o', thread: old, video: null, attachments: [], files: [], opts: { ask: {} }, tester: null };
+  const { vars, calls } = sendRig(S, { kindOf, cleanFlow, threadSpaces: {}, guessFlow: (t) => { asked.push([t.id, t.entries.length]); return Promise.resolve(); } });
+  await vars.submit('When do I water them?');
+  assert.deepEqual(asked, [['o', 1]], 'asked once, before the turn is added, without waiting for it');
+  assert.equal(calls.run.length, 1, 'the turn went out');
+  // with a guess, the guess is adopted and nothing is asked; with a kind, nothing either
+  const guessed = { id: 'q', title: 'Cake', opts: { mode: 'ask' }, entries: [{ id: 'q1', kind: 'ask', prompt: 'sponge', createdAt: at(9) }] };
+  S.thread = guessed; S.view = 'q'; vars.threadSpaces.q = 'personal';
+  await vars.submit('And the icing?');
+  assert.deepEqual(guessed.flow, { kind: 'personal' });
+  const kinded = { id: 'k', title: 'Deck', flow: { kind: 'coen' }, opts: { mode: 'ask' }, entries: [{ id: 'k1', kind: 'ask', prompt: 'boards', createdAt: at(9) }] };
+  S.thread = kinded; S.view = 'k';
+  await vars.submit('Screws?');
+  // a new flow waits for its first answer, as before (run's nameThread / guessFlow)
+  S.thread = null; S.view = 'all';
+  await vars.submit('A new thing');
+  assert.deepEqual(asked, [['o', 1]]);
+  // guessFlow stores the answer as the synced kind (setFlow), unless he picked one meanwhile
+  const set = [];
+  const gv = { feat: () => true, GROUPS: OWNER, ME: { bio: '' }, threadSpaces: {}, spaceByHand, spaceRequest, parseSpaces, cleanFlow, modelFor: () => 'fast', noThink: {}, accountReloading: false,
+    DB: { get: async () => old }, setFlow: (t, k) => set.push([t.id, k]), completeChat: async () => '1: personal' };
+  lift(gv, 'guessFlow');
+  await gv.guessFlow(old);
+  assert.deepEqual(set, [['o', 'personal']]);
+});
+
+test('the + Flow tab and In: "+ New flow" are one action: same state, same choices, same view (follow-up 2)', () => {
+  assert.match(APP, /\$\('#newFlowBtn'\)\.onclick = newFlow;/);
+  assert.match(fnSource('openFlowMenu'), /if \(!b\.dataset\.flow\) return newFlow\(\); \/\/ the same as the \+ Flow tab/);
+  assert.match(fnSource('openFlowMenu'), /data-flow="" class="flow-menu-new">\+ New flow<\/button>/);
+  // from All with In: on an older flow, or from a past day's flow, newFlow lands on the same thing
+  const run = (S) => {
+    const log = [];
+    const v = { S, dayKey, earlierOpen: 'x', newThread: () => ({ id: 'n', title: '', entries: [] }), flushOpen: () => log.push('flush'), stopReading: () => {},
+      openFlowOpts: (t) => log.push(['opts', t?.id]), renderDay: (o) => log.push(['day', o]), renderOptions: () => log.push('options'),
+      $: () => ({ textContent: '' }), input: { placeholder: '', focus: () => log.push('focus') }, MODES: { ask: { ph: 'Ask anything…' }, image: { ph: 'Describe it' } } };
+    lift(v, 'newFlow');
+    v.newFlow();
+    return { S: { day: S.day, view: S.view, thread: S.thread }, earlierOpen: v.earlierOpen, log, ph: v.input.placeholder };
+  };
+  const fromAll = run({ mode: 'ask', day: dayKey(Date.now()), view: 'all', thread: { id: 'coen', entries: [{ id: 'c1' }] } });
+  const fromPast = run({ mode: 'ask', day: dayKey(at(4)), view: 'coen', thread: { id: 'coen', entries: [{ id: 'c1' }] } });
+  assert.deepEqual(fromAll, fromPast);
+  assert.deepEqual(fromAll.S, { day: dayKey(Date.now()), view: 'n', thread: { id: 'n', title: '', entries: [] } });
+  assert.deepEqual(fromAll.log, ['flush', ['opts', 'n'], ['day', { cached: true }], 'options', 'focus']);
+});
+
+test('a new flow whose kind is known at send time carries the flow hint on its first turn (follow-up 5)', async () => {
+  const GROUPS = groupsFor('owner');
+  // + Flow, then a kind from the flow's menu (setFlow puts it on the record), then the first send
+  const fresh = { id: 'n', title: '', flow: { kind: 'coen' }, opts: { mode: 'ask' }, entries: [] };
+  const S = { mode: 'ask', day: dayKey(Date.now()), view: 'n', thread: fresh, video: null, attachments: [], files: [], opts: { ask: {} }, tester: null };
+  const pv = { memoryAnchor: () => 0, heldForRun: () => '', runStart: () => 0, liveBrowser: () => '', historyWindow: () => 0, RUN_BROWSER: {}, kindOf, flowHint, threadSpaces: {}, GROUPS, S };
+  lift(pv, 'runPrompt');
+  const seen = [];
+  const { vars } = sendRig(S, { kindOf, cleanFlow, threadSpaces: {}, run: async (e) => { seen.push(pv.runPrompt(e, S.thread).flow); } });
+  await vars.submit('Estimate the Hall kitchen');
+  assert.deepEqual(seen, ['This flow is about work for Coen Construction.']);
+  // In: on a flow with a kind, sent from All: its first turn here carries it too
+  const li = { id: 'li', title: 'Post', flow: { kind: 'linkedin' }, opts: { mode: 'ask' }, entries: [] };
+  S.thread = li; S.view = 'all';
+  await vars.submit('A post about the bid');
+  assert.equal(seen[1], flowHint('linkedin', GROUPS));
+  // no kind known yet: no hint, and nothing waits for one (the guess comes after the first answer)
+  S.thread = null; S.view = 'all';
+  vars.newThread = () => ({ id: 'n2', title: '', entries: [] });
+  await vars.submit('Something');
+  assert.equal(seen[2], '');
+});
+
+test('the header keeps the whole connection label at phone width (follow-up 9)', () => {
+  const css = readFileSync(new URL('../public/studio.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const phone = css.slice(css.indexOf('\n@media (max-width: 480px) {'), css.indexOf('\n}', css.indexOf('\n@media (max-width: 480px) {')));
+  assert.ok(phone.length > 200, 'the 480px block');
+  assert.doesNotMatch(phone, /\.key-state span \{ display: none; \}/, 'the label is never hidden');
+  assert.doesNotMatch(phone, /\.key-state \{[^}]*width: 16px/, 'no 16px box that cuts the pill');
+  assert.match(phone, /\n {2}\.key-state \{ padding: 0 9px; gap: 6px; margin: 0 0 0 6px; \}/);
+  assert.match(css, /\n {2}\.key-state::after \{ content: ''; position: absolute; left: 0; right: 0; top: 50%; translate: 0 -50%; height: 44px; \}/, 'its 44px touch area stays inside its own width');
 });
