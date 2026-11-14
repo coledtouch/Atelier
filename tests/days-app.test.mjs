@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, KIND_DEFAULTS, dayKey, tabFlows, earlierCut } from '../public/days.js';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, KIND_DEFAULTS, dayKey, tabFlows, earlierCut, daySlice, dayList } from '../public/days.js';
 import { groupsFor, spaceRequest, parseSpaces } from '../public/thread-spaces.js';
 import { problems } from './humanizer-lint.mjs';
 
@@ -132,7 +132,7 @@ test('opts are saved per flow: every save of S.opts or S.mode goes through saveF
   // where a flow is opened or left, its choices load
   assert.match(fnSource('openThread'), /S\.thread = t; openFlowOpts\(t\);/);
   assert.match(fnSource('startFresh'), /S\.thread = null;\n\s*openFlowOpts\(null\);/);
-  assert.match(APP, /S\.thread = recoverThread\(t\); openFlowOpts\(S\.thread\);/, 'the boot resume');
+  assert.match(fnSource('openToday'), /S\.thread = t; openFlowOpts\(t\);/, 'the boot resume');
   // a turn in a flow with no choices yet keeps the ones it was sent with
   assert.match(fnSource('submit'), /if \(!S\.thread\) S\.thread = newThread\(\);\n\s*if \(!S\.thread\.opts\) saveFlowOpts\(\);/);
 });
@@ -446,4 +446,125 @@ test('Today redraws when threads change: sync, a title, a kind', () => {
   // All is drawn from the day's timeline; the conversation shows only in a flow
   assert.match(fnSource('renderTimeline'), /dayTimeline\(/);
   assert.match(fnSource('patchStream'), /if \(S\.view === 'all'\) return;/);
+});
+
+// ── Task 7: day navigation, the Days list, search by day, boot opens Today ──
+const DAY = 864e5;
+const at = (daysAgo, h = 12) => { const d = new Date(); d.setDate(d.getDate() - daysAgo); d.setHours(h, 0, 0, 0); return d.getTime(); };
+
+test('boot opens Today: the last flow when it has something today, else the day\'s All', () => {
+  const today = dayKey(Date.now());
+  const rig = () => {
+    const S = { day: dayKey(Date.now() - 3 * DAY), view: 'all', thread: null };
+    const calls = { opts: [], options: 0 };
+    const vars = { S, dayKey, daySlice, openFlowOpts: (t) => calls.opts.push(t?.id), renderOptions: () => { calls.options++; }, requestAnimationFrame: () => {}, scrollDown: () => {} };
+    lift(vars, 'openToday');
+    return { S, calls, vars };
+  };
+  // the last flow had a turn today: it opens on its tab
+  let { S, calls, vars } = rig();
+  const coen = { id: 'coen', updatedAt: Date.now(), entries: [{ id: 'a', at: at(2) }, { id: 'b', at: Date.now() }] };
+  vars.openToday(coen);
+  assert.equal(S.day, today);
+  assert.equal(S.view, 'coen');
+  assert.equal(S.thread, coen);
+  assert.deepEqual(calls.opts, ['coen'], 'its own composer choices');
+  // touched recently (the old 6-hour rule would resume it) but its turns are from yesterday: All, In: names a new flow
+  ({ S, calls, vars } = rig());
+  vars.openToday({ id: 'late', updatedAt: Date.now(), entries: [{ id: 'a', at: at(1, 23) }] });
+  assert.equal(S.day, today);
+  assert.equal(S.view, 'all');
+  assert.equal(S.thread, null);
+  assert.deepEqual(calls.opts, []);
+  // no last flow, or it is gone from this device
+  ({ S, vars } = rig());
+  vars.openToday(null);
+  assert.equal(S.day, today);
+  assert.equal(S.view, 'all');
+  // the boot calls it, after a launch check, and no longer measures 6 hours
+  const boot = APP.slice(APP.indexOf('const lastId = lsHas('), APP.indexOf('renderDay(); // Today'));
+  assert.match(boot, /if \(lastId && !shared\) \{\n\s*const t = await Promise\.race\(\[DB\.get\(lastId\)[^\n]*\n\s*openToday\(recoverThread\(t\)\);\n\s*\}/);
+  assert.doesNotMatch(boot, /6 \* 36e5/);
+  assert.match(APP, /const shared = launch\.text \|\| launch\.share \|\| launch\.voice; \/\/ a launch skips/, 'a launch still skips the resume and goes to the composer');
+});
+
+test('the drawer defaults to Days: a Days order first, the others kept, a stored order respected', () => {
+  const sorts = evalIn({}, `return (${constExpr('THREAD_SORTS')});`);
+  assert.deepEqual(Object.keys(sorts), ['days', 'recent', 'oldest', 'title', 'entries', 'space']);
+  const decl = /\nlet threadSort = ([^\n]*);\n/.exec(APP);
+  assert.ok(decl, 'app.js has let threadSort');
+  const pick = (stored) => evalIn({ THREAD_SORTS: sorts, LS: { get: (k, d) => (stored === undefined ? d : stored) } }, `return (${decl[1]});`);
+  assert.equal(pick(undefined), 'days', 'nothing stored: Days');
+  assert.equal(pick('title'), 'title', 'an order picked before is kept');
+  assert.equal(pick('nonsense'), 'days');
+  // index.html: the drawer is Days, and its select offers Days first
+  const drawer = HTML.slice(HTML.indexOf('id="threadsDrawer"'), HTML.indexOf('</aside>', HTML.indexOf('id="threadsDrawer"')));
+  assert.match(drawer, /^id="threadsDrawer" role="dialog" aria-modal="true" aria-label="Days"/);
+  assert.match(drawer, /<h3><em>Days<\/em><\/h3>/);
+  assert.match(drawer, /id="threadSortVal" aria-hidden="true">By day<\/span><select id="threadSort" aria-label="[^"]+"><option value="days">By day<\/option><option value="recent">/);
+  // the date opens it in the Days order (this visit only), search too with the box ready
+  assert.match(APP, /\$\('#dayDate'\)\.onclick = \(\) => openDays\(\);/);
+  assert.match(APP, /\$\('#daySearch'\)\.onclick = \(\) => openDays\(true\);/);
+  assert.match(fnSource('openDays'), /threadSort = 'days';/);
+  assert.doesNotMatch(fnSource('openDays'), /LS\.set\('threadSort'/, 'the stored order is not changed');
+  // a row in the Days order opens that flow on that day
+  assert.match(APP, /await openThread\(li\.dataset\.id, li\.dataset\.day\);/);
+  // the tabs' arrow keys read every tab ($$, not $: querySelector has no indexOf)
+  assert.match(APP, /\$\('#flowTabs'\)\.addEventListener\('keydown', \(ev\) => \{[^\n]*\n\s*const tabs = \$\$\('\[role="tab"\]', \$\('#flowTabs'\)\)/);
+  for (const t of ['Days', 'By day', 'Unsorted', 'Browse your days, or search every flow.', 'Search your flows…', 'Search flows', 'Sort flows', 'New flow']) assert.deepEqual(problems(t), [], t);
+});
+
+test('the Days order: each day newest first, its flows under it with kind chips; search keeps the day headings', () => {
+  const coen = { id: 'coen', title: 'Hall kitchen', flow: { kind: 'coen' }, entries: [{ id: 'c1', at: at(2), prompt: 'cabinet estimate' }, { id: 'c2', at: at(0, 9), prompt: 'counters' }] };
+  const kid = { id: 'kid', title: 'Science fair', entries: [{ id: 'k1', at: at(0, 10), prompt: 'magnets' }] };
+  const old = { id: 'old', title: 'Garden', entries: [{ id: 'o1', at: at(400), prompt: 'tomatoes' }] };
+  const pinned = { id: 'pin', title: 'Pinned one', entries: [{ id: 'p1', at: at(0, 8), prompt: 'pinned' }] };
+  const v = { dayKey, dayList, daySlice, pinnedThreads: new Set(['pin']), Date };
+  v.dayDate = evalIn(v, `return (${constExpr('dayDate')});`);
+  lift(v, 'dayHeading', 'daysRows');
+  assert.equal(v.dayHeading(dayKey(Date.now())), 'Today');
+  assert.equal(v.dayHeading(dayKey(at(1))), 'Yesterday');
+  assert.match(v.dayHeading(dayKey(at(400))), /\d{4}/, 'another year shows its year');
+  assert.doesNotMatch(v.dayHeading(dayKey(at(2))), /Today|Yesterday/);
+  const rows = v.daysRows([pinned, kid, coen, old]);
+  assert.deepEqual(rows.map((r) => `${r.g}:${r.t.id}:${r.day}`), [
+    'Pinned:pin:',
+    `Today:kid:${dayKey(Date.now())}`, `Today:coen:${dayKey(Date.now())}`, // most recent that day first
+    `${v.dayHeading(dayKey(at(2)))}:coen:${dayKey(at(2))}`, // a flow on two days is a row under each
+    `${v.dayHeading(dayKey(at(400)))}:old:${dayKey(at(400))}`,
+  ]);
+  // search: a flow shows under the days where something matched
+  const rowsQ = v.daysRows([coen], (t, day) => daySlice(t, day).entries.some((e) => e.prompt.includes('cabinet')));
+  assert.deepEqual(rowsQ.map((r) => r.day), [dayKey(at(2))]);
+  // renderThreads draws the Days rows: a heading per day, a kind chip, the day on the row, and search per day
+  const src = fnSource('renderThreads');
+  assert.match(src, /threadSort === 'days' \? daysRows\(all, keep\)/);
+  assert.match(src, /const keep = q \? \(t, day\) => hit\(\[t\.title\]\) \|\| daySlice\(t, day\)\.entries\.some\(\(e\) => hit\(entryWords\(e\)\)\) : null;/);
+  assert.match(src, /data-day="\$\{esc\(day\)\}"/);
+  assert.match(src, /class="flow-chip"/);
+  assert.match(src, /'Unsorted'/);
+});
+
+test('sending from a past day returns to today: a flow opened from the Days list, then a send', async () => {
+  const today = dayKey(Date.now()), yesterday = dayKey(at(1));
+  const flow = { id: 'coen', title: 'Hall kitchen', opts: { mode: 'ask' }, entries: [{ id: 'c1', kind: 'ask', prompt: 'cabinets', at: at(1) }] };
+  const S = { mode: 'ask', day: today, view: 'all', thread: null, video: null, attachments: [], files: [], opts: { ask: {} }, tester: null };
+  const { vars, calls } = sendRig(S);
+  Object.assign(vars, { persist: () => {}, liveThreads: new Map([['coen', flow]]), DB: { get: async () => null }, recoverThread: (t) => t, stopReading: () => {}, openFlowOpts: () => {},
+    earlierCut, closeDrawers: () => {}, renderOptions: () => {}, LS: { set: () => {} }, workspaceKey: (k) => k, requestAnimationFrame: () => {}, toast: () => {}, accountReloading: false });
+  lift(vars, 'openThread');
+  await vars.openThread('coen', yesterday);
+  assert.equal(S.day, yesterday, 'the Days row opens the flow on its day');
+  assert.equal(S.view, 'coen');
+  assert.equal(vars.earlierOpen, null, 'yesterday\'s part shows, not the whole flow');
+  // a row for a flow no longer here changes nothing
+  await vars.openThread('gone', dayKey(at(5)));
+  assert.equal(S.day, yesterday);
+  calls.render.length = 0;
+  await vars.submit('And the counters');
+  assert.equal(S.day, today, 'the send lands on today');
+  assert.equal(S.view, 'coen');
+  assert.equal(calls.render.length, 1);
+  assert.equal(vars.earlierOpen, 'coen', 'the conversation he was reading stays open');
+  assert.deepEqual(flow.entries.map((e) => e.prompt), ['cabinets', 'And the counters']);
 });

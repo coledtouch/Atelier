@@ -33,7 +33,7 @@ import { renderAppErrors, loadAppErrors } from './app-errors.js?v=131';
 import { HUMANIZER } from './humanizer.js?v=131';
 import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=131';
 import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace } from './thread-spaces.js?v=131';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, stepDay, tabFlows, earlierCut } from './days.js?v=131';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut } from './days.js?v=131';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -832,6 +832,14 @@ function stepToDay(dir) {
   S.day = to; S.view = 'all'; earlierOpen = null;
   renderDay();
   requestAnimationFrame(scrollDay);
+}
+// Boot: Atelier opens on today. The last flow opens on its tab when it had a turn today; otherwise the day's All, with
+// In: on a new flow (a flow from an earlier day is one tap away in the Days list).
+function openToday(t) {
+  S.day = dayKey(Date.now());
+  if (!t || !daySlice(t, S.day).entries.length) return;
+  S.thread = t; openFlowOpts(t); S.view = t.id; renderOptions();
+  requestAnimationFrame(() => scrollDown(true, true));
 }
 // A timeline row: its flow, scrolled to that turn (under the header), which flashes once.
 function showEntry(id) {
@@ -5312,11 +5320,13 @@ async function renderRecentThreads(known) {
     return `<button type="button" class="recent-thread" data-recent-thread="${esc(t.id)}" style="--accent:var(--c-${MODE_KEYS.includes(kind) ? kind : 'ask'})"><span class="recent-title">${esc(t.title || 'Untitled')}</span><span class="recent-meta"><span class="recent-mode">${esc(MODES[kind]?.label || 'Thread')}${pinnedThreads.has(t.id) ? ' · Pinned' : ''}</span><span>${esc(Sync.agoText(at))}</span></span></button>`;
   }).join('');
 }
-async function openThread(id) {
+// day: a row of the Days list opens the flow on that day (its part of it shows, the rest under the Earlier bar).
+async function openThread(id, day = null) {
   persist(true, { flush: true });
   const t = (S.thread?.id === id && S.thread) || liveThreads.get(id) || recoverThread(await DB.get(id)); // the one on screen as it is
   if (!t || accountReloading) return toast('That thread is no longer on this device. Refresh the list.', { error: true });
   if (t.id !== S.thread?.id) stopReading({ disarm: true });
+  if (day) S.day = day;
   S.thread = t; openFlowOpts(t);
   // Today shows it as its tab: its part of the day, or all of it when it has nothing that day (opened from the list)
   S.view = t.id; earlierOpen = earlierCut(t, S.day) >= t.entries.length ? t.id : null;
@@ -5324,13 +5334,13 @@ async function openThread(id) {
   LS.set(workspaceKey('lastFlow'), t.id);
   requestAnimationFrame(() => scrollDown(true, true));
 }
-// Today's controls (renderDay above): tabs, + Flow, ◀ ▶, the date and search (the Threads list for now), Earlier, All's rows, In:.
+// Today's controls (renderDay above): tabs, + Flow, ◀ ▶, the date and search (the Days list), Earlier, All's rows, In:.
 $('#flowTabs').addEventListener('click', (ev) => {
   const b = ev.target.closest('[role="tab"]'); if (!b) return;
   if (b.dataset.view === 'all') showAll(); else if (b.dataset.view !== S.view) openFlow(b.dataset.view).catch(storageError);
 });
 $('#flowTabs').addEventListener('keydown', (ev) => { // arrows move between tabs; Enter or Space opens one
-  const tabs = $('[role="tab"]', $('#flowTabs')), i = tabs.indexOf(document.activeElement);
+  const tabs = $$('[role="tab"]', $('#flowTabs')), i = tabs.indexOf(document.activeElement);
   const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[ev.key];
   if (i < 0 || to === undefined) return;
   ev.preventDefault();
@@ -5341,8 +5351,8 @@ $('#flowTabs').addEventListener('keydown', (ev) => { // arrows move between tabs
 $('#newFlowBtn').onclick = newFlow;
 $('#dayPrev').onclick = () => stepToDay(-1);
 $('#dayNext').onclick = () => stepToDay(1);
-$('#dayDate').onclick = () => $('#threadsBtn').click();
-$('#daySearch').onclick = () => { $('#threadsBtn').click(); $('#threadSearch').focus({ preventScroll: true }); };
+$('#dayDate').onclick = () => openDays();
+$('#daySearch').onclick = () => openDays(true);
 $('#earlierBar').addEventListener('click', () => {
   if (!S.thread) return;
   const first = stream.querySelector(':scope > .entry'), top = first?.getBoundingClientRect().top;
@@ -5507,9 +5517,34 @@ async function allThreads(known) {
 }
 
 // The Threads list's order (the Sort menu, kept per device): newest or oldest by last activity, by title, or by length.
-// Pinned threads stay on top in every order, sorted the same way among themselves.
-const THREAD_SORTS = { recent: 'Newest first', oldest: 'Oldest first', title: 'Title, A to Z', entries: 'Longest first', space: 'By group' };
-let threadSort = Object.hasOwn(THREAD_SORTS, LS.get('threadSort', 'recent')) ? LS.get('threadSort', 'recent') : 'recent';
+// Pinned threads stay on top in every order, sorted the same way among themselves. By day (v132, the default) is the
+// Days list: a heading per day, and under it the flows that had something that day.
+const THREAD_SORTS = { days: 'By day', recent: 'Newest first', oldest: 'Oldest first', title: 'Title, A to Z', entries: 'Longest first', space: 'By group' };
+let threadSort = Object.hasOwn(THREAD_SORTS, LS.get('threadSort', 'days')) ? LS.get('threadSort', 'days') : 'days';
+// The Days order's headings: Today, Yesterday, else the date (with its year when it is not this year).
+function dayHeading(day) {
+  const d = dayDate(day), now = new Date(), y = new Date(now); y.setDate(now.getDate() - 1);
+  if (day === dayKey(now.getTime())) return 'Today';
+  if (day === dayKey(y.getTime())) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', ...(d.getFullYear() !== now.getFullYear() && { year: 'numeric' }) });
+}
+// The Days order's rows: pinned flows on top once, then each day newest first with the flows that had something that
+// day (most recently active first). A flow seen on three days is a row under each. keep(t, day): search drops a day
+// where nothing of that flow matched.
+function daysRows(list, keep = null) {
+  const byId = new Map(list.map((t) => [t.id, t]));
+  const pinned = list.filter((t) => pinnedThreads.has(t.id)).map((t) => ({ t, g: 'Pinned', day: '' }));
+  const days = dayList(list.filter((t) => !pinnedThreads.has(t.id)));
+  return [...pinned, ...days.flatMap(({ day, ids }) => ids.map((id) => byId.get(id)).filter((t) => !keep || keep(t, day)).map((t) => ({ t, g: dayHeading(day), day })))];
+}
+// The date opens the Days list, scrolled to the day on screen; search opens it with the box ready. The Days order is for
+// this visit: an order picked in the list before stays the stored one.
+let jumpToDay = null;
+function openDays(search = false) {
+  threadSort = 'days'; jumpToDay = S.day;
+  $('#threadsBtn').click();
+  if (search) $('#threadSearch').focus({ preventScroll: true });
+}
 function sortThreads(list, how) { // list arrives newest first (allThreads); Array.sort is stable, so ties stay newest first
   if (how === 'oldest') return [...list].reverse();
   if (how === 'title') return [...list].sort((a, b) => (a.title || 'Untitled').localeCompare(b.title || 'Untitled', undefined, { numeric: true, sensitivity: 'base' }));
@@ -5571,9 +5606,11 @@ async function renderThreads(fromSorter = false, known = null) {
   if (storeBusy) all.late.then((saved) => { if (seq === threadsSeq && !$('#threadsDrawer').hidden) renderThreads(false, saved); });
   $('#clearThreadSearch').hidden = !q;
   // Also by the name of a file a turn carried (v114): "invoice.pdf" finds the thread that read it.
-  if (q) all = all.filter((t) => [t.title, ...t.entries.flatMap((e) => [e.prompt, e.text, e.app?.title,
-    ...(Array.isArray(e.files) ? e.files.map((f) => f?.name) : []),
-    ...(e.ideas || []).flatMap((idea) => [idea.title, idea.pitch])])].join(' ').toLowerCase().includes(q));
+  const entryWords = (e) => [e.prompt, e.text, e.app?.title, ...(Array.isArray(e.files) ? e.files.map((f) => f?.name) : []), ...(e.ideas || []).flatMap((idea) => [idea.title, idea.pitch])];
+  const hit = (words) => words.join(' ').toLowerCase().includes(q);
+  if (q) all = all.filter((t) => hit([t.title, ...t.entries.flatMap(entryWords)]));
+  // By day, a match shows under the days it was on (every day of the flow when its title matched)
+  const keep = q ? (t, day) => hit([t.title]) || daySlice(t, day).entries.some((e) => hit(entryWords(e))) : null;
   all = sortThreads(all, threadSort);
   all = [...all.filter((t) => pinnedThreads.has(t.id)), ...all.filter((t) => !pinnedThreads.has(t.id))];
   $('#threadSort').value = threadSort; $('#threadSortVal').textContent = THREAD_SORTS[threadSort];
@@ -5587,19 +5624,29 @@ async function renderThreads(fromSorter = false, known = null) {
   if (threadSort === 'space' && fromSorter !== true) sortIntoSpaces(all); // not awaited: the list shows now and fills in
   const group = (at, t) => (threadSort === 'space' ? labelOf(GROUPS, spaceOf(threadSpaces, t.id)) || (spacesBusy ? 'Sorting…' : 'Not sorted yet') : !byDate ? THREAD_SORTS[threadSort] : at >= today ? 'Today' : at >= today - day ? 'Yesterday' : at >= today - 6 * day ? 'This week' : 'Earlier');
   const groupOf = (t) => (pinnedThreads.has(t.id) ? 'Pinned' : group(ClaudeImport.listAt(t), t));
-  const sizes = new Map(); for (const t of all) { const g = groupOf(t); sizes.set(g, (sizes.get(g) || 0) + 1); }
+  // By day: a row per flow and day (daysRows); the other orders: a row per thread under its heading
+  const rows = threadSort === 'days' ? daysRows(all, keep) : all.map((t) => ({ t, g: groupOf(t), day: '' }));
+  const sizes = new Map(); for (const { g } of rows) sizes.set(g, (sizes.get(g) || 0) + 1);
   let last = '', h = '';
-  for (const t of all) {
-    const at = ClaudeImport.listAt(t), fromClaude = ClaudeImport.isClaudeThread(t), pinned = pinnedThreads.has(t.id), g = groupOf(t), shut = shutGroups.has(groupKey(g));
-    if (g !== last) { h += `<li class="thread-group"><button type="button" class="thread-group-btn" data-group="${esc(g)}" aria-expanded="${!shut}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg><span>${esc(g)}</span><span class="thread-group-n">${sizes.get(g)}</span></button></li>`; last = g; }
+  for (const { t, g, day } of rows) {
+    const at = ClaudeImport.listAt(t), fromClaude = ClaudeImport.isClaudeThread(t), pinned = pinnedThreads.has(t.id), shut = shutGroups.has(groupKey(g));
+    if (g !== last) { h += `<li class="thread-group"${day ? ` data-day-head="${esc(day)}"` : ''}><button type="button" class="thread-group-btn" data-group="${esc(g)}" aria-expanded="${!shut}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg><span>${esc(g)}</span><span class="thread-group-n">${sizes.get(g)}</span></button></li>`; last = g; }
     if (shut) continue;
-    const kinds = [...new Set(t.entries.map((e) => e.kind))].slice(0, 6);
-    h += `<li class="thread ${S.thread?.id === t.id ? 'on' : ''}" data-id="${esc(t.id)}"><button class="thread-open" aria-current="${S.thread?.id === t.id ? 'true' : 'false'}">
+    const kinds = [...new Set(t.entries.map((e) => e.kind))].slice(0, 6), on = S.thread?.id === t.id && (!day || day === S.day);
+    // By day: the flow's kind chip and what it had that day; otherwise its size and when it was last active
+    const n = day ? daySlice(t, day).entries.length : t.entries.length, kind = day ? kindOf(t, threadSpaces) : '';
+    const chip = day ? `<span class="flow-chip" style="--flow:${flowColor(kind)}"><i class="flow-dot" aria-hidden="true"></i><span>${esc(GROUPS.groups.find((x) => x.key === kind)?.short || 'Unsorted')}</span></span> ` : '';
+    const when = day ? '' : ` · ${new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric', ...(new Date(at).getFullYear() !== new Date().getFullYear() && { year: 'numeric' }) })}`;
+    h += `<li class="thread ${on ? 'on' : ''}" data-id="${esc(t.id)}"${day ? ` data-day="${esc(day)}"` : ''}><button class="thread-open" aria-current="${on ? 'true' : 'false'}">
       <span class="thread-dots">${kinds.map((k) => `<i style="--accent:var(--c-${k})"></i>`).join('')}${remix?.activeThreads().has(t.id) ? '<i class="rx-live" style="--accent:var(--c-video)" title="Filming"></i>' : ''}</span>
-      <span class="thread-body"><span class="thread-title">${esc(t.title || 'Untitled')}</span><span class="thread-sub">${fromClaude ? '<span class="thread-tag">from Claude</span>' : ''}${t.entries.length} ${t.entries.length === 1 ? 'entry' : 'entries'} · ${new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric', ...(new Date(at).getFullYear() !== new Date().getFullYear() && { year: 'numeric' }) })}${esc(Sync.badge(t))}</span></span></button>
+      <span class="thread-body"><span class="thread-title">${esc(t.title || 'Untitled')}</span><span class="thread-sub">${chip}${fromClaude ? '<span class="thread-tag">from Claude</span>' : ''}${n} ${n === 1 ? 'entry' : 'entries'}${when}${esc(Sync.badge(t))}</span></span></button>
       <span class="thread-tools"><button type="button" class="icon-btn${pinned ? ' thread-pinned' : ''}" data-pin="${esc(t.id)}" aria-pressed="${pinned}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${esc(t.title || 'untitled thread')}"><svg viewBox="0 0 24 24"><path d="m8 3 8 0-1 6 3 4H6l3-4zM12 13v8"/></svg></button><button type="button" class="icon-btn" data-thread-menu="${esc(t.id)}" aria-label="Options for ${esc(t.title || 'untitled thread')}"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span></li>`;
   }
   list.innerHTML = busyNote + h; // the open thread can show while the rest are still being read
+  // Opened from the date: the day on screen's heading at the top of the list (once the saved rows are in)
+  const head = jumpToDay && !storeBusy && threadSort === 'days' ? $(`[data-day-head="${CSS.escape(jumpToDay)}"]`, list) : null;
+  if (!storeBusy) jumpToDay = null;
+  if (head) list.scrollTop += head.getBoundingClientRect().top - list.getBoundingClientRect().top;
 }
 // Typing filters the rows already read (threadRows), a moment after the last key. Before any read has come back
 // (threadRows null) it reads, as before.
@@ -5677,7 +5724,7 @@ $('#threadList').addEventListener('click', async (ev) => {
   }
   const li = ev.target.closest('.thread');
   if (!li) return;
-  await openThread(li.dataset.id);
+  await openThread(li.dataset.id, li.dataset.day); // By day: that flow on that day
 });
 
 let libFilter = 'all', libItems = [], libLoaded = false, libToken = 0;
@@ -8275,12 +8322,12 @@ window.atelierBoot?.started();
   // Bring threads over from the old database first (bounded — never delays startup by more than ~2s).
   await Promise.race([migrateOldThreads().catch(() => false), sleep(2000)]);
 
-  // resume the last thread if it was recent (6h) — never let a slow/blocked IndexedDB stall startup
-  // lastFlow (v132); a device updated from an older build has only lastThread, read until lastFlow is first written.
+  // Atelier opens on Today (openToday): the last flow when it had a turn today — never let a slow/blocked IndexedDB stall
+  // startup. lastFlow (v132); a device updated from an older build has only lastThread, read until lastFlow is first written.
   const lastId = lsHas(workspaceKey('lastFlow')) ? LS.get(workspaceKey('lastFlow'), null) : LS.get(workspaceKey('lastThread'), null);
   if (lastId && !shared) {
     const t = await Promise.race([DB.get(lastId).catch(() => null), sleep(1500).then(() => null)]);
-    if (t && Date.now() - t.updatedAt < 6 * 36e5) { S.thread = recoverThread(t); openFlowOpts(S.thread); S.view = S.thread.id; renderOptions(); requestAnimationFrame(() => scrollDown(true, true)); }
+    openToday(recoverThread(t));
   }
   renderDay(); // Today: the resumed flow, else the day's All
   remix.boot().catch((err) => console.warn('[atelier] remix resume', err)); // reads rx:ops once, resumes polling, prunes rx:*

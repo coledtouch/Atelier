@@ -535,20 +535,20 @@
   </footer>
 
   <!-- Threads drawer -->
-  <aside class="drawer left" id="threadsDrawer" role="dialog" aria-modal="true" aria-label="Threads" tabindex="-1" hidden>
+  <aside class="drawer left" id="threadsDrawer" role="dialog" aria-modal="true" aria-label="Days" tabindex="-1" hidden>
     <div class="drawer-head">
-      <h3><em>Threads</em></h3>
+      <h3><em>Days</em></h3>
       <button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
-    <p class="drawer-description">Search or reopen a past conversation.</p>
-    <button type="button" class="thread-new" id="drawerNewThread"><span aria-hidden="true">＋</span> New thread</button>
+    <p class="drawer-description">Browse your days, or search every flow.</p>
+    <button type="button" class="thread-new" id="drawerNewThread"><span aria-hidden="true">＋</span> New flow</button>
     <div class="thread-search">
-      <input class="search" id="threadSearch" type="search" placeholder="Search your conversations…" aria-label="Search threads" aria-describedby="threadCount" />
+      <input class="search" id="threadSearch" type="search" placeholder="Search your flows…" aria-label="Search flows" aria-describedby="threadCount" />
       <button type="button" class="icon-btn" id="clearThreadSearch" aria-label="Clear search" hidden>×</button>
     </div>
     <div class="thread-bar">
       <p class="thread-count" id="threadCount" role="status" aria-live="polite"></p>
-      <label class="opt thread-sort"><span class="opt-val" id="threadSortVal" aria-hidden="true">Newest first</span><select id="threadSort" aria-label="Sort threads"><option value="recent">Newest first</option><option value="oldest">Oldest first</option><option value="title">Title, A to Z</option><option value="entries">Longest first</option><option value="space">By group</option></select></label>
+      <label class="opt thread-sort"><span class="opt-val" id="threadSortVal" aria-hidden="true">By day</span><select id="threadSort" aria-label="Sort flows"><option value="days">By day</option><option value="recent">Newest first</option><option value="oldest">Oldest first</option><option value="title">Title, A to Z</option><option value="entries">Longest first</option><option value="space">By group</option></select></label>
     </div>
     <ul class="thread-list" id="threadList"></ul>
   </aside>

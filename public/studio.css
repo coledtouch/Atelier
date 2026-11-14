@@ -245,6 +245,7 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
 .tl-time { color: var(--ink-3); font: 400 11px/1 var(--mono); }
 .flow-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 160px; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--flow) 35%, var(--line)); border-radius: 99px; background: color-mix(in srgb, var(--flow) 10%, transparent); color: var(--flow); font: 500 11px/1.2 var(--sans); }
 .flow-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-sub .flow-chip { padding: 1px 7px; margin-right: 6px; vertical-align: 1px; } /* the Days list: a flow row's kind */
 .tl-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 1.45; }
 .earlier-bar { max-width: 860px; margin: 0 auto 4px; }
 .earlier-btn { width: 100%; min-height: 40px; border: 1px dashed var(--line-2); border-radius: 12px; color: var(--ink-2); font: 500 12px/1 var(--sans); }
