@@ -387,6 +387,7 @@ export function patchInPlace(target, source, ids = [], removed = [], { title = f
 //   store (memoryStore() / idbStore()), apiHeaders, isOwner, isTester, hasTesterTraces, getOpen (this tab's open thread
 //   object: refreshed in place, never planned from), isLive (generating in this tab),
 //   onApplied | onThreads ({threadIds, open: {replaced, added, removed, skipped, closed} | null}), onStatus(status), onAsk(n),
+//   onFlowLanded(threadId, flow) (a push that carried a flow was accepted: the server now holds this device's flow),
 //   onCleared() (another tab cleared this device: this tab's sync stopped for good), fetch, locks (navigator.locks-like,
 //   or null: this tab leads), channel (BroadcastChannel-like, or null), now, uid, timers {setTimeout, clearTimeout},
 //   online(), visible(), toast(msg), dropThumbs(entryIds), persistStorage(), idle(fn), media (MEDIA_SYNC),
@@ -407,6 +408,7 @@ export function createSync(deps = {}) {
   const getOpen = deps.getOpen || (() => null);
   const isLive = deps.isLive || (() => false);
   const onApplied = deps.onApplied || deps.onThreads || noop;
+  const onFlowLanded = deps.onFlowLanded || noop;
   const onStatus = deps.onStatus || noop;
   const onCleared = deps.onCleared || noop;
   const fetchImpl = deps.fetch || ((...a) => globalThis.fetch(...a));
@@ -1860,7 +1862,12 @@ export function createSync(deps = {}) {
         return true;
       }
       const hydrated = await hydrateSlots(id, thread, p);
-      if (await applyLocal(id, p, hydrated)) { await dropCache(hydrated.used); return true; }
+      if (await applyLocal(id, p, hydrated)) {
+        await dropCache(hydrated.used);
+        // An accepted flow-only push changes nothing here, so no read follows: the app learns it landed from this.
+        if (body.flow?.v && canonical(recs.get(id)?.flow ?? null) === canonical(body.flow.v)) safe(() => onFlowLanded(id, body.flow.v));
+        return true;
+      }
     }
     // Kept changing while this was planned: a full pull reconciles with what the server now holds.
     const { wait: _w, ...r0 } = recs.get(id) || newRecord();
@@ -2665,6 +2672,7 @@ export function init(deps) {
     ...deps, toast, db: deps.rawDB, store: deps.store || idbStore(names.store), fetch: (...a) => fetch(...a), locks: navigator.locks || null, channel,
     getOpen: () => (engine === created ? deps.getOpen?.() || null : null),
     onApplied: (change) => { if (engine === created) (deps.onApplied || deps.onThreads)?.(change); },
+    onFlowLanded: (id, flow) => { if (engine === created) deps.onFlowLanded?.(id, flow); },
     onCleared: () => { if (engine === created) deps.onCleared?.(); },
     online: () => navigator.onLine !== false, visible: () => document.visibilityState === 'visible',
     persistStorage: () => navigator.storage?.persist?.().catch(() => {}),
@@ -2710,12 +2718,15 @@ export async function flush() { await Promise.allSettled([...inflight]); return 
 export const on = () => Boolean(engine?.on());
 export const busy = () => Boolean(engine?.busy());
 export const badge = (thread) => engine?.badge(thread) || '';
-// A thread's flow is the one the server holds: nothing unsent (flowUnsent). With sync off there is no server to wait for.
-export const flowLanded = (t) => {
-  if (!engine?.on()) return true;
-  const rec = engine.record(t?.id);
+// A thread's flow is the one the server holds: nothing unsent (flowUnsent). Unknown (no engine yet, its settings not
+// read yet) is not landed. With sync off there is no server to wait for.
+export function landedOn(eng, t) {
+  if (!eng || !eng.config()) return false;
+  if (!eng.on()) return true;
+  const rec = eng.record(t?.id);
   return Boolean(rec) && !flowUnsent(t, rec);
-};
+}
+export const flowLanded = (t) => landedOn(engine, t);
 export const deleteCopy = (id) => (engine ? engine.deleteCopy(id) : Promise.resolve('Delete this thread?'));
 export const deleteThread = (id) => (engine ? engine.deleteThread(id) : bootDeps?.rawDB?.del(id));
 export const pendingCount = () => (engine ? engine.pendingCount().catch(() => 0) : Promise.resolve(0));

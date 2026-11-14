@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { fakeR2, workerRequest } from './fake-r2.mjs';
 import { handleSync, SYNC_TIMING } from '../src/sync.js';
 import {
-  createSync, memoryStore, flowUnsent, statusLine, countsLine, sizeText, agoText, forkNote, patchInPlace, COPY, SYNC_CLIENT, wipeText, deviceOnly, bindUi,
+  createSync, memoryStore, flowUnsent, landedOn, statusLine, countsLine, sizeText, agoText, forkNote, patchInPlace, COPY, SYNC_CLIENT, wipeText, deviceOnly, bindUi,
 } from '../public/sync.js';
 import { canonical, strip, applyPush, sha256hex, entryHash, quickPrint, utf8Length } from '../public/sync-merge.js';
 import { validateBackup, recoverThread } from '../public/data-safety.js';
@@ -570,6 +570,38 @@ test('changing only the flow marks the thread dirty and pushes it', async () => 
   assert.deepEqual(pc.get('t1').entries.map((e) => e.id), ['e1']);
   assert.equal(await phone.store.get('d:t1'), undefined);
   assert.equal(await pc.store.get('d:t1'), undefined);
+});
+
+test('an accepted push that carried a flow tells the app it landed (onFlowLanded); a refused one does not', async () => {
+  const w = world();
+  const landed = { pc: [], phone: [] };
+  const pc = device(w, 'pc', { engine: { onFlowLanded: (id) => landed.pc.push(id) } });
+  const phone = device(w, 'phone', { engine: { onFlowLanded: (id) => landed.phone.push(id) } });
+  await pc.db.put(thread('t1', [ask('e1', T0)]));
+  await online(pc); await online(phone);
+  assert.deepEqual(landed.pc, [], 'the first push carried no flow');
+  await pc.put({ ...pc.get('t1'), flow: { kind: 'kid' } });
+  await push(pc);
+  assert.deepEqual(landed.pc, ['t1'], 'a flow-only push landed');
+  await pc.put({ ...pc.get('t1'), entries: [...pc.get('t1').entries, ask('e2', T0 + 1)] });
+  await push(pc);
+  assert.deepEqual(landed.pc, ['t1'], 'a push with no flow change says nothing');
+  // the phone, not pulled since, sends its own flow on a stale base: the server keeps Kid, so it did not land
+  await phone.put({ ...phone.get('t1'), flow: { kind: 'work' } });
+  await push(phone);
+  assert.deepEqual(w.doc('t1').flow, { kind: 'kid' });
+  assert.deepEqual(landed.phone, [], 'refused: not landed');
+});
+
+test('landedOn: not landed until the settings are known; sync off counts as landed; else the record must hold the flow', () => {
+  const t = { id: 't1', flow: { kind: 'kid' } };
+  const eng = (cfg, on, rec) => ({ config: () => cfg, on: () => on, record: () => rec });
+  assert.equal(landedOn(null, t), false, 'no engine yet');
+  assert.equal(landedOn(eng(null, false, null), t), false, 'settings not read yet');
+  assert.equal(landedOn(eng({ enabled: false }, false, null), t), true, 'sync off: no server to wait for');
+  assert.equal(landedOn(eng({ enabled: true }, true, null), t), false, 'no record yet');
+  assert.equal(landedOn(eng({ enabled: true }, true, { flow: { kind: 'apps' } }), t), false, 'the server holds another flow');
+  assert.equal(landedOn(eng({ enabled: true }, true, { flow: { kind: 'kid' } }), t), true);
 });
 
 test('a pulled flow reaches the open tab without losing a local edit', async () => {
