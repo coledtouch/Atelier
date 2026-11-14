@@ -742,3 +742,22 @@ test('status counts images and videos: kept up to date by each upload, and right
   const r = await bodyOf(await call(env, 'GET', 'status'));
   assert.deepEqual([r.blobs, r.images, r.videos, r.bytes], [4, 2, 1, 9 + 15 + 6 + 11]);
 });
+
+// A turn moved to another flow (app.js moveTurn): the source's delete says move, so Recently deleted gets no copy (the
+// turn lives on in its new flow, and restoring that copy would show it twice). Otherwise it is the same rev-aware delete.
+test('a move delete removes the entries rev-aware and writes no trash copy, also when it empties the thread', async () => {
+  const env = syncEnv();
+  await push(env, 't1', [ask('e1', 1), ask('e2', 2)], { title: { v: 'Coen', base: 0 } });
+  await push(env, 't1', [ask('e2', 2, 'edited elsewhere')], { bases: { e2: 1 } }); // e2 → rev 2
+  clock += 1000;
+  const stale = await bodyOf(await call(env, 'DELETE', 'thread/t1', { body: { v: 1, seen: { e2: 1 }, move: true } }));
+  assert.deepEqual([stale.removed, stale.kept, stale.trashKey], [0, 2, null], 'changed after the mover looked: kept');
+  const one = await bodyOf(await call(env, 'DELETE', 'thread/t1', { body: { v: 1, seen: { e2: 2 }, move: true } }));
+  assert.deepEqual([one.removed, one.kept, one.deleted, one.trashKey], [1, 1, false, null]);
+  assert.deepEqual(env.SYNC_BUCKET.json('t/t1.json').gone, { e2: 2 });
+  const last = await bodyOf(await call(env, 'DELETE', 'thread/t1', { body: { v: 1, seen: { e1: 1 }, move: true } }));
+  assert.deepEqual([last.removed, last.deleted, last.trashKey], [1, true, null], 'the source emptied: a tombstone, as for any empty thread');
+  assert.equal(env.SYNC_BUCKET.keys().some((k) => k.startsWith('x/')), false, 'nothing in Recently deleted');
+  assert.equal((await bodyOf(await call(env, 'GET', 'trash'))).items.length, 0);
+  assert.equal((await call(env, 'DELETE', 'thread/t1', { body: { v: 1, seen: {}, move: 1 } })).status, 400);
+});

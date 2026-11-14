@@ -98,3 +98,38 @@ test('mergeSpaces: a tab saves only the answers it changed, and a guess never re
   assert.deepEqual(mergeSpaces({ q: 'nope' }, {}, [], set), {});
   assert.deepEqual(stored, { a: 'coen!', c: 'kid' });
 });
+
+// ── suggestKind: a question that names another flow's kind (the owner's Nov 14 report: "Any new messages from slack?" asked
+// in a Coen flow belongs under Edgeball). A cheap local match on kind names and clear keywords, never a model call.
+test('each group lists the words that name it: Slack is Edgeball, and the vague kinds list none', () => {
+  const words = (set, key) => set.groups.find((g) => g.key === key).words;
+  assert.deepEqual(words(owner, 'edgeball'), ['edgeball', 'Slack', 'from slack', 'on slack', 'in slack', 'slack message', 'slack messages', 'slack channel', 'slack dm']);
+  assert.deepEqual(words(owner, 'coen'), ['coen']);
+  assert.deepEqual(words(owner, 'linkedin'), ['linkedin']);
+  assert.deepEqual(words(owner, 'apps'), ['atelier']);
+  for (const key of ['personal', 'kid', 'work']) assert.deepEqual(words(owner, key), [], `${key}: too vague to match on a word`);
+  assert.deepEqual(words(basic, 'linkedin'), ['linkedin']);
+  for (const set of [basic, owner]) for (const g of set.groups) { assert.ok(Object.isFrozen(g.words)); for (const w of g.words) assert.match(w, /^[A-Za-z]+(?: [a-z]+)*$/); }
+});
+
+test('suggestKind: the owner\'s report, and only a kind other than the open flow\'s with no word of the open one', async () => {
+  const { suggestKind } = await import('../public/thread-spaces.js');
+  assert.equal(suggestKind('Any new messages from slack?', 'coen', owner), 'edgeball');
+  assert.equal(suggestKind('What did Edgeball send the client?', 'coen', owner), 'edgeball');
+  assert.equal(suggestKind('Any new messages from Slack?', 'edgeball', owner), '', 'already in the right kind');
+  assert.equal(suggestKind('Post the Slack update from Coen', 'coen', owner), '', 'it names the open flow\'s kind too');
+  assert.equal(suggestKind('Draft a LinkedIn post about the deck', 'coen', owner), 'linkedin');
+  assert.equal(suggestKind('Slack and LinkedIn: what is new?', 'coen', owner), '', 'two other kinds: no guess');
+  assert.equal(suggestKind('Any new messages?', 'coen', owner), '', 'names nothing');
+  assert.equal(suggestKind('slacks for the kid', 'coen', owner), '', 'whole words only');
+  // slack is also a builder's word: lowercase, it counts only as the app (from, on or in slack; a slack message)
+  assert.equal(suggestKind('How much slack is in the schedule?', 'coen', owner), '');
+  assert.equal(suggestKind('Take the slack out of the cable', 'coen', owner), '');
+  assert.equal(suggestKind('anything on slack today', 'coen', owner), 'edgeball');
+  assert.equal(suggestKind('reply to the slack message', 'coen', owner), 'edgeball');
+  assert.equal(suggestKind("Check Coen's texts", 'edgeball', owner), 'coen', 'a possessive still names it');
+  assert.equal(suggestKind('Any new messages from slack?', '', owner), '', 'a flow with no kind yet gets none');
+  assert.equal(suggestKind('Any new messages from slack?', 'work', basic), '', 'Slack is only Edgeball in the owner\'s set');
+  assert.equal(suggestKind('', 'coen', owner), '');
+  assert.equal(suggestKind(null, 'coen', owner), '');
+});

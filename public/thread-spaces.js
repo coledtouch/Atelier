@@ -9,9 +9,12 @@
 // No DOM and no network here, so tests/thread-spaces.test.mjs imports it directly.
 
 // about: what a flow of this kind is about, for the line the run's system prompt gets (days.js flowHint).
-const group = (key, label, short, hint, about) => Object.freeze({ key, label, short, hint, about, color: `--flow-${key}` });
+// words: whole words that name the kind in a question (suggestKind): its name when that is distinctive, and clear
+// keywords (Slack is where Edgeball's work happens). A vague kind (Personal, Kid, Work) lists none. A word with a capital
+// matches only as written (Slack the app, not slack in a schedule or a cable); a phrase gives the lowercase word its sense.
+const group = (key, label, short, hint, about, words = []) => Object.freeze({ key, label, short, hint, about, words: Object.freeze(words), color: `--flow-${key}` });
 const KID = group('kid', 'Kid', 'Kid', 'their child: school, homework, activities, gifts, health and things to do together.', 'their kid');
-const LINKEDIN = group('linkedin', 'LinkedIn', 'LinkedIn', 'posts, comments and messages for their LinkedIn, written in their voice.', 'a LinkedIn post in their voice');
+const LINKEDIN = group('linkedin', 'LinkedIn', 'LinkedIn', 'posts, comments and messages for their LinkedIn, written in their voice.', 'a LinkedIn post in their voice', ['linkedin']);
 export const GROUP_SETS = Object.freeze({
   basic: Object.freeze({ id: 'basic2', groups: Object.freeze([
     group('work', 'Work', 'Work', 'their job or business, clients, colleagues, products they sell, code, marketing and business money.', 'their work'),
@@ -22,11 +25,11 @@ export const GROUP_SETS = Object.freeze({
   owner: Object.freeze({ id: 'owner2', groups: Object.freeze([
     group('personal', 'Personal', 'Personal', 'home, family, friends, health, hobbies, travel, personal money, entertainment and curiosity.', 'their personal life'),
     KID,
-    group('coen', 'Work: Coen Construction', 'Coen', 'their construction company, Coen Construction. Jobs, estimates, customers, crews, materials, suppliers, permits and its money.', 'work for Coen Construction'),
-    group('edgeball', 'Work: Edgeball Strategies', 'Edgeball', 'their company Edgeball Strategies. Its clients, projects, proposals, strategy work and its money.', 'work for Edgeball Strategies'),
+    group('coen', 'Work: Coen Construction', 'Coen', 'their construction company, Coen Construction. Jobs, estimates, customers, crews, materials, suppliers, permits and its money.', 'work for Coen Construction', ['coen']),
+    group('edgeball', 'Work: Edgeball Strategies', 'Edgeball', 'their company Edgeball Strategies. Its clients, projects, proposals, strategy work and its money.', 'work for Edgeball Strategies', ['edgeball', 'Slack', 'from slack', 'on slack', 'in slack', 'slack message', 'slack messages', 'slack channel', 'slack dm']),
     group('work', 'Work: other', 'Other work', 'any other job or business matter that names neither company.', 'work outside Coen Construction and Edgeball Strategies'),
     LINKEDIN,
-    group('apps', 'My Applications', 'My apps', 'software they build themselves, such as Atelier. Features, bugs, code, design, deploys and testers.', 'software they build, such as Atelier'),
+    group('apps', 'My Applications', 'My apps', 'software they build themselves, such as Atelier. Features, bugs, code, design, deploys and testers.', 'software they build, such as Atelier', ['atelier']),
   ]) }),
 });
 /** The set each set replaced. The new sets only add groups, so the answers (and hand marks) of the old one still fit. */
@@ -68,6 +71,21 @@ export const spaceOf = (spaces, id) => String(spaces?.[id] || '').replace(/!$/, 
 export const spaceByHand = (spaces, id) => String(spaces?.[id] || '').endsWith('!');
 /** A group's heading in the list, or '' for a key the set doesn't have. */
 export const labelOf = (set, key) => set.groups.find((g) => g.key === key)?.label || '';
+
+/**
+ * The kind a question names when it isn't the open flow's ('edgeball' for "Any new messages from slack?" in a Coen flow),
+ * else ''. A cheap local match on each group's words, whole words only, never a model call. To keep false guesses rare it
+ * answers only when the open flow has a kind, the question names no word of that kind, and it names exactly one other.
+ */
+export function suggestKind(text, current, set) {
+  const raw = String(text || ''), s = raw.toLowerCase();
+  if (!s || !current || !set?.groups) return '';
+  const said = (w) => (/[A-Z]/.test(w) ? new RegExp(`(^|[^A-Za-z0-9])${w}(?![A-Za-z0-9])`).test(raw) : new RegExp(`(^|[^a-z0-9])${w.replace(/ /g, '\\s+')}(?![a-z0-9])`).test(s));
+  const names = (g) => g.words.some(said);
+  const hits = set.groups.filter(names).map((g) => g.key);
+  if (hits.includes(current)) return '';
+  return hits.length === 1 ? hits[0] : '';
+}
 
 /** What the model sees of one thread: its title, the start of its first prompt, and whether Build made an app in it. */
 export function threadLine(t) {

@@ -350,8 +350,9 @@ async function postThread(ctx) {
   }));
 }
 
-// DELETE thread/:id — {v, seen: {entryId: rev}}. The pre-image goes to x/<id>/<first attempt ms>.json before each
-// write that removes anything, so the trash object always matches the delete that landed.
+// DELETE thread/:id — {v, seen: {entryId: rev}, move?}. The pre-image goes to x/<id>/<first attempt ms>.json before each
+// write that removes anything, so the trash object always matches the delete that landed. move: true is a turn moved to
+// another flow (app.js moveTurn): nothing was deleted, so Recently deleted gets no copy (restoring one would show it twice).
 async function deleteThread(ctx) {
   const { req, bucket, id } = ctx;
   const { big, body } = await readJson(req, LIMITS.deleteBody);
@@ -370,7 +371,7 @@ async function deleteThread(ctx) {
     // delete across a re-creation removes nothing (kept > 0 tells the deleter to pull the thread back).
     const out = applyDelete(cur.doc, reborn(body.born, bornOf(cur.doc)) ? {} : body.seen, SYNC_TIMING.now());
     if (!out.changed) return { response: json({ v: FORMAT, rev: cur.doc.rev, etag: cur.etag, deleted: out.deleted, kept: out.kept.length, removed: 0, trashKey: null }) };
-    const removes = out.removed.length > 0;
+    const removes = out.removed.length > 0 && body.move !== true;
     // Testers: the trash copy holds the old document and the new one replaces it, so the growth is the new one's size.
     // Counted at once, never refused: a tester at the cap can still delete.
     await room.need(utf8Length(out.json), true);

@@ -158,3 +158,22 @@ test('estimate: sums rx blob bytes and passes through the storage estimate', asy
   await st.jobPatch('e1', 's1', { state: 'ready' });
   assert.deepEqual(await st.estimate(), { usage: 9, quota: 99, rxBytes: 150, persisted: true });
 });
+
+test('refile: a Remix turn moved to another flow takes its records along, so a prune never drops them', async () => {
+  const kv = memoryKv();
+  const s = createRemixStore(kv, { now: () => 5_000 });
+  await s.putBlob(keys.shot('e1', 's1'), blob(10), { threadId: 't1' });
+  await s.jobPatch('e1', 's1', { state: 'done' }, 't1');
+  await s.opsAdd({ entryId: 'e1', threadId: 't1', shotId: 's2', op: 'op-2' });
+  await s.putBlob(keys.shot('e2', 's1'), blob(10), { threadId: 't1' });
+  assert.equal(await s.refile('e1', 't2'), 2);
+  assert.equal(kv.map.get('rx:shot:e1:s1').threadId, 't2');
+  assert.equal((await s.jobGet('e1')).threadId, 't2');
+  assert.equal((await s.opsAll())[0].threadId, 't2');
+  assert.equal(kv.map.get('rx:shot:e2:s1').threadId, 't1', 'other turns stay');
+  await s.opsRemove('e1');
+  const { dropped } = await s.prune({ liveThreadIds: ['t2'] });
+  assert.deepEqual(dropped, ['e2']);
+  assert.ok(kv.map.has('rx:shot:e1:s1'));
+  assert.equal(await s.refile('../x', 't2'), 0);
+});

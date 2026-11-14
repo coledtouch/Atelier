@@ -364,9 +364,10 @@ export function checkPush(body) {
   }
   return null;
 }
-// DELETE /api/sync/thread/:id body → null or {status, code}.
+// DELETE /api/sync/thread/:id body → null or {status, code}. move: true when the entries went to another flow (a turn
+// moved, app.js moveTurn): the server keeps no Recently deleted copy for it, since nothing was deleted.
 export function checkDelete(body) {
-  if (!record(body) || body.v !== FORMAT || !record(body.seen) || !(body.born == null || validDate(body.born))) return badBody('bad_shape');
+  if (!record(body) || body.v !== FORMAT || !record(body.seen) || !(body.born == null || validDate(body.born)) || !(body.move == null || typeof body.move === 'boolean')) return badBody('bad_shape');
   const keys = Object.keys(body.seen);
   if (keys.length > LIMITS.docEntries * 4 || !keys.every((k) => syncId(k) && isRev(body.seen[k]))) return badBody('bad_shape');
   return null;
@@ -682,11 +683,16 @@ function finishPlan(local, slots, rec, base, extra) {
 //   orphans: ids of pending entries no tab is generating (no run lock anywhere — the client only says so where it can
 //   see every tab's locks): an interrupted run's leftover, decided like a recovered entry instead of holding the whole
 //   thread back for good (a tab's run that outlived a delete can save one, and no tab ever settles it).
+//   moving: ids of entries this device moved out of this thread to another flow and still has to delete here (sync.js
+//   mv:). The server's copy of each is left out of the plan: never re-added here, and its record kept as it is (the
+//   delete goes at that revision; an undo before it goes finds the record whole). Once the server lists it in gone, the
+//   usual path buries it.
 // → { defer: null | 'busy' | 'live', slots, prints, prevK, record, title, flow, createdAt, changedAt, push, removeThread,
 //     changed, added, replaced, removed, forks, localTitle, localFlow } (flow undefined = no change). Nothing is ever
 // deleted because the server lacks it: remote absence never removes a local entry; only gone does, and only when the local copy is unchanged since k.
-export async function planPull({ local = null, record: rec0 = null, remote, now = Date.now(), uid, locked = null, live = false, quarantined = () => false, hashOf = defaultHashOf, orphans = null }) {
+export async function planPull({ local = null, record: rec0 = null, remote, now = Date.now(), uid, locked = null, live = false, quarantined = () => false, hashOf = defaultHashOf, orphans = null, moving = null }) {
   local = seen(local);
+  const away = (id) => Boolean(moving?.has?.(id)) && !own(remote.gone, id) && !(local?.entries || []).some((e) => e.id === id);
   const base = rec0 || newRecord();
   const rec = { ...base, e: { ...base.e } };
   delete rec.refetch; delete rec.full; delete rec.deleted; delete rec.lost; delete rec.wait;
@@ -703,6 +709,16 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
   const isBusy = (e) => (e.pending === true && !orphan(e)) || isLocked(locked, e.id);
   const asSeen = (e) => (e && orphan(e) ? { ...e, recovered: true } : e); // an orphan decides as a recovered entry
   for (const r of remote.entries) {
+    if (away(r.id)) {
+      // Moved out, its delete not sent: the copy stays out of the thread. A version this device pushed whose answer never
+      // came (k.pend) is learned, so the delete goes at the revision it landed as. A full view holding someone else's
+      // version ends the wait too, at the revision this device knew: the delete then leaves that edit on the server (it
+      // comes back here as a copy), so nothing anyone wrote is lost.
+      const k = kOf(base, r.id);
+      if (k && Array.isArray(k.pend) && k.pend.includes(r.h)) rec.e[r.id] = recordOf(r, await viewG(r), k);
+      else if (remote.full && k && Array.isArray(k.pend)) { const { pend: _p, ...kk } = k; rec.e[r.id] = kk; }
+      continue;
+    }
     if (quarantined(r.id, r.h)) continue;
     const l = asSeen(L.get(r.id)), k = kOf(base, r.id);
     const gR = await viewG(r);
@@ -749,7 +765,9 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
     }
     // gone from the server and from here: its record goes, but what this device knew of its versions stays (record.dead),
     // so a stale tab's copy of one written back later (after the thread came back here) is still recognised as stale
-    for (const id of Object.keys(rec.e)) if (!R.has(id) && !L.has(id)) { bury(rec, id, rec.e[id]); delete rec.e[id]; }
+    for (const id of Object.keys(rec.e)) if (!R.has(id) && !L.has(id) && !away(id)) { bury(rec, id, rec.e[id]); delete rec.e[id]; }
+    // a moved-out entry's push that never landed: nothing of it is there to wait for
+    for (const id of Object.keys(rec.e)) if (away(id) && !R.has(id) && Array.isArray(rec.e[id]?.pend)) { const { pend: _p, ...k } = rec.e[id]; rec.e[id] = k; }
   }
   const slots = buildSlots(local, decisions, inserts);
   const tomb = Boolean(remote.deletedAt) && remote.entries.length === 0;
@@ -781,7 +799,7 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
   const createdAt = local ? Math.min(local.createdAt, remote.createdAt) : remote.createdAt;
   // partial: a delta can't settle a local copy that lacks entries the record knows (a stale tab's older copy, say):
   // only the whole thread brings them back. The caller fetches the full view and plans again.
-  const partial = Boolean(local) && !remote.full && Object.keys(base.e).some((id) => !L.has(id) && !own(gone, id));
+  const partial = Boolean(local) && !remote.full && Object.keys(base.e).some((id) => !L.has(id) && !own(gone, id) && !away(id));
   const plan = finishPlan(local, slots, rec, base, { id: remote.id, title, flow, createdAt, changedAt: remote.changedAt, push, removeThread, how, partial });
   if (busy) plan.defer = 'busy';
   else if (live && (plan.changed || removeThread)) plan.defer = 'live';
@@ -798,7 +816,9 @@ export async function planPull({ local = null, record: rec0 = null, remote, now 
 //     flow: {v, base} | null, createdAt, born, held: [{id, reason}], waiting: [ids], refetch, bytes, dirty }
 // holdBlobs(blobs) → a held reason | null: the client keeps an entry here for now because of its blobs (a large video
 // on mobile data waits for Wi-Fi: 'wifi').
-export async function planPush({ thread, record: rec0 = null, locked = null, media = MEDIA_SYNC, hashOf = defaultHashOf, skip = null, holdBlobs = null }) {
+// moving: ids moved out of this thread that still have to be deleted here (planPull): missing here on purpose, so they
+// never ask for the full pull that would put them back.
+export async function planPush({ thread, record: rec0 = null, locked = null, media = MEDIA_SYNC, hashOf = defaultHashOf, skip = null, holdBlobs = null, moving = null }) {
   const base = rec0 || newRecord();
   // A thread without a usable createdAt still syncs: its earliest entry's (the server keeps the minimum anyway).
   const firstAt = Math.min(...(thread.entries || []).map((e) => (validDate(e?.createdAt) ? e.createdAt : Infinity)));
@@ -840,7 +860,7 @@ export async function planPush({ thread, record: rec0 = null, locked = null, med
     out.bytes += x.size;
     for (const bl of x.blobs) if (!blobs.has(bl.hash)) blobs.set(bl.hash, bl);
   }
-  for (const id of Object.keys(base.e)) if (!present.has(id)) out.refetch = true; // known but missing here: a full pull re-adds it
+  for (const id of Object.keys(base.e)) if (!present.has(id) && !moving?.has?.(id)) out.refetch = true; // known but missing here: a full pull re-adds it
   const title = typeof title0 === 'string' ? title0.slice(0, LIMITS.title) : '';
   if ((base.title == null || base.lost ? title !== '' : title !== base.title) && (out.entries.length || base.rev > 0)) out.title = { v: title, base: base.lost ? 0 : base.titleRev || 0 };
   // flow: like the title, but only a set one ever goes up. The app never clears a flow, so a missing or invalid one here

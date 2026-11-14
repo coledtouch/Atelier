@@ -2520,3 +2520,307 @@ test('media review: a large video planned on Wi-Fi isn’t uploaded once the pho
   assert.equal(puts(), 1);
   assert.deepEqual(idsOf(w.doc('t1')), ['e1', 'e2']);
 });
+
+// ── moving a turn to another flow (app.js moveTurn) ──
+// What app.js does, in its order: the ids for the target, save the target, record the move, save (or drop) the source.
+async function moveTurn(dev, from, to, ids, { fixed = [], title } = {}) {
+  const { ids: map, refused } = await dev.engine.moveIds(from, to, ids, { fixed });
+  if (refused) return { refused };
+  const src = dev.get(from);
+  const tgt = dev.get(to) || thread(to, [], { title: title || `Thread ${to}` });
+  const moved = src.entries.filter((e) => ids.includes(e.id)).map((e) => ({ ...e, id: map[e.id] }));
+  await dev.put({ ...tgt, entries: [...tgt.entries, ...moved].sort((a, b) => a.createdAt - b.createdAt) });
+  const rest = src.entries.filter((e) => !ids.includes(e.id));
+  await dev.engine.moveOut(from, to, map, { drop: !rest.length });
+  if (rest.length) await dev.put({ ...src, entries: rest });
+  return { map };
+}
+const moveDeletes = (w, dev) => w.requests(dev).filter((x) => x.method === 'DELETE' && JSON.parse(x.body || '{}').move === true);
+
+test('move: a turn leaves its flow on every device, with its id, and no copy lands in Recently deleted', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.db.put(thread('t1', [ask('e1', T0), ask('e2', T0 + 1)], { title: 'Coen' }));
+  await pc.db.put(thread('t2', [ask('e3', T0 - 5)], { title: 'Edgeball' }));
+  await online(pc); await online(phone);
+  const { map } = await moveTurn(pc, 't1', 't2', ['e2']);
+  assert.deepEqual(map, { e2: 'e2' });
+  await sync(pc);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1']);
+  assert.deepEqual(idsOf(w.doc('t2')), ['e3', 'e2']);
+  assert.equal(moveDeletes(w, pc).length, 1);
+  const order = w.requests(pc).filter((x) => x.method !== 'GET').map((x) => `${x.method} ${x.path}`);
+  assert.ok(order.indexOf('POST thread/t2') < order.findIndex((x) => x === 'DELETE thread/t1'), 'the delete goes after the turn landed');
+  assert.equal((await pc.engine.trash()).items.length, 0);
+  await sync(phone);
+  assert.deepEqual(idsOf(phone.get('t1')), ['e1']);
+  assert.deepEqual(idsOf(phone.get('t2')), ['e3', 'e2']);
+  await sync(pc); await sync(phone); await sync(pc);
+  for (const d of [pc, phone]) {
+    assert.deepEqual(idsOf(d.get('t1')), ['e1'], `${d.name}: not put back`);
+    assert.deepEqual(idsOf(d.get('t2')), ['e3', 'e2'], `${d.name}: one copy`);
+  }
+  assert.equal((await phone.engine.trash()).items.length, 0);
+});
+
+test('move: offline, nothing is sent and a pull never puts the turn back; reconnecting sends it', async () => {
+  const w = world();
+  const pc = device(w, 'pc');
+  await pc.db.put(thread('t1', [ask('e1', T0), ask('e2', T0 + 1)]));
+  await pc.db.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc);
+  pc.offline = true;
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  assert.match(statusLine(pc.engine.status()), /changes? waiting to sync/);
+  await settle(pc); // the cycle it started (offline: nothing) is over
+  pc.offline = false;
+  await sync(pc);
+  assert.deepEqual(idsOf(pc.get('t1')), ['e1']);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1']);
+  assert.deepEqual(idsOf(w.doc('t2')), ['e3', 'e2']);
+});
+
+test('move: a pull before the delete is sent leaves the moved turn out of the old flow', async () => {
+  const w = world();
+  const pc = device(w, 'pc');
+  await pc.db.put(thread('t1', [ask('e1', T0), ask('e2', T0 + 1)]));
+  await pc.db.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc);
+  pc.before = (x) => (x.method === 'DELETE' ? new Response('{"error":"busy"}', { status: 503 }) : null);
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  await sync(pc).catch(() => {});
+  await sync(pc).catch(() => {});
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1', 'e2'], 'still on the server');
+  assert.deepEqual(idsOf(pc.get('t1')), ['e1'], 'but not back here');
+  pc.before = null;
+  await sync(pc);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1']);
+  assert.deepEqual(idsOf(pc.get('t1')), ['e1']);
+  assert.deepEqual(idsOf(pc.get('t2')), ['e3', 'e2']);
+});
+
+test('move: undo before the delete is sent calls it back and keeps the id', async () => {
+  const w = world();
+  const pc = device(w, 'pc');
+  await pc.db.put(thread('t1', [ask('e1', T0), ask('e2', T0 + 1)]));
+  await pc.db.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc);
+  pc.offline = true;
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  const back = await moveTurn(pc, 't2', 't1', ['e2']);
+  assert.deepEqual(back.map, { e2: 'e2' });
+  pc.offline = false;
+  await sync(pc); await sync(pc);
+  assert.equal(moveDeletes(w, pc).length, 0);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1', 'e2']);
+  assert.deepEqual(idsOf(w.doc('t2')), ['e3']);
+  assert.deepEqual(idsOf(pc.get('t1')), ['e1', 'e2']);
+  assert.deepEqual(idsOf(pc.get('t2')), ['e3']);
+});
+
+test('move: undo after the delete went gives the turn a new id, so it is not taken for a deleted copy', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.db.put(thread('t1', [ask('e1', T0), ask('e2', T0 + 1)]));
+  await pc.db.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc); await online(phone);
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  await sync(pc);
+  const back = await moveTurn(pc, 't2', 't1', ['e2']);
+  const id = back.map.e2;
+  assert.notEqual(id, 'e2');
+  await sync(pc); await sync(pc); await sync(phone);
+  for (const d of [pc, phone]) {
+    assert.deepEqual(idsOf(d.get('t1')), ['e1', id], d.name);
+    assert.deepEqual(idsOf(d.get('t2')), ['e3'], d.name);
+  }
+  assert.equal(pc.get('t1').entries[1].createdAt, T0 + 1, 'its time is kept');
+  // a Remix turn's id can't change: that undo is refused, and nothing moves
+  await moveTurn(pc, 't1', 't2', [id]);
+  await sync(pc);
+  const refused = await moveTurn(pc, 't2', 't1', [id], { fixed: [id] });
+  assert.equal(refused.refused, true);
+  assert.deepEqual(idsOf(pc.get('t2')), ['e3', id]);
+});
+
+test('move: the only turn of a flow empties it; the flow is gone everywhere and never comes back', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.db.put(thread('t1', [ask('e1', T0)], { title: 'Slack question' }));
+  await pc.db.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc); await online(phone);
+  await moveTurn(pc, 't1', 't2', ['e1']);
+  assert.equal(pc.get('t1'), undefined);
+  await sync(pc);
+  assert.ok(w.doc('t1').deletedAt, 'tombstoned');
+  assert.equal((await pc.engine.trash()).items.length, 0, 'no trash copy');
+  await sync(phone);
+  assert.equal(phone.get('t1'), undefined);
+  assert.deepEqual(idsOf(phone.get('t2')), ['e3', 'e1']);
+  await sync(pc); await sync(pc);
+  assert.equal(pc.get('t1'), undefined);
+  assert.deepEqual(idsOf(pc.get('t2')), ['e3', 'e1']);
+});
+
+test('move: a stale copy of the old flow pushed again (standing in for an old client without the mv: outbox) does not bring the turn back', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.db.put(thread('t1', [ask('e1', T0), ask('e2', T0 + 1)]));
+  await pc.db.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc); await online(phone);
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  await sync(pc);
+  const t = phone.get('t1');
+  await phone.put({ ...t, entries: [...t.entries, ask('e4', T0 + 2)] }); // writes before it pulled the move
+  await sync(phone); await sync(pc);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1', 'e4']);
+  for (const d of [pc, phone]) assert.deepEqual(idsOf(d.get('t1')), ['e1', 'e4'], d.name);
+});
+
+// A move while the source's push of that turn is on the wire (the review's race, I1): the "Move to Edgeball?" chip
+// shows as the answer ends, which is when that turn's first push goes out. Whatever revision the server ends up holding
+// from this device, the move deletes it there, so the turn is in one flow only, on every device.
+async function heldPush(w, dev, id) {
+  let release, held = false;
+  const gate = new Promise((r) => { release = r; });
+  dev.before = async (x) => { if (x.method === 'POST' && x.path === `thread/${id}`) { dev.before = null; held = true; await gate; } return null; };
+  const running = push(dev);
+  assert.ok(await until(() => held), 'the push is on the wire');
+  return async () => { release(); await running; };
+}
+test('move race: a new turn moved while its first push to the old flow is on the wire', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.put(thread('t1', [ask('e1', T0)]));
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc); await online(phone);
+  const t = structuredClone(pc.get('t1')); t.entries.push(ask('e2', T0 + 1)); await pc.put(t);
+  const land = await heldPush(w, pc, 't1');
+  assert.equal(pc.engine.record('t1')?.e?.e2?.r, 0, 'not landed yet');
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  await land();
+  w.clock.t += MIN; await sync(pc); await sync(pc); await sync(pc); await sync(phone);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1']);
+  assert.deepEqual(idsOf(w.doc('t2')), ['e3', 'e2']);
+  for (const d of [pc, phone]) {
+    assert.deepEqual(idsOf(d.get('t1')), ['e1'], `${d.name}: not back in the old flow`);
+    assert.deepEqual(idsOf(d.get('t2')), ['e3', 'e2'], d.name);
+  }
+});
+
+test('move race: an edit of a synced turn on the wire when it is moved', async () => {
+  const w = world();
+  const pc = device(w, 'pc');
+  await pc.put(thread('t1', [ask('e1', T0), ask('e2', T0 + 1)]));
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc);
+  const t = structuredClone(pc.get('t1')); t.entries[1].text = 'retried'; w.clock.t += 1000; await pc.put(t);
+  const land = await heldPush(w, pc, 't1');
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  await land();
+  w.clock.t += MIN; await sync(pc); await sync(pc); await sync(pc);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1']);
+  assert.deepEqual(idsOf(pc.get('t1')), ['e1']);
+  assert.deepEqual(pc.get('t2').entries.map((e) => `${e.id}:${e.text}`), ['e3:answer e3', 'e2:retried']);
+});
+
+test('move race: the only turn of a new flow, moved while its first push is on the wire', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc); await online(phone);
+  await pc.put(thread('t1', [ask('e2', T0 + 1)], { title: 'Coen texts' }));
+  const land = await heldPush(w, pc, 't1');
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  await land();
+  w.clock.t += MIN; await sync(pc); await sync(pc); await sync(pc); await sync(phone);
+  assert.ok(w.doc('t1').deletedAt, 'the old flow is gone on the server');
+  for (const d of [pc, phone]) {
+    assert.equal(d.get('t1'), undefined, `${d.name}: no old flow`);
+    assert.deepEqual(idsOf(d.get('t2')), ['e3', 'e2'], d.name);
+  }
+});
+
+test('move race: a push whose answer was lost still has its landed copy deleted', async () => {
+  const w = world();
+  const pc = device(w, 'pc');
+  await pc.put(thread('t1', [ask('e1', T0)]));
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc);
+  const t = structuredClone(pc.get('t1')); t.entries.push(ask('e2', T0 + 1)); await pc.put(t);
+  // the POST lands on the server, but its answer never reaches this device
+  let lost = false;
+  pc.before = async (x) => {
+    if (x.method !== 'POST' || x.path !== 'thread/t1') return null;
+    pc.before = null;
+    const u = new URL(`https://atelier.test/api/sync/${x.path}`), headers = new Headers({ 'content-type': 'application/json', 'x-app-pass': 'pw', 'content-length': String(Buffer.byteLength(x.body)) });
+    await handleSync(workerRequest(u, { method: 'POST', headers, body: x.body }), w.env, u, u.pathname.slice('/api/'.length));
+    lost = true;
+    throw new TypeError('Failed to fetch');
+  };
+  await push(pc).catch(() => {});
+  assert.ok(lost);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1', 'e2'], 'it landed');
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  w.clock.t += MIN; await sync(pc); await sync(pc); await sync(pc);
+  assert.deepEqual(idsOf(w.doc('t1')), ['e1']);
+  assert.deepEqual(idsOf(pc.get('t1')), ['e1']);
+  assert.deepEqual(idsOf(pc.get('t2')), ['e3', 'e2']);
+});
+
+// The re-review's 4th probe: the pc's push lands but its answer is lost, the phone edits that turn, then the pc moves it.
+// The move must settle in a bounded number of reads. It deletes only what this device knew, so the phone's edit stays
+// on the server (in the old flow, as a copy) and nothing anyone wrote is lost.
+test('move race: a lost push answer, then another device edits the turn, then the move: it settles and keeps the edit', async () => {
+  const w = world();
+  const pc = device(w, 'pc'), phone = device(w, 'phone');
+  await pc.put(thread('t1', [ask('e1', T0)]));
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc); await online(phone);
+  const t = structuredClone(pc.get('t1')); t.entries.push(ask('e2', T0 + 1)); await pc.put(t);
+  pc.before = async (x) => {
+    if (x.method !== 'POST' || x.path !== 'thread/t1') return null;
+    pc.before = null;
+    const u = new URL(`https://atelier.test/api/sync/${x.path}`), headers = new Headers({ 'content-type': 'application/json', 'x-app-pass': 'pw', 'content-length': String(Buffer.byteLength(x.body)) });
+    await handleSync(workerRequest(u, { method: 'POST', headers, body: x.body }), w.env, u, u.pathname.slice('/api/'.length));
+    throw new TypeError('Failed to fetch');
+  };
+  await push(pc).catch(() => {});
+  w.clock.t += MIN; await sync(phone);
+  const p = structuredClone(phone.get('t1')); p.entries[1].text = 'edited on phone'; w.clock.t += 1000; await phone.put(p); await sync(phone);
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  const n0 = w.requests(pc).length;
+  for (let i = 0; i < 5; i++) { w.clock.t += MIN; await sync(pc); }
+  const reqs = w.requests(pc).slice(n0);
+  const fullReads = reqs.filter((x) => x.method === 'GET' && x.path.startsWith('thread/t1')).length;
+  assert.ok(fullReads <= 3, `settles in a few reads, not every cycle (${fullReads})`);
+  assert.equal(pc.engine.record('t1')?.e?.e2?.pend, undefined, 'no push left waiting');
+  const mv = await pc.store.get('mv:t1');
+  assert.deepEqual(Object.keys(mv?.seen || {}), [], 'the move is settled');
+  // nothing lost: the pc's version is in the new flow, the phone's edit is still on the server and on both devices
+  assert.deepEqual(pc.get('t2').entries.map((e) => e.id), ['e3', 'e2']);
+  assert.ok(w.doc('t1').entries.some((e) => e.id === 'e2'), 'the phone edit is kept on the server');
+  assert.ok(pc.get('t1').entries.some((e) => e.id === 'e2' && e.text === 'edited on phone'), 'and comes back to the old flow here as a copy');
+  // and it stays settled: later cycles read nothing more of t1
+  const n1 = w.requests(pc).length;
+  for (let i = 0; i < 3; i++) { w.clock.t += MIN; await sync(pc); }
+  assert.equal(w.requests(pc).slice(n1).filter((x) => x.method === 'GET' && x.path.startsWith('thread/t1')).length, 0);
+});
+
+test('move: a push that never settles stops holding the move after a few full reads', async () => {
+  const w = world();
+  const pc = device(w, 'pc');
+  await pc.put(thread('t1', [ask('e1', T0), ask('e2', T0 + 1)]));
+  await pc.put(thread('t2', [ask('e3', T0 - 5)]));
+  await online(pc);
+  await moveTurn(pc, 't1', 't2', ['e2']);
+  // a pend that no read can settle (stands in for a case planPull doesn't know): the wait is bounded
+  const stuck = () => { const rec = pc.engine.record('t1'); if (rec?.e?.e2) rec.e.e2.pend = ['f'.repeat(64)]; };
+  stuck();
+  const n0 = w.requests(pc).length;
+  for (let i = 0; i < 8; i++) { stuck(); w.clock.t += MIN; await sync(pc); }
+  const reqs = w.requests(pc).slice(n0);
+  assert.ok(reqs.filter((x) => x.method === 'GET' && x.path.startsWith('thread/t1')).length <= 4, 'bounded full reads');
+  assert.equal(reqs.filter((x) => x.method === 'DELETE').length, 1, 'then the delete goes, at the revision it knew');
+  assert.deepEqual(w.doc('t1').entries.map((e) => e.id), ['e1']);
+});

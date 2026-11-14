@@ -1,6 +1,7 @@
 // Days and flows: a flow is a thread; a day is derived from the times of its entries (local time), never stored.
 // Pure helpers the UI uses. No DOM and no network, so tests/days.test.mjs imports it directly.
-import { spaceOf, spaceByHand } from './thread-spaces.js?v=137';
+import { spaceOf, spaceByHand } from './thread-spaces.js?v=138';
+import { entryOrder } from './sync-merge.js?v=138';
 
 const pad = (n) => String(n).padStart(2, '0');
 /** 'YYYY-MM-DD' in local time. */
@@ -216,4 +217,100 @@ export function globalOptsWrite(stored, mode, slice, kind) {
   for (const k of Object.keys(own)) { if (!held(k)) continue; if (k in was) own[k] = was[k]; else delete own[k]; }
   out[mode] = { ...was, ...own };
   return out;
+}
+
+// ── moving a turn to another flow ──
+// A turn is one prompt and its answer: an entry, plus the versions sync kept beside it (forks: forkOf its id, sorted right
+// after it). Retry and Restore keep their versions inside the entry, and a Build refine is a turn of its own.
+/** The ids of the turn holding entry `id` (from its original down to every fork of it), in thread order; [] when absent. */
+export function turnIds(t, id) {
+  const es = entriesOf(t), byId = new Map(es.map((e) => [e.id, e]));
+  let root = byId.get(id);
+  if (!root) return [];
+  const up = new Set([root.id]);
+  while (root.forkOf != null && byId.has(root.forkOf) && !up.has(root.forkOf)) { root = byId.get(root.forkOf); up.add(root.id); }
+  const ids = new Set([root.id]);
+  for (let grew = true; grew;) { grew = false; for (const e of es) if (!ids.has(e.id) && ids.has(e.forkOf)) { ids.add(e.id); grew = true; } }
+  return es.filter((e) => ids.has(e.id)).map((e) => e.id);
+}
+
+/**
+ * Moves the turn holding entry `id` from thread `from` to thread `to`. The threads' entry lists are not changed; with
+ * marks, the source entries that stay get their marks in place (moveMarks), so each keeps its object.
+ * Each entry keeps its id, createdAt and at, so its day stays the same; `rename` ({oldId: newId}) gives a new id to an
+ * entry the target already knew under the old one (sync: a turn moved back), as a copy, and its forks follow it.
+ * marks ({entryTaint, worseTaint, taintedFrom}: context.js and appdata.js): a move never drops taint (moveMarks).
+ * → { from: the source's entries, to: the target's entries in the order every device sorts them, moved, ids: {old: new} }
+ */
+export function moveTurn(from, to, id, rename = {}, marks = null) {
+  const ids = new Set(turnIds(from, id));
+  const map = {};
+  for (const e of entriesOf(from)) if (ids.has(e.id)) map[e.id] = typeof rename[e.id] === 'string' && rename[e.id] ? rename[e.id] : e.id;
+  let moved = entriesOf(from).filter((e) => ids.has(e.id)).map((e) => {
+    const forkOf = e.forkOf != null && Object.hasOwn(map, e.forkOf) ? map[e.forkOf] : e.forkOf;
+    return map[e.id] === e.id && forkOf === e.forkOf ? e : { ...e, id: map[e.id], ...(e.forkOf != null ? { forkOf } : {}) };
+  });
+  let rest = entriesOf(from).filter((e) => !ids.has(e.id));
+  if (marks) ({ moved, rest } = moveMarks(entriesOf(from), ids, moved, rest, marks));
+  const sorted = [...entriesOf(to)];
+  for (const e of moved) {
+    let i = sorted.findIndex((x) => Number.isFinite(x?.createdAt) && entryOrder(x, e) > 0);
+    if (i < 0) i = sorted.length;
+    sorted.splice(i, 0, e);
+  }
+  return { from: rest, to: sorted, moved, ids: map };
+}
+// What a moved turn may hold, and what the turns around it may have taken from it, stays marked on both sides:
+// - the moved turn: whatever the source held before it (it may quote that), as ranTaint (sticky in sync-merge);
+// - the source's turns after it: whatever the moved turn held (their answers may quote it), as ranTaint;
+// - a Build version whose lineage was marked as not the owner's words (taintedFrom) and that the move cut off from that
+//   mark keeps it as its own (untrusted), so its app still runs strict, with its own data store.
+// Entries that already carry as much are left as they are (no new version to sync).
+// The source's entries are marked IN PLACE: a turn still answering there keeps the object its run writes into, so its
+// answer reaches the flow that is saved (app.js moveEntry also refuses a move while any answer is coming). The moved
+// entries are marked on copies: they go to a new list.
+function moveMarks(all, ids, moved, rest, { entryTaint, worseTaint, taintedFrom }) {
+  const first = all.findIndex((e) => ids.has(e.id));
+  const sum = (list) => list.reduce((w, e) => worseTaint(w, entryTaint(e)), '');
+  const before = sum(all.slice(0, first)), turn = sum(all.filter((e) => ids.has(e.id)));
+  const raises = (e, why) => { const own = entryTaint(e); return Boolean(why) && worseTaint(own, why) !== own; };
+  const stamp = (e, why) => (raises(e, why) ? { ...e, ranTaint: worseTaint(e.ranTaint || '', why) } : e);
+  const stampHere = (e, why) => { if (raises(e, why)) e.ranTaint = worseTaint(e.ranTaint || '', why); return e; };
+  const after = new Set(all.slice(first + 1).map((e) => e.id));
+  const kept = (list, orig, here) => {
+    const lost = list.map((e, i) => {
+      if (e.kind !== 'build' || typeof taintedFrom !== 'function') return null;
+      const was = taintedFrom(all, orig[i]);
+      return was && !taintedFrom(list, e) ? (typeof was.untrusted === 'string' && was.untrusted ? was.untrusted : 'share') : null;
+    });
+    return list.map((e, i) => {
+      if (!lost[i]) return e;
+      if (here) { e.untrusted = lost[i]; return e; }
+      return { ...e, untrusted: lost[i] };
+    });
+  };
+  const movedOrig = all.filter((e) => ids.has(e.id)), restOrig = all.filter((e) => !ids.has(e.id));
+  return {
+    moved: kept(moved.map((e) => stamp(e, before)), movedOrig),
+    rest: kept(rest.map((e) => (after.has(e.id) ? stampHere(e, turn) : e)), restOrig, true),
+  };
+}
+
+const lastAt = (t) => Math.max(...entriesOf(t).map(entryTime).filter(Number.isFinite), -Infinity);
+const byRecent = (a, b) => lastAt(b) - lastAt(a);
+/**
+ * Where a turn can go, for the Move picker: { today: the flows with something on `day` (most recently active that day
+ * first), recent: up to `limit` other flows, the most recently active first }. Never the source, never an empty flow
+ * (a new flow not saved yet: the picker offers "+ New flow" per kind instead).
+ */
+export function moveTargets(threads, day, fromId, limit = 6) {
+  const pool = threads.filter((t) => t && t.id !== fromId && entriesOf(t).length);
+  const today = flowsOn(pool, day);
+  const seen = new Set(today);
+  return { today, recent: pool.filter((t) => !seen.has(t)).sort(byRecent).slice(0, limit) };
+}
+
+/** The flow a one-tap "Move to Edgeball" uses: the most recently active flow of that kind (not the source, not empty), or null for a new one. */
+export function moveDest(threads, kind, fromId, guesses) {
+  return threads.filter((t) => t && t.id !== fromId && entriesOf(t).length && kindOf(t, guesses) === kind).sort(byRecent)[0] || null;
 }

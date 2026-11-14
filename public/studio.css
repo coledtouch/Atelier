@@ -247,6 +247,21 @@ body:not(.testers-open) .tester-ui, body.testers-open .tester-closed { display: 
 .flow-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thread-sub .flow-chip { padding: 1px 7px; margin-right: 6px; vertical-align: 1px; } /* the Days list: a flow row's kind */
 .tl-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 1.45; }
+/* A row's ⋯: Move for that turn. Always shown and 44px wide, so a phone needs no hover or long-press. */
+.timeline > li { display: flex; align-items: stretch; gap: 2px; }
+.timeline > li > .tl-row { flex: 1 1 auto; min-width: 0; }
+.tl-more { flex: none; width: 44px; min-height: 44px; border-radius: 10px; color: var(--ink-3); font: 500 18px/1 var(--sans); }
+.tl-more:hover, .tl-more:focus-visible { background: var(--surface-2); color: var(--ink); }
+/* The Move picker (app.js openMovePicker): today's flows, recent flows, then a new flow per kind. */
+.move-dialog .sheet-body { gap: 8px; }
+.move-what { margin: 0; overflow-wrap: anywhere; }
+.move-list { display: grid; gap: 2px; max-height: min(60vh, 520px); overflow-y: auto; }
+.move-list h3 { margin: 12px 0 2px; color: var(--ink-3); font: 500 11px/1.2 var(--sans); letter-spacing: .08em; text-transform: uppercase; }
+.move-row { --flow: var(--flow-none); display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 10px; border-radius: 10px; text-align: left; color: var(--ink); }
+.move-row:hover, .move-row:focus-visible { background: var(--surface-2); }
+.move-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.move-new { color: var(--ink-2); }
+.actions .move-hint { --flow: var(--accent); border: 1px solid color-mix(in srgb, var(--flow) 45%, var(--line)); color: var(--flow); }
 .earlier-bar { max-width: 860px; margin: 0 auto 4px; }
 .earlier-btn { width: 100%; min-height: 40px; border: 1px dashed var(--line-2); border-radius: 12px; color: var(--ink-2); font: 500 12px/1 var(--sans); }
 .earlier-btn:hover { color: var(--ink); background: var(--surface-2); }
