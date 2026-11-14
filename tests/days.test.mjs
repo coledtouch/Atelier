@@ -167,9 +167,12 @@ test('firstShots: on the first run only marks whose flow is missing or different
   assert.deepEqual(firstShots([null], spaces), []);
 });
 
-// Devices that each hold hand marks, sharing one synced flow for thread t, with the server's rule: a push is taken
-// when its base is fresh, which a device that pulled first always has. Each device runs the app's rule (handPlan with
-// its shots, landed = its record matches) after every pull or push.
+// Devices that each hold hand marks, sharing one synced flow for thread t, in the app's order:
+// - a pull that brings the server's flow is a read of the library, which runs the app's rule (handsWin: handPlan with
+//   its shots, landed = its record matches);
+// - a push is taken when its base is fresh (the server's CAS). An accepted push changes nothing locally, so no read
+//   follows: only sync.js's onFlowLanded clears the shot of a choice that agrees with what landed (shotLanded);
+// - a refused push brings the server's copy back, and that read runs the rule.
 function fleet(names, serverKind) {
   const server = { flow: serverKind ? { kind: serverKind } : null };
   const devs = Object.fromEntries(names.map((n) => [n, { spaces: {}, shots: null, t: { id: 't', entries: [{ id: 'x' }], flow: server.flow }, rec: server.flow, writes: 0 }]));
@@ -181,8 +184,16 @@ function fleet(names, serverKind) {
     for (const a of adopt) d.spaces[a.id] = `${a.kind}!`;
     for (const w of write) { d.t = { ...d.t, flow: w.flow }; d.writes++; if (w.spent) d.shots.delete('t'); }
   };
+  const kindOfFlow = (f) => cleanFlow(f)?.kind;
   const pull = (n) => { const d = devs[n]; d.t = { ...d.t, flow: server.flow }; d.rec = server.flow; run(d); };
-  const push = (n) => { const d = devs[n]; if (cleanFlow(d.t.flow)?.kind !== cleanFlow(d.rec)?.kind) { server.flow = d.t.flow; d.rec = d.t.flow; } run(d); };
+  const push = (n) => {
+    const d = devs[n], k = kindOfFlow(d.t.flow);
+    if (!k || k === kindOfFlow(d.rec)) return; // nothing unsent
+    if (!server.flow || kindOfFlow(d.rec) === kindOfFlow(server.flow)) {
+      server.flow = d.t.flow; d.rec = d.t.flow;
+      if (d.spaces.t === `${k}!`) d.shots?.delete('t'); // onFlowLanded → shotLanded
+    } else pull(n); // stale base: refused, the server's copy comes back
+  };
   const pick = (n, kind) => { const d = devs[n]; d.spaces.t = `${kind}!`; d.shots ??= new Set(); d.shots.add('t'); d.t = { ...d.t, flow: { kind } }; };
   const settle = (order) => { for (let i = 0; i < 4; i++) for (const n of order) { pull(n); push(n); } };
   return { server, devs, run, pull, push, pick, settle };
@@ -201,6 +212,21 @@ test('two devices: his choice beats a guess that synced first, and his later pic
   assert.deepEqual(f.server.flow, { kind: 'work' }, 'the newer pick stays');
   assert.equal(f.devs.desk.spaces.t, 'work!', 'and the desk takes it as his choice');
   assert.equal(f.devs.desk.writes, 1, 'the desk wrote once, over the guess, never over his pick');
+});
+
+test('two devices, the re-review sequence: a shot cleared by its push landing never overwrites his later pick', () => {
+  const f = fleet(['desk', 'phone'], 'coen');
+  for (const n of ['desk', 'phone']) { f.devs[n].spaces.t = 'coen!'; f.pull(n); }
+  f.pick('desk', 'work'); f.push('desk'); // he re-files T to Work on the desk and walks away: no read there after
+  assert.equal(f.devs.desk.shots.size, 0, 'the push landed: the desk\'s shot is cleared with no read');
+  f.pull('phone');
+  assert.equal(f.devs.phone.spaces.t, 'work!', 'the phone adopts Work');
+  f.pick('phone', 'kid'); f.push('phone'); // he picks Kid there and sends a turn
+  f.pull('desk'); // the desk wakes
+  assert.equal(f.devs.desk.spaces.t, 'kid!', 'the desk adopts Kid');
+  f.settle(['phone', 'desk']);
+  assert.deepEqual(f.server.flow, { kind: 'kid' }, 'his newest pick stays');
+  assert.deepEqual([f.devs.desk.writes, f.devs.phone.writes], [0, 0]);
 });
 
 test('three devices holding marks: the newest pick survives (review: item 1)', () => {

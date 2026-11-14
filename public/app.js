@@ -710,22 +710,19 @@ async function handsWin(rows) {
   try {
     refreshSpaces(); // a choice made in another tab counts
     const live = (t) => (S.thread?.id === t.id ? S.thread : liveThreads.get(t.id) || t); // the record on screen, never a stale copy
-    const seen = rows.map(live), st = handShots(seen), shots = st.ids;
-    const { write, adopt, settled } = handPlan(seen, threadSpaces, shots, Sync.flowLanded);
+    const seen = rows.map(live);
+    const { write, adopt, settled } = handPlan(seen, threadSpaces, handShots(seen).ids, Sync.flowLanded);
     for (const { id, kind } of adopt) { if (GROUPS.groups.some((g) => g.key === kind)) threadSpaces[id] = `${kind}!`; else Reflect.deleteProperty(threadSpaces, id); }
     if (adopt.length) saveSpaces(adopt.map((a) => a.id));
-    if (settled.length) { for (const id of settled) shots.delete(id); keepShots(st); } // landed: nothing left to defend
+    if (settled.length) editShots((st) => { for (const id of settled) st.ids.delete(id); }); // landed: nothing left to defend
     let wrote = 0;
     for (const { thread } of write) {
       if (accountReloading) break;
       const onScreen = S.thread?.id === thread.id ? S.thread : liveThreads.get(thread.id);
       const cur = onScreen || await DB.get(thread.id);
-      const now = cur && handPlan([cur], threadSpaces, shots).write[0]; // the same rule on the row as it is now
+      const now = cur && handPlan([cur], threadSpaces, readShots().ids).write[0]; // the same rule on the row and the shots as they are now
       if (!now) continue;
-      if (now.spent) {
-        shots.delete(cur.id);
-        if (!keepShots(st)) { shots.add(cur.id); continue; } // not kept: it would be granted again, so it isn't used
-      }
+      if (now.spent && !editShots((st) => { st.ids.delete(cur.id); })) continue; // not kept: it would be granted again, so it isn't used
       if (cur === S.thread) { setFlow(cur, now.flow.kind); renderOptions(); } // the composer shows the new kind's choices
       else { cur.flow = now.flow; await DB.put(cur); }
       wrote++;
@@ -745,19 +742,33 @@ function readShots() {
 function keepShots(st) {
   return LS.set(workspaceKey('handShots'), { seeded: st.seeded, ids: [...st.ids] });
 }
+// A change to the shots as storage holds them now, so one added meanwhile (another tab, a pick during a wait) is kept.
+// → false when storage didn't keep it
+function editShots(change) {
+  const st = readShots();
+  change(st);
+  return keepShots(st);
+}
 function handShots(rows) {
   const st = readShots();
   if (!st.seeded && Array.isArray(rows)) {
-    for (const id of firstShots(rows, threadSpaces)) st.ids.add(id);
+    const first = firstShots(rows, threadSpaces);
+    editShots((now) => { for (const id of first) now.ids.add(id); now.seeded = true; });
+    for (const id of first) st.ids.add(id);
     st.seeded = true;
-    keepShots(st);
   }
   return st;
 }
 function addShot(id) {
-  const st = readShots();
-  st.ids.add(id);
-  keepShots(st);
+  editShots((st) => { st.ids.add(id); });
+}
+// A push carrying a flow was accepted (sync.js onFlowLanded). If it is his choice, its shot has nothing left to defend:
+// a flow that differs later is his newer pick from another device. No read follows an accepted push, so this is the
+// only place that learns it in time.
+function shotLanded(id, flow) {
+  refreshSpaces();
+  if (!spaceByHand(threadSpaces, id) || spaceOf(threadSpaces, id) !== cleanFlow(flow)?.kind) return;
+  editShots((st) => { st.ids.delete(id); });
 }
 // v132, once per workspace: a group he chose by hand in the Threads list ('coen!' in threadSpaces) becomes that thread's
 // synced flow, since he already confirmed it, even over a flow a guess put there first (handsWin). Running it again
@@ -8606,7 +8617,7 @@ window.atelierBoot?.started();
     },
     isTester: () => Boolean(S.tester),
     hasTesterTraces: () => testerTrace || lsHas('tester') || lsHas('meTester'),
-    getOpen: () => S.thread, isLive: (id) => liveThreads.has(id), onApplied: syncApplied,
+    getOpen: () => S.thread, isLive: (id) => liveThreads.has(id), onApplied: syncApplied, onFlowLanded: shotLanded,
     // Clear this device ran in another tab: this tab's sync has stopped for good; don't save the open thread back.
     onCleared: () => { clearTimeout(persistTimer); S.thread = null; startFresh(); toast('Atelier was cleared on this device in another tab. Reload this tab before you continue.', { error: true }); },
     dropThumbs: (ids) => { for (const k of [...libThumbs.keys()]) if (ids.some((id) => k.includes(`:${id}:`))) libThumbs.delete(k); },

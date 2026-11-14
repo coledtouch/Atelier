@@ -617,8 +617,8 @@ function migrationRig(rows, spaces, { open = null } = {}) {
       get: async (id) => structuredClone(db.get(id)), put: async (t) => { puts.push(t.id); db.set(t.id, structuredClone(t)); } },
     // the real setFlow saves the open flow (persist) and draws its choices when it has none; renderOptions draws them
     setFlow: (t, kind) => { t.flow = { kind }; drawn.push(['setFlow', t.id, kind]); v.DB.put(t); }, renderOptions: () => drawn.push('options'),
-    renderFlowTabs: () => drawn.push('tabs') };
-  lift(v, 'migrateHandFlows', 'handsWin', 'readShots', 'keepShots', 'handShots', 'addShot');
+    renderFlowTabs: () => drawn.push('tabs'), refreshSpaces: () => {}, spaceOf };
+  lift(v, 'migrateHandFlows', 'handsWin', 'readShots', 'keepShots', 'editShots', 'handShots', 'addShot', 'shotLanded');
   return { v, db, puts, ls, reads, drawn };
 }
 
@@ -1110,7 +1110,36 @@ test('a shot defends his choice only until it is seen landed; then a differing f
   await r.v.handsWin(await r.v.DB.all());
   assert.equal(r.v.threadSpaces.same, 'kid!', 'adopted');
   assert.deepEqual(r.puts, ['guessed'], 'and never written back over');
-  assert.match(fnSource('handsWin'), /handPlan\(seen, threadSpaces, shots, Sync\.flowLanded\)/);
+  assert.match(fnSource('handsWin'), /handPlan\(seen, threadSpaces, handShots\(seen\)\.ids, Sync\.flowLanded\)/);
+});
+
+test('he picks, the push lands, then a pull brings a different flow: it is adopted, not overwritten (re-review: item 1)', async () => {
+  const e = (id) => [{ id, kind: 'ask', prompt: 'x', createdAt: at(3) }];
+  const r = migrationRig([{ id: 't', title: 'T', updatedAt: at(3), flow: { kind: 'coen' }, entries: e('t1') }], { t: 'coen!' });
+  await r.v.handsWin(await r.v.DB.all()); // seeded: the mark agrees, no shot
+  // he re-files T to Work here (pickKind: mark, shot, flow)
+  r.v.threadSpaces.t = 'work!'; r.v.addShot('t'); r.db.get('t').flow = { kind: 'work' };
+  assert.deepEqual(r.ls['handShots:ws'].ids, ['t']);
+  r.v.shotLanded('t', { kind: 'personal' }); // a flow that isn't his choice landing clears nothing
+  assert.deepEqual(r.ls['handShots:ws'].ids, ['t']);
+  r.v.shotLanded('t', { kind: 'work' }); // sync.js onFlowLanded: the push was accepted. No read follows it.
+  assert.deepEqual(r.ls['handShots:ws'].ids, [], 'cleared by the push landing');
+  // the next read is the pull of his newer pick from the phone (the landed check alone would still say no)
+  r.db.get('t').flow = { kind: 'kid' };
+  assert.equal(await r.v.handsWin(await r.v.DB.all()), 1);
+  assert.equal(r.v.threadSpaces.t, 'kid!', 'adopted');
+  assert.deepEqual(r.puts, [], 'never written over');
+  assert.match(APP, /onApplied: syncApplied, onFlowLanded: shotLanded,/, 'wired into Sync.init');
+});
+
+test('a shot added while handsWin waits on the store is kept (re-review: shots written after an await)', async () => {
+  const e = (id) => [{ id, kind: 'ask', prompt: 'x', createdAt: at(3) }];
+  const r = migrationRig([{ id: 'a', title: 'A', updatedAt: at(3), flow: { kind: 'personal' }, entries: e('a1') }], { a: 'coen!' });
+  const get = r.v.DB.get;
+  r.v.DB.get = async (id) => { r.v.threadSpaces.b = 'kid!'; r.v.addShot('b'); return get(id); }; // he picks in the meantime
+  assert.equal(await r.v.handsWin(await r.v.DB.all()), 1);
+  assert.deepEqual(r.db.get('a').flow, { kind: 'coen' });
+  assert.deepEqual(r.ls['handShots:ws'], { seeded: true, ids: ['b'] }, 'a spent its shot, and b\'s new one survives');
 });
 
 test('a device that cannot keep its shots never writes over a flow that differs (review: item 1, storage full)', async () => {
