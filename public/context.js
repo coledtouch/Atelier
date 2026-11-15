@@ -1,7 +1,7 @@
 // Session context for chat turns: what earlier turns a model gets as text (history + compact notes for what it can't
 // see), which earlier attachment a text follow-up is about, and where that follow-up goes. Pure — no DOM, no app
 // state — so app.js and tests/context.test.mjs both import it.
-import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=139';
+import { cleanName, fmtDur, framesPlan, videoParts } from './video.js?v=140';
 
 export const CHAT_KINDS = ['ask', 'code'];
 // Earlier turns replayed (chat answers and notes alike): every one while a thread has fewer than HISTORY_TURNS +
@@ -363,12 +363,15 @@ export function mediaTurn(prompt, ctx, { cap = CTX_IMAGES, sees = true } = {}) {
 //   import   an entry restored from a backup file (e.imported, set by data-safety prepareImport): a file can say anything
 //   legacy   an entry from before shares and links were marked (MARKS_SINCE), or photos / a video from before shared
 //            files were marked (MEDIA_MARKS_SINCE): an old share looks like your own words
+//   linkedin an agent step that read LinkedIn posts, comments or notifications (linkedin_posts, linkedin_notifications,
+//            linkedin_read_post; v140): other people's words. It holds back account and browser tools, never more LinkedIn
+//            reads, and ranks just above claude.
 //   claude   a turn imported from claude.ai (via 'claude': pasted articles, documents, Claude's own web results) or a
 //            Claude history read (claude_history_*). It holds back account and browser tools, never more Claude history —
 //            and it ranks last, so it is the reason only when it is the only one: with any other, Claude history waits too.
 // Own words (typed, pasted, dictated, a keyed launch), your own photos, and what your accounts returned (mail, Slack,
 // Drive…) never taint: asking before every read in an inbox thread is the cost this avoids.
-export const TAINTS = Object.freeze(['share', 'link', 'web', 'browser', 'file', 'import', 'legacy', 'claude']);
+export const TAINTS = Object.freeze(['share', 'link', 'web', 'browser', 'file', 'import', 'legacy', 'linkedin', 'claude']);
 // v56 (2026-10-02) began marking link and share turns (e.untrusted); entries made before the next day may be unmarked shares.
 export const MARKS_SINCE = Date.UTC(2026, 9, 3);
 // v84 began marking photos and videos that came with a share (never marked before): an entry with photos or a video
@@ -376,6 +379,8 @@ export const MARKS_SINCE = Date.UTC(2026, 9, 3);
 export const MEDIA_MARKS_SINCE = Date.UTC(2026, 9, 10);
 const markOf = (v) => (!v ? '' : v === 'link' ? 'link' : 'share');
 const isBrowserStep = (st) => st.service === 'browser' || /^browser_/.test(String(st.name || ''));
+// A LinkedIn read (v140): what it returns was written by other people. Likes, comments and posts return no text of theirs.
+export const isLinkedInRead = (st) => Boolean(st) && /^linkedin_(posts|notifications|read_post)$/.test(String(st.name || ''));
 const isClaudeStep = (st) => st.service === 'claude' || /^claude_history_/.test(String(st.name || ''));
 const hasMedia = (x) => (Array.isArray(x.images) && x.images.length > 0) || Boolean(x.video);
 // An agent step whose result put outside text in the context: every browser tool but browser_show (which only brings a
@@ -422,6 +427,7 @@ export function entryTaint(x) {
   for (const st of steps) if (st.untrusted) why = worseTaint(why, markOf(st.untrusted));
   if ((Number.isFinite(x.web) && x.web > 0) || /\blive web\b/.test(typeof x.meta?.note === 'string' ? x.meta.note : '')) why = worseTaint(why, 'web');
   if (steps.some(readsPage)) why = worseTaint(why, 'browser');
+  if (steps.some(isLinkedInRead)) why = worseTaint(why, 'linkedin');
   if (steps.some(isClaudeStep)) why = worseTaint(why, 'claude');
   return why;
 }
@@ -435,7 +441,9 @@ export function threadTaint(prior, ctx = null) {
 // Whether reason why holds back a tool of this service: every reason holds back every tool, except that text from
 // Claude chats alone ('claude' ranks last, so it is never the reason when another applies) doesn't hold back reading
 // more of the same chats.
-export const taintGates = (why, service) => Boolean(why) && !(why === 'claude' && service === 'claude');
+// LinkedIn posts alone ('linkedin', v140) likewise don't hold back reading more of LinkedIn: a search's words are the
+// way out there, and app.js asks for those (linkedin.js liWayOut) once account data is in the context too.
+export const taintGates = (why, service) => Boolean(why) && !(why === 'claude' && service === 'claude') && !(why === 'linkedin' && service === 'linkedin');
 // The approval card's sentence for a step that waits because of why (thread reasons, plus reasons from earlier in the
 // same answer: 'page' a page read, 'chats' Claude chats read, 'shared-chat' a Claude chat holding a shared or linked
 // turn). '' for anything else.
@@ -444,11 +452,13 @@ const TAINT_NOTES = Object.freeze({
   link: 'This thread holds text from a link. So reading your accounts waits for your OK. Start a new thread to skip this.',
   web: 'This thread holds web search results, and a page can try to steer the assistant. So reading your accounts waits for your OK. Start a new thread to skip this.',
   browser: 'The assistant read a web page or someone else’s GitHub content in this thread. That text can try to steer it. So reading your accounts waits for your OK. Start a new thread to skip this.',
+  linkedin: 'This thread holds LinkedIn posts by other people. That text can try to steer the assistant. So reading your accounts waits for your OK.',
   claude: 'This thread holds text from your Claude chats, which can include pasted or web text. So reading your accounts waits for your OK. Start a new thread to skip this.',
   file: 'This thread holds an attached file, and its text can try to steer the assistant. So reading your accounts waits for your OK. Start a new thread to skip this.',
   import: 'This thread was restored from a backup file, so reading your accounts waits for your OK. Start a new thread to skip this.',
   legacy: 'This thread is older than Atelier’s check for shared text and photos. So reading your accounts waits for your OK. Start a new thread to skip this.',
   page: 'Asked after reading a web page or someone else’s GitHub content in this answer. That text can try to steer the assistant. So reading your accounts now waits for your OK.',
+  li: 'Asked after reading LinkedIn posts in this answer. Other people wrote them. So reading your accounts now waits for your OK.',
   chats: 'Asked after reading your Claude chats in this answer. They can include pasted or web text. So reading your accounts now waits for your OK.',
   'shared-chat': 'Asked after reading a Claude chat that holds a share or text from a link. That text can try to steer the assistant. So reading your accounts now waits for your OK.',
 });

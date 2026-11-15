@@ -3,6 +3,7 @@
 // Functions are lifted out of public/app.js and run against stubs, as tests/launch-wiring.test.mjs does.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as LinkedIn from '../public/linkedin.js';
 import { readFile } from 'node:fs/promises';
 import { followUpRoute, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, buildHistory, HISTORY_TURNS, HISTORY_BLOCK, withSent, TAINTS, MARKS_SINCE, MEDIA_MARKS_SINCE } from '../public/context.js';
 import { NOTES } from '../public/launch.js';
@@ -283,7 +284,7 @@ function agentRig({ e, batches, approve = () => true, searches = [], extra = {},
   const calls = { asked: [], ext: [], tool: [], extras: [], systems: [], msgs: [] };
   let n = 0, id = 0;
   const vars = {
-    TOOLS: { services: { gmail: true } }, EXT: { ready: true }, REMOTE: { online: false }, SYS: { ask: () => 'ask', code: () => 'code' }, withSent, runPrompt: () => ({ browser: 'local' }),
+    ...LinkedIn, TOOLS: { services: { gmail: true } }, EXT: { ready: true }, REMOTE: { online: false }, SYS: { ask: () => 'ask', code: () => 'code' }, withSent, runPrompt: () => ({ browser: 'local' }),
     browserAvailable: () => true, historyFor: () => [], agentTools: () => DEFS, uid: () => `s${++id}`, modelFor: () => 'anthropic:claude-sonnet-5-5',
     streamChat: async (o) => {
       calls.extras.push(typeof o.extra === 'function' ? o.extra(o.model) : o.extra);
@@ -1365,7 +1366,7 @@ test('runAgent records the addresses each successful tool result held (e.toolUrl
   const r = agentRig({ e, extra, batches: [[['gmail_search', { q: 'x' }], ['github_read', { repo: 'me/app', path: 'x' }]], []] });
   await r.run();
   assert.deepEqual(e.toolUrls, ['https://exfil.example/x']);
-  assert.match(fnSource('runAgent'), /accountRead = true;[^\n]*\n\s+noteToolUrls\(e, result\.result\);/);
+  assert.match(fnSource('runAgent'), /accountRead = true;[^\n]*\n(?:[^\n]*\n){2}\s+noteToolUrls\(e, result\.result\);/);
 });
 
 // A tiny DOM for guardLinks: anchors with attributes, text, classes and appended children.

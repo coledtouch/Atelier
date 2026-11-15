@@ -18,7 +18,7 @@ test('only a look in the browser, with the setting on, on a turn that did not st
 test('app.js: the setting is the owner\'s, the step is sent as approved, and the tab-moved re-ask is skipped only for it', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(app, /const browserUnasked = \(\) => approvalOn\('browserUnasked'\);/);
-  assert.match(app, /if \(approvesAll\(\{ \.\.\.standing, on: approveAll\(\) \}\) \|\| \(!leaving && \(browseUnasked\(step, \{ \.\.\.standing, on: browserUnasked\(\) \}\) \|\| readUnasked\(step, \{ \.\.\.standing, on: accountsUnasked\(\) \}\)\)\)\) step\.auto = true;\s+else if \(!step\.write && \(e\.untrusted \|\| why \|\| searched > 0 \|\| asksFirst\(step\.name, args\)\)\) step\.confirm = true;/);
+  assert.match(app, /if \(!liWrite && \(approvesAll\(\{ \.\.\.standing, on: approveAll\(\) \}\) \|\| \(!leaving && \(browseUnasked\(step, \{ \.\.\.standing, on: browserUnasked\(\) \}\) \|\| readUnasked\(step, \{ \.\.\.standing, on: accountsUnasked\(\) \}\)\)\)\)\) step\.auto = true;\s+else if \(!step\.write && \(e\.untrusted \|\| why \|\| searched > 0 \|\| asksFirst\(step\.name, args\)\)\) step\.confirm = true;/);
   assert.match(app, /step\.write \|\| step\.confirm === true \|\| step\.auto === true\)/, 'the relay and the extension get approved: true');
   assert.match(app, /!step\.confirm && !step\.auto && known !== undefined/);
   assert.match(app, /if \(on && !confirm\('Atelier will open and read pages in your signed-in browser without asking first\./, 'turning it on asks once, with the risk');
@@ -45,8 +45,8 @@ test('a chosen web address still asks when outside text and account data share t
 
 test('app.js: the way-out check reads the run and the thread; the account setting is the owner\'s and off by default', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(app, /const leaving = leavesWithData\(\{ wayOut: asksFirst\(step\.name, args\), outside: Boolean\(taint \|\| pageRead \|\| titlesRead \|\| chatsRead \|\| searched > 0\), data: accountRead \|\| dataBefore \}\);/);
-  assert.match(app, /const dataBefore = \(thread\?\.entries \|\| \[\]\)\.some\(\(x\) => x !== e && x\.steps\?\.some\(\(st\) => st\.status === 'done' && st\.service !== 'browser'\)\);/);
+  assert.match(app, /const leaving = leavesWithData\(\{ wayOut: asksFirst\(step\.name, args\), outside: Boolean\(taint \|\| pageRead \|\| titlesRead \|\| chatsRead \|\| liRead \|\| searched > 0\), data: accountRead \|\| dataBefore \}\)\s+\|\| leavesWithData\(\{ wayOut: liWayOut\(step\.name, args\), outside: Boolean\(taint \|\| pageRead \|\| titlesRead \|\| chatsRead \|\| searched > 0 \|\| liRead\), data: otherData \|\| dataBefore \}\);/);
+  assert.match(app, /const dataBefore = \(thread\?\.entries \|\| \[\]\)\.some\(\(x\) => x !== e && x\.steps\?\.some\(\(st\) => st\.status === 'done' && st\.service !== 'browser' && st\.service !== 'linkedin'\)\);/);
   assert.match(app, /const accountsUnasked = \(\) => approvalOn\('accountsUnasked'\);/);
   assert.match(app, /if \(on && !confirm\('Atelier will read your connected accounts without asking first/);
   assert.doesNotMatch(app, /DEFAULT_SETTINGS = \{[^}]*accountsUnasked/s);

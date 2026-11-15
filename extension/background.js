@@ -36,7 +36,8 @@ const MAX_SHOWN_TEXT = 2000; // characters of the text to type shown in the conf
 // lets a page loaded for a read draw itself.
 // front: the pause after a sign-in tab comes forward. pick: how long a sign-in waits for the user to click their login in
 // Chrome's list when the keys didn't pick it, looking every poll (1.4.3, v120).
-const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800, front: 400, pick: 30_000, poll: 500, bar: 900, gm: 8000, wake: 20_000 };
+// li: the pause that lets a LinkedIn page draw its posts after it loads (1.4.9, v140).
+const TIMING = { confirm: 45_000, settle: 1200, read: 10_000, fill: 700, helper: 30_000, render: 800, front: 400, pick: 30_000, poll: 500, bar: 900, gm: 8000, wake: 20_000, li: 2500 };
 // After a click or typing request is declined, closed or left unanswered, further ones from the same path (this
 // browser's Atelier tab, or another device through the relay) are refused without a window for a while: 30 s, doubling
 // with each refusal in a row (at most 10 min); an Allow resets it. A hijacked page can't keep stealing the focus.
@@ -238,8 +239,8 @@ const isConfirmPage = (sender) => sender?.id === chrome.runtime.id && String(sen
 const withoutHash = (url) => String(url || '').split('#')[0];
 
 function refusal(action, answer) {
-  const what = action === 'type' ? 'typing' : action === 'signin' ? 'sign-in' : action === 'sms' ? 'text message' : 'click';
-  const nothing = action === 'type' ? 'nothing was typed' : action === 'signin' ? 'nothing was signed in' : action === 'sms' ? 'nothing was sent' : 'nothing was clicked';
+  const what = action === 'type' ? 'typing' : action === 'signin' ? 'sign-in' : action === 'sms' ? 'text message' : action === 'linkedin' ? 'LinkedIn action' : 'click';
+  const nothing = action === 'type' ? 'nothing was typed' : action === 'signin' ? 'nothing was signed in' : action === 'sms' ? 'nothing was sent' : action === 'linkedin' ? 'nothing was done on LinkedIn' : 'nothing was clicked';
   if (answer === 'timeout') return `No one answered the Atelier Browser confirmation on the computer within ${Math.round(TIMING.confirm / 1000)} seconds, so ${nothing}.`;
   if (answer === 'failed') return `The Atelier Browser confirmation window couldn’t be shown, so ${nothing}.`;
   return `The user declined this ${what} in the Atelier Browser confirmation window, so ${nothing}.`;
@@ -265,21 +266,23 @@ async function popupWindow(url) {
 async function asksNothing() {
   try { return (await chrome.storage.local.get(['noAsk'])).noAsk === true; } catch { return false; }
 }
-// What the window shows: the element read from the page, or for a text message (sms) who it goes to.
-function looksAt(action, { tabId, element, to }, token) {
+// What the window shows: the element read from the page, for a text message (sms) who it goes to, and for LinkedIn
+// (1.4.9) what is done to whose post (to) on which page (url).
+function looksAt(action, { tabId, element, to, url, op }, token) {
   if (action === 'sms') return Promise.resolve([{ url: '', title: 'Messages' }, { tag: 'message', type: '', label: String(to || '').slice(0, 200) }]);
+  if (action === 'linkedin') return Promise.resolve([{ url: String(url || ''), title: 'LinkedIn' }, { tag: 'linkedin', type: String(op || ''), label: String(to || '').slice(0, 200) }]);
   return withTimeout(Promise.all([
     chrome.tabs.get(tabId),
     inPage(tabId, pageElement, [element, 'describe', { token }]),
   ]), TIMING.read, NOT_RESPONDING);
 }
-async function confirmFirst(action, { tabId, element, text, submit, to }, via) {
+async function confirmFirst(action, { tabId, element, text, submit, to, url, op }, via) {
   const path = via === 'remote' ? 'remote' : 'local';
   // The user's standing OK on this computer: no window, no cooldown. The element is still found and marked, the page
   // is still checked again before the action, and a password or payment field is still refused.
   if (await asksNothing()) {
     const token = crypto.randomUUID();
-    const [tab, target] = await looksAt(action, { tabId, element, to }, token);
+    const [tab, target] = await looksAt(action, { tabId, element, to, url, op }, token);
     if (!target) throw new Error('Element not found — call browser_elements again (the page may have changed).');
     if (action === 'type' && target.sensitive) throw new Error(REFUSED_FIELD);
     return { url: tab.url, expect: { tag: target.tag, type: target.type, label: target.label }, token };
@@ -293,7 +296,7 @@ async function confirmFirst(action, { tabId, element, text, submit, to }, via) {
   try {
     // Bounded: a page showing a dialog box never answers, and this request holds the one-at-a-time lock meanwhile.
     // A description that arrives too late is dropped, so no window ever opens for a request already given up on.
-    const [tab, target] = await looksAt(action, { tabId, element, to }, req.id);
+    const [tab, target] = await looksAt(action, { tabId, element, to, url, op }, req.id);
     if (!target) throw new Error('Element not found — call browser_elements again (the page may have changed).');
     if (action === 'type' && target.sensitive) throw new Error(REFUSED_FIELD);
     const typed = String(text ?? '');
@@ -301,7 +304,7 @@ async function confirmFirst(action, { tabId, element, text, submit, to }, via) {
       action, via: path, submit: action === 'type' && Boolean(submit),
       element: { tag: target.tag, type: target.type, label: target.label, ...(target.href ? { href: target.href } : {}), ...(target.near ? { near: target.near } : {}) },
       page: { title: tab.title || target.page || '', url: tab.url || target.url || '' },
-      ...(action === 'type' || action === 'sms' ? { text: typed.slice(0, MAX_SHOWN_TEXT), more: Math.max(0, typed.length - MAX_SHOWN_TEXT) } : {}),
+      ...(action === 'type' || action === 'sms' || action === 'linkedin' ? { text: typed.slice(0, MAX_SHOWN_TEXT), more: Math.max(0, typed.length - MAX_SHOWN_TEXT) } : {}),
       expiresAt,
     };
     const answer = new Promise((resolve) => { req.answer = resolve; });
@@ -576,6 +579,329 @@ async function gmOpen(page, chat, limit) {
   return { ...hit, messages: [] }; // a conversation with nothing in it yet, or one slow to load
 }
 
+// ── LinkedIn in this browser, signed in as the owner (1.4.9, v140) ──
+// Reads posts, notifications and the owner's own activity, and likes, comments, replies or posts once he says so. It
+// works on LinkedIn's own pages in one background tab, never through LinkedIn's private API, and only on pages this
+// worker builds from a short list (liPage): a model can't send that tab anywhere else. LinkedIn's class names are
+// scrambled, so the page is read by its labels: "Open control menu for post by …", "Reaction button state: …",
+// "View more options for …’s comment." and the comment editor's role=textbox.
+// LinkedIn's terms forbid automated likes and comments, so every write here needs Atelier's approval flag (the owner
+// tapped it) and this window's OK, and runs under limits a page or the relay can't lift: a daily cap per kind, a human
+// pause since the last write, no second comment on a post already commented on, and a 24-hour stop the moment LinkedIn
+// shows a warning, a check or a restriction.
+const LI = 'https://www.linkedin.com';
+const LI_LIMITS = { like: 40, comment: 15, post: 2 }; // per day; a reply counts as a comment
+const LI_GAP = { like: [6000, 12000], comment: [15000, 30000], post: [30000, 60000] }; // ms since the last write of that kind
+const LI_MAX_WAIT = 30_000; // a longer pause still to go is refused rather than waited out (the relay gives a command 90 s)
+const LI_PAUSE = 24 * 3600_000;
+const LI_KEEP = 60 * 24 * 3600_000; // how long a comment or reply is remembered, so it is never posted twice
+const LI_MAX = { comment: 1250, post: 3000 };
+const LI_NOT_SIGNED_IN = 'LinkedIn isn’t signed in in this browser. Ask the user to sign in to LinkedIn here. Atelier never signs in to LinkedIn.';
+const LI_WARNING = 'LinkedIn showed a warning, a security check or a restriction. Atelier stopped all LinkedIn actions for 24 hours. Ask the user to look at LinkedIn.';
+const LI_NO_POST = 'That post isn’t on the page any more. Read the page again and use a post from the new list.';
+const LI_UNKNOWN = 'LinkedIn didn’t show the result, so it isn’t known whether it went through. Look at the post before trying again.';
+const LI_NEEDS_APPROVAL = 'This LinkedIn action needs the user’s tap in Atelier first, so nothing was done.';
+const LI_SOURCES = ['search', 'feed', 'person', 'company', 'newsletter', 'mine', 'post'];
+const LI_DATES = ['past-24h', 'past-week', 'past-month'];
+const LI_SLUG = /^(?!\.+$)[\w%.-]{2,120}$/; // never just dots: '..' would climb out of /in/
+
+// A post's own address, normalized; '' for anything else.
+function liPostUrl(url) {
+  const m = /^https:\/\/www\.linkedin\.com\/feed\/update\/(urn:li:(?:activity|ugcPost|share):\d{6,25})\/?(?:[?#].*)?$/.exec(String(url || '').trim());
+  return m ? `${LI}/feed/update/${m[1]}/` : '';
+}
+// The page a list of posts comes from, built here from a source and plain values. Every value is checked, so the
+// address can't carry anything but a search word, a date range or a profile name to LinkedIn.
+function liSourceUrl(a = {}) {
+  const source = String(a.source || 'search');
+  if (!LI_SOURCES.includes(source)) throw new Error(`source must be one of ${LI_SOURCES.join(', ')}.`);
+  const slug = (v) => { const s = String(v || '').trim().replace(/^https:\/\/www\.linkedin\.com\/(in|company|newsletters)\//, '').replace(/\/.*$/, ''); if (!LI_SLUG.test(s)) throw new Error('Pass the profile, company or newsletter name as it shows in its LinkedIn address.'); return encodeURIComponent(decodeURIComponent(s)); };
+  if (source === 'feed') return `${LI}/feed/`;
+  if (source === 'person') return `${LI}/in/${slug(a.profile)}/recent-activity/all/`;
+  if (source === 'company') return `${LI}/company/${slug(a.profile)}/posts/`;
+  if (source === 'newsletter') return `${LI}/newsletters/${slug(a.profile)}/`;
+  if (source === 'mine') return `${LI}/in/me/recent-activity/${['comments', 'reactions', 'all'].includes(a.kind) ? a.kind : 'comments'}/`;
+  if (source === 'post') { const u = liPostUrl(a.url); if (!u) throw new Error('Pass url: a post address like https://www.linkedin.com/feed/update/urn:li:activity:…/'); return u; }
+  const words = String(a.keywords || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (!words) throw new Error('Pass keywords for a post search.');
+  const date = LI_DATES.includes(a.datePosted) ? a.datePosted : 'past-week';
+  const by = a.postedBy === 'anyone' ? '' : `&postedBy=${encodeURIComponent('["first"]')}`;
+  return `${LI}/search/results/content/?keywords=${encodeURIComponent(words)}&datePosted=${encodeURIComponent(`"${date}"`)}&sortBy=${encodeURIComponent('"date_posted"')}${by}`;
+}
+// A page a post was found on, as liSourceUrl or liPostUrl built it ('' for anything else): a post with no address of
+// its own (search results have none) is found again there by its author and opening words.
+function liPage(url) {
+  const post = liPostUrl(url);
+  if (post) return post;
+  let u;
+  try { u = new URL(String(url || '')); } catch { return ''; }
+  if (u.origin !== LI) return '';
+  return /^\/(search\/results\/content\/|feed\/$|in\/[^/]+\/recent-activity\/|company\/[^/]+\/posts\/|newsletters\/[^/]+\/$)/.test(u.pathname) ? u.href : '';
+}
+
+function pageLinkedIn(op, arg = {}) {
+  const clean = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const CTL = 'button[aria-label^="Open control menu for post by"]';
+  const REACT = 'button[aria-label^="Reaction button state"]';
+  const EDITOR = '[role="textbox"][contenteditable="true"], [role="textbox"]';
+  const single = /^\/feed\/update\//.test(location.pathname);
+  const cardOf = (b) => { let e = b; while (e && !e.querySelector(REACT)) e = e.parentElement; return e; };
+  const cards = () => {
+    const seen = new Set(), out = [];
+    for (const b of document.querySelectorAll(CTL)) {
+      const el = cardOf(b);
+      if (!el || seen.has(el)) continue;
+      seen.add(el);
+      out.push({ el, author: clean(String(b.getAttribute('aria-label')).replace(/^Open control menu for post by\s*/, ''), 120) });
+    }
+    return out;
+  };
+  const body = (el) => clean(el.querySelector('[data-testid="expandable-text-box"]')?.innerText, 4000);
+  const liked = (el) => !/no reaction/i.test(el.querySelector(REACT)?.getAttribute('aria-label') || 'no reaction');
+  const urlOf = (el) => {
+    if (single) return `${location.origin}${location.pathname}`;
+    const a = el.querySelector('a[href*="/feed/update/urn:li:"]');
+    return a ? String(a.href).split(/[?#]/)[0] : '';
+  };
+  // Whose comments a post shows: on a post's own page the whole page, in a list just that post.
+  const scope = (el) => (single ? document : el);
+  const OPTS = /^View more options for\s*/;
+  const commenters = (root) => [...root.querySelectorAll('button[aria-label^="View more options for "]')]
+    .map((b) => clean(String(b.getAttribute('aria-label')).replace(OPTS, '').replace(/[’']s? comment\.?$/, ''), 120));
+  const age = (el) => /(?:^|\s)(\d+(?:mo|yr|m|h|d|w))\b/.exec(clean(el.innerText, 400))?.[1] || '';
+  const starts = (t) => clean(t, 60).toLowerCase();
+  const marked = () => document.querySelector(`[data-atelier-li="${arg.token}"]`);
+  const editorIn = (root) => [...root.querySelectorAll(EDITOR)].find((e) => e.getBoundingClientRect().height > 0) || null;
+  const insert = (ed, text) => { ed.focus(); const r = document.createRange(); r.selectNodeContents(ed); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('insertText', false, text); };
+  const submitNear = (ed, words) => {
+    let e = ed;
+    for (let i = 0; i < 9 && e; i++, e = e.parentElement) {
+      const b = [...e.querySelectorAll('button')].find((x) => words.includes(clean(x.innerText, 20)) && !x.getAttribute('aria-label') && !x.disabled);
+      if (b) return b;
+    }
+    return null;
+  };
+  if (op === 'state') {
+    const text = clean(document.body?.innerText, 6000);
+    const warning = /\/checkpoint\//.test(location.pathname)
+      || /unusual activity|temporarily (restricted|limited)|account (has been |is )?restricted|security (check|verification)|verify (that )?you(’|')?re (a )?(human|real)|we(’|')ve restricted/i.test(text);
+    const signedIn = !/^\/(login|uas|authwall|signup)/.test(location.pathname) && !/\/authwall/.test(location.href);
+    return { warning, signedIn };
+  }
+  if (op === 'scroll') { window.scrollBy(0, innerHeight * 2); document.getElementById('workspace')?.scrollBy(0, 2400); return true; }
+  if (op === 'posts') {
+    return cards().slice(0, arg.limit).map(({ el, author }) => ({
+      author, text: body(el).slice(0, 700), url: urlOf(el), liked: liked(el), age: age(el),
+      mine: Boolean(arg.me) && commenters(scope(el)).includes(arg.me),
+    }));
+  }
+  if (op === 'notifications') {
+    const out = [], seen = new Set();
+    for (const a of document.querySelectorAll('main a[href]')) {
+      let u;
+      try { u = new URL(a.href); } catch { continue; }
+      const urn = u.searchParams.get('highlightedUpdateUrn') || (/\/feed\/update\/(urn:li:[a-zA-Z]+:\d+)/.exec(u.pathname)?.[1]) || '';
+      if (!/^urn:li:(activity|ugcPost|share):\d+$/.test(urn)) continue;
+      const text = clean(a.innerText, 300);
+      if (!text || seen.has(urn + text)) continue;
+      seen.add(urn + text);
+      out.push({ text, url: `${location.origin}/feed/update/${urn}/` });
+      if (out.length >= arg.limit) break;
+    }
+    return out;
+  }
+  // The post asked for, marked with this request's token: on its own page the first post, else by author and opening words.
+  if (op === 'find') {
+    document.querySelectorAll('[data-atelier-li]').forEach((e) => e.removeAttribute('data-atelier-li'));
+    const all = cards();
+    const want = starts(arg.starts), who = clean(arg.author, 120).toLowerCase();
+    const hit = single ? all[0]
+      : all.find((c) => c.author.toLowerCase() === who && starts(body(c.el)).startsWith(want.slice(0, 40)))
+        || (want.length >= 20 ? all.find((c) => starts(body(c.el)).startsWith(want.slice(0, 40))) : null);
+    if (!hit) return { error: 'none' };
+    hit.el.setAttribute('data-atelier-li', arg.token);
+    const comments = [...scope(hit.el).querySelectorAll('button[aria-label^="View more options for "]')].slice(0, 40).map((b) => {
+      let c = b; for (let i = 0; i < 8 && c && !c.querySelector('[data-testid="expandable-text-box"]'); i++) c = c.parentElement;
+      return { author: clean(String(b.getAttribute('aria-label')).replace(OPTS, '').replace(/[’']s? comment\.?$/, ''), 120), text: clean(c?.querySelector('[data-testid="expandable-text-box"]')?.innerText, 300) };
+    });
+    return { author: hit.author, text: body(hit.el), url: urlOf(hit.el), liked: liked(hit.el), age: age(hit.el), mine: Boolean(arg.me) && commenters(scope(hit.el)).includes(arg.me), comments };
+  }
+  // More comments on a post's own page, so a comment already there by the owner shows before anything is posted.
+  if (op === 'more') {
+    const b = [...document.querySelectorAll('button')].find((x) => /^load more comments$/i.test(x.getAttribute('aria-label') || clean(x.innerText, 40)));
+    if (!b) return { more: false };
+    b.click();
+    return { more: true };
+  }
+  if (op === 'mine') { const el = marked(); return { n: el ? commenters(scope(el)).filter((n) => n === arg.me).length : -1 }; }
+  if (op === 'liked') { const el = marked(); return el ? { liked: liked(el) } : { error: 'none' }; }
+  if (op === 'like') {
+    const el = marked();
+    if (!el) return { error: 'none' };
+    if (liked(el)) return { already: true };
+    el.querySelector(REACT).click();
+    return { clicked: true };
+  }
+  // The comment box under the marked post, opened if it isn't showing yet. A draft already in it is never posted along.
+  if (op === 'openComment') {
+    const el = marked();
+    if (!el) return { error: 'none' };
+    let ed = editorIn(el) || (single ? editorIn(document) : null);
+    if (!ed) { const b = el.querySelector('button[aria-label="Comment"]'); if (!b) return { error: 'box' }; b.click(); return { opened: true }; }
+    return { ready: true };
+  }
+  if (op === 'typeComment') {
+    const el = marked();
+    if (!el) return { error: 'none' };
+    const ed = editorIn(el) || (single ? editorIn(document) : null);
+    if (!ed) return { error: 'box' };
+    if (clean(ed.innerText, 10)) return { error: 'draft' };
+    insert(ed, String(arg.text));
+    ed.setAttribute('data-atelier-ed', arg.token);
+    return { typed: clean(ed.innerText, 4000) === clean(arg.text, 4000) };
+  }
+  // Reply under one person's comment: its own Reply button, then the box that opens under it, after the name LinkedIn
+  // puts there.
+  if (op === 'openReply') {
+    const who = clean(arg.to, 120);
+    const b = [...document.querySelectorAll('button[aria-label^="View more options for "]')]
+      .find((x) => clean(String(x.getAttribute('aria-label')).replace(OPTS, '').replace(/[’']s? comment\.?$/, ''), 120).toLowerCase() === who.toLowerCase());
+    if (!b) return { error: 'none' };
+    let c = b; for (let i = 0; i < 10 && c && !c.querySelector('button[aria-label="Reply"]'); i++) c = c.parentElement;
+    const reply = c?.querySelector('button[aria-label="Reply"]');
+    if (!reply) return { error: 'none' };
+    document.querySelectorAll('[data-atelier-li]').forEach((e) => e.removeAttribute('data-atelier-li'));
+    c.setAttribute('data-atelier-li', arg.token);
+    reply.click();
+    return { opened: true };
+  }
+  if (op === 'typeReply') {
+    const c = marked();
+    if (!c) return { error: 'none' };
+    const ed = editorIn(c);
+    if (!ed) return { error: 'box' };
+    const had = clean(ed.innerText, 200);
+    if (had && !had.toLowerCase().startsWith(clean(arg.to, 60).split(' ')[0].toLowerCase())) return { error: 'draft' };
+    insert(ed, `${had && !/\s$/.test(ed.innerText.replace(/\n$/, '')) ? ' ' : ''}${arg.text}`);
+    ed.setAttribute('data-atelier-ed', arg.token);
+    return { typed: clean(ed.innerText, 4000).endsWith(clean(arg.text, 4000)) };
+  }
+  if (op === 'compose') {
+    const b = [...document.querySelectorAll('button, [role="button"]')].find((x) => /^start a post/i.test(clean(x.innerText || x.getAttribute('aria-label'), 40)));
+    if (!b) return { error: 'box' };
+    b.click();
+    return { opened: true };
+  }
+  if (op === 'typePost') {
+    const dlg = document.querySelector('[role="dialog"]');
+    const ed = dlg && editorIn(dlg);
+    if (!ed) return { error: 'box' };
+    if (clean(ed.innerText, 10)) return { error: 'draft' };
+    insert(ed, String(arg.text));
+    ed.setAttribute('data-atelier-ed', arg.token);
+    return { typed: clean(ed.innerText, 4000) === clean(arg.text, 4000) };
+  }
+  if (op === 'submit') {
+    const ed = document.querySelector(`[data-atelier-ed="${arg.token}"]`);
+    if (!ed) return { error: 'box' };
+    const b = submitNear(ed, arg.words || ['Comment']);
+    if (!b) return { error: 'button' };
+    b.click();
+    return { clicked: true };
+  }
+  // After a submit: the box emptied or gone (a post's dialog closed), and the words now on the page.
+  if (op === 'posted') {
+    const ed = document.querySelector(`[data-atelier-ed="${arg.token}"]`);
+    const gone = !ed || !ed.isConnected || !clean(ed.innerText, 10);
+    const shown = clean(document.body?.innerText, 400000).includes(clean(arg.text, 120));
+    return { gone, shown };
+  }
+  return null;
+}
+// The owner's name as LinkedIn has it: the title of his own profile page ("Cole Ciprari | LinkedIn").
+async function pageLinkedInMe() {
+  const r = await fetch('/in/me/', { credentials: 'include' });
+  const title = /<title>([^<]*)<\/title>/.exec(await r.text())?.[1] || '';
+  return { name: title.replace(/\s*\|\s*LinkedIn\s*$/i, '').replace(/&amp;/g, '&').replace(/&#39;|&#x27;/g, '’').trim(), signedIn: !/\/(login|authwall|uas)/.test(r.url) };
+}
+
+async function liStore() {
+  const got = await chrome.storage.local.get(['liDay', 'liLast', 'liPause', 'liDone']).catch(() => ({}));
+  const today = new Date().toISOString().slice(0, 10);
+  const day = got.liDay?.date === today ? got.liDay : { date: today, like: 0, comment: 0, post: 0 };
+  const now = Date.now();
+  const done = Object.fromEntries(Object.entries(got.liDone || {}).filter(([, t]) => now - Number(t) < LI_KEEP));
+  return { day, last: got.liLast || {}, pause: Number(got.liPause) || 0, done };
+}
+async function liCheckPause() {
+  const { pause } = await liStore();
+  if (pause > Date.now()) throw new Error(`${LI_WARNING} It resumes in about ${Math.ceil((pause - Date.now()) / 3600_000)} h.`);
+}
+// Before a write: the 24-hour stop, the day's cap and the human pause since the last write of that kind.
+async function liGate(kind) {
+  const st = await liStore();
+  if (st.pause > Date.now()) throw new Error(`${LI_WARNING} It resumes in about ${Math.ceil((st.pause - Date.now()) / 3600_000)} h.`);
+  if (st.day[kind] >= LI_LIMITS[kind]) throw new Error(`That is today’s limit of ${LI_LIMITS[kind]} LinkedIn ${kind === 'like' ? 'likes' : kind === 'post' ? 'posts' : 'comments and replies'}, so nothing was done. It resets tomorrow.`);
+  const [lo, hi] = LI_GAP[kind];
+  const wait = Number(st.last[kind] || 0) + lo + Math.random() * (hi - lo) - Date.now();
+  if (wait > LI_MAX_WAIT) throw new Error(`Atelier spaces LinkedIn actions out like a person would. Try this one again in ${Math.ceil(wait / 1000)} s.`);
+  if (wait > 0) await sleep(wait);
+}
+async function liNote(kind, key) {
+  const st = await liStore();
+  st.day[kind] += 1;
+  st.last[kind] = Date.now();
+  if (key) st.done[key] = Date.now();
+  await chrome.storage.local.set({ liDay: st.day, liLast: st.last, liDone: st.done }).catch(() => {});
+}
+async function liStop() { await chrome.storage.local.set({ liPause: Date.now() + LI_PAUSE }).catch(() => {}); }
+
+// The one background tab LinkedIn work happens in: reused while it is still on LinkedIn, else a new one.
+async function liTab(url) {
+  const { liTabId } = await chrome.storage.session.get('liTabId').catch(() => ({}));
+  let tab = Number.isInteger(liTabId) ? await chrome.tabs.get(liTabId).catch(() => null) : null;
+  if (tab && !String(tab.url || '').startsWith(LI)) tab = null;
+  if (tab) await chrome.tabs.update(tab.id, { url });
+  else { tab = await chrome.tabs.create({ url, active: false }); chrome.storage.session.set({ liTabId: tab.id }).catch(() => {}); }
+  chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
+  await waitForLoad(tab.id);
+  await sleep(TIMING.li);
+  const page = (op, arg = {}) => withTimeout(inPage(tab.id, pageLinkedIn, [op, arg]), TIMING.read, NOT_RESPONDING);
+  const st = await page('state');
+  if (st?.warning) { await liStop(); throw new Error(LI_WARNING); }
+  if (!st?.signedIn) throw new Error(LI_NOT_SIGNED_IN);
+  return { tab, page };
+}
+async function liMe(tabId) {
+  const { liMe: saved } = await chrome.storage.session.get('liMe').catch(() => ({}));
+  if (saved) return saved;
+  const me = await withTimeout(inPage(tabId, pageLinkedInMe), TIMING.read, NOT_RESPONDING).catch(() => null);
+  if (!me?.signedIn) throw new Error(LI_NOT_SIGNED_IN);
+  if (me.name) chrome.storage.session.set({ liMe: me.name }).catch(() => {});
+  return me.name || '';
+}
+// A post the tools pass around: its own address, or the page it was listed on plus its author and opening words.
+function liHandle(a = {}) {
+  const url = liPostUrl(a.url), page = url || liPage(a.page);
+  if (!page) throw new Error('Pass url (a post address) or page, author and starts from linkedin_posts.');
+  const starts = String(a.starts || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const author = String(a.author || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!url && (!author || starts.length < 20)) throw new Error('A post without its own address needs author and starts (its first words) from linkedin_posts.');
+  return { url, page, author, starts, key: url || `${author}|${starts.slice(0, 60).toLowerCase()}` };
+}
+async function liOpen(h, { comments = false } = {}) {
+  const { tab, page } = await liTab(h.page);
+  const me = await liMe(tab.id);
+  const token = crypto.randomUUID();
+  if (comments && /\/feed\/update\//.test(h.page)) {
+    for (let i = 0; i < 3 && (await page('more'))?.more; i++) await sleep(1200);
+  }
+  let post = await page('find', { author: h.author, starts: h.starts, token, me });
+  for (let i = 0; i < 2 && post?.error && !h.url; i++) { await page('scroll'); await sleep(1500); post = await page('find', { author: h.author, starts: h.starts, token, me }); }
+  if (!post || post.error) throw new Error(LI_NO_POST);
+  return { tab, page, me, token, post };
+}
+
 // ── commands ── (ctx.via: 'local' for the Atelier tab in this browser, 'remote' for the relay; ctx.approved: the
 // owner approved this step in Atelier)
 const COMMANDS = {
@@ -809,6 +1135,108 @@ const COMMANDS = {
     }
     throw new Error('Unknown personal texts action.');
   },
+  // LinkedIn in this browser: op posts / notifications / read / like / comment / reply / post (see pageLinkedIn).
+  async linkedin(args = {}, ctx = {}) {
+    const op = String(args.op || '');
+    if (op === 'posts') {
+      await liCheckPause();
+      const url = liSourceUrl(args);
+      const limit = clampInt(args.limit, 1, 25, 10);
+      const { tab, page } = await liTab(url);
+      const me = await liMe(tab.id);
+      let posts = (await page('posts', { limit, me })) || [];
+      for (let i = 0; i < 3 && posts.length < limit; i++) { await page('scroll'); await sleep(1500); posts = (await page('posts', { limit, me })) || []; }
+      return { page: url, me, posts };
+    }
+    if (op === 'notifications') {
+      await liCheckPause();
+      const { page } = await liTab(`${LI}/notifications/`);
+      return { notifications: (await page('notifications', { limit: clampInt(args.limit, 1, 40, 20) })) || [] };
+    }
+    if (op === 'read') {
+      await liCheckPause();
+      const h = liHandle(args);
+      const { post, me } = await liOpen(h, { comments: true });
+      return { ...post, me };
+    }
+    if (!['like', 'comment', 'reply', 'post'].includes(op)) throw new Error('Unknown LinkedIn action.');
+    if (ctx.approved !== true) throw new Error(LI_NEEDS_APPROVAL);
+    const kind = op === 'reply' ? 'comment' : op;
+    const text = String(args.text ?? '').trim();
+    if (op !== 'like') {
+      if (!text) throw new Error('Pass the text.');
+      if (/[–—]/.test(text)) throw new Error('The text has a dash the owner never uses (— or –). Rewrite it without one.');
+      if (text.length > LI_MAX[kind]) throw new Error(`That is over LinkedIn’s ${LI_MAX[kind]} characters.`);
+    }
+    if (op === 'post') {
+      await liGate('post');
+      await confirmFirst('linkedin', { to: 'A new post on your LinkedIn', url: `${LI}/feed/`, op, text }, ctx.via);
+      const { page } = await liTab(`${LI}/feed/`);
+      const token = crypto.randomUUID();
+      if ((await page('compose'))?.error) throw new Error('Couldn’t find “Start a post” on LinkedIn, so nothing was posted.');
+      await sleep(1500);
+      const typed = await page('typePost', { text, token });
+      if (typed?.error === 'draft') throw new Error('LinkedIn’s post box already holds a draft, so nothing was posted. Ask the user to clear it.');
+      if (!typed?.typed) throw new Error('The text didn’t go into LinkedIn’s post box, so nothing was posted.');
+      await sleep(800 + Math.random() * 1200);
+      if ((await page('submit', { token, words: ['Post'] }))?.error) throw new Error('Couldn’t find LinkedIn’s Post button, so nothing was posted. The text is still in the box.');
+      for (let waited = 0; waited < 8000; waited += 1000) {
+        await sleep(1000);
+        if ((await page('posted', { token, text }).catch(() => null))?.gone) { await liNote('post'); return { posted: true }; }
+      }
+      throw new Error(LI_UNKNOWN);
+    }
+    const h = liHandle(args);
+    if (op === 'reply' && !h.url) throw new Error('A reply needs url: the post’s own address.');
+    const to = String(args.to || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (op === 'reply' && !to) throw new Error('Pass to: the name of the person whose comment this answers.');
+    const key = op === 'reply' ? `${h.key}|reply|${to.toLowerCase()}` : h.key;
+    if (op !== 'like' && (await liStore()).done[key]) throw new Error(`Atelier already ${op === 'reply' ? `replied to ${to} there` : 'commented on that post'}, so nothing was posted. Never twice.`);
+    await liGate(kind);
+    let { page, me, token, post } = await liOpen(h, { comments: op !== 'like' });
+    if (op === 'like' && post.liked) return { liked: true, already: true, author: post.author };
+    if (op === 'comment' && post.mine) { await liNote('comment', key).catch(() => {}); throw new Error('The user already commented on that post, so nothing was posted. Never twice.'); }
+    const about = `${post.author || h.author || 'this person'}’s post`;
+    await confirmFirst('linkedin', { to: op === 'like' ? `Like ${about}` : op === 'reply' ? `Reply to ${to} on ${about}` : `Comment on ${about}`, url: post.url || h.page, op, text: op === 'like' ? '' : text }, ctx.via);
+    // The confirmation took time: the page is found again before anything is clicked.
+    post = await page('find', { author: h.author || post.author, starts: h.starts || post.text, token, me });
+    if (!post || post.error) throw new Error(LI_NO_POST);
+    if ((await page('state'))?.warning) { await liStop(); throw new Error(LI_WARNING); }
+    await sleep(600 + Math.random() * 1400);
+    if (op === 'like') {
+      const r = await page('like', { token });
+      if (r?.already) return { liked: true, already: true, author: post.author };
+      if (!r?.clicked) throw new Error(LI_NO_POST);
+      for (let waited = 0; waited < 5000; waited += 500) {
+        await sleep(500);
+        if ((await page('liked', { token }))?.liked) { await liNote('like'); return { liked: true, author: post.author, url: post.url || '' }; }
+      }
+      throw new Error(LI_UNKNOWN);
+    }
+    if (op === 'comment') {
+      const open = await page('openComment', { token });
+      if (open?.error) throw new Error('Couldn’t open the comment box on that post, so nothing was posted.');
+      if (open?.opened) await sleep(1500);
+      const typed = await page('typeComment', { text, token });
+      if (typed?.error === 'draft') throw new Error('That post’s comment box already holds a draft, so nothing was posted. Ask the user to clear it.');
+      if (!typed?.typed) throw new Error('The text didn’t go into the comment box, so nothing was posted.');
+    } else {
+      if ((await page('openReply', { to, token }))?.error) throw new Error(`Couldn’t find ${to}’s comment on that post, so nothing was posted.`);
+      await sleep(1500);
+      const typed = await page('typeReply', { to, text, token });
+      if (typed?.error === 'draft') throw new Error('That reply box already holds other text, so nothing was posted. Ask the user to clear it.');
+      if (!typed?.typed) throw new Error('The text didn’t go into the reply box, so nothing was posted.');
+    }
+    await sleep(800 + Math.random() * 1200);
+    if ((await page('submit', { token, words: op === 'reply' ? ['Reply', 'Comment'] : ['Comment', 'Post'] }))?.error) throw new Error('Couldn’t find the button that posts it, so nothing was posted. The text is still in the box.');
+    await liNote(kind, key); // from here it may have gone out: never again, whatever the check below finds
+    for (let waited = 0; waited < 8000; waited += 1000) {
+      await sleep(1000);
+      const r = await page('posted', { token, text }).catch(() => null);
+      if (r?.gone && r.shown) return { posted: true, as: me, on: post.author, url: post.url || '' };
+    }
+    throw new Error(LI_UNKNOWN);
+  },
   async show({ tabId }) {
     const t = await chrome.tabs.update(tabId, { active: true });
     await chrome.windows.update(t.windowId, { focused: true });
@@ -875,7 +1303,7 @@ function scheduleReconnect() {
   setTimeout(connectRelay, 1000 * 2 ** retry); // 2s … 64s
 }
 // Commands the server may send (pairing/status are local-only).
-const REMOTE_COMMANDS = ['tabs', 'read', 'open', 'elements', 'describe', 'click', 'type', 'signin', 'messages', 'gmessages', 'show'];
+const REMOTE_COMMANDS = ['tabs', 'read', 'open', 'elements', 'describe', 'click', 'type', 'signin', 'messages', 'gmessages', 'linkedin', 'show'];
 
 // Local-only: pairing handed over by the Atelier page on this computer.
 COMMANDS.pair = async ({ token, origin }) => {

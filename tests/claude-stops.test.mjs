@@ -6,6 +6,7 @@
 // against stubs, as tests/untrusted-turns.test.mjs does, with the real Worker adapter behind the client's fetch.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import * as LinkedIn from '../public/linkedin.js';
 import { readFile } from 'node:fs/promises';
 import { claudeChat, afterFallback, turnAfterFallback, STOPS, PAUSE_CONTINUATIONS, CLAUDE_MAX_OUTPUT, CLAUDE_UNLISTED_MAX } from '../src/anthropic.js';
 import { followUpRoute, threadTaint, ownTaint, taintGates, taintNote, readsPage, pageOrigin, worseTaint, buildHistory, withSent } from '../public/context.js';
@@ -270,6 +271,7 @@ const DEFS = [{ name: 'gmail_search', service: 'gmail' }, { name: 'gmail_draft',
 function rig({ chains = {}, other = () => openaiSSE([{ delta: { content: 'other' } }, { finish: 'stop' }]), tester = null } = {}) {
   const calls = { bodies: [], toasts: [], tools: [], approvals: [] };
   const vars = {
+    ...LinkedIn,
     S: { settings: { temperature: 0.5, models: {}, passcode: 'p' }, tester },
     fetch: async (url, init) => {
       assert.equal(url, '/api/chat');

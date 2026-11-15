@@ -120,7 +120,7 @@ test('personal texts: the command needs approval to send, asks like a text from 
   assert.match(cmd, /if \(before\?\.here !== got\.chat\) throw new Error\(GM_NOT_SENT\);/, 'the tab moved on while the user was asked: nothing is typed');
   assert.match(cmd, /if \(now\?\.here === got\.chat && now\.n > before\.n\) return \{ sent: true, to: got\.name \|\| to, chat: got\.chat, via: 'Google Messages' \};/, 'sent only once a new outgoing message shows');
   assert.equal((cmd.match(/return \{ sent: true/g) || []).length, 1);
-  assert.match(BACKGROUND, /const REMOTE_COMMANDS = \[[^\]]*'messages', 'gmessages', 'show'\];/);
+  assert.match(BACKGROUND, /const REMOTE_COMMANDS = \[[^\]]*'messages', 'gmessages', 'linkedin', 'show'\];/);
   assert.match(BACKGROUND, /const tabs = await chrome\.tabs\.query\(\{ url: GM_URL \}\);/);
   assert.match(BACKGROUND, /if \(!tab\) throw new Error\(GM_NOT_OPEN\);/);
   assert.match(BACKGROUND, /if \(!st\?\.paired\) throw new Error\(GM_NOT_PAIRED\);/);
@@ -135,7 +135,7 @@ test('personal texts: the app’s three tools, their wording to the model, and w
   assert.match(APP, /Use those when the user says personal, or names that phone\. Use the messages_ tools for the work phone, the iPhone, the Mac, or when they don't say\./);
   // This browser has no Google Messages tab: the other computers are asked.
   assert.match(APP, /if \(cmd === 'gmessages' && \/\^Google Messages isn’t \(open\|paired\) in this browser\/\.test\(err\?\.message \|\| ''\)\) return viaRelay\(\);/);
-  assert.match(WORKER, /const allowed = \[[^\]]*'messages', 'gmessages', 'show'\];/);
+  assert.match(WORKER, /const allowed = \[[^\]]*'messages', 'gmessages', 'linkedin', 'show'\];/);
 });
 
 test('personal texts: the relay needs approval for a send, and asks each computer until one has the tab', async () => {

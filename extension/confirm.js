@@ -20,16 +20,20 @@ const port = chrome.runtime.connect({ name: 'atelier-confirm' });
 
 function render(i) {
   info = i;
-  const typing = i.action === 'type', signing = i.action === 'signin', texting = i.action === 'sms';
+  const typing = i.action === 'type', signing = i.action === 'signin', texting = i.action === 'sms', linked = i.action === 'linkedin';
+  // LinkedIn (1.4.9): like, comment, reply or post. el.type holds which, el.label whose post.
+  const op = linked ? (i.element || {}).type : '';
+  const LI_TITLE = { like: 'Allow Atelier to like this LinkedIn post?', comment: 'Allow Atelier to post this LinkedIn comment?', reply: 'Allow Atelier to post this LinkedIn reply?', post: 'Allow Atelier to publish this LinkedIn post?' };
   const el = i.element || {}, page = i.page || {};
-  document.title = `${typing ? 'Allow typing?' : signing ? 'Allow sign-in?' : texting ? 'Allow sending a text?' : 'Allow click?'} — Atelier Browser`;
-  $('title').textContent = typing ? (i.submit ? 'Allow Atelier to type and submit?' : 'Allow Atelier to type?') : signing ? 'Allow Atelier to sign in?' : texting ? 'Allow Atelier to send a text?' : 'Allow Atelier to click?';
+  document.title = `${typing ? 'Allow typing?' : signing ? 'Allow sign-in?' : texting ? 'Allow sending a text?' : linked ? 'Allow on LinkedIn?' : 'Allow click?'} — Atelier Browser`;
+  $('title').textContent = typing ? (i.submit ? 'Allow Atelier to type and submit?' : 'Allow Atelier to type?') : signing ? 'Allow Atelier to sign in?' : texting ? 'Allow Atelier to send a text?' : linked ? (LI_TITLE[op] || 'Allow Atelier to act on LinkedIn?') : 'Allow Atelier to click?';
   $('via').textContent = VIA[i.via] || 'Atelier is asking.';
   $('action').textContent = typing ? (i.submit ? 'Type the text below, then submit it' : 'Type the text below')
     : signing ? 'Sign in with the password Chrome saved for this site. Atelier never sees it.'
-    : texting ? 'Send the text below from Messages on this Mac, to:' : 'Click';
+    : texting ? 'Send the text below from Messages on this Mac, to:'
+    : linked ? 'On LinkedIn, signed in as you:' : 'Click';
   $('label').textContent = el.label ? `“${el.label}”` : '(no label)';
-  $('kind').textContent = texting ? 'Messages' : `${el.tag || 'element'}${el.type ? ` · ${el.type}` : ''}`;
+  $('kind').textContent = texting ? 'Messages' : linked ? 'LinkedIn' : `${el.tag || 'element'}${el.type ? ` · ${el.type}` : ''}`;
   $('kind').hidden = false;
   let host = '';
   try { host = new URL(page.url).host; } catch {}
@@ -41,9 +45,9 @@ function render(i) {
   $('near').textContent = el.near ? `In: “${el.near}”` : '';
   $('href').hidden = !el.href;
   $('href').textContent = el.href ? `Link to ${el.href}` : '';
-  if (typing || texting) {
+  if (typing || texting || (linked && i.text)) {
     $('typed').hidden = false;
-    $('typedTitle').textContent = texting ? 'Text to send' : 'Text to type'; // 1.4.1: a text message had the typing heading
+    $('typedTitle').textContent = texting ? 'Text to send' : linked ? (op === 'post' ? 'Post to publish' : op === 'reply' ? 'Reply to post' : 'Comment to post') : 'Text to type'; // 1.4.1: a text message had the typing heading
     $('text').textContent = i.text || '(nothing: the field is cleared)';
     if (i.more > 0) { $('more').hidden = false; $('more').textContent = `…and ${i.more} more characters.`; }
   }

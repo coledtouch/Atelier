@@ -7,6 +7,7 @@
 // API and every other provider are fetch mocks: no real call is ever made.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import * as LinkedIn from '../public/linkedin.js';
 import { readFile } from 'node:fs/promises';
 import { claudeChat, cacheMin } from '../src/anthropic.js';
 import { geminiSseToOpenAI } from '../src/gemini.js';
@@ -59,10 +60,10 @@ class FakeDate extends Date {
 }
 // persona / capabilities / SYS, and runPrompt / agentTools (what a thread turn's prompt and tool list state for its run),
 // with stubs for the app's state.
-const PROMPT_CONSTS = ['ACCURACY', 'NO_FABRICATION', 'flowLine', 'TZ', 'tzOffset', 'dateLine', 'liveBrowser', 'historyWindow', 'RUN_BROWSER', 'B_TAB', 'B_EL', 'BROWSER_TOOLS', 'MESSAGES_TOOLS', 'agentTools'];
+const PROMPT_CONSTS = ['ACCURACY', 'NO_FABRICATION', 'flowLine', 'TZ', 'tzOffset', 'dateLine', 'liveBrowser', 'historyWindow', 'RUN_BROWSER', 'B_TAB', 'B_EL', 'BROWSER_TOOLS', 'MESSAGES_TOOLS', 'LINKEDIN_TOOLS', 'agentTools'];
 function promptRig({ memory = [], tester = null, vars: more = {} } = {}) {
   const vars = {
-    Date: FakeDate, S: { settings: { name: 'Cole', about: '' }, tester }, ME: { bio: 'Builds Atelier.', learned: '', memory },
+    ...LinkedIn, Date: FakeDate, S: { settings: { name: 'Cole', about: '' }, tester }, ME: { bio: 'Builds Atelier.', learned: '', memory },
     TOOLS: { services: { gmail: true, github: true, githubAccounts: [{ label: 'cole' }] }, list: [] }, EXT: { ready: false }, REMOTE: { online: false }, claudeChats: 0,
     factsFor, factsInUse, runStart, memoryAnchor, heldForRun, TESTER_HISTORY, buildHistory,
     ...more,
@@ -177,7 +178,7 @@ test('the browser’s reachability is held for the run: a relay flip between fol
   const r1 = v.runPrompt(turn(0), t);
   const s1 = v.SYS.code(r1), tools1 = v.agentTools(r1.browser).map((x) => x.function.name);
   assert.match(s1, /Connected right now: [^.]*their computer’s browser \(remotely\)/);
-  assert.equal(tools1.length, 15, 'gmail_search + the 8 browser tools + the 3 Messages tools + the 3 personal-text tools (v131)');
+  assert.equal(tools1.length, 23, 'gmail_search + the 8 browser tools + the 3 Messages tools + the 3 personal-text tools (v131) + the 8 LinkedIn tools (v140)');
   v.REMOTE.online = false;
   const r2 = v.runPrompt(turn(1), t);
   assert.equal(r2.browser, 'remote');
@@ -476,6 +477,7 @@ const FNS = ['withoutThinking', 'streamChat', 'streamChatOnce', 'streamChatRaw',
 function chatRig({ other } = {}) {
   const bodies = [];
   const vars = {
+    ...LinkedIn,
     S: { settings: { temperature: 0.5, models: {}, passcode: 'p' }, tester: null },
     fetch: async (url, init) => { const body = JSON.parse(init.body); bodies.push(body); return body.model.startsWith('anthropic:') ? claudeChat(body, 'sk-ant-test') : other(body); },
     noteAllowance() {}, isTesterCode, modelLabel: (m) => m, toast() {}, navigator: { onLine: true },
