@@ -15,6 +15,8 @@ const COMMAND_TIMEOUT_MS = 90_000;
 export function relayNeedsApproval(cmd, args) {
   if (cmd === 'click' || cmd === 'type' || cmd === 'signin' || cmd === 'open') return true;
   if (cmd === 'messages' || cmd === 'gmessages') return args?.op === 'send';
+  // LinkedIn (v140): a like, comment, reply or post. Reading posts goes only to pages the extension builds itself.
+  if (cmd === 'linkedin') return ['like', 'comment', 'reply', 'post'].includes(args?.op);
   return cmd === 'read' && Boolean(args?.url);
 }
 

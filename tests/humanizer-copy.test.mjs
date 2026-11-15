@@ -10,6 +10,7 @@
 // No provider is ever called: /api/chat is a mock that answers with a canned stream.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as LinkedIn from '../public/linkedin.js';
 import { readFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { HUMANIZER } from '../public/humanizer.js';
@@ -484,7 +485,7 @@ class FakeDate extends Date {
   static now() { return clock; }
 }
 const GMAIL = { type: 'function', function: { name: 'gmail_draft', description: 'Save a draft', parameters: { type: 'object', properties: { body: { type: 'string' } } } }, 'x-service': 'gmail', 'x-label': 'Save Gmail draft' };
-const PROMPT = ['ACCURACY', 'NO_FABRICATION', 'TZ', 'tzOffset', 'dateLine', 'liveBrowser', 'historyWindow', 'RUN_BROWSER', 'B_TAB', 'B_EL', 'BROWSER_TOOLS', 'agentTools', 'SENT_AS_THEM', 'AS_GIVEN'];
+const PROMPT = ['ACCURACY', 'NO_FABRICATION', 'TZ', 'tzOffset', 'dateLine', 'liveBrowser', 'historyWindow', 'RUN_BROWSER', 'B_TAB', 'B_EL', 'BROWSER_TOOLS', 'LINKEDIN_TOOLS', 'agentTools', 'SENT_AS_THEM', 'AS_GIVEN'];
 const STREAM = ['EMPTY_NUDGE', 'shows', 'THINKING_BLOCKS', 'replayRounds', 'replayable', 'MAX_OUTPUT', 'HELPER_ROLES', 'UNLISTED_CLAUDE_ROOM', 'roomFor', 'SSE_ERRORS', 'EFFORT', 'FIRST_TOKEN_MS', 'providerOf', 'accountProblem', 'sleep', 'asksFirst', 'urlHost'];
 const FNS = ['persona', 'capabilities', 'voiceBlock', 'nameRules', 'runPrompt', 'historyFor', 'withoutThinking', 'streamChat', 'streamChatOnce', 'streamChatRaw', 'apiHeaders', 'toApiError', 'extCall', 'runChat', 'runAgent', 'runWatch'];
 const sseOf = (events) => new Response(new ReadableStream({ start(c) { for (const e of events) c.enqueue(new TextEncoder().encode(e)); c.close(); } }), { headers: { 'content-type': 'text/event-stream' } });
@@ -494,6 +495,7 @@ const reply = () => sseOf(['data: {"choices":[{"index":0,"delta":{"content":"Don
 function rig({ tester = null } = {}) {
   const bodies = [], roles = [];
   const vars = {
+    ...LinkedIn,
     Date: FakeDate, HUMANIZER,
     S: { settings: { name: 'Cole', about: '', temperature: 0.5, models: {}, passcode: 'p' }, tester },
     ME: { bio: 'Builds Atelier.', learned: '', memory: [], style: 'Short and plain. Signs off "C".', samples: 'Quick one: can we move Friday to 3? C' },

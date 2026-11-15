@@ -255,7 +255,7 @@ test('app-2 #10: a button on an earlier turn never takes, or clears, the photos 
   assert.match(submit, /if \(ownSend && !extra\.images\) \{ S\.attachments = \[\]; renderAttachments\(\); \}/);
   // Every send that names its own text comes from a button on an entry (or Look up, which passes its own images).
   const named = [...APP.matchAll(/[^a-zA-Z.]submit\(([^)\n]{1,40})/g)].map((m) => m[1]).filter((a) => a && !/^(undefined|textArg)/.test(a));
-  assert.deepEqual(named.map((a) => a.split(',')[0].trim().slice(0, 12)), ['e.prompt', '`Expand this', '`Build a wor', '`${d.title}:', '`Turn this i', 'prompt']);
+  assert.deepEqual(named.map((a) => a.split(',')[0].trim().slice(0, 12)), ['TODAY_PROMPT', 'e.prompt', '`Expand this', '`Build a wor', '`${d.title}:', '`Turn this i', 'prompt']);
 });
 
 // ── app-4 #7, #8, #11: You and the Testers panel ──
@@ -464,9 +464,9 @@ test('ui #4, #12, Messages row: the browser bar follows the chosen theme, the to
 
 test('v136: an old extension behind the relay says to update it, not "Unknown command gmessages"', async () => {
   const relay = (error) => async () => ({ ok: false, status: 400, json: async () => ({ ok: false, error }) });
-  const vars = lift({ EXT: { ready: false }, REMOTE: { online: true }, MIN_EXT: '1.4.8', apiHeaders: () => ({}), deviceKind: () => 'linux',
+  const vars = lift({ EXT: { ready: false }, REMOTE: { online: true }, MIN_EXT: '1.4.9', apiHeaders: () => ({}), deviceKind: () => 'linux',
     fetch: relay('Unknown command gmessages') }, 'extCall');
-  await assert.rejects(vars.extCall('gmessages', { op: 'recent' }), /has an old copy\. Update it to 1\.4\.8 in Settings → Connections/);
+  await assert.rejects(vars.extCall('gmessages', { op: 'recent' }), /has an old copy\. Update it to 1\.4\.9 in Settings → Connections/);
   await assert.rejects(vars.extCall('signin', {}), /Saved-password sign-in needs Atelier Browser 1\.4\.0/);
   vars.fetch = relay('Google Messages isn’t open in any browser.');
   await assert.rejects(vars.extCall('gmessages', {}), /^Error: Google Messages isn’t open in any browser\.$/);

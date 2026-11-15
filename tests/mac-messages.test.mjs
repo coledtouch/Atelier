@@ -185,7 +185,7 @@ test('app: asking for texts reaches the agent while a browser is connected, typo
   const hint = new Function(`return ${/\nconst MESSAGES_HINT = (\/[^\n]+\/i);/.exec(app)[1]};`)();
   for (const p of ['read my most recent sm,s', 'read my sms', "check my sm's", 'any new texts?', 'what did Scott text me', 'show my txts', 'my iMessages', 'S M S from mom']) assert.ok(hint.test(p), p);
   for (const p of ['write a poem about summer', 'small steps', 'the smiths', 'is mom ok', 'some numbers']) assert.ok(!hint.test(p), p);
-  assert.match(app, /\(Boolean\(browser\) && \(BROWSER_HINT\.test\(e\.prompt\) \|\| MESSAGES_HINT\.test\(e\.prompt\)\)\)/);
+  assert.match(app, /\(Boolean\(browser\) && \(BROWSER_HINT\.test\(e\.prompt\) \|\| MESSAGES_HINT\.test\(e\.prompt\) \|\| LINKEDIN_HINT\.test\(e\.prompt\)\)\)/);
 });
 
 // Sending, with the macOS side played (helper 1.0.2 to 1.0.5, v115 to v121).

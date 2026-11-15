@@ -1096,6 +1096,29 @@ a.chip { text-decoration: none; display: inline-flex; align-items: center; }
 .ac-acts { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
 .ac-acts .btn-primary { padding: 9px 18px; font-size: 14px; }
 
+/* Today's LinkedIn (v140, linkedin.js todayHtml): drafts the owner taps one at a time */
+.li-today { margin: 4px 0 14px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line-2)); border-radius: 16px; background: color-mix(in srgb, var(--accent) 4%, var(--bg-2)); padding: 14px; }
+.li-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.li-head b { font-size: 15px; }
+.li-head span { margin-left: auto; font: 500 11px/1.4 var(--mono); color: var(--ink-3); }
+.li-note { margin: 4px 0 6px; font-size: 13px; color: var(--ink-3); }
+.li-part { margin: 14px 0 6px; font: 600 10px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.li-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.li-row { padding: 10px 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); overflow-wrap: anywhere; }
+.li-row.done, .li-row.skipped { opacity: .62; }
+.li-row.error { border-color: color-mix(in srgb, var(--danger, #c0392b) 55%, var(--line)); }
+.li-who { margin: 0; font-size: 14px; }
+.li-who span { color: var(--ink-3); font-size: 13px; }
+.li-who a { margin-left: 6px; font-size: 12px; }
+.li-about { margin: 3px 0 0; font-size: 13px; color: var(--ink-2); }
+.li-said { margin: 6px 0 0; font-size: 14px; white-space: pre-wrap; }
+.li-err { margin: 6px 0 0; font-size: 13px; color: var(--danger, #c0392b); }
+.li-text { display: block; width: 100%; margin-top: 8px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 14px; line-height: 1.5; resize: vertical; outline: 0; }
+.li-text:focus { border-color: var(--accent); }
+.li-acts { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.li-acts .btn-primary { padding: 8px 16px; font-size: 14px; }
+.li-state { font: 500 11px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+
 /* browser action target on approval cards */
 .ac-target { margin: -4px 0 12px; padding: 9px 11px; border-radius: 10px; background: var(--bg); border: 1px dashed var(--line-2); font-size: 13px; line-height: 1.5; color: var(--ink-2); overflow-wrap: anywhere; }
 .ac-target span { font: 400 11px/1.4 var(--mono); color: var(--ink-3); }
