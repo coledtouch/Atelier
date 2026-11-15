@@ -377,3 +377,19 @@ test('linkedin.js: the Today playbook drafts only, checks for duplicates first, 
   assert.match(p, /No dashes, hashtags, emojis or links\./);
   assert.doesNotMatch(p, /Kimoby|FocalX|FleetIt|DiPrima|Tardif|coleos/, 'nothing personal in the shipped code: that lives in his profile and memory');
 });
+
+// v141: a post comes back whole and as its author laid it out. LinkedIn puts the full text in the page with <br> line
+// breaks and hides the rest behind a "… more" button inside the same box; 1.4.9 cut each listed post at 700
+// characters and turned every line break into a space.
+test('extension page reader: a long post comes back whole, line breaks kept, LinkedIn’s “… more” dropped', () => {
+  const para = 'A recalled car is bought and paid for and can’t earn. '.repeat(16).trim();
+  const shown = `Avis started Q3 with about 18,000 cars grounded by recalls.\n \n${para}\n \nSource: https://lnkd.in/x\n… more`;
+  const p = linkedinPage({ path: '/in/coleos/recent-activity/all/', cards: [card({ author: 'Cole Ciprari', text: shown, comments: [['Nick DiPrima', 'Same with permits.\n\n\n\nEvery week.\n… see more']] })] });
+  const [post] = runPage(p, 'posts', { limit: 5 });
+  assert.equal(post.text, `Avis started Q3 with about 18,000 cars grounded by recalls.\n\n${para}\n\nSource: https://lnkd.in/x`);
+  assert.ok(post.text.length > 700, 'no longer cut at 700 characters');
+  const found = runPage(p, 'find', { author: 'Cole Ciprari', starts: 'Avis started Q3 with about 18,000 cars grounded', token: 't' });
+  assert.equal(found.text, post.text);
+  assert.equal(found.comments[0].text, 'Same with permits.\n\nEvery week.');
+  assert.match(APP, /A post's text keeps its author's line breaks: when you quote one, keep them/);
+});

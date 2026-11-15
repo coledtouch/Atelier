@@ -641,6 +641,10 @@ function liPage(url) {
 
 function pageLinkedIn(op, arg = {}) {
   const clean = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  // A post or comment as its author laid it out (1.4.10, v141): line breaks and blank lines kept, and LinkedIn's own
+  // "… more" button text dropped. The whole text is in the page; only styling hides the rest behind that button.
+  const prose = (s, n) => String(s || '').replace(/\r/g, '').replace(/[ \t ]+/g, ' ').split('\n').map((l) => l.trim()).join('\n')
+    .replace(/\n*(?:…|\.\.\.) ?(?:see )?more$/i, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, n);
   const CTL = 'button[aria-label^="Open control menu for post by"]';
   const REACT = 'button[aria-label^="Reaction button state"]';
   const EDITOR = '[role="textbox"][contenteditable="true"], [role="textbox"]';
@@ -656,7 +660,7 @@ function pageLinkedIn(op, arg = {}) {
     }
     return out;
   };
-  const body = (el) => clean(el.querySelector('[data-testid="expandable-text-box"]')?.innerText, 4000);
+  const body = (el) => prose(el.querySelector('[data-testid="expandable-text-box"]')?.innerText, 3000); // LinkedIn's own post limit
   const liked = (el) => !/no reaction/i.test(el.querySelector(REACT)?.getAttribute('aria-label') || 'no reaction');
   const urlOf = (el) => {
     if (single) return `${location.origin}${location.pathname}`;
@@ -691,7 +695,7 @@ function pageLinkedIn(op, arg = {}) {
   if (op === 'scroll') { window.scrollBy(0, innerHeight * 2); document.getElementById('workspace')?.scrollBy(0, 2400); return true; }
   if (op === 'posts') {
     return cards().slice(0, arg.limit).map(({ el, author }) => ({
-      author, text: body(el).slice(0, 700), url: urlOf(el), liked: liked(el), age: age(el),
+      author, text: body(el), url: urlOf(el), liked: liked(el), age: age(el),
       mine: Boolean(arg.me) && commenters(scope(el)).includes(arg.me),
     }));
   }
@@ -722,7 +726,7 @@ function pageLinkedIn(op, arg = {}) {
     hit.el.setAttribute('data-atelier-li', arg.token);
     const comments = [...scope(hit.el).querySelectorAll('button[aria-label^="View more options for "]')].slice(0, 40).map((b) => {
       let c = b; for (let i = 0; i < 8 && c && !c.querySelector('[data-testid="expandable-text-box"]'); i++) c = c.parentElement;
-      return { author: clean(String(b.getAttribute('aria-label')).replace(OPTS, '').replace(/[’']s? comment\.?$/, ''), 120), text: clean(c?.querySelector('[data-testid="expandable-text-box"]')?.innerText, 300) };
+      return { author: clean(String(b.getAttribute('aria-label')).replace(OPTS, '').replace(/[’']s? comment\.?$/, ''), 120), text: prose(c?.querySelector('[data-testid="expandable-text-box"]')?.innerText, 1250) };
     });
     return { author: hit.author, text: body(hit.el), url: urlOf(hit.el), liked: liked(hit.el), age: age(hit.el), mine: Boolean(arg.me) && commenters(scope(hit.el)).includes(arg.me), comments };
   }

@@ -464,9 +464,9 @@ test('ui #4, #12, Messages row: the browser bar follows the chosen theme, the to
 
 test('v136: an old extension behind the relay says to update it, not "Unknown command gmessages"', async () => {
   const relay = (error) => async () => ({ ok: false, status: 400, json: async () => ({ ok: false, error }) });
-  const vars = lift({ EXT: { ready: false }, REMOTE: { online: true }, MIN_EXT: '1.4.9', apiHeaders: () => ({}), deviceKind: () => 'linux',
+  const vars = lift({ EXT: { ready: false }, REMOTE: { online: true }, MIN_EXT: '1.4.10', apiHeaders: () => ({}), deviceKind: () => 'linux',
     fetch: relay('Unknown command gmessages') }, 'extCall');
-  await assert.rejects(vars.extCall('gmessages', { op: 'recent' }), /has an old copy\. Update it to 1\.4\.9 in Settings → Connections/);
+  await assert.rejects(vars.extCall('gmessages', { op: 'recent' }), /has an old copy\. Update it to 1\.4\.10 in Settings → Connections/);
   await assert.rejects(vars.extCall('signin', {}), /Saved-password sign-in needs Atelier Browser 1\.4\.0/);
   vars.fetch = relay('Google Messages isn’t open in any browser.');
   await assert.rejects(vars.extCall('gmessages', {}), /^Error: Google Messages isn’t open in any browser\.$/);
