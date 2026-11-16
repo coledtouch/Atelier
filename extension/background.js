@@ -1150,6 +1150,7 @@ const COMMANDS = {
       const me = await liMe(tab.id);
       let posts = (await page('posts', { limit, me })) || [];
       for (let i = 0; i < 3 && posts.length < limit; i++) { await page('scroll'); await sleep(1500); posts = (await page('posts', { limit, me })) || []; }
+      chrome.storage.local.set({ liReadDay: localDay() }).catch(() => {}); // the reminder skips a day that already ran
       return { page: url, me, posts };
     }
     if (op === 'notifications') {
@@ -1326,13 +1327,76 @@ COMMANDS.status = async () => {
   let mac = false;
   try { mac = (await chrome.runtime.getPlatformInfo()).os === 'mac'; } catch {}
   const messages = mac ? await messagesHost({ op: 'ping' }).then(() => true, () => false) : false;
-  return { paired: Boolean(relayToken), origin: relayOrigin || null, connected: ws?.readyState === WebSocket.OPEN, asks: !(await asksNothing()), id: chrome.runtime.id, mac, messages };
+  const { on, time } = await remindGet();
+  return { paired: Boolean(relayToken), origin: relayOrigin || null, connected: ws?.readyState === WebSocket.OPEN, asks: !(await asksNothing()), id: chrome.runtime.id, mac, messages, remind: { on, time } };
 };
 // Local-only: the Atelier tab on this computer turns the confirmation window back on. Nothing here can turn it off.
 COMMANDS.askAgain = async () => {
   await chrome.storage.local.set({ noAsk: false });
   return { asks: true };
 };
+
+// The daily LinkedIn reminder (1.4.11, v142): a notification on this computer at the time the owner picked in Atelier.
+// Tapping it opens Atelier's LinkedIn flow. It only reminds: nothing on LinkedIn is read or done until he taps Today's
+// LinkedIn there, and each like or comment still waits for its own tap. Local-only (not in REMOTE_COMMANDS).
+// liRemind: { on, time: 'HH:MM' in this computer's time, origin: the Atelier it opens, shown: the local day it last
+// showed }. liReadDay: the local day Atelier last read the LinkedIn feed here; a day that already has a run is skipped.
+const REMIND_ID = 'atelier-li-remind';
+const REMIND_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const localDay = (t = Date.now()) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+// Today's moment for 'HH:MM' on this computer's clock.
+const slotToday = (time, now = Date.now()) => { const [h, m] = time.split(':').map(Number); const d = new Date(now); d.setHours(h, m, 0, 0); return d.getTime(); };
+async function remindGet() {
+  const { liRemind } = await chrome.storage.local.get(['liRemind']).catch(() => ({}));
+  const r = liRemind && typeof liRemind === 'object' ? liRemind : {};
+  const ok = r.on === true && REMIND_TIME.test(r.time || '') && ALLOWED_ORIGINS.includes(r.origin);
+  return { on: ok, time: REMIND_TIME.test(r.time || '') ? r.time : '09:00', origin: r.origin, shown: r.shown || '' };
+}
+// One alarm, for the next time it is due. A day missed with Chrome closed is reminded once when Chrome next starts,
+// that same day only.
+async function remindPlan(now = Date.now()) {
+  const r = await remindGet();
+  await chrome.alarms.clear?.(REMIND_ID);
+  if (!r.on) return;
+  const today = slotToday(r.time, now);
+  if (today <= now && r.shown !== localDay(now)) await remindNow(now);
+  chrome.alarms.create(REMIND_ID, { when: today > now ? today : slotToday(r.time, today + 26 * 3600_000) });
+}
+async function remindNow(now = Date.now()) {
+  const r = await remindGet();
+  const day = localDay(now);
+  if (!r.on || r.shown === day) return false;
+  await chrome.storage.local.set({ liRemind: { on: true, time: r.time, origin: r.origin, shown: day } });
+  const { liReadDay } = await chrome.storage.local.get(['liReadDay']).catch(() => ({}));
+  if (liReadDay === day) return false; // today's LinkedIn already ran through Atelier on this computer
+  await chrome.notifications?.create(REMIND_ID, { type: 'basic', iconUrl: 'icons/icon-128.png', title: 'Today’s LinkedIn', message: 'Time for today’s LinkedIn. Tap to open your LinkedIn flow in Atelier.', priority: 1 });
+  return true;
+}
+// From the Atelier tab on this computer: { on, time }. Answers what is set.
+COMMANDS.remind = async ({ on, time, origin } = {}) => {
+  if (typeof on !== 'boolean') throw new Error('Pass on: true or false.');
+  const was = await remindGet();
+  const t = time === undefined ? was.time : String(time);
+  if (!REMIND_TIME.test(t)) throw new Error('Pass time as HH:MM, from 00:00 to 23:59.');
+  if (on && !ALLOWED_ORIGINS.includes(origin)) throw new Error('Set the reminder from Atelier on this computer.');
+  const now = Date.now();
+  // A time already past today starts tomorrow: setting it is never itself a reminder.
+  const shown = slotToday(t, now) <= now ? localDay(now) : (was.time === t ? was.shown : '');
+  await chrome.storage.local.set({ liRemind: { on, time: t, origin: on ? origin : was.origin, shown } });
+  await remindPlan(now);
+  return { on, time: t };
+};
+chrome.alarms.onAlarm.addListener((a) => { if (a.name === REMIND_ID) remindNow().finally(() => remindPlan()).catch(() => {}); });
+chrome.notifications?.onClicked.addListener(async (id) => {
+  if (id !== REMIND_ID) return;
+  chrome.notifications.clear(id);
+  const { origin } = await remindGet();
+  if (!ALLOWED_ORIGINS.includes(origin)) return;
+  const tab = await chrome.tabs.create({ url: `${origin}/?open=linkedin`, active: true });
+  chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+});
+chrome.runtime.onStartup.addListener(() => { remindPlan().catch(() => {}); });
+chrome.runtime.onInstalled.addListener(() => { remindPlan().catch(() => {}); });
 
 // Reconnect whenever the service worker wakes: browser start, install/update, and a 1-minute alarm.
 chrome.runtime.onStartup.addListener(connectRelay);
@@ -1346,7 +1410,7 @@ connectRelay();
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const origin = sender.origin || (sender.url && new URL(sender.url).origin);
   if (sender.id !== chrome.runtime.id || !ALLOWED_ORIGINS.includes(origin)) return false;
-  if (msg?.cmd === 'pair') msg.args = { ...(msg.args || {}), origin };
+  if (msg?.cmd === 'pair' || msg?.cmd === 'remind') msg.args = { ...(msg.args || {}), origin };
   const fn = Object.hasOwn(COMMANDS, msg?.cmd) && COMMANDS[msg.cmd];
   if (!fn) { sendResponse({ ok: false, error: `Unknown command ${msg?.cmd}` }); return false; }
   fn(msg.args || {}, { via: 'local', approved: msg?.approved === true })

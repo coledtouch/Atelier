@@ -393,3 +393,19 @@ test('extension page reader: a long post comes back whole, line breaks kept, Lin
   assert.equal(found.comments[0].text, 'Same with permits.\n\nEvery week.');
   assert.match(APP, /A post's text keeps its author's line breaks: when you quote one, keep them/);
 });
+
+// v142: the daily reminder's tap (extension 1.4.11) opens /?open=linkedin. The app only opens the LinkedIn flow in Ask:
+// any link can carry that word, so nothing reads LinkedIn or sends until the owner taps Today's LinkedIn himself.
+test('the LinkedIn reminder opens the flow and starts nothing; its row is the owner’s, in plain words', () => {
+  const open = /\nasync function openLinkedInFlow\(\) \{\n([\s\S]*?)\n\}\n/.exec(APP)?.[1];
+  assert.ok(open, 'openLinkedInFlow');
+  assert.match(open, /if \(S\.tester \|\| !S\.settings\.passcode\) return;/);
+  assert.match(open, /moveDest\(.*, 'linkedin', /);
+  for (const never of ['submit(', 'liDraftToday', 'extCall', 'extLocal', 'runAgent']) assert.ok(!open.includes(never), never);
+  assert.match(APP, /if \(params\.get\('open'\) === 'linkedin' && !shared\) openLinkedInFlow\(\)/);
+  assert.match(APP, /if \(extSt\?\.remind && S\.settings\.passcode && !S\.tester\) \{/);
+  for (const s of ['Chrome on this computer reminds you each day.', 'Tap it to open your LinkedIn flow.', 'A daily nudge from Chrome on this computer.', 'Nothing on LinkedIn runs until you tap.', 'Tap Today’s LinkedIn to draft today’s list.', 'Time for today’s LinkedIn.', 'Tap to open your LinkedIn flow in Atelier.']) {
+    assert.ok(APP.includes(s) || BACKGROUND.includes(s), s);
+    assert.deepEqual(problems(s), [], s);
+  }
+});

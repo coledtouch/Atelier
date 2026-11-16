@@ -988,6 +988,9 @@ dialog[open] > .toast { position: absolute; left: 50%; bottom: 16px; max-width: 
    text got any, so three buttons left the text no room at all in the 600px sheet (v114). One button stays in column 4. */
 .conn > .conn-acts { grid-area: auto / 3 / auto / -1; justify-self: start; }
 .conn-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The LinkedIn reminder's time (v142): sized like the chips beside it. */
+.li-remind-time { min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 99px; background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; color-scheme: light dark; }
+.li-remind-time:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 a.chip { text-decoration: none; display: inline-flex; align-items: center; }
 .conn .accts { grid-area: 2 / 3 / auto / -1; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .acct { display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; height: 28px; padding: 0 10px 0 11px; border: 1px solid var(--line-2); border-radius: 99px; background: var(--surface); font: 500 12px/1 var(--mono); color: var(--ink); }

@@ -8,33 +8,33 @@
 // double as a fallback chain if a model is retired (404/410). Any other ID can be typed in Settings.
 // Every relative import carries ?v=<sw.js VERSION number> (a cached old module never meets a new app.js): bump them all
 // with `node scripts/bump-version.mjs <n>`, and keep each import on one line.
-import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=141';
-import * as Sync from './sync.js?v=141';
-import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=141';
-import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=141';
-import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=141';
-import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY, mergeProfile, factsInUse, FACTS_IN_PROMPT } from './context.js?v=141';
-import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=141';
-import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=141';
-import { initLookup } from './lookup.js?v=141';
-import { createRemix } from './remix-app.js?v=141';
-import { sendMode, looksLikeQuestion } from './remix.js?v=141';
-import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=141';
-import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=141';
-import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=141';
-import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=141';
-import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=141';
-import * as ClaudeImport from './claude-import.js?v=141';
-import { createFeedback } from './feedback.js?v=141';
-import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=141';
-import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=141';
-import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=141';
-import { renderAppErrors, loadAppErrors } from './app-errors.js?v=141';
-import { HUMANIZER } from './humanizer.js?v=141';
-import { LINKEDIN_TOOL_SPECS, LI_READS, liOp, liWayOut, TODAY_PROMPT, TODAY_PLAYBOOK, todayFrom, rowSteps, todayHtml, hasDash } from './linkedin.js?v=141';
-import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=141';
-import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, mergeSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace, suggestKind } from './thread-spaces.js?v=141';
-import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handPlan, firstShots, rolledDay, keepsFlow, turnIds, moveTurn as movedTurn, moveTargets, moveDest } from './days.js?v=141';
+import { prepareImport, recoverThread, openOldDb, storeTx, commitNow } from './data-safety.js?v=142';
+import * as Sync from './sync.js?v=142';
+import { RUNWAY_VIDEO_MODELS, RUNWAY_SECONDS, POWERED_BY as RUNWAY_POWERED, PORTAL_URL as RUNWAY_PORTAL, isRunwayId, buildRequest as runwayRequest, cropStill as runwayCropStill, runwayVideo, runwayHint, runwayAccount, connectionRow as runwayConnection, quoteNote as runwayQuote, creditsNote as runwayCredits, optionNote as runwayOptNote, optionQuote as runwayOptQuote, ratioBox, veoSeconds, runwayMenuSeconds, runwaySecondsFor, RUNWAY_MODELS as RUNWAY_SPECS } from './runway.js?v=142';
+import { normalizeMe, allowedIds, isTesterCode, parseAllowanceHeader, leftOf, headroom, money, nextReset, parseResetsAt, resetIn, veoCost, veoShape, veoChoices, VEO_PER_SECOND, testerClipReason, profileOut, profileIn, toMs, isSub, configBody, VEO_CAP, MAX_IMAGES, PROFILE_MAX } from './tester.js?v=142';
+import { normalizeVideoMime, isVideoFile, cleanName, clipEligible, clipReason, fileValid, planFor, framesPlan, frameCapFor, videoParts, noteFor, fmtDur, storedVideo, readVideo, startClip, deleteClip, LOCAL_MAX_BYTES } from './video.js?v=142';
+import { stripThink, buildHistory, videoSource, pickContext, followUpRoute, photoFollowUp, readsImages, mediaTurn, ABOUT_MEDIA, ASKS_WEB, CTX_IMAGES, threadTaint, ownTaint, entryTaint, taintGates, taintNote, browseUnasked, readUnasked, leavesWithData, agentThread, approvesAll, standingOn, approvalsToSeed, readsPage, pageOrigin, worseTaint, withSent, sentText, runStart, memoryAnchor, factsFor, heldForRun, TESTER_HISTORY, mergeProfile, factsInUse, FACTS_IN_PROMPT } from './context.js?v=142';
+import { readUsage, addUsage, cacheLabel, usageTitle, cacheKey } from './usage.js?v=142';
+import { readLaunch, planLaunch, applyLaunch, takePendingLaunch, peekPendingLaunch, sweepShare, syncLaunchRole, roleOf, quickPrefs, ensureLaunchKey, rotateLaunchKey, forgetLaunchKey, keyState, shortcutLink, takeDraft, draftKeeper, createHold, whenVisible, detectPlatform, isStandalone, micPermission, joinDraft, NOTES, HOLD_MS, SHARE_CACHE, SHARE_LIMITS, sendingNote, assistLink, MODE_LABELS } from './launch.js?v=142';
+import { initLookup } from './lookup.js?v=142';
+import { createRemix } from './remix-app.js?v=142';
+import { sendMode, looksLikeQuestion } from './remix.js?v=142';
+import { createReader, voiceChoices, voiceFor, normalizeReadAloud, SPEEDS, AI_CAPTION, autoReadText, spokenFrom, dropSpoken, SPOKEN_FROM } from './readaloud.js?v=142';
+import { createDictation, startFromGesture, insertText, micHelp, clock as micClock } from './dictate.js?v=142';
+import { viewportState, kbDebugFlag, createKbDebug, FRAME_HANDOFF_MS } from './viewport.js?v=142';
+import { planRefine, versions as buildVersions, composerTarget, restoreBase, hasApp as buildHasApp } from './builds.js?v=142';
+import { createAppStore, createBridge, idbBackend, appKey, taintedFrom, workspaceDb, fmtBytes } from './appdata.js?v=142';
+import * as ClaudeImport from './claude-import.js?v=142';
+import { createFeedback } from './feedback.js?v=142';
+import { OMNI_ID, OMNI_SECONDS, OMNI_TESTER_SECONDS, migrateVideoId, omniRequest, omniVideo } from './omni.js?v=142';
+import { XAI_VIDEO_MODELS, XAI_SECONDS, XAI_IMAGE_MODEL, xaiSeconds, xaiQuote, xaiOptNote, xaiVideoRequest, xaiVideo, xaiImageRequest, xaiImage as xaiImageCall } from './xai.js?v=142';
+import { usd as spendUsd, resetDay, breakdownRows, loadSpend } from './spend.js?v=142';
+import { renderAppErrors, loadAppErrors } from './app-errors.js?v=142';
+import { HUMANIZER } from './humanizer.js?v=142';
+import { LINKEDIN_TOOL_SPECS, LI_READS, liOp, liWayOut, TODAY_PROMPT, TODAY_PLAYBOOK, todayFrom, rowSteps, todayHtml, hasDash } from './linkedin.js?v=142';
+import { docKind, readFile, pdfPageText, clipText, fitFiles, leftOut, KIND_LABEL, MAX_FILES, FILE_MAX_BYTES, FILE_CHARS } from './files.js?v=142';
+import { groupsFor, PREVIOUS_SET_IDS, carryForward, SPACE_BATCH, cleanSpaces, mergeSpaces, spaceOf, spaceByHand, labelOf, spaceRequest, parseSpaces, bySpace, suggestKind } from './thread-spaces.js?v=142';
+import { kindOf, cleanFlow, flowHint, flowOpts, globalOptsWrite, dayKey, dayTimeline, dayList, daySlice, stepDay, tabFlows, earlierCut, flowsOn, handPlan, firstShots, rolledDay, keepsFlow, turnIds, moveTurn as movedTurn, moveTargets, moveDest } from './days.js?v=142';
 
 const PREMIUM_MODELS = {
   // Everyday answers: fast + cheap. Hard prompts escalate to `smart` automatically.
@@ -1187,7 +1187,7 @@ function storageError(err) { console.error(err); toast('Couldn’t save your wor
 // This build (scripts/bump-version.mjs moves it with every ?v=). Every API call names it (x-atelier-build): the Worker
 // refuses a build below its floor on the routes that act on your accounts or synced data (src/worker.js
 // MIN_CLIENT_BUILD → 426 app_outdated, appOutdated below). Feedback reports it too.
-const APP_BUILD = '141';
+const APP_BUILD = '142';
 const SW_CHECK_MS = 3_600_000; // how often a long-open tab looks for a new version (when it comes back into view)
 function apiHeaders(extra = {}) {
   const h = { 'content-type': 'application/json', 'x-atelier-build': APP_BUILD, ...extra };
@@ -3211,7 +3211,7 @@ const EXT = { ready: false, version: null, pending: new Map() };
 // it ships: MIN_EXT is extension/manifest.json's version (tests/extension.test.mjs keeps them equal, and
 // scripts/check-bump.mjs makes every change to extension/ raise that version). 1.3.3: sign-in codes, ID numbers and a
 // password shown as text are refused too.
-const MIN_EXT = '1.4.10';
+const MIN_EXT = '1.4.11';
 const olderExt = (v) => { const a = String(v || '0').split('.').map((n) => Number(n) || 0), b = MIN_EXT.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== b[i]) return (a[i] || 0) < b[i]; return false; };
 window.addEventListener('message', (ev) => {
   if (ev.source !== window || ev.origin !== location.origin) return;
@@ -3480,6 +3480,17 @@ function liTap(e, id, skip) {
     } catch (err) { row.status = 'error'; row.error = String(err.message || err).slice(0, 300); }
     repaint(e); persist();
   });
+}
+// The LinkedIn reminder's tap (extension 1.4.11 opens /?open=linkedin, v142): the most recent LinkedIn flow, else a new
+// one, in Ask so its Today's LinkedIn chip shows. It only opens the flow. Any link can carry the word, so nothing starts.
+async function openLinkedInFlow() {
+  if (S.tester || !S.settings.passcode) return;
+  const to = moveDest(dayCache ? dayPool() : await allThreads(), 'linkedin', '', threadSpaces);
+  if (S.mode !== 'ask') setMode('ask');
+  if (to) await openFlow(to.id);
+  else { newFlow(); S.thread.flow = { kind: 'linkedin' }; renderFlowTabs(); renderOptions(); }
+  setComposerOpen(true); // a small window shows the chip too, not only the folded prompt row
+  toast('Tap Today’s LinkedIn to draft today’s list.', { ms: 8000 });
 }
 // The chip in a LinkedIn flow: a run that reads LinkedIn and drafts today's list, with tools and "As me" on.
 function liDraftToday() {
@@ -7274,6 +7285,13 @@ async function renderConnections() {
   if (extSt?.mac) rows.push(connRow({ key: 'messages', on: extSt.messages === true, name: 'Messages', state: extSt.messages ? 'Ready on this Mac' : 'Not set up',
     detail: extSt.messages ? (approveAll() ? 'Atelier can read your texts here and send them. Approve everything is on, so it doesn’t ask.' : 'Atelier can read your texts here and send one once you approve it.') : 'Copy the setup command, paste it in Terminal, then follow what it prints.',
     action: extSt.messages ? '' : `<button type="button" class="chip" data-mac-messages="${esc(extSt.id || '')}">Set up Messages</button>` }));
+  // The daily LinkedIn reminder (extension 1.4.11, v142): a notification from Chrome on this computer. Owner only.
+  if (extSt?.remind && S.settings.passcode && !S.tester) {
+    const { on, time } = extSt.remind;
+    rows.push(connRow({ key: 'li-remind', on, name: 'LinkedIn', state: on ? `Reminder at ${esc(remindLabel(time))}` : 'Reminder off',
+      detail: on ? 'Chrome on this computer reminds you each day. Tap it to open your LinkedIn flow.' : 'A daily nudge from Chrome on this computer. Nothing on LinkedIn runs until you tap.',
+      action: `<span class="conn-acts"><input type="time" class="li-remind-time" data-li-remind-time value="${esc(time)}" aria-label="Reminder time" /><button type="button" class="chip${on ? ' on' : ''}" data-li-remind aria-pressed="${on}">${on ? 'Turn off' : 'Turn on'}</button></span>` }));
+  }
   const rw = rwRow();
   rows.push(connRow({ key: 'runway', on: rw.on, name: 'Runway', state: esc(rw.state), detail: esc(rwBack ? rw.detail : 'checking credits…'), action: `<a class="chip" href="${RUNWAY_PORTAL}" target="_blank" rel="noopener">Developer portal</a>` }));
   for (const [k, name, how] of CONNECTORS) {
@@ -7303,7 +7321,30 @@ async function renderConnections() {
   $('#connList').removeAttribute('aria-busy');
   drawn = true;
 }
+// 'HH:MM' → this device's way of writing a time of day ("9:00 AM", "09:00").
+const remindLabel = (t) => { const [h, m] = String(t || '09:00').split(':').map(Number); return new Date(2000, 0, 1, h || 0, m || 0).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
+async function setRemind(on, time) {
+  const r = await extLocal('remind', { on, time }, 8000).catch((err) => ({ error: err?.message || String(err) }));
+  if (r?.error) { toast(`Couldn’t set the reminder: ${r.error}`, { error: true }); return null; }
+  return r;
+}
+// A new time while the reminder is on applies at once. While it is off, it is kept until Turn on.
+$('#connList').addEventListener('change', async (ev) => {
+  const box = ev.target.closest?.('[data-li-remind-time]');
+  if (!box || !/^\d{2}:\d{2}$/.test(box.value)) return;
+  if ($('#connList [data-li-remind]')?.getAttribute('aria-pressed') !== 'true') return;
+  const r = await setRemind(true, box.value);
+  if (r) { toast(`You’ll get the LinkedIn reminder at ${remindLabel(r.time)} each day`); renderConnections(); }
+});
 $('#connList').addEventListener('click', async (ev) => {
+  const rem = ev.target.closest('[data-li-remind]');
+  if (rem) {
+    const on = rem.getAttribute('aria-pressed') !== 'true';
+    const time = $('#connList [data-li-remind-time]')?.value;
+    const r = await setRemind(on, /^\d{2}:\d{2}$/.test(time || '') ? time : undefined);
+    if (r) toast(on ? `You’ll get the LinkedIn reminder at ${remindLabel(r.time)} each day` : 'The LinkedIn reminder is off');
+    return renderConnections();
+  }
   const un = ev.target.closest('[data-browser-unasked]');
   if (un) {
     const on = !browserUnasked();
@@ -8924,6 +8965,8 @@ window.atelierBoot?.started();
     toast(connected === 'gmail' || connected === 'canva' ? `${svc} connected ✓ ${word('account')}` : connected === 'denied' ? `${svc} access was declined` : `${svc} connection failed — ${word('why') || 'try again'}`, { error: connected === 'error' });
   }
 
+  // The LinkedIn reminder's tap (extension 1.4.11): opens the LinkedIn flow, never a run (openLinkedInFlow).
+  if (params.get('open') === 'linkedin' && !shared) openLinkedInFlow().catch((err) => console.warn('[atelier] LinkedIn flow', err));
   syncDock(); moveInk();
   if ('serviceWorker' in navigator) {
     if (['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
